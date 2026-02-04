@@ -1,4 +1,5 @@
 import js from "@eslint/js"
+import prettierConfig from "eslint-config-prettier"
 import prettier from "eslint-plugin-prettier"
 import react from "eslint-plugin-react"
 import reactHooks from "eslint-plugin-react-hooks"
@@ -6,11 +7,18 @@ import { defineConfig } from "eslint/config"
 import tseslint from "typescript-eslint"
 
 export default defineConfig([
+    {
+        ignores: ["dist", "node_modules"],
+    },
+
     // JS 기본 추천 규칙 (TS만 써도 필요)
     js.configs.recommended,
 
     // TypeScript 추천 규칙
     ...tseslint.configs.recommended,
+
+    // Prettier와 충돌하는 ESLint 규칙 비활성화
+    prettierConfig,
 
     {
         files: ["**/*.{ts,tsx}"],
@@ -52,7 +60,12 @@ export default defineConfig([
             "prefer-const": "error",
 
             /* Prettier */
-            "prettier/prettier": "warn",
+            "prettier/prettier": [
+                "warn",
+                {
+                    endOfLine: "auto",
+                },
+            ],
         },
     },
 ])
