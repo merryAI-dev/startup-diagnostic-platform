@@ -57,17 +57,19 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
-    match /companies/{companyId} {
+    match /profiles/{userId}/companyInfo/{docId} {
       allow read: if isSignedIn()
-        && (request.auth.uid == companyId || isAdmin());
-      allow write: if false;
+        && (request.auth.uid == userId || isAdmin());
+      allow create, update: if isSignedIn()
+        && request.auth.uid == userId;
+      allow delete: if false;
     }
 
-    match /companies/{companyId}/companyInfo/{docId} {
+    match /profiles/{userId}/selfAssessment/{docId} {
       allow read: if isSignedIn()
-        && (request.auth.uid == companyId || isAdmin());
+        && (request.auth.uid == userId || isAdmin());
       allow create, update: if isSignedIn()
-        && request.auth.uid == companyId;
+        && request.auth.uid == userId;
       allow delete: if false;
     }
   }

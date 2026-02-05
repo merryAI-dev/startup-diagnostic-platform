@@ -79,11 +79,16 @@ function isBusinessNumber(value: string) {
 
 export function useCompanyInfoForm(companyId: string) {
   const [form, setForm] = useState<CompanyInfoForm>(DEFAULT_FORM)
+  const [savedForm, setSavedForm] = useState<CompanyInfoForm>(DEFAULT_FORM)
   const [investmentRows, setInvestmentRows] = useState<InvestmentInput[]>(
     DEFAULT_INVESTMENTS
   )
+  const [savedInvestmentRows, setSavedInvestmentRows] = useState<
+    InvestmentInput[]
+  >(DEFAULT_INVESTMENTS)
   const [loading, setLoading] = useState(true)
   const [saveStatus, setSaveStatus] = useState<string | null>(null)
+  const [hasSavedData, setHasSavedData] = useState(false)
   const [touched, setTouched] = useState<
     Partial<Record<keyof CompanyInfoForm, boolean>>
   >({})
@@ -125,7 +130,7 @@ export function useCompanyInfoForm(companyId: string) {
     async function loadCompanyInfo() {
       setLoading(true)
       try {
-        const ref = doc(db, "companies", companyId, "companyInfo", "profile")
+        const ref = doc(db, "profiles", companyId, "companyInfo", "info")
         const snapshot = await getDoc(ref)
         if (!mounted) return
         if (!snapshot.exists()) {
@@ -133,7 +138,8 @@ export function useCompanyInfoForm(companyId: string) {
           return
         }
         const data = snapshot.data() as CompanyInfoRecord
-        setForm({
+        setHasSavedData(true)
+        const nextForm: CompanyInfoForm = {
           companyInfo: data.basic?.companyInfo ?? "",
           ceoName: data.basic?.ceo?.name ?? "",
           ceoEmail: data.basic?.ceo?.email ?? "",
@@ -155,7 +161,9 @@ export function useCompanyInfoForm(companyId: string) {
             data.fundingPlan?.desiredAmount2026
           ),
           desiredPreValue: formatNumber(data.fundingPlan?.preValue),
-        })
+        }
+        setForm(nextForm)
+        setSavedForm(nextForm)
         const nextInvestments = (data.investments ?? []).map((row) => ({
           stage: row.stage ?? "",
           date: row.date ?? "",
@@ -163,6 +171,9 @@ export function useCompanyInfoForm(companyId: string) {
           majorShareholder: row.majorShareholder ?? "",
         }))
         setInvestmentRows(
+          nextInvestments.length ? nextInvestments : DEFAULT_INVESTMENTS
+        )
+        setSavedInvestmentRows(
           nextInvestments.length ? nextInvestments : DEFAULT_INVESTMENTS
         )
       } finally {
@@ -260,7 +271,7 @@ export function useCompanyInfoForm(companyId: string) {
     }
 
     try {
-      const ref = doc(db, "companies", companyId, "companyInfo", "profile")
+      const ref = doc(db, "profiles", companyId, "companyInfo", "info")
       await setDoc(
         ref,
         {
@@ -273,6 +284,9 @@ export function useCompanyInfoForm(companyId: string) {
         { merge: true }
       )
       setSaveStatus("저장 완료")
+      setSavedForm(form)
+      setSavedInvestmentRows(investmentRows)
+      setHasSavedData(true)
       return true
     } catch (err) {
       setSaveStatus("저장에 실패했습니다.")
@@ -291,6 +305,8 @@ export function useCompanyInfoForm(companyId: string) {
     saveStatus,
     canSubmit,
     missingRequired,
+    hasSavedData,
+    savedInvestmentRows,
     formatNumberInput,
     formatBusinessNumber,
     markTouched: (field: keyof CompanyInfoForm) =>
@@ -304,6 +320,23 @@ export function useCompanyInfoForm(companyId: string) {
       if (field === "businessNumber") return !isBusinessNumber(value)
       return false
     },
+    isFieldValid: (field: keyof CompanyInfoForm) => {
+      const value = form[field] ?? ""
+      if (!isFilled(value)) return false
+      if (field === "ceoEmail") return isEmail(value)
+      if (field === "ceoPhone") return isPhone(value)
+      if (field === "businessNumber") return isBusinessNumber(value)
+      return true
+    },
+    isSavedFieldValid: (field: keyof CompanyInfoForm) => {
+      const value = savedForm[field] ?? ""
+      if (!isFilled(value)) return false
+      if (field === "ceoEmail") return isEmail(value)
+      if (field === "ceoPhone") return isPhone(value)
+      if (field === "businessNumber") return isBusinessNumber(value)
+      return true
+    },
+    savedInvestmentRows,
     formatPhoneNumber,
     saveCompanyInfo,
   }
