@@ -1,37 +1,25 @@
 import { useNavigate } from "react-router-dom"
-import { useState } from "react"
 import { AdminDashboard } from "../components/dashboard/AdminDashboard"
 import { signOutUser } from "../firebase/auth"
-import { activateUserProfile } from "../firebase/profile"
+import { useAuth } from "../context/AuthContext"
 
 export function AdminPage() {
   const navigate = useNavigate()
-  const [approvalLoading, setApprovalLoading] = useState(false)
-  const [approvalError, setApprovalError] = useState<string | null>(null)
+  const { user } = useAuth()
 
   async function handleLogout() {
     await signOutUser()
     navigate("/login")
   }
 
-  async function handleApprove(uid: string) {
-    setApprovalLoading(true)
-    setApprovalError(null)
-    try {
-      await activateUserProfile(uid.trim())
-    } catch (err) {
-      setApprovalError("승인 처리에 실패했습니다.")
-    } finally {
-      setApprovalLoading(false)
-    }
+  if (!user) {
+    return null
   }
 
   return (
     <AdminDashboard
+      user={user}
       onLogout={handleLogout}
-      onApprove={handleApprove}
-      approvalLoading={approvalLoading}
-      approvalError={approvalError}
     />
   )
 }

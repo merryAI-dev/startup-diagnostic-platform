@@ -51,6 +51,7 @@ export function SelfAssessmentForm({
   activeSectionId,
   onSectionChange,
   variant = "full",
+  readOnly = false,
 }: {
   sections: SelfAssessmentSections
   onAnswerChange: (
@@ -68,6 +69,7 @@ export function SelfAssessmentForm({
   activeSectionId?: string
   onSectionChange?: (id: string) => void
   variant?: "full" | "header" | "content"
+  readOnly?: boolean
 }) {
   const [internalActiveSectionId, setInternalActiveSectionId] = useState(
     SELF_ASSESSMENT_SECTIONS[0]?.storageKey ?? "",
@@ -217,17 +219,35 @@ export function SelfAssessmentForm({
                           )}
                         </div>
                       </div>
-                      <AnswerToggle
-                        value={answer?.answer ?? null}
-                        onChange={(value) =>
-                          onAnswerChange(
-                            activeSection.storageKey,
-                            subsection.storageKey,
-                            question.storageKey,
-                            value
-                          )
-                        }
-                      />
+                      {readOnly ? (
+                        <span
+                          className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                            answer?.answer === true
+                              ? "bg-emerald-100 text-emerald-700"
+                              : answer?.answer === false
+                              ? "bg-rose-100 text-rose-700"
+                              : "bg-slate-100 text-slate-500"
+                          }`}
+                        >
+                          {answer?.answer === true
+                            ? "예"
+                            : answer?.answer === false
+                            ? "아니오"
+                            : "미선택"}
+                        </span>
+                      ) : (
+                        <AnswerToggle
+                          value={answer?.answer ?? null}
+                          onChange={(value) =>
+                            onAnswerChange(
+                              activeSection.storageKey,
+                              subsection.storageKey,
+                              question.storageKey,
+                              value
+                            )
+                          }
+                        />
+                      )}
                     </div>
 
                     <div className="mt-3">
@@ -239,7 +259,12 @@ export function SelfAssessmentForm({
                           : "예/아니오를 선택한 뒤 이유를 작성해주세요."}
                         <textarea
                           rows={2}
-                          className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700 focus:border-slate-400 focus:outline-none"
+                          readOnly={readOnly}
+                          className={`mt-2 w-full rounded-xl border px-3 py-2 text-sm ${
+                            readOnly
+                              ? "border-slate-100 bg-slate-50 text-slate-600"
+                              : "border-slate-200 bg-white text-slate-700 focus:border-slate-400 focus:outline-none"
+                          }`}
                           placeholder="근거 또는 도움 요청 내용을 작성해주세요."
                           value={answer?.reason ?? ""}
                           onChange={(event) =>
