@@ -20,6 +20,15 @@ export function PendingPage() {
     return null
   }, [location.search])
 
+  const noticeFromQuery = useMemo<string | null>(() => {
+    const params = new URLSearchParams(location.search)
+    const reason = params.get("reason")
+    if (reason === "google") {
+      return "Google 로그인도 이메일 인증 또는 관리자 승인이 완료되어야 사용할 수 있습니다."
+    }
+    return null
+  }, [location.search])
+
   useEffect(() => {
     let isMounted = true
     async function tryActivate() {
@@ -52,6 +61,7 @@ export function PendingPage() {
       role={profile?.role ?? roleFromQuery}
       onBack={() => navigate("/login")}
       error={activationError ?? undefined}
+      notice={noticeFromQuery ?? undefined}
     />
   )
 }

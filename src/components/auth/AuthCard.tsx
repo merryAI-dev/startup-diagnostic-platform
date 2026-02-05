@@ -14,8 +14,48 @@ type AuthCardProps = {
   showGoogle?: boolean
   showRoleSelector?: boolean
   showExtraStep?: boolean
-  loading?: boolean
+  loadingEmail?: boolean
+  loadingGoogle?: boolean
   error?: string | null
+}
+
+const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
+function getEmailError(value: string) {
+  if (!value.trim()) return "이메일을 입력해주세요."
+  if (!emailPattern.test(value)) return "올바른 이메일 형식이 아닙니다."
+  return null
+}
+
+function getPasswordError(value: string) {
+  if (!value.trim()) return "비밀번호를 입력해주세요."
+  if (value.length < 6) return "비밀번호는 6자 이상이어야 합니다."
+  return null
+}
+
+function Spinner({ className = "" }: { className?: string }) {
+  return (
+    <svg
+      className={`h-4 w-4 animate-spin ${className}`}
+      viewBox="0 0 24 24"
+      fill="none"
+      aria-hidden="true"
+    >
+      <circle
+        className="opacity-25"
+        cx="12"
+        cy="12"
+        r="10"
+        stroke="currentColor"
+        strokeWidth="3"
+      />
+      <path
+        className="opacity-75"
+        fill="currentColor"
+        d="M4 12a8 8 0 018-8v3a5 5 0 00-5 5H4z"
+      />
+    </svg>
+  )
 }
 
 export function AuthCard({
@@ -30,12 +70,28 @@ export function AuthCard({
   showGoogle = true,
   showRoleSelector = true,
   showExtraStep = false,
-  loading = false,
+  loadingEmail = false,
+  loadingGoogle = false,
   error = null,
 }: AuthCardProps) {
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [showPassword, setShowPassword] = useState(false)
+  const [touched, setTouched] = useState({ email: false, password: false })
+
+  const emailError = getEmailError(email)
+  const passwordError = getPasswordError(password)
+  const showEmailError = touched.email && emailError
+  const showPasswordError = touched.password && passwordError
+  const isBusy = loadingEmail || loadingGoogle
+
+  function handleSubmit() {
+    if (emailError || passwordError) {
+      setTouched({ email: true, password: true })
+      return
+    }
+    onSubmit(role, email.trim(), password)
+  }
 
   return (
     <div className="grid gap-8 lg:grid-cols-2 place-items-center">
@@ -53,11 +109,21 @@ export function AuthCard({
           <label className="block text-sm text-slate-600">
             이메일
             <input
-              className="mt-1 w-full rounded-xl border border-slate-200 px-4 py-2 text-sm focus:border-slate-400 focus:outline-none"
+              className={`mt-1 w-full rounded-xl border px-4 py-2 text-sm focus:outline-none ${showEmailError
+                  ? "border-rose-300 focus:border-rose-400"
+                  : "border-slate-200 focus:border-slate-400"
+                }`}
               placeholder="name@company.com"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
+              onBlur={() =>
+                setTouched((prev) => ({ ...prev, email: true }))
+              }
+              disabled={isBusy}
             />
+            {showEmailError ? (
+              <p className="mt-1 text-xs text-rose-600">{emailError}</p>
+            ) : null}
           </label>
 
           <label className="block text-sm text-slate-600">
@@ -65,15 +131,23 @@ export function AuthCard({
             <div className="relative mt-1">
               <input
                 type={showPassword ? "text" : "password"}
-                className="w-full rounded-xl border border-slate-200 px-4 py-2 pr-10 text-sm focus:border-slate-400 focus:outline-none"
+                className={`w-full rounded-xl border px-4 py-2 pr-10 text-sm focus:outline-none ${showPasswordError
+                    ? "border-rose-300 focus:border-rose-400"
+                    : "border-slate-200 focus:border-slate-400"
+                  }`}
                 placeholder="••••••••"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
+                onBlur={() =>
+                  setTouched((prev) => ({ ...prev, password: true }))
+                }
+                disabled={isBusy}
               />
               <button
                 type="button"
                 className="absolute inset-y-0 right-2 flex items-center text-slate-500 hover:text-slate-700"
                 onClick={() => setShowPassword((prev) => !prev)}
+                disabled={isBusy}
                 aria-label={showPassword ? "비밀번호 숨기기" : "비밀번호 보기"}
               >
                 {showPassword ? (
@@ -112,6 +186,9 @@ export function AuthCard({
                 </span>
               </button>
             </div>
+            {showPasswordError ? (
+              <p className="mt-1 text-xs text-rose-600">{passwordError}</p>
+            ) : null}
           </label>
 
           {showExtraStep && (
@@ -129,19 +206,33 @@ export function AuthCard({
 
           <button
             className="w-full rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
-            onClick={() => onSubmit(role, email, password)}
-            disabled={loading}
+            onClick={handleSubmit}
+            disabled={isBusy}
           >
-            {loading ? "처리 중..." : title}
+            {loadingEmail ? (
+              <span className="inline-flex items-center justify-center gap-2">
+                <Spinner className="text-white" />
+                <span className="sr-only">처리 중</span>
+              </span>
+            ) : (
+              title
+            )}
           </button>
 
           {showGoogle ? (
             <button
               className="flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
               onClick={onGoogle}
-              disabled={loading}
+              disabled={isBusy}
             >
-              Google 로그인
+              {loadingGoogle ? (
+                <span className="inline-flex items-center justify-center gap-2">
+                  <Spinner className="text-slate-700" />
+                  <span className="sr-only">처리 중</span>
+                </span>
+              ) : (
+                "Google 로그인"
+              )}
             </button>
           ) : null}
         </div>

@@ -17,12 +17,17 @@ import type { Role } from "../types/auth"
 
 export function LoginPage() {
   const [role, setRole] = useState<Role>("company")
-  const [loading, setLoading] = useState(false)
+  const [loadingEmail, setLoadingEmail] = useState(false)
+  const [loadingGoogle, setLoadingGoogle] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const navigate = useNavigate()
   const { refreshProfile } = useAuth()
+  const isBusy = loadingEmail || loadingGoogle
 
-  async function routeAfterLogin(uid: string) {
+  async function routeAfterLogin(
+    uid: string,
+    options: { skipAutoActivate?: boolean } = {}
+  ) {
     const profile = await getUserProfile(uid)
     if (!profile) {
       setError("프로필이 없습니다. 회원가입을 진행해주세요.")
@@ -30,6 +35,10 @@ export function LoginPage() {
       return
     }
     if (!profile.active) {
+      if (options.skipAutoActivate) {
+        navigate("/pending?reason=google")
+        return
+      }
       // Ensure we have the latest verification state.
       if (auth.currentUser) {
         await auth.currentUser.reload()
@@ -59,7 +68,8 @@ export function LoginPage() {
     email: string,
     password: string
   ) {
-    setLoading(true)
+    if (isBusy) return
+    setLoadingEmail(true)
     setError(null)
     try {
       const result = await signInWithEmail(email, password)
@@ -68,12 +78,13 @@ export function LoginPage() {
     } catch (err) {
       setError("로그인에 실패했습니다. 입력값을 확인하세요.")
     } finally {
-      setLoading(false)
+      setLoadingEmail(false)
     }
   }
 
   async function handleGoogleLogin() {
-    setLoading(true)
+    if (isBusy) return
+    setLoadingGoogle(true)
     setError(null)
     try {
       const result = await signInWithGoogle()
@@ -89,11 +100,11 @@ export function LoginPage() {
         )
       }
       await refreshProfile()
-      await routeAfterLogin(result.user.uid)
+      await routeAfterLogin(result.user.uid, { skipAutoActivate: true })
     } catch (err) {
       setError("Google 로그인에 실패했습니다.")
     } finally {
-      setLoading(false)
+      setLoadingGoogle(false)
     }
   }
 
@@ -110,7 +121,8 @@ export function LoginPage() {
           role={role}
           setRole={setRole}
           showRoleSelector
-          loading={loading}
+          loadingEmail={loadingEmail}
+          loadingGoogle={loadingGoogle}
           error={error}
         />
       </div>

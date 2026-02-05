@@ -4,12 +4,14 @@ type PendingApprovalProps = {
   role?: Role | null
   onBack: () => void
   error?: string
+  notice?: string
 }
 
 export function PendingApproval({
   role,
   onBack,
   error,
+  notice,
 }: PendingApprovalProps) {
   return (
     <div className="mx-auto max-w-xl rounded-3xl border border-slate-200 bg-white p-8 text-center shadow-sm">
@@ -39,6 +41,11 @@ export function PendingApproval({
           "계정 유형에 따라 승인 또는 인증 절차를 완료하세요."
         )}
       </div>
+      {notice ? (
+        <div className="mt-4 rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-700">
+          {notice}
+        </div>
+      ) : null}
       {error ? (
         <p className="mt-4 text-sm text-rose-600">{error}</p>
       ) : null}

@@ -13,16 +13,19 @@ import type { Role } from "../types/auth"
 
 export function SignupPage() {
   const [role, setRole] = useState<Role>("company")
-  const [loading, setLoading] = useState(false)
+  const [loadingEmail, setLoadingEmail] = useState(false)
+  const [loadingGoogle, setLoadingGoogle] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const navigate = useNavigate()
+  const isBusy = loadingEmail || loadingGoogle
 
   async function handleEmailSignup(
     nextRole: Role,
     email: string,
     password: string
   ) {
-    setLoading(true)
+    if (isBusy) return
+    setLoadingEmail(true)
     setError(null)
     try {
       const result = await signUpWithEmail(email, password)
@@ -41,12 +44,13 @@ export function SignupPage() {
     } catch (err) {
       setError("회원가입에 실패했습니다. 입력값을 확인하세요.")
     } finally {
-      setLoading(false)
+      setLoadingEmail(false)
     }
   }
 
   async function handleGoogleSignup() {
-    setLoading(true)
+    if (isBusy) return
+    setLoadingGoogle(true)
     setError(null)
     try {
       const result = await signInWithGoogle()
@@ -63,7 +67,7 @@ export function SignupPage() {
     } catch (err) {
       setError("Google 회원가입에 실패했습니다.")
     } finally {
-      setLoading(false)
+      setLoadingGoogle(false)
     }
   }
 
@@ -80,7 +84,8 @@ export function SignupPage() {
         setRole={setRole}
         showGoogle={false}
         showExtraStep
-        loading={loading}
+        loadingEmail={loadingEmail}
+        loadingGoogle={loadingGoogle}
         error={error}
       />
     </div>
