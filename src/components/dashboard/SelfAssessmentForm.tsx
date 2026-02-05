@@ -2,7 +2,7 @@ import { useMemo, useState } from "react"
 import { SELF_ASSESSMENT_SECTIONS } from "../../data/selfAssessment"
 import type {
   AnswerValue,
-  SelfAssessmentState,
+  SelfAssessmentSections,
 } from "../../types/selfAssessment"
 
 function AnswerToggle({
@@ -15,8 +15,8 @@ function AnswerToggle({
   return (
     <div className="flex gap-2">
       {[
-        { label: "예", value: "yes" as const },
-        { label: "아니오", value: "no" as const },
+        { label: "예", value: true as const },
+        { label: "아니오", value: false as const },
       ].map((option) => (
         <button
           key={option.value}
@@ -24,7 +24,7 @@ function AnswerToggle({
           onClick={() => onChange(option.value)}
           className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors ${
             value === option.value
-              ? option.value === "yes"
+              ? option.value === true
                 ? "border-emerald-600 bg-emerald-600 text-white"
                 : "border-rose-600 bg-rose-600 text-white"
               : "border-slate-200 text-slate-600 hover:bg-slate-50"
@@ -45,22 +45,32 @@ function formatScore(score: number) {
 }
 
 export function SelfAssessmentForm({
-  answers,
+  sections,
   onAnswerChange,
   onReasonChange,
   activeSectionId,
   onSectionChange,
   variant = "full",
 }: {
-  answers: SelfAssessmentState
-  onAnswerChange: (id: string, value: AnswerValue) => void
-  onReasonChange: (id: string, value: string) => void
+  sections: SelfAssessmentSections
+  onAnswerChange: (
+    sectionKey: string,
+    subsectionKey: string,
+    questionKey: string,
+    value: AnswerValue
+  ) => void
+  onReasonChange: (
+    sectionKey: string,
+    subsectionKey: string,
+    questionKey: string,
+    value: string
+  ) => void
   activeSectionId?: string
   onSectionChange?: (id: string) => void
   variant?: "full" | "header" | "content"
 }) {
   const [internalActiveSectionId, setInternalActiveSectionId] = useState(
-    SELF_ASSESSMENT_SECTIONS[0]?.id ?? "",
+    SELF_ASSESSMENT_SECTIONS[0]?.storageKey ?? "",
   )
   const resolvedActiveSectionId =
     activeSectionId ?? internalActiveSectionId
@@ -76,8 +86,11 @@ export function SelfAssessmentForm({
       section.subsections.forEach((subsection) => {
         let subsectionScore = 0
         subsection.questions.forEach((question) => {
-          const answer = answers[question.id]
-          const score = answer?.answer === "yes" ? question.weight : 0
+          const answer =
+            sections?.[section.storageKey]?.[subsection.storageKey]?.[
+              question.storageKey
+            ]
+          const score = answer?.answer === true ? question.weight : 0
           nextQuestionScores[question.id] = score
           subsectionScore += score
         })
@@ -92,11 +105,11 @@ export function SelfAssessmentForm({
       subsectionScores: nextSubsectionScores,
       questionScores: nextQuestionScores,
     }
-  }, [answers])
+  }, [sections])
 
   const activeSection =
     SELF_ASSESSMENT_SECTIONS.find(
-      (section) => section.id === resolvedActiveSectionId,
+      (section) => section.storageKey === resolvedActiveSectionId,
     ) ?? SELF_ASSESSMENT_SECTIONS[0]
 
   if (!activeSection) {
@@ -111,12 +124,12 @@ export function SelfAssessmentForm({
       {variant !== "content" ? (
         <div className="flex flex-wrap gap-2 border-b border-slate-200">
           {SELF_ASSESSMENT_SECTIONS.map((section) => {
-            const isActive = section.id === resolvedActiveSectionId
+            const isActive = section.storageKey === resolvedActiveSectionId
             return (
               <button
                 key={section.id}
                 type="button"
-                onClick={() => handleSectionChange(section.id)}
+                onClick={() => handleSectionChange(section.storageKey)}
                 className={`-mb-px border-b-2 px-3 pb-2 text-sm font-semibold transition-colors ${
                   isActive
                     ? "border-slate-900 text-slate-900"
@@ -165,7 +178,10 @@ export function SelfAssessmentForm({
 
             <div className="space-y-4 p-4">
               {subsection.questions.map((question, index) => {
-                const answer = answers[question.id]
+                const answer =
+                  sections?.[activeSection.storageKey]?.[
+                    subsection.storageKey
+                  ]?.[question.storageKey]
                 const score = questionScores[question.id] ?? 0
                 return (
                   <div
@@ -183,15 +199,15 @@ export function SelfAssessmentForm({
                               {question.tag}
                             </span>
                           ) : null}
-                          {answer?.answer ? (
+                          {answer?.answer !== null && answer?.answer !== undefined ? (
                             <span
                               className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold ${
-                                answer.answer === "yes"
+                                answer.answer === true
                                   ? "bg-emerald-100 text-emerald-700"
                                   : "bg-slate-200 text-slate-600"
                               }`}
                             >
-                              {answer.answer === "yes" ? "+ " : ""}
+                              {answer.answer === true ? "+ " : ""}
                               {formatScore(score)}점
                             </span>
                           ) : (
@@ -203,15 +219,22 @@ export function SelfAssessmentForm({
                       </div>
                       <AnswerToggle
                         value={answer?.answer ?? null}
-                        onChange={(value) => onAnswerChange(question.id, value)}
+                        onChange={(value) =>
+                          onAnswerChange(
+                            activeSection.storageKey,
+                            subsection.storageKey,
+                            question.storageKey,
+                            value
+                          )
+                        }
                       />
                     </div>
 
                     <div className="mt-3">
                       <label className="text-xs text-slate-500">
-                        {answer?.answer === "yes"
+                        {answer?.answer === true
                           ? "예라고 답변한 근거를 작성해주세요."
-                          : answer?.answer === "no"
+                          : answer?.answer === false
                           ? "아니오라면 MYSC가 어떻게 도우면 좋을지 작성해주세요."
                           : "예/아니오를 선택한 뒤 이유를 작성해주세요."}
                         <textarea
@@ -220,7 +243,12 @@ export function SelfAssessmentForm({
                           placeholder="근거 또는 도움 요청 내용을 작성해주세요."
                           value={answer?.reason ?? ""}
                           onChange={(event) =>
-                            onReasonChange(question.id, event.target.value)
+                            onReasonChange(
+                              activeSection.storageKey,
+                              subsection.storageKey,
+                              question.storageKey,
+                              event.target.value
+                            )
                           }
                         />
                       </label>

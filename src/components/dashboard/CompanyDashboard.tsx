@@ -98,11 +98,13 @@ function StatusBadge({
 function StepCard({
   label,
   status,
+  progressLabel,
   active,
   onClick,
 }: {
   label: string
   status: "complete" | "incomplete"
+  progressLabel?: string
   active: boolean
   onClick: () => void
 }) {
@@ -117,7 +119,12 @@ function StepCard({
       }`}
     >
       <div className="flex items-center justify-between">
-        <div className="text-sm font-semibold">{label}</div>
+        <div>
+          <div className="text-sm font-semibold">{label}</div>
+          {progressLabel ? (
+            <div className="mt-1 text-xs text-slate-500">{progressLabel}</div>
+          ) : null}
+        </div>
         <span
           className={`rounded-full px-2 py-1 text-xs font-semibold ${
             status === "complete"
@@ -157,7 +164,7 @@ export function CompanyDashboard({
   } = useCompanyInfoForm(companyId)
 
   const {
-    answers,
+    sections,
     loading: assessmentLoading,
     saveStatus: assessmentSaveStatus,
     hasSavedData: hasSavedAssessment,
@@ -274,6 +281,11 @@ export function CompanyDashboard({
     ]
   }, [form, investmentRows, isFieldInvalid, isFieldValid])
 
+  const overallProgress = useMemo(() => {
+    const completed = Number(hasSavedData) + Number(hasSavedAssessment)
+    return Math.round((completed / 2) * 100)
+  }, [hasSavedData, hasSavedAssessment])
+
   const stepSummaries: StepSummary[] = [
     {
       key: "step1",
@@ -299,14 +311,17 @@ export function CompanyDashboard({
         return (
           subSum +
           subsection.questions.reduce((qSum, question) => {
-            const answer = answers[question.id]
-            return qSum + (answer?.answer === "yes" ? question.weight : 0)
+            const answer =
+              sections?.[section.storageKey]?.[subsection.storageKey]?.[
+                question.storageKey
+              ]
+            return qSum + (answer?.answer === true ? question.weight : 0)
           }, 0)
         )
       }, 0)
       return sum + sectionScore
     }, 0)
-  }, [answers])
+  }, [sections])
 
 
   function inputClass(invalid?: boolean, extra?: string) {
@@ -361,12 +376,27 @@ export function CompanyDashboard({
                   />
                 ))}
               </div>
-              <div className="flex items-center gap-2 text-xs text-slate-500 sm:ml-auto">
+              <div className="flex items-center gap-3 text-xs text-slate-500 sm:ml-auto">
                 {saveStatus || assessmentSaveStatus ? (
                   <span>{saveStatus ?? assessmentSaveStatus}</span>
                 ) : null}
               </div>
             </div>
+          </div>
+          <div className="mt-4 h-1.5 w-full rounded-full bg-slate-100">
+            <div
+              className={`h-1.5 rounded-full transition-all ${
+                overallProgress === 100
+                  ? "bg-emerald-500"
+                  : overallProgress >= 50
+                  ? "bg-amber-400"
+                  : "bg-slate-400"
+              }`}
+              style={{ width: `${overallProgress}%` }}
+            />
+          </div>
+          <div className="mt-2 text-right text-xs font-semibold text-slate-500">
+            전체 진행률 {overallProgress}%
           </div>
         </div>
 
@@ -440,7 +470,7 @@ export function CompanyDashboard({
                 <div className="border-b border-slate-100 bg-white px-8 pt-4">
                   <SelfAssessmentForm
                     variant="header"
-                    answers={answers}
+                    sections={sections}
                     onAnswerChange={updateAnswer}
                     onReasonChange={updateReason}
                     activeSectionId={activeAssessmentSection}
@@ -459,7 +489,7 @@ export function CompanyDashboard({
                 >
                   <SelfAssessmentForm
                     variant="content"
-                    answers={answers}
+                    sections={sections}
                     onAnswerChange={updateAnswer}
                     onReasonChange={updateReason}
                     activeSectionId={activeAssessmentSection}

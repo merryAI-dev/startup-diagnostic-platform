@@ -4,6 +4,7 @@ import { db } from "../firebase/client"
 import type {
   AnswerValue,
   SelfAssessmentAnswer,
+  SelfAssessmentSections,
   SelfAssessmentState,
 } from "../types/selfAssessment"
 import { SELF_ASSESSMENT_SECTIONS } from "../data/selfAssessment"
@@ -14,19 +15,77 @@ const DEFAULT_ANSWER: SelfAssessmentAnswer = {
 }
 
 function buildInitialState(): SelfAssessmentState {
-  const state: SelfAssessmentState = {}
+  const sections: SelfAssessmentSections = {}
+  SELF_ASSESSMENT_SECTIONS.forEach((section) => {
+    const subsectionMap: Record<string, Record<string, SelfAssessmentAnswer>> =
+      {}
+    section.subsections.forEach((subsection) => {
+      const questionMap: Record<string, SelfAssessmentAnswer> = {}
+      subsection.questions.forEach((question) => {
+        questionMap[question.storageKey] = { ...DEFAULT_ANSWER }
+      })
+      subsectionMap[subsection.storageKey] = questionMap
+    })
+    sections[section.storageKey] = subsectionMap
+  })
+  return { sections }
+}
+
+function mergeSections(
+  base: SelfAssessmentSections,
+  incoming?: SelfAssessmentSections
+): SelfAssessmentSections {
+  if (!incoming) return base
+  const merged: SelfAssessmentSections = {}
+  Object.keys(base).forEach((sectionKey) => {
+    merged[sectionKey] = {}
+    const baseSection = base[sectionKey]
+    const incomingSection = incoming[sectionKey] ?? {}
+    Object.keys(baseSection).forEach((subsectionKey) => {
+      merged[sectionKey][subsectionKey] = {
+        ...baseSection[subsectionKey],
+        ...(incomingSection[subsectionKey] ?? {}),
+      }
+    })
+  })
+  return merged
+}
+
+function fromLegacyAnswers(
+  legacy?: Record<string, { answer: unknown; reason?: string }>
+): SelfAssessmentSections | null {
+  if (!legacy) return null
+  const base = buildInitialState()
   SELF_ASSESSMENT_SECTIONS.forEach((section) => {
     section.subsections.forEach((subsection) => {
       subsection.questions.forEach((question) => {
-        state[question.id] = { ...DEFAULT_ANSWER }
+        const legacyAnswer = legacy[question.id]
+        if (legacyAnswer) {
+          const normalizedAnswer =
+            legacyAnswer.answer === "yes"
+              ? true
+              : legacyAnswer.answer === "no"
+              ? false
+              : legacyAnswer.answer === true
+              ? true
+              : legacyAnswer.answer === false
+              ? false
+              : null
+          base.sections[section.storageKey][subsection.storageKey][
+            question.storageKey
+          ] = {
+            answer: normalizedAnswer,
+            reason: legacyAnswer.reason ?? "",
+          }
+        }
       })
     })
   })
-  return state
+  return base.sections
 }
 
 export function useSelfAssessmentForm(companyId: string) {
-  const [answers, setAnswers] = useState<SelfAssessmentState>(buildInitialState)
+  const [state, setState] = useState<SelfAssessmentState>(buildInitialState)
   const [loading, setLoading] = useState(true)
   const [saveStatus, setSaveStatus] = useState<string | null>(null)
   const [hasSavedData, setHasSavedData] = useState(false)
@@ -43,9 +102,19 @@ export function useSelfAssessmentForm(companyId: string) {
           setLoading(false)
           return
         }
-        const data = snapshot.data() as { answers?: SelfAssessmentState }
-        if (data?.answers) {
-          setAnswers({ ...buildInitialState(), ...data.answers })
+        const data = snapshot.data() as {
+          sections?: SelfAssessmentSections
+          answers?: Record<string, { answer: unknown; reason?: string }>
+        }
+        if (data?.sections || data?.answers) {
+          const base = buildInitialState()
+          const legacySections = fromLegacyAnswers(data.answers)
+          setState({
+            sections: mergeSections(
+              base.sections,
+              data.sections ?? legacySections ?? undefined
+            ),
+          })
           setHasSavedData(true)
         }
       } finally {
@@ -61,27 +130,61 @@ export function useSelfAssessmentForm(companyId: string) {
   }, [companyId])
 
   const isComplete = useMemo(() => {
-    return Object.values(answers).every(
-      (value) => value.answer !== null
+    return SELF_ASSESSMENT_SECTIONS.every((section) =>
+      section.subsections.every((subsection) =>
+        subsection.questions.every((question) => {
+          const answer =
+            state.sections?.[section.storageKey]?.[subsection.storageKey]?.[
+              question.storageKey
+            ]
+          return answer?.answer !== null
+        })
+      )
     )
-  }, [answers])
+  }, [state])
 
-  function updateAnswer(id: string, answer: AnswerValue) {
-    setAnswers((prev) => ({
-      ...prev,
-      [id]: {
-        ...prev[id],
-        answer,
+  function updateAnswer(
+    sectionKey: string,
+    subsectionKey: string,
+    questionKey: string,
+    answer: AnswerValue
+  ) {
+    setState((prev) => ({
+      sections: {
+        ...prev.sections,
+        [sectionKey]: {
+          ...prev.sections[sectionKey],
+          [subsectionKey]: {
+            ...prev.sections[sectionKey]?.[subsectionKey],
+            [questionKey]: {
+              ...prev.sections[sectionKey]?.[subsectionKey]?.[questionKey],
+              answer,
+            },
+          },
+        },
       },
     }))
   }
 
-  function updateReason(id: string, reason: string) {
-    setAnswers((prev) => ({
-      ...prev,
-      [id]: {
-        ...prev[id],
-        reason,
+  function updateReason(
+    sectionKey: string,
+    subsectionKey: string,
+    questionKey: string,
+    reason: string
+  ) {
+    setState((prev) => ({
+      sections: {
+        ...prev.sections,
+        [sectionKey]: {
+          ...prev.sections[sectionKey],
+          [subsectionKey]: {
+            ...prev.sections[sectionKey]?.[subsectionKey],
+            [questionKey]: {
+              ...prev.sections[sectionKey]?.[subsectionKey]?.[questionKey],
+              reason,
+            },
+          },
+        },
       },
     }))
   }
@@ -93,7 +196,7 @@ export function useSelfAssessmentForm(companyId: string) {
       await setDoc(
         ref,
         {
-          answers,
+          sections: state.sections,
           metadata: {
             updatedAt: serverTimestamp(),
             createdAt: serverTimestamp(),
@@ -111,7 +214,7 @@ export function useSelfAssessmentForm(companyId: string) {
   }
 
   return {
-    answers,
+    sections: state.sections,
     loading,
     saveStatus,
     hasSavedData,
