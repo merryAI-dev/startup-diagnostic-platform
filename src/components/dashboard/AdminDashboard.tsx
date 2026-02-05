@@ -319,7 +319,7 @@ export function AdminDashboard({
                   기업 정보가 없습니다.
                 </div>
               ) : (
-                <div className="space-y-4 text-sm text-slate-700">
+                <div className="min-h-0 flex-1 space-y-4 overflow-y-auto text-sm text-slate-700">
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div>
                     <div className="text-xs text-slate-400">회사명</div>
