@@ -16,9 +16,9 @@ import { SignupPage } from "./pages/SignupPage"
 export function App() {
   return (
     <BrowserRouter>
-      <div className="h-[100vh] w-full">
-        {/* <div className="mx-auto w-full max-w-7xl px-6 py-10"> */}
-        <Routes>
+      <div className="flex h-screen w-full flex-col overflow-hidden">
+        <div className="flex-1 overflow-y-auto">
+          <Routes>
           <Route path="/" element={<HomeRedirect />} />
           <Route path="/login" element={<LoginPage />} />
           <Route path="/signup" element={<SignupPage />} />
@@ -51,9 +51,12 @@ export function App() {
           />
 
           <Route path="*" element={<NotFoundPage />} />
-        </Routes>
+          </Routes>
+        </div>
+        <footer className="border-t border-slate-200 bg-slate-100 px-6 py-4 text-right text-xs text-slate-500">
+          © MYSC. All rights reserved.
+        </footer>
       </div>
-      {/* </div> */}
     </BrowserRouter>
   )
 }
