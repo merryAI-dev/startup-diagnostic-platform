@@ -349,7 +349,7 @@ export function CompanyDashboard({
     .toUpperCase()
 
   return (
-    <div className="rounded-3xl border border-slate-200 bg-white shadow-sm h-[calc(100vh-10rem)]">
+    <div className="w-full h-[calc(100vh-5rem)] bg-white">
       <div className="flex h-full flex-col">
         <div className="border-b border-slate-100 px-8 py-6">
           <div className="flex items-center justify-between">
