@@ -116,8 +116,7 @@ function StepCard({
           : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
       }`}
     >
-      <div classN
-      ame="flex items-center justify-between">
+      <div className="flex items-center justify-between">
         <div className="text-sm font-semibold">{label}</div>
         <span
           className={`rounded-full px-2 py-1 text-xs font-semibold ${
