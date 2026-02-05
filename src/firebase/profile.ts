@@ -1,4 +1,6 @@
 import {
+  addDoc,
+  collection,
   doc,
   getDoc,
   serverTimestamp,
@@ -25,12 +27,23 @@ export async function createUserProfile(
   requestedRole: Role | null,
   email?: string | null
 ) {
+  let companyId: string | null = null
+  if (requestedRole === "company") {
+    const companyRef = await addDoc(collection(db, "companies"), {
+      ownerUid: uid,
+      name: null,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    })
+    companyId = companyRef.id
+  }
   const ref = doc(db, collectionName, uid)
   await setDoc(ref, {
     role,
     requestedRole,
     active: false,
     email: email ?? null,
+    companyId,
     createdAt: serverTimestamp(),
   })
 }

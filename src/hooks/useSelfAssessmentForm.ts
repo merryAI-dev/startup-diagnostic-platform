@@ -95,7 +95,7 @@ export function useSelfAssessmentForm(companyId: string) {
     async function load() {
       setLoading(true)
       try {
-        const ref = doc(db, "profiles", companyId, "selfAssessment", "info")
+        const ref = doc(db, "companies", companyId, "selfAssessment", "info")
         const snapshot = await getDoc(ref)
         if (!mounted) return
         if (!snapshot.exists()) {
@@ -192,7 +192,7 @@ export function useSelfAssessmentForm(companyId: string) {
   async function saveSelfAssessment() {
     setSaveStatus(null)
     try {
-      const ref = doc(db, "profiles", companyId, "selfAssessment", "info")
+      const ref = doc(db, "companies", companyId, "selfAssessment", "info")
       await setDoc(
         ref,
         {

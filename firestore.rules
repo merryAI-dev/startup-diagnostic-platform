@@ -12,6 +12,11 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.active == true;
     }
 
+    function isCompanyOwner(companyId) {
+      return isSignedIn()
+        && get(/databases/$(database)/documents/companies/$(companyId)).data.ownerUid == request.auth.uid;
+    }
+
     match /profiles/{userId} {
       allow create: if isSignedIn()
         && request.auth.uid == userId
@@ -57,19 +62,30 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
-    match /profiles/{userId}/companyInfo/{docId} {
+    match /companies/{companyId} {
       allow read: if isSignedIn()
-        && (request.auth.uid == userId || isAdmin());
-      allow create, update: if isSignedIn()
-        && request.auth.uid == userId;
+        && (isCompanyOwner(companyId) || isAdmin());
+      allow create: if isSignedIn()
+        && request.resource.data.ownerUid == request.auth.uid;
+      allow update: if isSignedIn()
+        && isCompanyOwner(companyId)
+        && request.resource.data.ownerUid == resource.data.ownerUid;
       allow delete: if false;
     }
 
-    match /profiles/{userId}/selfAssessment/{docId} {
+    match /companies/{companyId}/companyInfo/{docId} {
       allow read: if isSignedIn()
-        && (request.auth.uid == userId || isAdmin());
+        && (isCompanyOwner(companyId) || isAdmin());
       allow create, update: if isSignedIn()
-        && request.auth.uid == userId;
+        && isCompanyOwner(companyId);
+      allow delete: if false;
+    }
+
+    match /companies/{companyId}/selfAssessment/{docId} {
+      allow read: if isSignedIn()
+        && (isCompanyOwner(companyId) || isAdmin());
+      allow create, update: if isSignedIn()
+        && isCompanyOwner(companyId);
       allow delete: if false;
     }
   }

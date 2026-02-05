@@ -5,4 +5,5 @@ export type UserProfile = {
   requestedRole?: Role | null
   active: boolean
   email?: string | null
+  companyId?: string | null
 }

@@ -130,7 +130,7 @@ export function useCompanyInfoForm(companyId: string) {
     async function loadCompanyInfo() {
       setLoading(true)
       try {
-        const ref = doc(db, "profiles", companyId, "companyInfo", "info")
+        const ref = doc(db, "companies", companyId, "companyInfo", "info")
         const snapshot = await getDoc(ref)
         if (!mounted) return
         if (!snapshot.exists()) {
@@ -271,7 +271,7 @@ export function useCompanyInfoForm(companyId: string) {
     }
 
     try {
-      const ref = doc(db, "profiles", companyId, "companyInfo", "info")
+      const ref = doc(db, "companies", companyId, "companyInfo", "info")
       await setDoc(
         ref,
         {
@@ -280,6 +280,14 @@ export function useCompanyInfoForm(companyId: string) {
             ...companyInfo.metadata,
             createdAt: serverTimestamp(),
           },
+        },
+        { merge: true }
+      )
+      await setDoc(
+        doc(db, "companies", companyId),
+        {
+          name: companyInfo.basic.companyInfo || null,
+          updatedAt: serverTimestamp(),
         },
         { merge: true }
       )

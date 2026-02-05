@@ -5,16 +5,22 @@ import { useAuth } from "../context/AuthContext"
 
 export function CompanyPage() {
   const navigate = useNavigate()
-  const { user } = useAuth()
+  const { user, profile } = useAuth()
 
   async function handleLogout() {
     await signOutUser()
     navigate("/login")
   }
 
-  if (!user) {
+  if (!user || !profile?.companyId) {
     return null
   }
 
-  return <CompanyDashboard onLogout={handleLogout} companyId={user.uid} />
+  return (
+    <CompanyDashboard
+      onLogout={handleLogout}
+      companyId={profile.companyId}
+      user={user}
+    />
+  )
 }
