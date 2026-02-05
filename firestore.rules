@@ -56,5 +56,19 @@ service cloud.firestore {
     match /adminRoleRequests/{requestId} {
       allow read, write: if false;
     }
+
+    match /companies/{companyId} {
+      allow read: if isSignedIn()
+        && (request.auth.uid == companyId || isAdmin());
+      allow write: if false;
+    }
+
+    match /companies/{companyId}/companyInfo/{docId} {
+      allow read: if isSignedIn()
+        && (request.auth.uid == companyId || isAdmin());
+      allow create, update: if isSignedIn()
+        && request.auth.uid == companyId;
+      allow delete: if false;
+    }
   }
 }
