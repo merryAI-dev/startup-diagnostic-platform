@@ -339,12 +339,12 @@ export function CompanyDashboard({
 
   const primaryProvider = user.providerData?.[0]?.providerId ?? "password"
   const isGoogle = primaryProvider === "google.com"
-  const email = user.email ?? user.providerData?.[0]?.email ?? "사용자"
+  const email =
+    user.email ?? user.providerData?.[0]?.email ?? "사용자"
   const avatarUrl = user.photoURL ?? user.providerData?.[0]?.photoURL ?? ""
-  const initials = email
-    .split("@")[0]
-    .slice(0, 2)
-    .toUpperCase()
+  const safeEmail = String(email ?? "사용자")
+  const emailBase = safeEmail.split("@")[0] ?? safeEmail
+  const initials = emailBase.slice(0, 2).toUpperCase()
 
   return (
     <div className="w-full h-full bg-white">

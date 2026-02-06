@@ -37,16 +37,21 @@ function mergeSections(
 ): SelfAssessmentSections {
   if (!incoming) return base
   const merged: SelfAssessmentSections = {}
-  Object.keys(base).forEach((sectionKey) => {
-    merged[sectionKey] = {}
-    const baseSection = base[sectionKey]
-    const incomingSection = incoming[sectionKey] ?? {}
+  Object.keys(base ?? {}).forEach((sectionKey) => {
+    const baseSection = base?.[sectionKey]
+    if (!baseSection) return
+    const incomingSection = incoming?.[sectionKey] ?? {}
+    const sectionBucket: Record<string, Record<string, SelfAssessmentAnswer>> =
+      {}
     Object.keys(baseSection).forEach((subsectionKey) => {
-      merged[sectionKey][subsectionKey] = {
-        ...baseSection[subsectionKey],
+      const baseSubsection = baseSection[subsectionKey]
+      if (!baseSubsection) return
+      sectionBucket[subsectionKey] = {
+        ...baseSubsection,
         ...(incomingSection[subsectionKey] ?? {}),
       }
     })
+    merged[sectionKey] = sectionBucket
   })
   return merged
 }
@@ -71,9 +76,11 @@ function fromLegacyAnswers(
               : legacyAnswer.answer === false
               ? false
               : null
-          base.sections[section.storageKey][subsection.storageKey][
-            question.storageKey
-          ] = {
+          const sectionBucket = base.sections[section.storageKey]
+          if (!sectionBucket) return
+          const subsectionBucket = sectionBucket[subsection.storageKey]
+          if (!subsectionBucket) return
+          subsectionBucket[question.storageKey] = {
             answer: normalizedAnswer,
             reason: legacyAnswer.reason ?? "",
           }
@@ -149,21 +156,26 @@ export function useSelfAssessmentForm(companyId: string) {
     questionKey: string,
     answer: AnswerValue
   ) {
-    setState((prev) => ({
-      sections: {
-        ...prev.sections,
-        [sectionKey]: {
-          ...prev.sections[sectionKey],
-          [subsectionKey]: {
-            ...prev.sections[sectionKey]?.[subsectionKey],
-            [questionKey]: {
-              ...prev.sections[sectionKey]?.[subsectionKey]?.[questionKey],
-              answer,
+    setState((prev) => {
+      const prevSection = prev.sections[sectionKey] ?? {}
+      const prevSubsection = prevSection[subsectionKey] ?? {}
+      const prevAnswer = prevSubsection[questionKey] ?? DEFAULT_ANSWER
+      return {
+        sections: {
+          ...prev.sections,
+          [sectionKey]: {
+            ...prevSection,
+            [subsectionKey]: {
+              ...prevSubsection,
+              [questionKey]: {
+                ...prevAnswer,
+                answer,
+              },
             },
           },
         },
-      },
-    }))
+      }
+    })
   }
 
   function updateReason(
@@ -172,21 +184,26 @@ export function useSelfAssessmentForm(companyId: string) {
     questionKey: string,
     reason: string
   ) {
-    setState((prev) => ({
-      sections: {
-        ...prev.sections,
-        [sectionKey]: {
-          ...prev.sections[sectionKey],
-          [subsectionKey]: {
-            ...prev.sections[sectionKey]?.[subsectionKey],
-            [questionKey]: {
-              ...prev.sections[sectionKey]?.[subsectionKey]?.[questionKey],
-              reason,
+    setState((prev) => {
+      const prevSection = prev.sections[sectionKey] ?? {}
+      const prevSubsection = prevSection[subsectionKey] ?? {}
+      const prevAnswer = prevSubsection[questionKey] ?? DEFAULT_ANSWER
+      return {
+        sections: {
+          ...prev.sections,
+          [sectionKey]: {
+            ...prevSection,
+            [subsectionKey]: {
+              ...prevSubsection,
+              [questionKey]: {
+                ...prevAnswer,
+                reason,
+              },
             },
           },
         },
-      },
-    }))
+      }
+    })
   }
 
   async function saveSelfAssessment() {

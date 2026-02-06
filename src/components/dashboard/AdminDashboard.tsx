@@ -56,10 +56,9 @@ export function AdminDashboard({
   const isGoogle = primaryProvider === "google.com"
   const email = user.email ?? user.providerData?.[0]?.email ?? "사용자"
   const avatarUrl = user.photoURL ?? user.providerData?.[0]?.photoURL ?? ""
-  const initials = email
-    .split("@")[0]
-    .slice(0, 2)
-    .toUpperCase()
+  const safeEmail = String(email ?? "사용자")
+  const emailBase = safeEmail.split("@")[0] ?? safeEmail
+  const initials = emailBase.slice(0, 2).toUpperCase()
 
   useEffect(() => {
     let mounted = true
@@ -80,8 +79,9 @@ export function AdminDashboard({
           }
         })
         setCompanies(list)
-        if (!selectedCompanyId && list.length > 0) {
-          setSelectedCompanyId(list[0].id)
+        const first = list[0]
+        if (!selectedCompanyId && first) {
+          setSelectedCompanyId(first.id)
         }
       } finally {
         if (mounted) {
@@ -598,9 +598,10 @@ export function AdminDashboard({
                     const filtered = assessmentSummary.grouped.filter(
                       (section) => section.sectionTitle === activeSectionFilter
                     )
-                    if (filtered.length === 1) {
-                      const section = filtered[0]
-                      return (
+                  if (filtered.length === 1) {
+                    const section = filtered[0]
+                    if (!section) return null
+                    return (
                         <div className="mt-4 min-h-0 flex-1 overflow-hidden">
                           <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden flex h-full flex-col">
                             <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50 px-4 py-3">

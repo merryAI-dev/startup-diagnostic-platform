@@ -93,7 +93,7 @@ export function useCompanyInfoForm(companyId: string) {
     Partial<Record<keyof CompanyInfoForm, boolean>>
   >({})
 
-  const requiredKeys = useMemo(
+  const requiredKeys = useMemo<(keyof CompanyInfoForm)[]>(
     () => [
       "companyInfo",
       "ceoName",
@@ -114,7 +114,7 @@ export function useCompanyInfoForm(companyId: string) {
       "desiredInvestment2026",
       "desiredPreValue",
     ],
-    [form]
+    []
   )
 
   const missingRequired = useMemo(
@@ -344,7 +344,6 @@ export function useCompanyInfoForm(companyId: string) {
       if (field === "businessNumber") return isBusinessNumber(value)
       return true
     },
-    savedInvestmentRows,
     formatPhoneNumber,
     saveCompanyInfo,
   }

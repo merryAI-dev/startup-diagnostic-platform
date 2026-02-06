@@ -19,7 +19,7 @@ function AnswerToggle({
         { label: "아니오", value: false as const },
       ].map((option) => (
         <button
-          key={option.value}
+          key={String(option.value)}
           type="button"
           onClick={() => onChange(option.value)}
           className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors ${
