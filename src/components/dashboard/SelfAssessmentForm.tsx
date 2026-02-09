@@ -44,7 +44,7 @@ function formatScore(score: number) {
   return score.toFixed(1).replace(/\.0$/, "")
 }
 
-function isQuestionInputComplete(answer: {
+function isQuestionInputComplete(answer?: {
   answer?: AnswerValue
   reason?: string
 }) {
