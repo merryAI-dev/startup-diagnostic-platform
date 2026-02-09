@@ -423,7 +423,7 @@ export function CompanyDashboard({
                   자가진단표 작성
                 </div>
                 <div className="mt-1 text-xs font-semibold text-rose-500">
-                  모든 항목을 선택해야 저장 버튼이 활성화됩니다.
+                  모든 문항의 답변과 근거를 입력해야 저장 버튼이 활성화됩니다.
                 </div>
               </div>
               <div className="flex flex-wrap items-center gap-2">

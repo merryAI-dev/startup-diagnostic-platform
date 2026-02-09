@@ -44,6 +44,14 @@ function formatScore(score: number) {
   return score.toFixed(1).replace(/\.0$/, "")
 }
 
+function isQuestionInputComplete(answer: {
+  answer?: AnswerValue
+  reason?: string
+}) {
+  return answer?.answer !== null && answer?.answer !== undefined
+    && (answer?.reason ?? "").trim().length >= 1
+}
+
 export function SelfAssessmentForm({
   sections,
   onAnswerChange,
@@ -78,33 +86,35 @@ export function SelfAssessmentForm({
     activeSectionId ?? internalActiveSectionId
   const handleSectionChange = onSectionChange ?? setInternalActiveSectionId
 
-  const { sectionScores, subsectionScores, questionScores } = useMemo(() => {
-    const nextSectionScores: Record<string, number> = {}
-    const nextSubsectionScores: Record<string, number> = {}
+  const { sectionAnsweredCounts, sectionQuestionCounts, questionScores } = useMemo(() => {
+    const nextSectionAnsweredCounts: Record<string, number> = {}
+    const nextSectionQuestionCounts: Record<string, number> = {}
     const nextQuestionScores: Record<string, number> = {}
 
     SELF_ASSESSMENT_SECTIONS.forEach((section) => {
-      let sectionScore = 0
+      let sectionAnsweredCount = 0
+      let sectionQuestionCount = 0
       section.subsections.forEach((subsection) => {
-        let subsectionScore = 0
         subsection.questions.forEach((question) => {
           const answer =
             sections?.[section.storageKey]?.[subsection.storageKey]?.[
               question.storageKey
             ]
           const score = answer?.answer === true ? question.weight : 0
+          if (isQuestionInputComplete(answer)) {
+            sectionAnsweredCount += 1
+          }
+          sectionQuestionCount += 1
           nextQuestionScores[question.id] = score
-          subsectionScore += score
         })
-        nextSubsectionScores[subsection.id] = subsectionScore
-        sectionScore += subsectionScore
       })
-      nextSectionScores[section.id] = sectionScore
+      nextSectionAnsweredCounts[section.id] = sectionAnsweredCount
+      nextSectionQuestionCounts[section.id] = sectionQuestionCount
     })
 
     return {
-      sectionScores: nextSectionScores,
-      subsectionScores: nextSubsectionScores,
+      sectionAnsweredCounts: nextSectionAnsweredCounts,
+      sectionQuestionCounts: nextSectionQuestionCounts,
       questionScores: nextQuestionScores,
     }
   }, [sections])
@@ -140,8 +150,8 @@ export function SelfAssessmentForm({
               >
                 {section.title}
                 <span className="ml-2 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">
-                  {formatScore(sectionScores[section.id] ?? 0)}/
-                  {formatScore(section.totalScore)}
+                  {sectionAnsweredCounts[section.id] ?? 0}/
+                  {sectionQuestionCounts[section.id] ?? 0}
                 </span>
               </button>
             )

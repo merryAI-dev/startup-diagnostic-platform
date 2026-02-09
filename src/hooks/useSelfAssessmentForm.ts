@@ -91,6 +91,11 @@ function fromLegacyAnswers(
   return base.sections
 }
 
+function isQuestionInputComplete(answer?: SelfAssessmentAnswer) {
+  return answer?.answer !== null && answer?.answer !== undefined
+    && (answer?.reason ?? "").trim().length >= 1
+}
+
 export function useSelfAssessmentForm(companyId: string) {
   const [state, setState] = useState<SelfAssessmentState>(buildInitialState)
   const [loading, setLoading] = useState(true)
@@ -144,7 +149,7 @@ export function useSelfAssessmentForm(companyId: string) {
             state.sections?.[section.storageKey]?.[subsection.storageKey]?.[
               question.storageKey
             ]
-          return answer?.answer !== null
+          return isQuestionInputComplete(answer)
         })
       )
     )
@@ -208,6 +213,10 @@ export function useSelfAssessmentForm(companyId: string) {
 
   async function saveSelfAssessment() {
     setSaveStatus(null)
+    if (!isComplete) {
+      setSaveStatus("모든 문항의 답변과 근거를 입력해주세요.")
+      return false
+    }
     try {
       const ref = doc(db, "companies", companyId, "selfAssessment", "info")
       await setDoc(
