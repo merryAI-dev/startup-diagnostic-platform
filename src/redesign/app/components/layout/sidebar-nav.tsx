@@ -37,6 +37,14 @@ const userNavItems = [
   { id: "settings", label: "설정", icon: Settings },
 ];
 
+const companyCoreNavIds = new Set([
+  "dashboard",
+  "consultants",
+  "regular",
+  "irregular",
+  "company-info",
+]);
+
 export function SidebarNav({
   currentPage,
   onNavigate,
@@ -45,37 +53,57 @@ export function SidebarNav({
 }: SidebarNavProps) {
   const isAdminUser = userRole === "admin" || userRole === "consultant" || userRole === "staff";
   const navItems = isAdminUser ? adminNavItems : userNavItems;
+  const companyCoreNavItems = userNavItems.filter((item) =>
+    companyCoreNavIds.has(item.id)
+  );
+  const companyLabsNavItems = userNavItems.filter(
+    (item) => !companyCoreNavIds.has(item.id)
+  );
+
+  const renderNavButton = (item: (typeof userNavItems)[number]) => {
+    const Icon = item.icon;
+    const isActive = currentPage === item.id;
+    const isDisabled = disabledPages?.has(item.id) ?? false;
+
+    return (
+      <button
+        key={item.id}
+        onClick={() => {
+          if (isDisabled) return;
+          onNavigate(item.id);
+        }}
+        disabled={isDisabled}
+        className={cn(
+          "w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-colors text-left",
+          isDisabled
+            ? "text-slate-300 cursor-not-allowed bg-transparent"
+            : isActive
+            ? "bg-primary text-primary-foreground"
+            : "text-foreground hover:bg-accent"
+        )}
+      >
+        <Icon className="w-5 h-5" />
+        <span className="text-sm">{item.label}</span>
+      </button>
+    );
+  };
 
   return (
     <div className="w-64 border-r bg-white h-full flex flex-col">
       <nav className="flex-1 p-4 space-y-1">
-        {navItems.map((item) => {
-          const Icon = item.icon;
-          const isActive = currentPage === item.id;
-          const isDisabled = disabledPages?.has(item.id) ?? false;
-
-          return (
-            <button
-              key={item.id}
-              onClick={() => {
-                if (isDisabled) return;
-                onNavigate(item.id);
-              }}
-              disabled={isDisabled}
-              className={cn(
-                "w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-colors text-left",
-                isDisabled
-                  ? "text-slate-300 cursor-not-allowed bg-transparent"
-                  : isActive
-                  ? "bg-primary text-primary-foreground"
-                  : "text-foreground hover:bg-accent"
-              )}
-            >
-              <Icon className="w-5 h-5" />
-              <span className="text-sm">{item.label}</span>
-            </button>
-          );
-        })}
+        {isAdminUser ? (
+          navItems.map((item) => renderNavButton(item))
+        ) : (
+          <>
+            {companyCoreNavItems.map((item) => renderNavButton(item))}
+            <div className="pt-3">
+              <p className="px-3 text-xs font-semibold uppercase tracking-wider text-slate-400">
+                Labs
+              </p>
+            </div>
+            {companyLabsNavItems.map((item) => renderNavButton(item))}
+          </>
+        )}
       </nav>
 
       <div className="p-4 border-t">
