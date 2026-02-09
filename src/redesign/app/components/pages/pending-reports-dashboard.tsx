@@ -1,0 +1,312 @@
+import { useMemo } from "react";
+import { Application, Program, OfficeHourReport, User } from "../../lib/types";
+import { Button } from "../ui/button";
+import { Badge } from "../ui/badge";
+import { AlertCircle, Clock, Calendar, FileText } from "lucide-react";
+import { format, differenceInDays } from "date-fns";
+import { ko } from "date-fns/locale";
+
+interface PendingReportsDashboardProps {
+  applications: Application[];
+  reports: OfficeHourReport[];
+  programs: Program[];
+  currentUser: User;
+  onCreateReport: (applicationId: string) => void;
+}
+
+interface PendingReportItem {
+  application: Application;
+  daysSinceSession: number;
+  isOverdue: boolean;
+  programName: string;
+  programColor: string;
+}
+
+export function PendingReportsDashboard({
+  applications,
+  reports,
+  programs,
+  currentUser,
+  onCreateReport,
+}: PendingReportsDashboardProps) {
+  // 미작성 보고서 목록 계산
+  const pendingReports = useMemo(() => {
+    const completedApps = applications.filter(
+      (app) => app.status === "completed" && app.scheduledDate
+    );
+
+    const reportedAppIds = new Set(reports.map((r) => r.applicationId));
+
+    const pending: PendingReportItem[] = completedApps
+      .filter((app) => !reportedAppIds.has(app.id))
+      .map((app) => {
+        const sessionDate = new Date(app.scheduledDate!);
+        const today = new Date();
+        const daysSince = differenceInDays(today, sessionDate);
+
+        const program = programs.find((p) => p.id === app.programId);
+
+        return {
+          application: app,
+          daysSinceSession: daysSince,
+          isOverdue: daysSince > 3,
+          programName: program?.name || "알 수 없음",
+          programColor: program?.color || "#gray-500",
+        };
+      })
+      .sort((a, b) => b.daysSinceSession - a.daysSinceSession);
+
+    // 권한에 따른 필터링
+    if (currentUser.role !== "admin") {
+      return pending.filter((p) =>
+        currentUser.programs?.includes(p.application.programId || "")
+      );
+    }
+
+    return pending;
+  }, [applications, reports, programs, currentUser]);
+
+  // 사업별 통계
+  const statsByProgram = useMemo(() => {
+    const stats: Record<
+      string,
+      { name: string; color: string; pending: number; overdue: number }
+    > = {};
+
+    pendingReports.forEach((item) => {
+      const programId = item.application.programId || "unknown";
+      if (!stats[programId]) {
+        stats[programId] = {
+          name: item.programName,
+          color: item.programColor,
+          pending: 0,
+          overdue: 0,
+        };
+      }
+      stats[programId].pending++;
+      if (item.isOverdue) {
+        stats[programId].overdue++;
+      }
+    });
+
+    return Object.entries(stats).map(([id, data]) => ({ id, ...data }));
+  }, [pendingReports]);
+
+  // 컨설턴트별 통계
+  const statsByConsultant = useMemo(() => {
+    const stats: Record<string, { name: string; pending: number; overdue: number }> = {};
+
+    pendingReports.forEach((item) => {
+      const consultantName = item.application.consultant;
+      if (!stats[consultantName]) {
+        stats[consultantName] = { name: consultantName, pending: 0, overdue: 0 };
+      }
+      stats[consultantName].pending++;
+      if (item.isOverdue) {
+        stats[consultantName].overdue++;
+      }
+    });
+
+    return Object.entries(stats)
+      .map(([name, data]) => data)
+      .sort((a, b) => b.overdue - a.overdue);
+  }, [pendingReports]);
+
+  const overdueCount = pendingReports.filter((p) => p.isOverdue).length;
+
+  return (
+    <div className="h-full flex flex-col bg-gray-50">
+      {/* Header */}
+      <div className="bg-white border-b px-8 py-6">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900">
+              미작성 보고서 관리
+            </h1>
+            <p className="text-sm text-muted-foreground mt-1">
+              세션 완료 후 3일 이내 보고서를 작성해주세요
+            </p>
+          </div>
+        </div>
+
+        {/* Stats */}
+        <div className="grid grid-cols-3 gap-4">
+          <div className="bg-gray-50 rounded-lg border p-4">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-sm text-muted-foreground">전체 미작성</span>
+              <FileText className="w-4 h-4 text-blue-500" />
+            </div>
+            <div className="text-3xl font-bold text-gray-900">
+              {pendingReports.length}건
+            </div>
+          </div>
+
+          <div className="bg-red-50 rounded-lg border border-red-200 p-4">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-sm text-red-700">기한 초과</span>
+              <AlertCircle className="w-4 h-4 text-red-500" />
+            </div>
+            <div className="text-3xl font-bold text-red-600">
+              {overdueCount}건
+            </div>
+            <p className="text-xs text-red-600 mt-1">3일 이상 지난 보고서</p>
+          </div>
+
+          <div className="bg-amber-50 rounded-lg border border-amber-200 p-4">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-sm text-amber-700">곧 마감</span>
+              <Clock className="w-4 h-4 text-amber-500" />
+            </div>
+            <div className="text-3xl font-bold text-amber-600">
+              {pendingReports.filter((p) => !p.isOverdue && p.daysSinceSession >= 2).length}건
+            </div>
+            <p className="text-xs text-amber-600 mt-1">2일 이상 경과</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Content */}
+      <div className="flex-1 overflow-y-auto px-8 py-6">
+        <div className="grid grid-cols-3 gap-6 mb-6">
+          {/* 사업별 통계 */}
+          <div className="col-span-2 bg-white rounded-lg border p-6">
+            <h3 className="font-semibold text-gray-900 mb-4">사업별 미작성 현황</h3>
+            <div className="space-y-3">
+              {statsByProgram.map((program) => (
+                <div
+                  key={program.id}
+                  className="flex items-center justify-between p-3 rounded-lg border"
+                >
+                  <div className="flex items-center gap-3">
+                    <div
+                      className="w-3 h-3 rounded-full"
+                      style={{ backgroundColor: program.color }}
+                    />
+                    <span className="font-medium text-gray-900">{program.name}</span>
+                  </div>
+                  <div className="flex items-center gap-4">
+                    <span className="text-sm text-muted-foreground">
+                      미작성 {program.pending}건
+                    </span>
+                    {program.overdue > 0 && (
+                      <Badge variant="destructive">초과 {program.overdue}건</Badge>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* 컨설턴트별 통계 */}
+          <div className="bg-white rounded-lg border p-6">
+            <h3 className="font-semibold text-gray-900 mb-4">
+              컨설턴트별 미작성
+            </h3>
+            <div className="space-y-3">
+              {statsByConsultant.map((consultant) => (
+                <div
+                  key={consultant.name}
+                  className="flex items-center justify-between p-3 rounded-lg border"
+                >
+                  <span className="text-sm font-medium text-gray-900">
+                    {consultant.name}
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-muted-foreground">
+                      {consultant.pending}건
+                    </span>
+                    {consultant.overdue > 0 && (
+                      <span className="text-xs text-red-600 font-medium">
+                        ({consultant.overdue})
+                      </span>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* 미작성 보고서 목록 */}
+        <div className="bg-white rounded-lg border">
+          <div className="p-6 border-b">
+            <h3 className="font-semibold text-gray-900">보고서 작성이 필요한 세션</h3>
+          </div>
+          <div className="divide-y">
+            {pendingReports.length === 0 ? (
+              <div className="p-12 text-center">
+                <FileText className="w-12 h-12 text-green-500 mx-auto mb-3" />
+                <p className="text-sm text-muted-foreground">
+                  모든 보고서가 작성되었습니다!
+                </p>
+              </div>
+            ) : (
+              pendingReports.map((item) => (
+                <div
+                  key={item.application.id}
+                  className={`p-4 hover:bg-gray-50 transition-colors ${
+                    item.isOverdue ? "bg-red-50/50" : ""
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-3 mb-2">
+                        <div
+                          className="w-2 h-2 rounded-full"
+                          style={{ backgroundColor: item.programColor }}
+                        />
+                        <span className="text-xs text-muted-foreground">
+                          {item.programName}
+                        </span>
+                        {item.isOverdue && (
+                          <Badge variant="destructive" className="text-xs">
+                            기한 초과
+                          </Badge>
+                        )}
+                      </div>
+                      <h4 className="font-medium text-gray-900 mb-1">
+                        {item.application.officeHourTitle}
+                      </h4>
+                      <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                        <div className="flex items-center gap-1.5">
+                          <Calendar className="w-3.5 h-3.5" />
+                          <span>
+                            {format(
+                              new Date(item.application.scheduledDate!),
+                              "yyyy년 M월 d일",
+                              { locale: ko }
+                            )}
+                          </span>
+                        </div>
+                        <span>•</span>
+                        <span>{item.application.consultant}</span>
+                        <span>•</span>
+                        <div className="flex items-center gap-1.5">
+                          <Clock className="w-3.5 h-3.5" />
+                          <span
+                            className={
+                              item.isOverdue ? "text-red-600 font-medium" : ""
+                            }
+                          >
+                            {item.daysSinceSession}일 경과
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                    <Button
+                      size="sm"
+                      onClick={() => onCreateReport(item.application.id)}
+                      variant={item.isOverdue ? "destructive" : "default"}
+                    >
+                      보고서 작성
+                    </Button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
