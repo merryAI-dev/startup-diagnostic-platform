@@ -137,6 +137,10 @@ export function SelfAssessmentForm({
         <div className="flex flex-wrap gap-2 border-b border-slate-200">
           {SELF_ASSESSMENT_SECTIONS.map((section) => {
             const isActive = section.storageKey === resolvedActiveSectionId
+            const answeredCount = sectionAnsweredCounts[section.id] ?? 0
+            const questionCount = sectionQuestionCounts[section.id] ?? 0
+            const hasMissing = answeredCount < questionCount
+            const isComplete = !hasMissing
             return (
               <button
                 key={section.id}
@@ -149,10 +153,24 @@ export function SelfAssessmentForm({
                 }`}
               >
                 {section.title}
-                <span className="ml-2 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">
-                  {sectionAnsweredCounts[section.id] ?? 0}/
-                  {sectionQuestionCounts[section.id] ?? 0}
+                <span
+                  className={`ml-2 rounded-full px-2 py-0.5 text-[11px] ${
+                    isComplete
+                      ? "bg-emerald-100 text-emerald-700"
+                      : "bg-slate-100 text-slate-600"
+                  }`}
+                >
+                  {answeredCount}/{questionCount}
                 </span>
+                {hasMissing ? (
+                  <span
+                    className="ml-1 inline-flex h-4 w-4 items-center justify-center rounded-full border border-amber-200 bg-amber-50 text-[10px] font-bold text-amber-600"
+                    title="미입력 항목 있음"
+                    aria-label="미입력 항목 있음"
+                  >
+                    !
+                  </span>
+                ) : null}
               </button>
             )
           })}

@@ -135,13 +135,23 @@ function StepCard({
           ) : null}
         </div>
         <span
-          className={`rounded-full px-2 py-1 text-xs font-semibold ${active
+          className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs font-semibold ${active
               ? "border border-white/20 bg-white/15 text-white"
               : status === "complete"
               ? "bg-emerald-200 text-emerald-800"
-              : "bg-amber-200 text-amber-800"
+              : "bg-amber-50 text-amber-700"
             }`}
         >
+          {status === "incomplete" ? (
+            <span
+              className={`inline-flex h-3 w-3 items-center justify-center text-[10px] font-bold ${
+                active ? "text-white" : "text-amber-700"
+              }`}
+              aria-hidden="true"
+            >
+              !
+            </span>
+          ) : null}
           {status === "complete" ? "완료" : "미완료"}
         </span>
       </div>
@@ -179,6 +189,9 @@ export function CompanyDashboard({
     loading: assessmentLoading,
     saveStatus: assessmentSaveStatus,
     hasSavedData: hasSavedAssessment,
+    answeredCount,
+    totalQuestionCount,
+    remainingCount,
     isComplete: assessmentComplete,
     updateAnswer,
     updateReason,
@@ -230,63 +243,41 @@ export function CompanyDashboard({
         && isFilled(row.majorShareholder)
     )
 
-    const basicWarning = basicFields.some(isFieldInvalid)
-    const locationWarning = locationFields.some(isFieldInvalid)
-    const workforceWarning = workforceFields.some(isFieldInvalid)
-    const certificationWarning = certificationFields.some(isFieldInvalid)
-    const fundingWarning = fundingFields.some(isFieldInvalid)
-
     return [
       {
         key: "basic",
         label: "기본정보",
-        variant: basicComplete ? "complete" : basicWarning ? "warning" : "idle",
+        variant: basicComplete ? "complete" : "warning",
         index: 1,
       },
       {
         key: "location",
         label: "소재지",
-        variant: locationComplete
-          ? "complete"
-          : locationWarning
-            ? "warning"
-            : "idle",
+        variant: locationComplete ? "complete" : "warning",
         index: 2,
       },
       {
         key: "workforce",
         label: "인력/재무",
-        variant: workforceComplete
-          ? "complete"
-          : workforceWarning
-            ? "warning"
-            : "idle",
+        variant: workforceComplete ? "complete" : "warning",
         index: 3,
       },
       {
         key: "certification",
         label: "인증/이력",
-        variant: certificationComplete
-          ? "complete"
-          : certificationWarning
-            ? "warning"
-            : "idle",
+        variant: certificationComplete ? "complete" : "warning",
         index: 4,
       },
       {
         key: "investment",
         label: "투자이력",
-        variant: investmentComplete ? "complete" : "idle",
+        variant: investmentComplete ? "complete" : "warning",
         index: 5,
       },
       {
         key: "funding",
         label: "투자희망",
-        variant: fundingComplete
-          ? "complete"
-          : fundingWarning
-            ? "warning"
-            : "idle",
+        variant: fundingComplete ? "complete" : "warning",
         index: 6,
       },
     ]
@@ -296,12 +287,12 @@ export function CompanyDashboard({
     {
       key: "step1",
       label: "기업정보",
-      status: hasSavedData ? "complete" : "incomplete",
+      status: canSubmit ? "complete" : "incomplete",
     },
     {
       key: "step2",
       label: "자가진단표",
-      status: hasSavedAssessment ? "complete" : "incomplete",
+      status: assessmentComplete ? "complete" : "incomplete",
     },
   ]
 
@@ -332,10 +323,10 @@ export function CompanyDashboard({
 
   function inputClass(invalid?: boolean, extra?: string) {
     return [
-      "mt-1 w-full rounded-xl border px-3 py-2 text-sm text-slate-700 focus:outline-none",
+      "mt-1 w-full rounded-xl border bg-white px-3 py-2 text-sm text-slate-800 shadow-sm focus:outline-none focus:ring-2",
       invalid
-        ? "border-rose-300 focus:border-rose-400"
-        : "border-slate-200 focus:border-slate-400",
+        ? "border-rose-400 bg-rose-50 text-rose-900 placeholder:text-rose-300 focus:border-rose-500 focus:ring-rose-100"
+        : "border-slate-300 focus:border-slate-500 focus:ring-slate-100",
       extra,
     ]
       .filter(Boolean)
@@ -422,11 +413,32 @@ export function CompanyDashboard({
                 <div className="text-sm font-semibold text-slate-700">
                   자가진단표 작성
                 </div>
-                <div className="mt-1 text-xs font-semibold text-rose-500">
-                  모든 문항의 답변과 근거를 입력해야 저장 버튼이 활성화됩니다.
-                </div>
+                {assessmentComplete ? (
+                  <div className="mt-2 inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">
+                    입력 완료 {answeredCount}/{totalQuestionCount}
+                  </div>
+                ) : (
+                  <div className="mt-2 inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700">
+                    <span
+                      className="inline-flex h-3.5 w-3.5 items-center justify-center rounded-full border border-amber-200 bg-white text-[10px] font-bold text-amber-700"
+                      aria-hidden="true"
+                    >
+                      !
+                    </span>
+                    미입력 {remainingCount}개 (완료 {answeredCount}/{totalQuestionCount})
+                  </div>
+                )}
               </div>
-              <div className="flex flex-wrap items-center gap-2">
+              <div
+                className={`flex flex-wrap items-center gap-2 ${
+                  assessmentComplete ? "" : "cursor-help"
+                }`}
+                title={
+                  assessmentComplete
+                    ? undefined
+                    : "모든 문항의 답변과 근거를 입력해야 저장할 수 있습니다."
+                }
+              >
                 <div className="rounded-xl border border-slate-900 bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-sm">
                   총점 {assessmentTotalScore}/100점
                 </div>
