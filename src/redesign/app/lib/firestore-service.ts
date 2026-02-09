@@ -247,7 +247,7 @@ class FirestoreService {
       const hasMore = snapshot.docs.length > pageSize;
 
       const data = docs.map((d) => ({ id: d.id, ...d.data() } as T));
-      const lastDoc = docs.length > 0 ? docs[docs.length - 1] : null;
+      const lastDoc = docs.length > 0 ? docs[docs.length - 1]! : null;
 
       return { data, lastDoc, hasMore };
     } catch (error) {

@@ -73,12 +73,13 @@ export function AdminUsers({ users, onUpdateUser, onAddUser }: AdminUsersProps) 
     onUpdateUser(userId, { status });
   };
 
-  const formatDate = (date: Date) => {
+  const formatDate = (date: Date | string) => {
+    const parsedDate = date instanceof Date ? date : new Date(date);
     return new Intl.DateTimeFormat("ko-KR", {
       year: "numeric",
       month: "2-digit",
       day: "2-digit",
-    }).format(date);
+    }).format(parsedDate);
   };
 
   const stats = {

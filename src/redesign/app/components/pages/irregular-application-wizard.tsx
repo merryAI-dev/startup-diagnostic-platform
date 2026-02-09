@@ -244,7 +244,8 @@ export function IrregularApplicationWizard({
                       selected={periodTo}
                       onSelect={setPeriodTo}
                       disabled={(date) =>
-                        date < new Date() || (periodFrom && date < periodFrom)
+                        date < new Date() ||
+                        (periodFrom ? date < periodFrom : false)
                       }
                       className="rounded-md border"
                     />

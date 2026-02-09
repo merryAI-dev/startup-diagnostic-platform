@@ -34,6 +34,7 @@
     "vite.config.ts"
   ],
   "exclude": [
+    "src/redesign/app",
     "node_modules",
     "dist"
   ]

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { useAuth as useAppAuth } from "../../context/AuthContext";
 import { signOutUser } from "../../firebase/auth";
@@ -68,6 +69,8 @@ type AppPage =
 
 export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
   const { user: firebaseUser, profile, loading } = useAppAuth();
+  const navigate = useNavigate();
+  const location = useLocation();
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -78,7 +81,8 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
 
   const resolvedRole: UserRole =
     roleOverride ?? (profile?.role === "admin" ? "admin" : "user");
-  const fallbackUser = initialUsers.find((u) => u.role === resolvedRole) ?? initialUsers[0];
+  const fallbackUser =
+    initialUsers.find((u) => u.role === resolvedRole) ?? initialUsers[0]!;
   const user: User = useMemo(() => {
     return {
       ...fallbackUser,
@@ -88,9 +92,48 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
         ? `회사 ${profile.companyId}`
         : fallbackUser.companyName,
       role: resolvedRole,
+      programName: fallbackUser.programName ?? "MYSC",
+      programs: fallbackUser.programs ?? [],
     };
   }, [fallbackUser, firebaseUser?.email, firebaseUser?.uid, profile?.companyId, resolvedRole]);
 
+  const adminPages = useMemo<Set<AppPage>>(
+    () =>
+      new Set([
+        "admin-dashboard",
+        "admin-applications",
+        "admin-programs",
+        "admin-consultants",
+        "admin-users",
+        "admin-communication",
+        "pending-reports",
+        "startup-diagnostic",
+      ]),
+    []
+  );
+  const userPages = useMemo<Set<AppPage>>(
+    () =>
+      new Set([
+        "dashboard",
+        "notifications",
+        "messages",
+        "unified-calendar",
+        "goals-kanban",
+        "ai-recommendations",
+        "team-collaboration",
+        "consultants",
+        "regular",
+        "irregular",
+        "history",
+        "company-metrics",
+        "company-newsletter",
+        "settings",
+        "company-info",
+      ]),
+    []
+  );
+
+  const basePath = roleOverride === "admin" ? "/admin" : "/company";
   const initialPage: AppPage =
     resolvedRole === "admin" ? "admin-dashboard" : "dashboard";
   const [currentPage, setCurrentPage] = useState<AppPage>(initialPage);
@@ -116,9 +159,45 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>(mockTeamMembers);
   
   // Set initial page based on role
+  const disabledPages = useMemo(() => {
+    const set = new Set<AppPage>();
+    if (!profile?.companyId) {
+      set.add("company-info");
+    }
+    if (!firebaseUser) {
+      set.add("startup-diagnostic");
+    }
+    return set;
+  }, [firebaseUser, profile?.companyId]);
+
   useEffect(() => {
-    setCurrentPage(initialPage);
-  }, [initialPage]);
+    const segment = location.pathname.split("/")[2] ?? "";
+    const requestedPage = segment as AppPage;
+    const allowedPages = resolvedRole === "admin" ? adminPages : userPages;
+    const nextPage = allowedPages.has(requestedPage)
+      ? requestedPage
+      : initialPage;
+    if (disabledPages.has(nextPage)) {
+      setCurrentPage(initialPage);
+      if (segment) {
+        navigate(`${basePath}/${initialPage}`, { replace: true });
+      }
+      return;
+    }
+    setCurrentPage(nextPage);
+    if (!segment) {
+      navigate(`${basePath}/${nextPage}`, { replace: true });
+    }
+  }, [
+    basePath,
+    adminPages,
+    userPages,
+    disabledPages,
+    initialPage,
+    location.pathname,
+    navigate,
+    resolvedRole,
+  ]);
 
   // 세션 완료 후 보고서 작성 팝업
   useEffect(() => {
@@ -148,7 +227,11 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
   }, [user, applications, reports]);
 
   const handleNavigate = (page: AppPage, id?: string) => {
+    if (disabledPages.has(page)) {
+      return;
+    }
     setCurrentPage(page);
+    navigate(`${basePath}/${page}`);
     if (id) {
       if (page === "regular-detail") {
         setSelectedOfficeHourId(id);
@@ -157,6 +240,8 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       }
     }
   };
+  const handleNavigateLoose = (page: string, id?: string) =>
+    handleNavigate(page as AppPage, id);
 
   const handleSelectOfficeHour = (id: string) => {
     setSelectedOfficeHourId(id);
@@ -365,7 +450,8 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     <div className="h-screen flex flex-col">
       <Topbar
         user={user}
-        onNavigate={(page) => handleNavigate(page as AppPage)}
+        onNavigate={handleNavigateLoose}
+        disabledPages={disabledPages}
         onLogout={async () => {
           await signOutUser();
           toast.success("로그아웃되었습니다");
@@ -374,8 +460,9 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       <div className="flex-1 flex overflow-hidden">
         <SidebarNav
           currentPage={currentPage}
-          onNavigate={(page) => handleNavigate(page as AppPage)}
+          onNavigate={handleNavigateLoose}
           userRole={user.role}
+          disabledPages={disabledPages}
         />
         <main className="flex-1 overflow-y-auto bg-gray-50">
           {currentPage === "dashboard" && (
@@ -383,7 +470,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
               applications={applications}
               user={user}
               programs={programList}
-              onNavigate={handleNavigate}
+              onNavigate={handleNavigateLoose}
             />
           )}
 
@@ -418,7 +505,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
                 if (page === "irregular-wizard") {
                   handleStartIrregularApplication();
                 } else {
-                  handleNavigate(page as AppPage);
+                  handleNavigateLoose(page);
                 }
               }}
             />
@@ -434,7 +521,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
           {currentPage === "history" && (
             <ApplicationHistoryCalendar
               applications={applications}
-              onNavigate={handleNavigate}
+              onNavigate={handleNavigateLoose}
             />
           )}
 
@@ -596,12 +683,13 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
               currentUser={user}
               teamMembers={teamMembers}
               onInviteMember={(email, role) => {
+                const companyName = email.split("@")[0] ?? email;
                 const newMember: TeamMember = {
                   id: `tm_${Date.now()}`,
                   email,
-                  companyName: email.split("@")[0],
-                  programName: user.programName,
-                  programs: user.programs,
+                  companyName,
+                  programName: user.programName ?? "MYSC",
+                  programs: user.programs ?? [],
                   role: role as any,
                   position: "팀원",
                   department: "일반",
@@ -648,7 +736,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
                 applications={applications}
                 programs={programList}
                 currentUser={user}
-                onNavigate={(page) => handleNavigate(page as AppPage)}
+                onNavigate={handleNavigateLoose}
               />
             </ProtectedRoute>
           )}

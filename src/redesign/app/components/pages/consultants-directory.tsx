@@ -29,11 +29,13 @@ export function ConsultantsDirectory({ consultants }: ConsultantsDirectoryProps)
       ? consultants
       : consultants.filter((c) => c.expertise.includes(filterExpertise));
 
-  const formatDate = (date: Date) => {
+  const formatDate = (date?: Date | string) => {
+    if (!date) return "-";
+    const parsedDate = date instanceof Date ? date : new Date(date);
     return new Intl.DateTimeFormat("ko-KR", {
       year: "numeric",
       month: "long",
-    }).format(date);
+    }).format(parsedDate);
   };
 
   return (
@@ -56,7 +58,7 @@ export function ConsultantsDirectory({ consultants }: ConsultantsDirectoryProps)
             </div>
             <div className="flex items-center gap-2">
               <Calendar className="w-5 h-5" />
-              <span>{consultants.reduce((sum, c) => sum + c.sessionsCompleted, 0)}건 이상 세션 완료</span>
+              <span>{consultants.reduce((sum, c) => sum + (c.sessionsCompleted ?? 0), 0)}건 이상 세션 완료</span>
             </div>
           </div>
         </div>

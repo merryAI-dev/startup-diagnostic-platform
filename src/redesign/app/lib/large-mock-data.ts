@@ -68,7 +68,7 @@ const programTargets: Record<string, number> = {
 
 function randomDate(start: Date, end: Date): string {
   const date = new Date(start.getTime() + Math.random() * (end.getTime() - start.getTime()));
-  return date.toISOString().split('T')[0];
+  return date.toISOString().split('T')[0] ?? date.toISOString();
 }
 
 function randomTime(): string {
@@ -77,7 +77,11 @@ function randomTime(): string {
 }
 
 function randomElement<T>(arr: T[]): T {
-  return arr[Math.floor(Math.random() * arr.length)];
+  const item = arr[Math.floor(Math.random() * arr.length)];
+  if (item === undefined) {
+    throw new Error("randomElement: empty array");
+  }
+  return item;
 }
 
 // 대규모 애플리케이션 데이터 생성
@@ -90,7 +94,8 @@ export function generateLargeApplications(): Application[] {
   const endDate = new Date('2026-02-28');
 
   Object.entries(programTargets).forEach(([programId, targetCount]) => {
-    const programCompanies = programStartups[programId];
+    const programCompanies = programStartups[programId] ?? [];
+    if (programCompanies.length === 0) return;
     
     for (let i = 0; i < targetCount; i++) {
       const company = randomElement(programCompanies);
@@ -137,11 +142,15 @@ export function generateLargeApplications(): Application[] {
         companyName: company,
         applicantName: `${company} 대표`,
         applicantEmail: `contact@${company.replace(/\s/g, '').toLowerCase()}.com`,
+        officeHourTitle: `${company} - ${topic}`,
         agenda: topic,
         details: `${topic}에 대한 상담이 필요합니다.`,
+        requestContent: `${topic}에 대한 상담이 필요합니다.`,
         status,
         createdAt,
-        consultant: status !== 'pending' ? `${consultant} 컨설턴트` : undefined,
+        updatedAt: createdAt,
+        consultant: status !== "pending" ? `${consultant} 컨설턴트` : "담당자 배정 중",
+        sessionFormat: Math.random() < 0.6 ? "online" : "offline",
         programId,
         scheduledDate,
         scheduledTime,
@@ -166,28 +175,31 @@ export function getCompanyCancellationStats(applications: Application[]) {
   }> = {};
 
   applications.forEach(app => {
-    if (!stats[app.companyName]) {
-      stats[app.companyName] = {
+    const companyName = app.companyName ?? "미지정";
+    if (!stats[companyName]) {
+      stats[companyName] = {
         total: 0,
         cancelled: 0,
         completed: 0,
         cancellationRate: 0,
       };
     }
-    
-    stats[app.companyName].total++;
+    const record = stats[companyName];
+    if (!record) return;
+    record.total++;
     if (app.status === 'cancelled') {
-      stats[app.companyName].cancelled++;
+      record.cancelled++;
     }
     if (app.status === 'completed') {
-      stats[app.companyName].completed++;
+      record.completed++;
     }
   });
 
   // 취소율 계산
   Object.keys(stats).forEach(company => {
-    stats[company].cancellationRate = 
-      Math.round((stats[company].cancelled / stats[company].total) * 100);
+    const record = stats[company];
+    if (!record) return;
+    record.cancellationRate = Math.round((record.cancelled / record.total) * 100);
   });
 
   return stats;
@@ -200,13 +212,10 @@ export function getTopicMonthlyTrend(applications: Application[]) {
   applications.forEach(app => {
     if (!app.agenda) return;
     
-    const month = app.createdAt.substring(0, 7); // YYYY-MM
+    const month = String(app.createdAt).substring(0, 7); // YYYY-MM
     
-    if (!trend[app.agenda]) {
-      trend[app.agenda] = {};
-    }
-    
-    trend[app.agenda][month] = (trend[app.agenda][month] || 0) + 1;
+    const bucket = trend[app.agenda] ?? (trend[app.agenda] = {});
+    bucket[month] = (bucket[month] || 0) + 1;
   });
 
   return trend;
@@ -217,13 +226,10 @@ export function getCompanyMonthlyActivity(applications: Application[]) {
   const activity: Record<string, Record<string, number>> = {};
 
   applications.forEach(app => {
-    const month = app.createdAt.substring(0, 7);
-    
-    if (!activity[app.companyName]) {
-      activity[app.companyName] = {};
-    }
-    
-    activity[app.companyName][month] = (activity[app.companyName][month] || 0) + 1;
+    const month = String(app.createdAt).substring(0, 7);
+    const companyName = app.companyName ?? "미지정";
+    const bucket = activity[companyName] ?? (activity[companyName] = {});
+    bucket[month] = (bucket[month] || 0) + 1;
   });
 
   return activity;

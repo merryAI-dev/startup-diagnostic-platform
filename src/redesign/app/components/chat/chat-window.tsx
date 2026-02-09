@@ -126,8 +126,13 @@ export function ChatWindow({
               {/* 메시지들 */}
               {msgs.map((message, index) => {
                 const isCurrentUser = message.senderId === currentUser.id;
-                const showAvatar = index === 0 || msgs[index - 1].senderId !== message.senderId;
-                const showTime = index === msgs.length - 1 || msgs[index + 1].senderId !== message.senderId;
+                const prevMessage = msgs[index - 1];
+                const nextMessage = msgs[index + 1];
+                const showAvatar =
+                  index === 0 || prevMessage?.senderId !== message.senderId;
+                const showTime =
+                  index === msgs.length - 1 ||
+                  nextMessage?.senderId !== message.senderId;
 
                 return (
                   <motion.div

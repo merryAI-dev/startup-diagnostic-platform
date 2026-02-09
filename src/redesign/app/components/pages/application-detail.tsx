@@ -159,11 +159,11 @@ export function ApplicationDetail({
               </div>
 
               {/* Attachments */}
-              {application.attachments.length > 0 && (
+              {(application.attachments ?? []).length > 0 && (
                 <div>
                   <h3 className="mb-2">첨부 파일</h3>
                   <div className="space-y-2">
-                    {application.attachments.map((file, idx) => (
+                    {(application.attachments ?? []).map((file, idx) => (
                       <div
                         key={idx}
                         className="flex items-center gap-2 p-2 bg-muted rounded"

@@ -5,7 +5,7 @@ export type ApplicationStatus =
   | "cancelled"
   | "completed";
 
-export type OfficeHourType = "regular" | "irregular";
+export type OfficeHourType = "regular" | "irregular" | "custom";
 
 export type SessionFormat = "online" | "offline";
 
@@ -66,15 +66,15 @@ export interface User {
   id: string;
   email: string;
   companyName: string;
-  programName: string; // deprecated - use programs instead
-  programs: string[]; // Program IDs that this user belongs to
+  programName?: string; // deprecated - use programs instead
+  programs?: string[]; // Program IDs that this user belongs to
   role: UserRole;
   permissions?: {
     canViewAllApplications?: boolean;
     canManageConsultants?: boolean;
     canManagePrograms?: boolean;
   };
-  status?: string;
+  status?: "active" | "inactive" | "suspended" | string;
   createdAt?: string | Date;
   lastLoginAt?: string | Date;
 }
@@ -115,12 +115,16 @@ export interface Application {
   status: ApplicationStatus;
   officeHourId?: string;
   officeHourTitle: string;
+  companyName?: string;
   consultant: string;
   consultantId?: string; // 컨설턴트 ID 추가
   sessionFormat: SessionFormat;
   agenda: string;
   requestContent: string;
-  attachments: string[];
+  attachments?: string[];
+  applicantName?: string;
+  applicantEmail?: string;
+  details?: string;
   scheduledDate?: string;
   scheduledTime?: string;
   periodFrom?: string;
@@ -129,9 +133,9 @@ export interface Application {
   isInternal?: boolean;
   programId?: string; // 어느 사업에 속하는지
   duration?: number; // 세션 시간 (시간 단위)
-  createdAt: Date;
-  updatedAt: Date;
-  completedAt?: Date; // 완료 시점
+  createdAt: Date | string;
+  updatedAt: Date | string;
+  completedAt?: Date | string; // 완료 시점
 }
 
 export interface FileItem {
@@ -143,20 +147,22 @@ export interface FileItem {
 export interface Consultant {
   id: string;
   name: string;
-  title: string;
+  title?: string;
   email: string;
-  phone: string;
+  phone?: string;
   expertise: string[];
   bio: string;
-  detailedBio: string;
-  education: string[];
-  certifications: string[];
-  publications: string[];
+  detailedBio?: string;
+  education?: string[];
+  certifications?: string[];
+  publications?: string[];
   linkedIn?: string;
   status: "active" | "inactive";
-  sessionsCompleted: number;
-  satisfaction: number; // 만족도 (changed from rating)
-  joinedDate: Date;
+  sessionsCompleted?: number;
+  satisfaction?: number; // 만족도 (changed from rating)
+  rating?: number;
+  avatarUrl?: string;
+  joinedDate?: Date | string;
   availability: ConsultantAvailability[];
 }
 
@@ -185,7 +191,7 @@ export interface UserWithPermissions {
     canManagePrograms?: boolean;
     managedPrograms?: string[];
   };
-  status: "active" | "inactive";
+  status: "active" | "inactive" | "suspended";
   createdAt: Date | string;
   lastLoginAt?: Date | string;
 }
@@ -292,13 +298,14 @@ export interface Goal {
   description: string;
   status: "backlog" | "todo" | "in_progress" | "review" | "completed";
   priority: "low" | "medium" | "high";
-  dueDate: string;
+  dueDate: string | Date;
   assignees: string[];
   tags: string[];
   progress: number;
-  createdAt: Date;
-  updatedAt: Date;
+  createdAt: Date | string;
+  updatedAt: Date | string;
   createdBy: string;
+  attachments?: string[];
   comments?: GoalComment[];
 }
 
@@ -307,11 +314,11 @@ export interface TeamMember {
   email: string;
   companyName: string;
   programName: string;
-  programs: string[];
+  programs?: string[];
   role: UserRole;
   position: string;
   department: string;
-  joinedAt: Date;
+  joinedAt: Date | string;
   isActive: boolean;
   permissions: {
     canApplyRegular: boolean;
@@ -319,8 +326,8 @@ export interface TeamMember {
     canViewAll: boolean;
     managedPrograms?: string[];
   };
-  createdAt: Date;
-  lastLoginAt?: Date;
+  createdAt: Date | string;
+  lastLoginAt?: Date | string;
   status: "active" | "inactive";
 }
 
