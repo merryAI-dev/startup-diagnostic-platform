@@ -6,6 +6,7 @@ import {
   getDocs,
 } from "firebase/firestore"
 import { useEffect, useMemo, useState } from "react"
+import { useNavigate } from "react-router-dom"
 import { SELF_ASSESSMENT_SECTIONS } from "../../data/selfAssessment"
 import { db } from "../../firebase/client"
 import type { CompanyInfoRecord } from "../../types/company"
@@ -26,6 +27,7 @@ export function AdminDashboard({
   user,
   onLogout,
 }: AdminDashboardProps) {
+  const navigate = useNavigate()
   const [companies, setCompanies] = useState<CompanySummary[]>([])
   const [selectedCompanyId, setSelectedCompanyId] = useState<string | null>(null)
   const [companyInfo, setCompanyInfo] = useState<CompanyInfoRecord | null>(null)
@@ -52,13 +54,7 @@ export function AdminDashboard({
     milestone78: "",
     milestone910: "",
   })
-  const primaryProvider = user.providerData?.[0]?.providerId ?? "password"
-  const isGoogle = primaryProvider === "google.com"
   const email = user.email ?? user.providerData?.[0]?.email ?? "사용자"
-  const avatarUrl = user.photoURL ?? user.providerData?.[0]?.photoURL ?? ""
-  const safeEmail = String(email ?? "사용자")
-  const emailBase = safeEmail.split("@")[0] ?? safeEmail
-  const initials = emailBase.slice(0, 2).toUpperCase()
 
   useEffect(() => {
     let mounted = true
@@ -241,61 +237,22 @@ export function AdminDashboard({
   }, [assessmentSummary])
 
   return (
-    <div className="bg-white shadow-sm h-full">
+    <div className="bg-transparent h-full">
       <div className="flex h-full flex-col">
         <div className="flex items-center justify-between border-b border-slate-100 px-8 py-5">
           <h1 className="text-2xl font-semibold text-slate-900">
             Admin Dashboard
           </h1>
-          <div className="flex flex-col items-end gap-2">
-            <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-3 py-2">
-              {avatarUrl ? (
-                <img
-                  src={avatarUrl}
-                  alt="사용자 프로필"
-                  className="h-8 w-8 rounded-full object-cover"
-                />
-              ) : (
-                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-100 text-xs font-semibold text-slate-600">
-                  {initials}
-                </div>
-              )}
-              <div className="text-right">
-                <div className="text-xs font-semibold text-slate-700">
-                  {email}
-                </div>
-                <div className="mt-0.5 flex items-center justify-end gap-1 text-[11px] text-slate-500">
-                  {isGoogle ? (
-                    <svg
-                      className="h-3.5 w-3.5"
-                      viewBox="0 0 24 24"
-                      aria-hidden="true"
-                    >
-                      <path
-                        fill="#EA4335"
-                        d="M12 10.2v3.8h5.3c-.2 1.2-1.4 3.5-5.3 3.5-3.2 0-5.8-2.6-5.8-5.8S8.8 5.9 12 5.9c1.8 0 3.1.8 3.8 1.5l2.6-2.5C16.8 3.4 14.6 2.4 12 2.4 6.9 2.4 2.8 6.5 2.8 11.6S6.9 20.8 12 20.8c7 0 8.4-4.9 8.4-7.4 0-.5-.1-.9-.1-1.3H12z"
-                      />
-                    </svg>
-                  ) : (
-                    <svg
-                      className="h-3.5 w-3.5 text-slate-500"
-                      viewBox="0 0 20 20"
-                      fill="currentColor"
-                      aria-hidden="true"
-                    >
-                      <path d="M10 2a4 4 0 00-4 4v3H5a2 2 0 00-2 2v5a2 2 0 002 2h10a2 2 0 002-2v-5a2 2 0 00-2-2h-1V6a4 4 0 00-4-4zm-2 7V6a2 2 0 114 0v3H8z" />
-                    </svg>
-                  )}
-                  <span>{isGoogle ? "Google 로그인" : "이메일 로그인"}</span>
-                </div>
-              </div>
-            </div>
+          <div className="flex items-center gap-3">
             <button
-              className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-slate-800"
-              onClick={onLogout}
+              className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
+              onClick={() => navigate("/admin/consultants")}
             >
-              로그아웃
+              컨설턴트 관리
             </button>
+            <div className="hidden text-xs text-slate-400 md:block">
+              {email}
+            </div>
           </div>
         </div>
         <div className="flex-1 min-h-0 grid gap-6 lg:grid-cols-[280px_1fr] px-8 py-5">

@@ -337,17 +337,8 @@ export function CompanyDashboard({
       .join(" ")
   }
 
-  const primaryProvider = user.providerData?.[0]?.providerId ?? "password"
-  const isGoogle = primaryProvider === "google.com"
-  const email =
-    user.email ?? user.providerData?.[0]?.email ?? "사용자"
-  const avatarUrl = user.photoURL ?? user.providerData?.[0]?.photoURL ?? ""
-  const safeEmail = String(email ?? "사용자")
-  const emailBase = safeEmail.split("@")[0] ?? safeEmail
-  const initials = emailBase.slice(0, 2).toUpperCase()
-
   return (
-    <div className="w-full h-full bg-white">
+    <div className="w-full h-full bg-transparent">
       <div className="flex h-full flex-col">
         <div className="border-b border-slate-100 px-8 py-6">
           <div className="flex items-center justify-between">
@@ -359,58 +350,6 @@ export function CompanyDashboard({
                 기업 정보와 자가 진단표를 완료해야 다음 단계로 진행할 수
                 있습니다.
               </p>
-            </div>
-            <div className="flex flex-col items-end gap-2">
-              <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-3 py-2">
-                {avatarUrl ? (
-                  <img
-                    src={avatarUrl}
-                    alt="사용자 프로필"
-                    className="h-8 w-8 rounded-full object-cover"
-                  />
-                ) : (
-                  <div className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-100 text-xs font-semibold text-slate-600">
-                    {initials}
-                  </div>
-                )}
-                <div className="text-right">
-                  <div className="text-xs font-semibold text-slate-700">
-                    {email}
-                  </div>
-                  <div className="mt-0.5 flex items-center justify-end gap-1 text-[11px] text-slate-500">
-                    {isGoogle ? (
-                      <svg
-                        className="h-3.5 w-3.5"
-                        viewBox="0 0 24 24"
-                        aria-hidden="true"
-                      >
-                        <path
-                          fill="#EA4335"
-                          d="M12 10.2v3.8h5.3c-.2 1.2-1.4 3.5-5.3 3.5-3.2 0-5.8-2.6-5.8-5.8S8.8 5.9 12 5.9c1.8 0 3.1.8 3.8 1.5l2.6-2.5C16.8 3.4 14.6 2.4 12 2.4 6.9 2.4 2.8 6.5 2.8 11.6S6.9 20.8 12 20.8c7 0 8.4-4.9 8.4-7.4 0-.5-.1-.9-.1-1.3H12z"
-                        />
-                      </svg>
-                    ) : (
-                      <svg
-                        className="h-3.5 w-3.5 text-slate-500"
-                        viewBox="0 0 20 20"
-                        fill="currentColor"
-                        aria-hidden="true"
-                      >
-                        <path d="M10 2a4 4 0 00-4 4v3H5a2 2 0 00-2 2v5a2 2 0 002 2h10a2 2 0 002-2v-5a2 2 0 00-2-2h-1V6a4 4 0 00-4-4zm-2 7V6a2 2 0 114 0v3H8z" />
-                      </svg>
-                    )}
-                    <span>
-                      {isGoogle ? "Google 로그인" : "이메일 로그인"}
-                    </span>
-                  </div>
-                </div>
-              </div>
-              <button
-                className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-slate-800"
-                onClick={onLogout}
-              >
-                로그아웃
-              </button>
             </div>
           </div>
         </div>
