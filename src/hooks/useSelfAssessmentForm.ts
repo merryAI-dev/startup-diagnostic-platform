@@ -141,19 +141,32 @@ export function useSelfAssessmentForm(companyId: string) {
     }
   }, [companyId])
 
-  const isComplete = useMemo(() => {
-    return SELF_ASSESSMENT_SECTIONS.every((section) =>
-      section.subsections.every((subsection) =>
-        subsection.questions.every((question) => {
+  const { answeredCount, totalQuestionCount } = useMemo(() => {
+    let nextAnsweredCount = 0
+    let nextTotalQuestionCount = 0
+
+    SELF_ASSESSMENT_SECTIONS.forEach((section) => {
+      section.subsections.forEach((subsection) => {
+        subsection.questions.forEach((question) => {
           const answer =
             state.sections?.[section.storageKey]?.[subsection.storageKey]?.[
               question.storageKey
             ]
-          return isQuestionInputComplete(answer)
+          nextTotalQuestionCount += 1
+          if (isQuestionInputComplete(answer)) {
+            nextAnsweredCount += 1
+          }
         })
-      )
-    )
+      })
+    })
+
+    return {
+      answeredCount: nextAnsweredCount,
+      totalQuestionCount: nextTotalQuestionCount,
+    }
   }, [state])
+  const remainingCount = Math.max(totalQuestionCount - answeredCount, 0)
+  const isComplete = remainingCount === 0
 
   function updateAnswer(
     sectionKey: string,
@@ -244,6 +257,9 @@ export function useSelfAssessmentForm(companyId: string) {
     loading,
     saveStatus,
     hasSavedData,
+    answeredCount,
+    totalQuestionCount,
+    remainingCount,
     isComplete,
     updateAnswer,
     updateReason,
