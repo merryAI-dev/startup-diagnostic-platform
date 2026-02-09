@@ -5,6 +5,7 @@ interface SidebarNavProps {
   currentPage: string;
   onNavigate: (page: string) => void;
   userRole?: string;
+  disabledPages?: Set<string>;
 }
 
 const adminNavItems = [
@@ -36,7 +37,12 @@ const userNavItems = [
   { id: "settings", label: "설정", icon: Settings },
 ];
 
-export function SidebarNav({ currentPage, onNavigate, userRole = "user" }: SidebarNavProps) {
+export function SidebarNav({
+  currentPage,
+  onNavigate,
+  userRole = "user",
+  disabledPages,
+}: SidebarNavProps) {
   const isAdminUser = userRole === "admin" || userRole === "consultant" || userRole === "staff";
   const navItems = isAdminUser ? adminNavItems : userNavItems;
 
@@ -46,14 +52,21 @@ export function SidebarNav({ currentPage, onNavigate, userRole = "user" }: Sideb
         {navItems.map((item) => {
           const Icon = item.icon;
           const isActive = currentPage === item.id;
+          const isDisabled = disabledPages?.has(item.id) ?? false;
 
           return (
             <button
               key={item.id}
-              onClick={() => onNavigate(item.id)}
+              onClick={() => {
+                if (isDisabled) return;
+                onNavigate(item.id);
+              }}
+              disabled={isDisabled}
               className={cn(
                 "w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-colors text-left",
-                isActive
+                isDisabled
+                  ? "text-slate-300 cursor-not-allowed bg-transparent"
+                  : isActive
                   ? "bg-primary text-primary-foreground"
                   : "text-foreground hover:bg-accent"
               )}

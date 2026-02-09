@@ -179,11 +179,11 @@ export function AIRecommendations({
                           exit={{ opacity: 0, height: 0 }}
                           className="mb-4 p-4 bg-slate-50 rounded-lg"
                         >
-                          {recommendation.type === "consultant" && recommendation.relatedData.consultantId && (
+                          {recommendation.type === "consultant" && recommendation.relatedData?.consultantId && (
                             <div>
                               {(() => {
                                 const consultant = consultants.find(
-                                  c => c.id === recommendation.relatedData.consultantId
+                                  c => c.id === recommendation.relatedData?.consultantId
                                 );
                                 return consultant ? (
                                   <div className="space-y-2">

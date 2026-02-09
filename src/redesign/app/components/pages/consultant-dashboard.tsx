@@ -22,6 +22,8 @@ export function ConsultantDashboard({
   currentUser 
 }: ConsultantDashboardProps) {
   const [selectedView, setSelectedView] = useState<"companies" | "topics" | "monthly" | "growth">("companies");
+  const toDate = (value: Date | string) =>
+    value instanceof Date ? value : new Date(value);
 
   // 권한에 따른 프로그램 필터링
   const accessiblePrograms = useMemo(() => {
@@ -47,28 +49,29 @@ export function ConsultantDashboard({
       total: number;
       completed: number;
       topics: Set<string>;
-      lastSession: string;
+      lastSession: Date | string;
     }> = {};
 
     filteredApplications.forEach(app => {
-      if (!companyMap[app.companyName]) {
-        companyMap[app.companyName] = {
+      const companyName = app.companyName ?? "미지정";
+      const record =
+        companyMap[companyName] ??
+        (companyMap[companyName] = {
           total: 0,
           completed: 0,
           topics: new Set(),
           lastSession: app.createdAt,
-        };
-      }
+        });
 
-      companyMap[app.companyName].total++;
+      record.total++;
       if (app.status === "completed") {
-        companyMap[app.companyName].completed++;
+        record.completed++;
       }
       if (app.agenda) {
-        companyMap[app.companyName].topics.add(app.agenda);
+        record.topics.add(app.agenda);
       }
-      if (app.createdAt > companyMap[app.companyName].lastSession) {
-        companyMap[app.companyName].lastSession = app.createdAt;
+      if (toDate(app.createdAt) > toDate(record.lastSession)) {
+        record.lastSession = app.createdAt;
       }
     });
 
@@ -78,7 +81,7 @@ export function ConsultantDashboard({
         세션수: data.completed,
         진행중: data.total - data.completed,
         주제수: data.topics.size,
-        마지막세션: data.lastSession,
+        마지막세션: String(data.lastSession),
       }))
       .sort((a, b) => b.세션수 - a.세션수)
       .slice(0, 15);
@@ -91,19 +94,16 @@ export function ConsultantDashboard({
     filteredApplications.forEach(app => {
       if (!app.agenda || app.status !== "completed") return;
       
-      const month = app.createdAt.substring(0, 7);
+      const month = toDate(app.createdAt).toISOString().substring(0, 7);
       
-      if (!topicMap[app.agenda]) {
-        topicMap[app.agenda] = {};
-      }
-      
-      topicMap[app.agenda][month] = (topicMap[app.agenda][month] || 0) + 1;
+      const bucket = topicMap[app.agenda] ?? (topicMap[app.agenda] = {});
+      bucket[month] = (bucket[month] || 0) + 1;
     });
 
     // 모든 월 추출
     const allMonths = Array.from(
       new Set(
-        filteredApplications.map(app => app.createdAt.substring(0, 7))
+        filteredApplications.map(app => toDate(app.createdAt).toISOString().substring(0, 7))
       )
     ).sort().slice(-6);
 
@@ -143,20 +143,20 @@ export function ConsultantDashboard({
 
     filteredApplications.forEach(app => {
       if (app.status !== "completed") return;
+      const companyName = app.companyName ?? "미지정";
+      const appDate = toDate(app.createdAt);
       
-      const appDate = new Date(app.createdAt);
-      
-      if (!growthMap[app.companyName]) {
-        growthMap[app.companyName] = {
+      const record =
+        growthMap[companyName] ??
+        (growthMap[companyName] = {
           earlyMonth: 0,
           recentMonth: 0,
-        };
-      }
+        });
 
       if (appDate < threeMonthsAgo) {
-        growthMap[app.companyName].earlyMonth++;
+        record.earlyMonth++;
       } else {
-        growthMap[app.companyName].recentMonth++;
+        record.recentMonth++;
       }
     });
 
@@ -196,7 +196,7 @@ export function ConsultantDashboard({
     const activeCompanies = new Set(
       filteredApplications
         .filter(a => a.status === "completed" || a.status === "confirmed")
-        .map(a => a.companyName)
+        .map(a => a.companyName ?? "미지정")
     ).size;
     const totalTopics = new Set(
       filteredApplications.filter(a => a.agenda).map(a => a.agenda)

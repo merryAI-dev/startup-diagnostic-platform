@@ -14,7 +14,8 @@ function generateMonthlyMetrics(companyName: string): MonthlyMetrics[] {
   for (let month = 1; month <= 10; month++) {
     // 성장률: 월 평균 5-15% 성장 (변동성 있게)
     const growthRate = 1 + (Math.random() * 0.10 + 0.05);
-    const prevRevenue = month === 1 ? base.revenue : data[month - 2].revenue;
+    const prevRevenue =
+      month === 1 ? base.revenue : data[month - 2]?.revenue ?? base.revenue;
     
     data.push({
       month,

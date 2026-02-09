@@ -113,10 +113,10 @@ export function GoalsKanban({
     e.preventDefault();
   };
 
-  const getDaysUntilDue = (dueDate?: string) => {
+  const getDaysUntilDue = (dueDate?: string | Date) => {
     if (!dueDate) return null;
     const today = new Date();
-    const due = new Date(dueDate);
+    const due = dueDate instanceof Date ? dueDate : new Date(dueDate);
     const diffTime = due.getTime() - today.getTime();
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
     return diffDays;
@@ -288,7 +288,7 @@ export function GoalsKanban({
                               exit={{ opacity: 0, scale: 0.95 }}
                               transition={{ duration: 0.2, delay: index * 0.03 }}
                               draggable
-                              onDragStart={(e) => handleDragStart(e, goal.id)}
+                              onDragStartCapture={(e) => handleDragStart(e, goal.id)}
                               className="group"
                             >
                               <Card className="p-4 cursor-move hover:shadow-lg transition-all">

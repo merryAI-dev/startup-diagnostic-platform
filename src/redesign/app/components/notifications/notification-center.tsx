@@ -122,7 +122,10 @@ export function NotificationCenter({
               </motion.div>
             ) : (
               filteredNotifications.map((notification, index) => {
-                const iconConfig = notificationIcons[notification.type];
+                const iconConfig =
+                  notificationIcons[
+                    notification.type as keyof typeof notificationIcons
+                  ] ?? notificationIcons.general;
                 const Icon = iconConfig.icon;
 
                 return (

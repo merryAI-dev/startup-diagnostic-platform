@@ -98,7 +98,7 @@ export function UnifiedCalendar({
   };
 
   // 날짜별로 그룹화된 일정
-  const eventsByDate = useMemo(() => {
+  const eventsByDate = useMemo<Record<string, Application[]>>(() => {
     const filtered = selectedProgram
       ? applications.filter(app => app.programId === selectedProgram)
       : applications;
@@ -109,25 +109,24 @@ export function UnifiedCalendar({
 
     const byDate: Record<string, Application[]> = {};
     confirmed.forEach(app => {
-      if (app.scheduledDate) {
-        if (!byDate[app.scheduledDate]) {
-          byDate[app.scheduledDate] = [];
-        }
-        byDate[app.scheduledDate].push(app);
-      }
+      if (!app.scheduledDate) return;
+      const key = app.scheduledDate;
+      const bucket = byDate[key] ?? (byDate[key] = []);
+      bucket.push(app);
     });
 
     return byDate;
   }, [applications, selectedProgram]);
 
   // 선택된 날짜의 이벤트
-  const selectedDateKey = selectedDate.toISOString().split("T")[0];
-  const selectedDateEvents = eventsByDate[selectedDateKey] || [];
+  const selectedDateKey = selectedDate.toISOString().split("T")[0] ?? "";
+  const selectedDateEvents = eventsByDate[selectedDateKey] ?? [];
 
   // 캘린더에서 날짜에 이벤트가 있는지 체크
   const hasEvents = (date: Date) => {
-    const dateKey = date.toISOString().split("T")[0];
-    return eventsByDate[dateKey] && eventsByDate[dateKey].length > 0;
+    const dateKey = date.toISOString().split("T")[0] ?? "";
+    const events = eventsByDate[dateKey];
+    return Boolean(events && events.length > 0);
   };
 
   // 이번 주 이벤트
@@ -414,7 +413,7 @@ export function UnifiedCalendar({
                     </div>
                   ) : (
                     <div className="space-y-3">
-                      {selectedDateEvents.map((event) => (
+                      {selectedDateEvents.map((event: Application) => (
                         <motion.div
                           key={event.id}
                           initial={{ opacity: 0, x: -20 }}
@@ -469,7 +468,7 @@ export function UnifiedCalendar({
                     </p>
                   ) : (
                     <div className="space-y-2">
-                      {thisWeekEvents.slice(0, 5).map((event) => (
+                      {thisWeekEvents.slice(0, 5).map((event: Application) => (
                         <div
                           key={event.id}
                           className="flex items-center gap-3 p-2 rounded-lg hover:bg-slate-50 cursor-pointer"
@@ -525,7 +524,7 @@ export function UnifiedCalendar({
                       </h3>
 
                       <div className="grid gap-3 ml-6">
-                        {events.map((event) => (
+                        {events.map((event: Application) => (
                           <motion.div
                             key={event.id}
                             initial={{ opacity: 0 }}

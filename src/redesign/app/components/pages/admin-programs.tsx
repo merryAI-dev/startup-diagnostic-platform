@@ -56,6 +56,8 @@ export function AdminPrograms({
     return "text-red-600";
   };
 
+  const selectedProgramId = selectedProgram?.id;
+
   return (
     <div className="p-8 max-w-7xl mx-auto">
       {/* Header */}
@@ -246,10 +248,13 @@ export function AdminPrograms({
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {getProgramStats(selectedProgram.id).applications.map((app) => (
+                  {(selectedProgramId
+                    ? getProgramStats(selectedProgramId).applications
+                    : []
+                  ).map((app) => (
                     <TableRow key={app.id}>
                       <TableCell className="font-medium">
-                        {(app.officeHourTitle || "").split("-")[0].trim() || "-"}
+                        {((app.officeHourTitle || "").split("-")[0] ?? "").trim() || "-"}
                       </TableCell>
                       <TableCell>{app.agenda}</TableCell>
                       <TableCell>{app.consultant}</TableCell>
@@ -297,23 +302,29 @@ export function AdminPrograms({
                     <div className="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
                       <span className="text-sm">전체 신청</span>
                       <span className="font-semibold">
-                        {getProgramStats(selectedProgram.id).applications.length}건
+                        {(selectedProgramId
+                          ? getProgramStats(selectedProgramId).applications.length
+                          : 0)}건
                       </span>
                     </div>
                     <div className="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
                       <span className="text-sm">완료된 세션</span>
                       <span className="font-semibold text-green-600">
-                        {getProgramStats(selectedProgram.id).totalSessions}건
+                        {(selectedProgramId
+                          ? getProgramStats(selectedProgramId).totalSessions
+                          : 0)}건
                       </span>
                     </div>
                     <div className="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
                       <span className="text-sm">진행 중</span>
                       <span className="font-semibold text-blue-600">
-                        {
-                          getProgramStats(selectedProgram.id).applications.filter(
-                            (app) => app.status === "confirmed" || app.status === "pending"
-                          ).length
-                        }
+                        {(selectedProgramId
+                          ? getProgramStats(selectedProgramId).applications
+                          : []
+                        ).filter(
+                          (app) =>
+                            app.status === "confirmed" || app.status === "pending"
+                        ).length}
                         건
                       </span>
                     </div>
@@ -326,19 +337,20 @@ export function AdminPrograms({
                     <div className="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
                       <span className="text-sm">목표 시수</span>
                       <span className="font-semibold">
-                        {selectedProgram.targetHours}h
+                        {selectedProgram?.targetHours ?? 0}h
                       </span>
                     </div>
                     <div className="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
                       <span className="text-sm">완료 시수</span>
                       <span className="font-semibold text-green-600">
-                        {selectedProgram.completedHours}h
+                        {selectedProgram?.completedHours ?? 0}h
                       </span>
                     </div>
                     <div className="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
                       <span className="text-sm">남은 시수</span>
                       <span className="font-semibold text-orange-600">
-                        {selectedProgram.targetHours - selectedProgram.completedHours}h
+                        {(selectedProgram?.targetHours ?? 0) -
+                          (selectedProgram?.completedHours ?? 0)}h
                       </span>
                     </div>
                   </div>

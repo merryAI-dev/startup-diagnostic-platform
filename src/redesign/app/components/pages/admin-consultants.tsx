@@ -37,9 +37,13 @@ export function AdminConsultants({
     const dayAvailability = updatedAvailability.find(a => a.dayOfWeek === dayOfWeek);
     
     if (dayAvailability) {
+      const targetSlot = dayAvailability.slots[slotIndex];
+      if (!targetSlot) {
+        return;
+      }
       dayAvailability.slots[slotIndex] = {
-        ...dayAvailability.slots[slotIndex],
-        available: !dayAvailability.slots[slotIndex].available
+        ...targetSlot,
+        available: !targetSlot.available
       };
     }
 

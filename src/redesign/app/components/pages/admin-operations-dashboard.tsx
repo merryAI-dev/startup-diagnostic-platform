@@ -30,8 +30,9 @@ export function AdminOperationsDashboard({
     }> = {};
 
     applications.forEach(app => {
-      if (!companyMap[app.companyName]) {
-        companyMap[app.companyName] = {
+      const companyName = app.companyName ?? "미지정";
+      if (!companyMap[companyName]) {
+        companyMap[companyName] = {
           total: 0,
           cancelled: 0,
           completed: 0,
@@ -40,18 +41,19 @@ export function AdminOperationsDashboard({
         };
       }
 
-      companyMap[app.companyName].total++;
+      companyMap[companyName].total++;
       if (app.status === "cancelled") {
-        companyMap[app.companyName].cancelled++;
+        companyMap[companyName].cancelled++;
       }
       if (app.status === "completed") {
-        companyMap[app.companyName].completed++;
+        companyMap[companyName].completed++;
       }
     });
 
     // 취소율 계산
     Object.keys(companyMap).forEach(company => {
       const data = companyMap[company];
+      if (!data) return;
       data.cancellationRate = Math.round((data.cancelled / data.total) * 100);
     });
 

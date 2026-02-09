@@ -14,9 +14,12 @@ interface TopbarProps {
   user: User;
   onLogout: () => void;
   onNavigate?: (page: string) => void;
+  disabledPages?: Set<string>;
 }
 
-export function Topbar({ user, onLogout, onNavigate }: TopbarProps) {
+export function Topbar({ user, onLogout, onNavigate, disabledPages }: TopbarProps) {
+  const companyInfoDisabled = disabledPages?.has("company-info") ?? false;
+
   return (
     <div className="h-16 border-b bg-white flex items-center justify-between px-6">
       <div className="flex items-center gap-3">
@@ -54,7 +57,11 @@ export function Topbar({ user, onLogout, onNavigate }: TopbarProps) {
             {user.role === "user" ? (
               <>
                 <DropdownMenuItem
-                  onClick={() => onNavigate?.("company-info")}
+                  disabled={companyInfoDisabled}
+                  onClick={() => {
+                    if (companyInfoDisabled) return;
+                    onNavigate?.("company-info");
+                  }}
                 >
                   기업 정보 입력
                 </DropdownMenuItem>
