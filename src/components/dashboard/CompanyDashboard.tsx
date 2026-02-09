@@ -39,7 +39,7 @@ function StatusBadge({
   index: number
 }) {
   const base =
-    "rounded-full border px-3 py-1 text-xs font-semibold inline-flex items-center gap-2 min-w-[110px]"
+    "rounded-full border px-2.5 py-0.5 text-[11px] font-semibold inline-flex items-center gap-1.5 min-w-[96px]"
   if (variant === "complete") {
     return (
       <div
@@ -114,22 +114,32 @@ function StepCard({
     <button
       type="button"
       onClick={onClick}
-      className={`flex-1 rounded-2xl border px-4 py-3 text-left transition ${active
-          ? "border-slate-300 bg-slate-100 text-slate-900"
-          : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+      className={`flex-1 rounded-2xl border px-3 py-2.5 text-left transition ${active
+          ? "border-slate-800 bg-slate-900 text-white shadow-md"
+          : "border-slate-300 bg-white text-slate-800 shadow-sm hover:bg-slate-50"
         }`}
     >
       <div className="flex items-center justify-between">
         <div>
-          <div className="text-sm font-semibold">{label}</div>
+          <div
+            className={`text-sm font-semibold ${active ? "text-white" : "text-slate-900"}`}
+          >
+            {label}
+          </div>
           {progressLabel ? (
-            <div className="mt-1 text-xs text-slate-500">{progressLabel}</div>
+            <div
+              className={`mt-1 text-xs ${active ? "text-slate-200" : "text-slate-600"}`}
+            >
+              {progressLabel}
+            </div>
           ) : null}
         </div>
         <span
-          className={`rounded-full px-2 py-1 text-xs font-semibold ${status === "complete"
-              ? "bg-emerald-100 text-emerald-700"
-              : "bg-amber-100 text-amber-700"
+          className={`rounded-full px-2 py-1 text-xs font-semibold ${active
+              ? "border border-white/20 bg-white/15 text-white"
+              : status === "complete"
+              ? "bg-emerald-200 text-emerald-800"
+              : "bg-amber-200 text-amber-800"
             }`}
         >
           {status === "complete" ? "완료" : "미완료"}
@@ -282,11 +292,6 @@ export function CompanyDashboard({
     ]
   }, [form, investmentRows, isFieldInvalid, isFieldValid])
 
-  const overallProgress = useMemo(() => {
-    const completed = Number(hasSavedData) + Number(hasSavedAssessment)
-    return Math.round((completed / 2) * 100)
-  }, [hasSavedData, hasSavedAssessment])
-
   const stepSummaries: StepSummary[] = [
     {
       key: "step1",
@@ -340,7 +345,7 @@ export function CompanyDashboard({
   return (
     <div className="w-full h-full bg-transparent">
       <div className="flex h-full flex-col">
-        <div className="border-b border-slate-100 px-8 py-6">
+        <div className="border-b border-slate-100 px-8 py-4">
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-2xl font-semibold text-slate-900">
@@ -354,13 +359,13 @@ export function CompanyDashboard({
           </div>
         </div>
 
-        <div className="border-b border-slate-100 px-8 py-4">
-          <div className="flex flex-wrap items-center gap-3">
+        <div className="border-b border-slate-100 px-8 py-3">
+          <div className="flex flex-wrap items-center gap-2">
             <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
               진행 단계
             </span>
-            <div className="flex w-full flex-col gap-3 sm:flex-row sm:items-center">
-              <div className="flex flex-1 gap-3">
+            <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-center">
+              <div className="flex flex-1 gap-2">
                 {stepSummaries.map((step) => (
                   <StepCard
                     key={step.key}
@@ -371,32 +376,18 @@ export function CompanyDashboard({
                   />
                 ))}
               </div>
-              <div className="flex items-center gap-3 text-xs text-slate-500 sm:ml-auto">
+              <div className="flex items-center gap-2 text-xs text-slate-500 sm:ml-auto">
                 {saveStatus || assessmentSaveStatus ? (
                   <span>{saveStatus ?? assessmentSaveStatus}</span>
                 ) : null}
               </div>
             </div>
           </div>
-          <div className="mt-4 h-1.5 w-full rounded-full bg-slate-100">
-            <div
-              className={`h-1.5 rounded-full transition-all ${overallProgress === 100
-                  ? "bg-emerald-500"
-                  : overallProgress >= 50
-                    ? "bg-amber-400"
-                    : "bg-slate-400"
-                }`}
-              style={{ width: `${overallProgress}%` }}
-            />
-          </div>
-          <div className="mt-2 text-right text-xs font-semibold text-slate-500">
-            전체 진행률 {overallProgress}%
-          </div>
         </div>
 
         {activeStep === "step1" ? (
-          <div className="border-b border-slate-100 bg-white px-8 py-4">
-            <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="border-b border-slate-100 bg-white px-8 py-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="text-sm font-semibold text-slate-700">
                 기업정보 작성
               </div>
@@ -411,7 +402,7 @@ export function CompanyDashboard({
                 {hasSavedData ? "기업정보 수정" : "기업정보 저장"}
               </button>
             </div>
-            <div className="mt-3 flex flex-wrap gap-2">
+            <div className="mt-2 flex flex-wrap gap-1.5">
               {sectionStatus.map((item) => (
                 <StatusBadge
                   key={item.key}
@@ -425,8 +416,8 @@ export function CompanyDashboard({
         ) : null}
 
         {activeStep === "step2" ? (
-          <div className="border-b border-slate-100 bg-white px-8 py-4">
-            <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="border-b border-slate-100 bg-white px-8 py-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
                 <div className="text-sm font-semibold text-slate-700">
                   자가진단표 작성
@@ -435,7 +426,7 @@ export function CompanyDashboard({
                   모든 항목을 선택해야 저장 버튼이 활성화됩니다.
                 </div>
               </div>
-              <div className="flex flex-wrap items-center gap-3">
+              <div className="flex flex-wrap items-center gap-2">
                 <div className="rounded-xl border border-slate-900 bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-sm">
                   총점 {assessmentTotalScore}/100점
                 </div>
@@ -457,14 +448,14 @@ export function CompanyDashboard({
         <div className="flex flex-1 min-h-0 flex-col">
           {activeStep === "step2" ? (
             assessmentLoading ? (
-              <div className="px-8 pb-6 pt-4">
+              <div className="px-8 pb-4 pt-3">
                 <div className="rounded-2xl border border-slate-100 bg-slate-50 p-6 text-sm text-slate-500">
                   자가 진단표를 불러오는 중입니다.
                 </div>
               </div>
             ) : (
               <>
-                <div className="border-b border-slate-100 bg-white px-8 pt-4">
+                <div className="border-b border-slate-100 bg-white px-8 pt-3">
                   <SelfAssessmentForm
                     variant="header"
                     sections={sections}
@@ -482,7 +473,7 @@ export function CompanyDashboard({
                 </div>
                 <div
                   ref={assessmentScrollRef}
-                  className="min-h-0 flex-1 overflow-y-auto px-8 pb-6 pt-4"
+                  className="min-h-0 flex-1 overflow-y-auto px-8 pb-4 pt-3"
                 >
                   <SelfAssessmentForm
                     variant="content"
@@ -497,14 +488,14 @@ export function CompanyDashboard({
           ) : null}
           {activeStep === "step1" ? (
             loading ? (
-              <div className="px-8 pb-6 pt-4">
+              <div className="px-8 pb-4 pt-3">
                 <div className="rounded-2xl border border-slate-100 bg-slate-50 p-6 text-sm text-slate-500">
                   기존 데이터를 불러오는 중입니다.
                 </div>
               </div>
             ) : (
-              <div className="min-h-0 flex-1 overflow-y-auto px-8 pb-6 pt-4">
-                <div className="space-y-6">
+              <div className="min-h-0 flex-1 overflow-y-auto px-8 pb-4 pt-3">
+                <div className="space-y-5">
                   <section>
                     <div className="text-sm font-semibold text-slate-700">
                       기본 정보
