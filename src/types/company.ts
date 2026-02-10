@@ -72,6 +72,7 @@ export type CompanyInfoRecord = {
   metadata: {
     createdAt?: unknown
     updatedAt?: unknown
+    saveType?: "draft" | "final"
   }
 }
 

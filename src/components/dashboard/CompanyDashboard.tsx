@@ -1,6 +1,6 @@
 import type { User } from "firebase/auth"
 import { ChevronDown } from "lucide-react"
-import { useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { SELF_ASSESSMENT_SECTIONS } from "../../data/selfAssessment"
 import { useCompanyInfoForm } from "../../hooks/useCompanyInfoForm"
 import { useSelfAssessmentForm } from "../../hooks/useSelfAssessmentForm"
@@ -206,8 +206,13 @@ export function CompanyDashboard({
     removeInvestmentRow,
     updateInvestmentRow,
     loading,
+    saving,
     saveStatus,
     canSubmit,
+    missingRequired,
+    invalidRequired,
+    missingRequiredLabels,
+    invalidRequiredLabels,
     formatNumberInput,
     formatRevenueInput,
     formatBusinessNumber,
@@ -216,14 +221,14 @@ export function CompanyDashboard({
     isFieldInvalid,
     isFieldValid,
     saveCompanyInfo,
-    hasSavedData,
+    saveCompanyInfoDraft,
   } = useCompanyInfoForm(companyId)
 
   const {
     sections,
     loading: assessmentLoading,
+    saving: assessmentSaving,
     saveStatus: assessmentSaveStatus,
-    hasSavedData: hasSavedAssessment,
     answeredCount,
     totalQuestionCount,
     remainingCount,
@@ -231,6 +236,7 @@ export function CompanyDashboard({
     updateAnswer,
     updateReason,
     saveSelfAssessment,
+    saveSelfAssessmentDraft,
   } = useSelfAssessmentForm(companyId)
 
   const sectionStatus = useMemo<StatusItem[]>(() => {
@@ -246,11 +252,11 @@ export function CompanyDashboard({
       "businessNumber",
       "primaryBusiness",
       "primaryIndustry",
-    ]
-    const locationFields: (keyof CompanyInfoForm)[] = ["headOffice"]
-    const workforceFields: (keyof CompanyInfoForm)[] = [
       "workforceFullTime",
       "workforceContract",
+    ]
+    const locationFields: (keyof CompanyInfoForm)[] = ["headOffice"]
+    const financeFields: (keyof CompanyInfoForm)[] = [
       "revenue2025",
       "revenue2026",
       "capitalTotal",
@@ -266,7 +272,7 @@ export function CompanyDashboard({
 
     const basicComplete = basicFields.every(isFieldValid)
     const locationComplete = locationFields.every(isFieldValid)
-    const workforceComplete = workforceFields.every(isFieldValid)
+    const financeComplete = financeFields.every(isFieldValid)
     const certificationComplete = certificationFields.every(isFieldValid)
     const fundingComplete = fundingFields.every(isFieldValid)
 
@@ -277,6 +283,7 @@ export function CompanyDashboard({
         && hasNumber(row.postMoney)
         && isFilled(row.majorShareholder)
     )
+    const financeInvestmentComplete = financeComplete && investmentComplete
 
     return [
       {
@@ -292,9 +299,9 @@ export function CompanyDashboard({
         index: 2,
       },
       {
-        key: "workforce",
-        label: "인력/재무",
-        variant: workforceComplete ? "complete" : "warning",
+        key: "finance-investment",
+        label: "재무/투자이력",
+        variant: financeInvestmentComplete ? "complete" : "warning",
         index: 3,
       },
       {
@@ -304,16 +311,10 @@ export function CompanyDashboard({
         index: 4,
       },
       {
-        key: "investment",
-        label: "투자이력",
-        variant: investmentComplete ? "complete" : "warning",
-        index: 5,
-      },
-      {
         key: "funding",
         label: "투자희망",
         variant: fundingComplete ? "complete" : "warning",
-        index: 6,
+        index: 5,
       },
     ]
   }, [form, investmentRows, isFieldInvalid, isFieldValid])
@@ -340,6 +341,25 @@ export function CompanyDashboard({
   const [activeInvestmentStageRow, setActiveInvestmentStageRow] = useState<
     number | null
   >(null)
+  const [snackbarMessage, setSnackbarMessage] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!saveStatus) return
+    setSnackbarMessage(saveStatus)
+  }, [saveStatus])
+
+  useEffect(() => {
+    if (!assessmentSaveStatus) return
+    setSnackbarMessage(assessmentSaveStatus)
+  }, [assessmentSaveStatus])
+
+  useEffect(() => {
+    if (!snackbarMessage) return
+    const timerId = window.setTimeout(() => {
+      setSnackbarMessage(null)
+    }, 2200)
+    return () => window.clearTimeout(timerId)
+  }, [snackbarMessage])
 
   const assessmentTotalScore = useMemo(() => {
     return SELF_ASSESSMENT_SECTIONS.reduce((sum, section) => {
@@ -500,11 +520,6 @@ export function CompanyDashboard({
                   />
                 ))}
               </div>
-              <div className="flex items-center gap-2 text-xs text-slate-500 sm:ml-auto">
-                {saveStatus || assessmentSaveStatus ? (
-                  <span>{saveStatus ?? assessmentSaveStatus}</span>
-                ) : null}
-              </div>
             </div>
           </div>
         </div>
@@ -515,17 +530,43 @@ export function CompanyDashboard({
               <div className="text-sm font-semibold text-slate-700">
                 기업정보 작성
               </div>
-              <button
-                className={`rounded-xl px-4 py-2 text-sm font-semibold text-white transition ${canSubmit
-                    ? "bg-emerald-500 hover:bg-emerald-600"
-                    : "bg-slate-300"
-                  }`}
-                onClick={saveCompanyInfo}
-                disabled={!canSubmit}
-              >
-                {hasSavedData ? "기업정보 수정" : "기업정보 저장"}
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                  onClick={saveCompanyInfoDraft}
+                  disabled={saving}
+                >
+                  임시저장
+                </button>
+                <button
+                  className="rounded-xl bg-emerald-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-600 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-100"
+                  onClick={saveCompanyInfo}
+                  disabled={saving || !canSubmit}
+                >
+                  {canSubmit ? "기업정보 수정" : "기업정보 저장"}
+                </button>
+              </div>
             </div>
+            {!canSubmit ? (
+              <div className="mt-2 text-xs text-amber-700">
+                {missingRequired > 0 ? `미입력 ${missingRequired}개` : null}
+                {missingRequired > 0 && invalidRequired > 0 ? " · " : null}
+                {invalidRequired > 0 ? `형식 확인 ${invalidRequired}개` : null}
+                {(missingRequired > 0 || invalidRequired > 0) &&
+                (missingRequiredLabels.length > 0 || invalidRequiredLabels.length > 0)
+                  ? ` (${[
+                      ...missingRequiredLabels,
+                      ...invalidRequiredLabels,
+                    ]
+                      .slice(0, 3)
+                      .join(", ")}${
+                      missingRequiredLabels.length + invalidRequiredLabels.length > 3
+                        ? " 외"
+                        : ""
+                    })`
+                  : null}
+              </div>
+            ) : null}
             <div className="mt-2 flex flex-wrap gap-1.5">
               {sectionStatus.map((item) => (
                 <StatusBadge
@@ -576,14 +617,18 @@ export function CompanyDashboard({
                   총점 {assessmentTotalScore}/100점
                 </div>
                 <button
-                  className={`rounded-xl px-4 py-2 text-sm font-semibold text-white transition ${assessmentComplete
-                      ? "bg-emerald-500 hover:bg-emerald-600"
-                      : "bg-slate-300"
-                    }`}
-                  onClick={saveSelfAssessment}
-                  disabled={!assessmentComplete}
+                  className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                  onClick={saveSelfAssessmentDraft}
+                  disabled={assessmentSaving}
                 >
-                  {hasSavedAssessment ? "자가진단표 수정" : "자가진단표 저장"}
+                  임시저장
+                </button>
+                <button
+                  className="rounded-xl bg-emerald-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-600 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-100"
+                  onClick={saveSelfAssessment}
+                  disabled={assessmentSaving || !assessmentComplete}
+                >
+                  {assessmentComplete ? "자가진단표 수정" : "자가진단표 저장"}
                 </button>
               </div>
             </div>
@@ -768,6 +813,40 @@ export function CompanyDashboard({
                           onBlur={() => markTouched("primaryIndustry")}
                         />
                       </label>
+                      <label className="text-xs text-slate-500 md:col-span-1">
+                        종업원수 (정규)
+                        <input
+                          className={inputClass(isFieldInvalid("workforceFullTime"))}
+                          placeholder="0"
+                          value={form.workforceFullTime}
+                          onChange={(e) =>
+                            setForm((prev) => ({
+                              ...prev,
+                              workforceFullTime: formatNumberInput(
+                                e.target.value
+                              ),
+                            }))
+                          }
+                          onBlur={() => markTouched("workforceFullTime")}
+                        />
+                      </label>
+                      <label className="text-xs text-slate-500 md:col-span-1">
+                        종업원수 (계약)
+                        <input
+                          className={inputClass(isFieldInvalid("workforceContract"))}
+                          placeholder="0"
+                          value={form.workforceContract}
+                          onChange={(e) =>
+                            setForm((prev) => ({
+                              ...prev,
+                              workforceContract: formatNumberInput(
+                                e.target.value
+                              ),
+                            }))
+                          }
+                          onBlur={() => markTouched("workforceContract")}
+                        />
+                      </label>
                     </div>
                   </section>
 
@@ -857,43 +936,9 @@ export function CompanyDashboard({
 
                   <section>
                     <div className="text-sm font-semibold text-slate-700">
-                      인력 및 재무
+                      재무 및 투자이력
                     </div>
                     <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                      <label className="text-xs text-slate-500">
-                        종업원수 (정규)
-                        <input
-                          className={inputClass(isFieldInvalid("workforceFullTime"))}
-                          placeholder="0"
-                          value={form.workforceFullTime}
-                          onChange={(e) =>
-                            setForm((prev) => ({
-                              ...prev,
-                              workforceFullTime: formatNumberInput(
-                                e.target.value
-                              ),
-                            }))
-                          }
-                          onBlur={() => markTouched("workforceFullTime")}
-                        />
-                      </label>
-                      <label className="text-xs text-slate-500">
-                        종업원수 (계약)
-                        <input
-                          className={inputClass(isFieldInvalid("workforceContract"))}
-                          placeholder="0"
-                          value={form.workforceContract}
-                          onChange={(e) =>
-                            setForm((prev) => ({
-                              ...prev,
-                              workforceContract: formatNumberInput(
-                                e.target.value
-                              ),
-                            }))
-                          }
-                          onBlur={() => markTouched("workforceContract")}
-                        />
-                      </label>
                       <label className="text-xs text-slate-500">
                         매출액 (2025년)
                         <input
@@ -940,74 +985,10 @@ export function CompanyDashboard({
                         />
                       </label>
                     </div>
-                  </section>
-
-                  <section>
-                    <div className="text-sm font-semibold text-slate-700">
-                      인증 및 이력
-                    </div>
-                    <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                      <label className="text-xs text-slate-500">
-                        인증/지정 여부
-                        <input
-                          className={inputClass(isFieldInvalid("certification"))}
-                          placeholder="예: 벤처기업 인증"
-                          value={form.certification}
-                          onChange={(e) =>
-                            setForm((prev) => ({
-                              ...prev,
-                              certification: e.target.value,
-                            }))
-                          }
-                          onBlur={() => markTouched("certification")}
-                        />
-                      </label>
-                      <label className="text-xs text-slate-500">
-                        TIPS/LIPS 이력
-                        <div className="relative">
-                          <select
-                            className={inputClass(
-                              isFieldInvalid("tipsLipsHistory"),
-                              "appearance-none pr-9"
-                            )}
-                            value={form.tipsLipsHistory}
-                            onChange={(e) =>
-                              setForm((prev) => ({
-                                ...prev,
-                                tipsLipsHistory: e.target.value,
-                              }))
-                            }
-                            onBlur={() => markTouched("tipsLipsHistory")}
-                          >
-                            <option value="">선택해주세요</option>
-                            {TIPS_LIPS_OPTIONS.map((option) => (
-                              <option key={option} value={option}>
-                                {option}
-                              </option>
-                            ))}
-                            {form.tipsLipsHistory.trim().length > 0 &&
-                            !TIPS_LIPS_OPTIONS.some(
-                              (option) => option === form.tipsLipsHistory
-                            ) ? (
-                              <option value={form.tipsLipsHistory}>
-                                {form.tipsLipsHistory}
-                              </option>
-                            ) : null}
-                          </select>
-                          <ChevronDown
-                            className="pointer-events-none absolute right-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400"
-                            aria-hidden="true"
-                          />
-                        </div>
-                      </label>
-                    </div>
-                  </section>
-
-                  <section>
-                    <div className="text-sm font-semibold text-slate-700">
-                      투자이력 (순서별 작성)
-                    </div>
-                    <div className="mt-3 space-y-3">
+                    <div className="mt-4 space-y-3">
+                      <div className="text-xs font-semibold text-slate-600">
+                        투자이력 (순서별 작성)
+                      </div>
                       {investmentRows.map((row, idx) => (
                         <div
                           key={`investment-${idx}`}
@@ -1153,6 +1134,67 @@ export function CompanyDashboard({
 
                   <section>
                     <div className="text-sm font-semibold text-slate-700">
+                      인증 및 이력
+                    </div>
+                    <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                      <label className="text-xs text-slate-500">
+                        인증/지정 여부
+                        <input
+                          className={inputClass(isFieldInvalid("certification"))}
+                          placeholder="예: 벤처기업 인증"
+                          value={form.certification}
+                          onChange={(e) =>
+                            setForm((prev) => ({
+                              ...prev,
+                              certification: e.target.value,
+                            }))
+                          }
+                          onBlur={() => markTouched("certification")}
+                        />
+                      </label>
+                      <label className="text-xs text-slate-500">
+                        TIPS/LIPS 이력
+                        <div className="relative">
+                          <select
+                            className={inputClass(
+                              isFieldInvalid("tipsLipsHistory"),
+                              "appearance-none pr-9"
+                            )}
+                            value={form.tipsLipsHistory}
+                            onChange={(e) =>
+                              setForm((prev) => ({
+                                ...prev,
+                                tipsLipsHistory: e.target.value,
+                              }))
+                            }
+                            onBlur={() => markTouched("tipsLipsHistory")}
+                          >
+                            <option value="">선택해주세요</option>
+                            {TIPS_LIPS_OPTIONS.map((option) => (
+                              <option key={option} value={option}>
+                                {option}
+                              </option>
+                            ))}
+                            {form.tipsLipsHistory.trim().length > 0 &&
+                            !TIPS_LIPS_OPTIONS.some(
+                              (option) => option === form.tipsLipsHistory
+                            ) ? (
+                              <option value={form.tipsLipsHistory}>
+                                {form.tipsLipsHistory}
+                              </option>
+                            ) : null}
+                          </select>
+                          <ChevronDown
+                            className="pointer-events-none absolute right-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400"
+                            aria-hidden="true"
+                          />
+                        </div>
+                      </label>
+                    </div>
+                  </section>
+
+                  <section>
+                    <div className="text-sm font-semibold text-slate-700">
                       투자 희망
                     </div>
                     <div className="mt-3 grid gap-3 sm:grid-cols-2">
@@ -1201,6 +1243,17 @@ export function CompanyDashboard({
             )
           ) : null}
         </div>
+        {snackbarMessage ? (
+          <div
+            className={`pointer-events-none fixed bottom-6 right-6 z-50 rounded-xl border px-4 py-2 text-sm font-semibold shadow-lg ${
+              snackbarMessage.includes("실패")
+                ? "border-rose-200 bg-rose-50 text-rose-700"
+                : "border-slate-800 bg-slate-900 text-white"
+            }`}
+          >
+            {snackbarMessage}
+          </div>
+        ) : null}
       </div>
     </div>
   )

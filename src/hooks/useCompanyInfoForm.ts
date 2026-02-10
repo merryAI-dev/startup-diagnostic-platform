@@ -17,6 +17,30 @@ const DEFAULT_INVESTMENTS: InvestmentInput[] = [
   },
 ]
 
+type SaveType = "draft" | "final"
+
+const FIELD_LABELS: Record<keyof CompanyInfoForm, string> = {
+  companyInfo: "기업정보",
+  ceoName: "대표자 성명",
+  ceoEmail: "대표자 이메일",
+  ceoPhone: "대표자 전화번호",
+  foundedAt: "법인 설립일자",
+  businessNumber: "사업자등록번호",
+  primaryBusiness: "주업태",
+  primaryIndustry: "주업종",
+  headOffice: "본점 소재지",
+  branchOffice: "지점 또는 연구소 소재지",
+  workforceFullTime: "종업원수 (정규)",
+  workforceContract: "종업원수 (계약)",
+  revenue2025: "매출액 (2025년)",
+  revenue2026: "매출액 (2026년)",
+  capitalTotal: "자본총계",
+  certification: "인증/지정 여부",
+  tipsLipsHistory: "TIPS/LIPS 이력",
+  desiredInvestment2026: "2026년 내 희망 투자액",
+  desiredPreValue: "투자전 희망기업가치",
+}
+
 function formatNumber(value: number | null | undefined) {
   if (value == null || Number.isNaN(value)) return ""
   return String(value).replace(/\B(?=(\d{3})+(?!\d))/g, ",")
@@ -124,8 +148,10 @@ export function useCompanyInfoForm(companyId: string) {
     InvestmentInput[]
   >(DEFAULT_INVESTMENTS)
   const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
   const [saveStatus, setSaveStatus] = useState<string | null>(null)
   const [hasSavedData, setHasSavedData] = useState(false)
+  const [hasFinalSavedData, setHasFinalSavedData] = useState(false)
   const [touched, setTouched] = useState<
     Partial<Record<keyof CompanyInfoForm, boolean>>
   >({})
@@ -154,13 +180,27 @@ export function useCompanyInfoForm(companyId: string) {
     []
   )
 
-  const missingRequired = useMemo(
-    () =>
-      requiredKeys.filter((key) => !isFilled(form[key] ?? "")).length,
+  const missingRequiredFields = useMemo(
+    () => requiredKeys.filter((key) => !isFilled(form[key] ?? "")),
     [requiredKeys, form]
   )
 
-  const canSubmit = missingRequired === 0
+  const invalidRequiredFields = useMemo(
+    () =>
+      requiredKeys.filter((key) => {
+        const value = form[key] ?? ""
+        if (!isFilled(value)) return false
+        if (key === "ceoEmail") return !isEmail(value)
+        if (key === "ceoPhone") return !isPhone(value)
+        if (key === "businessNumber") return !isBusinessNumber(value)
+        return false
+      }),
+    [requiredKeys, form]
+  )
+
+  const missingRequired = missingRequiredFields.length
+  const invalidRequired = invalidRequiredFields.length
+  const canSubmit = missingRequired === 0 && invalidRequired === 0
 
   useEffect(() => {
     let mounted = true
@@ -176,13 +216,14 @@ export function useCompanyInfoForm(companyId: string) {
         }
         const data = snapshot.data() as CompanyInfoRecord
         setHasSavedData(true)
+        setHasFinalSavedData(data.metadata?.saveType !== "draft")
         const nextForm: CompanyInfoForm = {
           companyInfo: data.basic?.companyInfo ?? "",
           ceoName: data.basic?.ceo?.name ?? "",
           ceoEmail: data.basic?.ceo?.email ?? "",
-          ceoPhone: data.basic?.ceo?.phone ?? "",
+          ceoPhone: formatPhoneNumber(data.basic?.ceo?.phone ?? ""),
           foundedAt: data.basic?.foundedAt ?? "",
-          businessNumber: data.basic?.businessNumber ?? "",
+          businessNumber: formatBusinessNumber(data.basic?.businessNumber ?? ""),
           primaryBusiness: data.basic?.primaryBusiness ?? "",
           primaryIndustry: data.basic?.primaryIndustry ?? "",
           headOffice: data.locations?.headOffice ?? "",
@@ -258,8 +299,7 @@ export function useCompanyInfoForm(companyId: string) {
     )
   }
 
-  async function saveCompanyInfo() {
-    setSaveStatus(null)
+  function buildCompanyInfo(saveType: SaveType): CompanyInfoRecord {
     const companyInfo: CompanyInfoRecord = {
       basic: {
         companyInfo: form.companyInfo,
@@ -304,9 +344,16 @@ export function useCompanyInfoForm(companyId: string) {
       },
       metadata: {
         updatedAt: serverTimestamp(),
+        saveType,
       },
     }
+    return companyInfo
+  }
 
+  async function saveCompanyInfoByType(saveType: SaveType) {
+    setSaveStatus(null)
+    setSaving(true)
+    const companyInfo = buildCompanyInfo(saveType)
     try {
       const ref = doc(db, "companies", companyId, "companyInfo", "info")
       await setDoc(
@@ -328,15 +375,34 @@ export function useCompanyInfoForm(companyId: string) {
         },
         { merge: true }
       )
-      setSaveStatus("저장 완료")
       setSavedForm(form)
       setSavedInvestmentRows(investmentRows)
       setHasSavedData(true)
+      if (saveType === "final") {
+        setHasFinalSavedData(true)
+        setSaveStatus("저장 완료")
+      } else {
+        setSaveStatus("임시저장 완료")
+      }
       return true
     } catch (err) {
-      setSaveStatus("저장에 실패했습니다.")
+      if (saveType === "final") {
+        setSaveStatus("저장에 실패했습니다.")
+      } else {
+        setSaveStatus("임시저장에 실패했습니다.")
+      }
       return false
+    } finally {
+      setSaving(false)
     }
+  }
+
+  async function saveCompanyInfo() {
+    return saveCompanyInfoByType("final")
+  }
+
+  async function saveCompanyInfoDraft() {
+    return saveCompanyInfoByType("draft")
   }
 
   return {
@@ -347,10 +413,15 @@ export function useCompanyInfoForm(companyId: string) {
     removeInvestmentRow,
     updateInvestmentRow,
     loading,
+    saving,
     saveStatus,
     canSubmit,
     missingRequired,
+    invalidRequired,
+    missingRequiredLabels: missingRequiredFields.map((field) => FIELD_LABELS[field]),
+    invalidRequiredLabels: invalidRequiredFields.map((field) => FIELD_LABELS[field]),
     hasSavedData,
+    hasFinalSavedData,
     savedInvestmentRows,
     formatNumberInput,
     formatRevenueInput,
@@ -384,5 +455,6 @@ export function useCompanyInfoForm(companyId: string) {
     },
     formatPhoneNumber,
     saveCompanyInfo,
+    saveCompanyInfoDraft,
   }
 }
