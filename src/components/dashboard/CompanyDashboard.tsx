@@ -362,10 +362,10 @@ export function CompanyDashboard({
 
   function inputClass(invalid?: boolean, extra?: string) {
     return [
-      "mt-1 w-full rounded-xl border bg-white px-3 py-2 text-sm text-slate-800 shadow-sm focus:outline-none focus:ring-2",
+      "mt-1 w-full rounded-lg border bg-white px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-1",
       invalid
-        ? "border-rose-400 bg-rose-50 text-rose-900 placeholder:text-rose-300 focus:border-rose-500 focus:ring-rose-100"
-        : "border-slate-300 focus:border-slate-500 focus:ring-slate-100",
+        ? "border-rose-300 bg-rose-50 text-rose-900 placeholder:text-rose-300 focus:border-rose-400 focus:ring-rose-200/60"
+        : "border-slate-200 focus:border-slate-300 focus:ring-slate-200/60",
       extra,
     ]
       .filter(Boolean)
@@ -645,8 +645,8 @@ export function CompanyDashboard({
                     <div className="text-sm font-semibold text-slate-700">
                       기본 정보
                     </div>
-                    <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                      <label className="text-xs text-slate-500">
+                    <div className="mt-3 grid gap-3 md:grid-cols-6">
+                      <label className="text-xs text-slate-500 md:col-span-2">
                         기업정보
                         <input
                           className={inputClass(isFieldInvalid("companyInfo"))}
@@ -661,7 +661,7 @@ export function CompanyDashboard({
                           onBlur={() => markTouched("companyInfo")}
                         />
                       </label>
-                      <label className="text-xs text-slate-500">
+                      <label className="text-xs text-slate-500 md:col-span-1">
                         대표자 성명
                         <input
                           className={inputClass(isFieldInvalid("ceoName"))}
@@ -676,7 +676,7 @@ export function CompanyDashboard({
                           onBlur={() => markTouched("ceoName")}
                         />
                       </label>
-                      <label className="text-xs text-slate-500">
+                      <label className="text-xs text-slate-500 md:col-span-2">
                         대표자 이메일
                         <input
                           className={inputClass(isFieldInvalid("ceoEmail"))}
@@ -691,7 +691,7 @@ export function CompanyDashboard({
                           onBlur={() => markTouched("ceoEmail")}
                         />
                       </label>
-                      <label className="text-xs text-slate-500">
+                      <label className="text-xs text-slate-500 md:col-span-1">
                         대표자 전화번호
                         <input
                           className={inputClass(isFieldInvalid("ceoPhone"))}
@@ -706,7 +706,7 @@ export function CompanyDashboard({
                           onBlur={() => markTouched("ceoPhone")}
                         />
                       </label>
-                      <label className="text-xs text-slate-500">
+                      <label className="text-xs text-slate-500 md:col-span-1">
                         법인 설립일자
                         <input
                           type="date"
@@ -721,7 +721,7 @@ export function CompanyDashboard({
                           onBlur={() => markTouched("foundedAt")}
                         />
                       </label>
-                      <label className="text-xs text-slate-500">
+                      <label className="text-xs text-slate-500 md:col-span-1">
                         사업자등록번호
                         <input
                           className={inputClass(isFieldInvalid("businessNumber"))}
@@ -738,7 +738,7 @@ export function CompanyDashboard({
                           onBlur={() => markTouched("businessNumber")}
                         />
                       </label>
-                      <label className="text-xs text-slate-500">
+                      <label className="text-xs text-slate-500 md:col-span-2">
                         주업태
                         <input
                           className={inputClass(isFieldInvalid("primaryBusiness"))}
@@ -753,7 +753,7 @@ export function CompanyDashboard({
                           onBlur={() => markTouched("primaryBusiness")}
                         />
                       </label>
-                      <label className="text-xs text-slate-500">
+                      <label className="text-xs text-slate-500 md:col-span-2">
                         주업종
                         <input
                           className={inputClass(isFieldInvalid("primaryIndustry"))}
