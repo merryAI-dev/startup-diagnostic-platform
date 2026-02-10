@@ -14,6 +14,8 @@ const DEFAULT_ANSWER: SelfAssessmentAnswer = {
   reason: "",
 }
 
+type SaveType = "draft" | "final"
+
 function buildInitialState(): SelfAssessmentState {
   const sections: SelfAssessmentSections = {}
   SELF_ASSESSMENT_SECTIONS.forEach((section) => {
@@ -99,8 +101,10 @@ function isQuestionInputComplete(answer?: SelfAssessmentAnswer) {
 export function useSelfAssessmentForm(companyId: string) {
   const [state, setState] = useState<SelfAssessmentState>(buildInitialState)
   const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
   const [saveStatus, setSaveStatus] = useState<string | null>(null)
   const [hasSavedData, setHasSavedData] = useState(false)
+  const [hasFinalSavedData, setHasFinalSavedData] = useState(false)
 
   useEffect(() => {
     let mounted = true
@@ -117,6 +121,7 @@ export function useSelfAssessmentForm(companyId: string) {
         const data = snapshot.data() as {
           sections?: SelfAssessmentSections
           answers?: Record<string, { answer: unknown; reason?: string }>
+          metadata?: { saveType?: SaveType }
         }
         if (data?.sections || data?.answers) {
           const base = buildInitialState()
@@ -128,6 +133,7 @@ export function useSelfAssessmentForm(companyId: string) {
             ),
           })
           setHasSavedData(true)
+          setHasFinalSavedData(data.metadata?.saveType !== "draft")
         }
       } finally {
         if (mounted) {
@@ -224,12 +230,13 @@ export function useSelfAssessmentForm(companyId: string) {
     })
   }
 
-  async function saveSelfAssessment() {
+  async function saveSelfAssessmentByType(saveType: SaveType) {
     setSaveStatus(null)
-    if (!isComplete) {
+    if (saveType === "final" && !isComplete) {
       setSaveStatus("모든 문항의 답변과 근거를 입력해주세요.")
       return false
     }
+    setSaving(true)
     try {
       const ref = doc(db, "companies", companyId, "selfAssessment", "info")
       await setDoc(
@@ -239,24 +246,46 @@ export function useSelfAssessmentForm(companyId: string) {
           metadata: {
             updatedAt: serverTimestamp(),
             createdAt: serverTimestamp(),
+            saveType,
           },
         },
         { merge: true }
       )
-      setSaveStatus("저장 완료")
+      if (saveType === "final") {
+        setHasFinalSavedData(true)
+        setSaveStatus("저장 완료")
+      } else {
+        setSaveStatus("임시저장 완료")
+      }
       setHasSavedData(true)
       return true
     } catch (err) {
-      setSaveStatus("저장에 실패했습니다.")
+      if (saveType === "final") {
+        setSaveStatus("저장에 실패했습니다.")
+      } else {
+        setSaveStatus("임시저장에 실패했습니다.")
+      }
       return false
+    } finally {
+      setSaving(false)
     }
+  }
+
+  async function saveSelfAssessment() {
+    return saveSelfAssessmentByType("final")
+  }
+
+  async function saveSelfAssessmentDraft() {
+    return saveSelfAssessmentByType("draft")
   }
 
   return {
     sections: state.sections,
     loading,
+    saving,
     saveStatus,
     hasSavedData,
+    hasFinalSavedData,
     answeredCount,
     totalQuestionCount,
     remainingCount,
@@ -264,5 +293,6 @@ export function useSelfAssessmentForm(companyId: string) {
     updateAnswer,
     updateReason,
     saveSelfAssessment,
+    saveSelfAssessmentDraft,
   }
 }
