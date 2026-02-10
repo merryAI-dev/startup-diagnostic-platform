@@ -136,6 +136,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
   const basePath = roleOverride === "admin" ? "/admin" : "/company";
   const initialPage: AppPage =
     resolvedRole === "admin" ? "admin-dashboard" : "dashboard";
+  const companyRecordId = profile?.companyId ?? firebaseUser?.uid ?? null;
   const [currentPage, setCurrentPage] = useState<AppPage>(initialPage);
   const [applications, setApplications] = useState<Application[]>(initialApplications);
   const [messages, setMessages] = useState<Message[]>(initialMessages);
@@ -161,14 +162,11 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
   // Set initial page based on role
   const disabledPages = useMemo(() => {
     const set = new Set<AppPage>();
-    if (!profile?.companyId) {
-      set.add("company-info");
-    }
     if (!firebaseUser) {
       set.add("startup-diagnostic");
     }
     return set;
-  }, [firebaseUser, profile?.companyId]);
+  }, [firebaseUser]);
 
   useEffect(() => {
     const segment = location.pathname.split("/")[2] ?? "";
@@ -543,13 +541,13 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
             <Settings user={user} />
           )}
 
-          {currentPage === "company-info" && firebaseUser && profile?.companyId && (
+          {currentPage === "company-info" && firebaseUser && companyRecordId && (
             <CompanyDashboard
               onLogout={async () => {
                 await signOutUser();
                 toast.success("로그아웃되었습니다");
               }}
-              companyId={profile.companyId}
+              companyId={companyRecordId}
               user={firebaseUser}
             />
           )}

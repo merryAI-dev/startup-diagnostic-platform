@@ -1,4 +1,5 @@
 import type { User } from "firebase/auth"
+import { ChevronDown } from "lucide-react"
 import { useMemo, useRef, useState } from "react"
 import { SELF_ASSESSMENT_SECTIONS } from "../../data/selfAssessment"
 import { useCompanyInfoForm } from "../../hooks/useCompanyInfoForm"
@@ -28,6 +29,39 @@ type StepSummary = {
   label: string
   status: "complete" | "incomplete"
 }
+
+type AddressFieldKey = "headOffice" | "branchOffice"
+
+type DaumPostcodeAddress = {
+  zonecode?: string
+  roadAddress?: string
+  jibunAddress?: string
+  bname?: string
+  buildingName?: string
+}
+
+type DaumPostcodeInstance = {
+  open: () => void
+}
+
+type DaumPostcodeConstructor = new (options: {
+  oncomplete: (data: DaumPostcodeAddress) => void
+}) => DaumPostcodeInstance
+
+const DAUM_POSTCODE_SCRIPT_SRC =
+  "https://t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"
+const TIPS_LIPS_OPTIONS = ["TIPS", "LIPS", "없음"] as const
+const INVESTMENT_STAGE_OPTIONS = [
+  "Pre-Seed",
+  "Seed",
+  "Pre-A",
+  "Series A",
+  "Series B",
+  "Series C+",
+  "Bridge/Extension",
+  "Angel",
+  "Convertible Note",
+] as const
 
 function StatusBadge({
   label,
@@ -175,6 +209,7 @@ export function CompanyDashboard({
     saveStatus,
     canSubmit,
     formatNumberInput,
+    formatRevenueInput,
     formatBusinessNumber,
     formatPhoneNumber,
     markTouched,
@@ -301,6 +336,10 @@ export function CompanyDashboard({
     "problem",
   )
   const assessmentScrollRef = useRef<HTMLDivElement | null>(null)
+  const postcodeScriptLoadingRef = useRef(false)
+  const [activeInvestmentStageRow, setActiveInvestmentStageRow] = useState<
+    number | null
+  >(null)
 
   const assessmentTotalScore = useMemo(() => {
     return SELF_ASSESSMENT_SECTIONS.reduce((sum, section) => {
@@ -331,6 +370,100 @@ export function CompanyDashboard({
     ]
       .filter(Boolean)
       .join(" ")
+  }
+
+  function openAddressSearchPopup(targetField: AddressFieldKey) {
+    if (typeof window === "undefined") return
+    const typedWindow = window as Window & {
+      daum?: { Postcode?: DaumPostcodeConstructor }
+    }
+    const Postcode = typedWindow.daum?.Postcode
+    if (!Postcode) return
+
+    const postcode = new Postcode({
+      oncomplete: (data) => {
+        const baseAddress =
+          data.roadAddress?.trim() || data.jibunAddress?.trim() || ""
+        const extras = [data.bname?.trim(), data.buildingName?.trim()].filter(
+          (value): value is string => Boolean(value)
+        )
+        const detailedAddress =
+          extras.length > 0
+            ? `${baseAddress} (${extras.join(", ")})`
+            : baseAddress
+        const zonecode = data.zonecode?.trim() ?? ""
+        const fullAddress = zonecode
+          ? `(${zonecode}) ${detailedAddress}`
+          : detailedAddress
+        if (!fullAddress) return
+
+        setForm((prev) => ({
+          ...prev,
+          [targetField]: fullAddress,
+        }))
+        if (targetField === "headOffice") {
+          markTouched("headOffice")
+        }
+      },
+    })
+    postcode.open()
+  }
+
+  function handleAddressSearchClick(targetField: AddressFieldKey) {
+    if (typeof window === "undefined") return
+    const typedWindow = window as Window & {
+      daum?: { Postcode?: DaumPostcodeConstructor }
+    }
+
+    if (typedWindow.daum?.Postcode) {
+      openAddressSearchPopup(targetField)
+      return
+    }
+
+    if (postcodeScriptLoadingRef.current) return
+
+    postcodeScriptLoadingRef.current = true
+
+    const script = document.createElement("script")
+    script.src = DAUM_POSTCODE_SCRIPT_SRC
+    script.async = true
+    script.onload = () => {
+      postcodeScriptLoadingRef.current = false
+      openAddressSearchPopup(targetField)
+    }
+    script.onerror = () => {
+      postcodeScriptLoadingRef.current = false
+    }
+    document.head.appendChild(script)
+  }
+
+  function clearAddressField(targetField: AddressFieldKey) {
+    setForm((prev) => ({
+      ...prev,
+      [targetField]: "",
+    }))
+    if (targetField === "headOffice") {
+      markTouched("headOffice")
+    }
+  }
+
+  function getFilteredInvestmentStageOptions(keyword: string) {
+    const normalizedKeyword = keyword.trim().toLowerCase()
+    if (!normalizedKeyword) {
+      return [...INVESTMENT_STAGE_OPTIONS]
+    }
+    return INVESTMENT_STAGE_OPTIONS.filter((option) =>
+      option.toLowerCase().includes(normalizedKeyword)
+    )
+  }
+
+  function handleRemoveInvestmentRow(index: number) {
+    removeInvestmentRow(index)
+    setActiveInvestmentStageRow((prev) => {
+      if (prev == null) return prev
+      if (prev === index) return null
+      return prev > index ? prev - 1 : prev
+    })
   }
 
   return (
@@ -644,33 +777,80 @@ export function CompanyDashboard({
                     </div>
                     <div className="mt-3 grid gap-3 sm:grid-cols-2">
                       <label className="text-xs text-slate-500">
-                        본점 소재지
-                        <input
-                          className={inputClass(isFieldInvalid("headOffice"))}
-                          placeholder="서울시 강남구 ..."
-                          value={form.headOffice}
-                          onChange={(e) =>
-                            setForm((prev) => ({
-                              ...prev,
-                              headOffice: e.target.value,
-                            }))
-                          }
-                          onBlur={() => markTouched("headOffice")}
-                        />
+                        <div className="flex items-center justify-between gap-2">
+                          <span>본점 소재지</span>
+                          <button
+                            type="button"
+                            onClick={() => handleAddressSearchClick("headOffice")}
+                            className="rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
+                          >
+                            주소 검색
+                          </button>
+                        </div>
+                        <div className="relative">
+                          <input
+                            className={inputClass(
+                              isFieldInvalid("headOffice"),
+                              "pr-8"
+                            )}
+                            placeholder="서울시 강남구 ..."
+                            value={form.headOffice}
+                            onChange={(e) =>
+                              setForm((prev) => ({
+                                ...prev,
+                                headOffice: e.target.value,
+                              }))
+                            }
+                            onBlur={() => markTouched("headOffice")}
+                          />
+                          {form.headOffice.trim().length > 0 ? (
+                            <button
+                              type="button"
+                              onClick={() => clearAddressField("headOffice")}
+                              className="absolute right-2 top-1/2 -translate-y-1/2 px-1 py-0.5 text-[10px] font-semibold text-slate-400 hover:text-slate-700"
+                              aria-label="본점 소재지 지우기"
+                              title="지우기"
+                            >
+                              x
+                            </button>
+                          ) : null}
+                        </div>
                       </label>
                       <label className="text-xs text-slate-500">
-                        지점 또는 연구소 소재지
-                        <input
-                          className={inputClass(false)}
-                          placeholder="없으면 '없음' 입력"
-                          value={form.branchOffice}
-                          onChange={(e) =>
-                            setForm((prev) => ({
-                              ...prev,
-                              branchOffice: e.target.value,
-                            }))
-                          }
-                        />
+                        <div className="flex items-center justify-between gap-2">
+                          <span>지점 또는 연구소 소재지</span>
+                          <button
+                            type="button"
+                            onClick={() => handleAddressSearchClick("branchOffice")}
+                            className="rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
+                          >
+                            주소 검색
+                          </button>
+                        </div>
+                        <div className="relative">
+                          <input
+                            className={inputClass(false, "pr-8")}
+                            placeholder="없으면 '없음' 입력"
+                            value={form.branchOffice}
+                            onChange={(e) =>
+                              setForm((prev) => ({
+                                ...prev,
+                                branchOffice: e.target.value,
+                              }))
+                            }
+                          />
+                          {form.branchOffice.trim().length > 0 ? (
+                            <button
+                              type="button"
+                              onClick={() => clearAddressField("branchOffice")}
+                              className="absolute right-2 top-1/2 -translate-y-1/2 px-1 py-0.5 text-[10px] font-semibold text-slate-400 hover:text-slate-700"
+                              aria-label="지점 또는 연구소 소재지 지우기"
+                              title="지우기"
+                            >
+                              x
+                            </button>
+                          ) : null}
+                        </div>
                       </label>
                     </div>
                   </section>
@@ -723,7 +903,7 @@ export function CompanyDashboard({
                           onChange={(e) =>
                             setForm((prev) => ({
                               ...prev,
-                              revenue2025: formatNumberInput(e.target.value),
+                              revenue2025: formatRevenueInput(e.target.value),
                             }))
                           }
                           onBlur={() => markTouched("revenue2025")}
@@ -738,7 +918,7 @@ export function CompanyDashboard({
                           onChange={(e) =>
                             setForm((prev) => ({
                               ...prev,
-                              revenue2026: formatNumberInput(e.target.value),
+                              revenue2026: formatRevenueInput(e.target.value),
                             }))
                           }
                           onBlur={() => markTouched("revenue2026")}
@@ -784,18 +964,41 @@ export function CompanyDashboard({
                       </label>
                       <label className="text-xs text-slate-500">
                         TIPS/LIPS 이력
-                        <input
-                          className={inputClass(isFieldInvalid("tipsLipsHistory"))}
-                          placeholder="예: TIPS 2024 선정"
-                          value={form.tipsLipsHistory}
-                          onChange={(e) =>
-                            setForm((prev) => ({
-                              ...prev,
-                              tipsLipsHistory: e.target.value,
-                            }))
-                          }
-                          onBlur={() => markTouched("tipsLipsHistory")}
-                        />
+                        <div className="relative">
+                          <select
+                            className={inputClass(
+                              isFieldInvalid("tipsLipsHistory"),
+                              "appearance-none pr-9"
+                            )}
+                            value={form.tipsLipsHistory}
+                            onChange={(e) =>
+                              setForm((prev) => ({
+                                ...prev,
+                                tipsLipsHistory: e.target.value,
+                              }))
+                            }
+                            onBlur={() => markTouched("tipsLipsHistory")}
+                          >
+                            <option value="">선택해주세요</option>
+                            {TIPS_LIPS_OPTIONS.map((option) => (
+                              <option key={option} value={option}>
+                                {option}
+                              </option>
+                            ))}
+                            {form.tipsLipsHistory.trim().length > 0 &&
+                            !TIPS_LIPS_OPTIONS.some(
+                              (option) => option === form.tipsLipsHistory
+                            ) ? (
+                              <option value={form.tipsLipsHistory}>
+                                {form.tipsLipsHistory}
+                              </option>
+                            ) : null}
+                          </select>
+                          <ChevronDown
+                            className="pointer-events-none absolute right-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400"
+                            aria-hidden="true"
+                          />
+                        </div>
                       </label>
                     </div>
                   </section>
@@ -814,18 +1017,65 @@ export function CompanyDashboard({
                             <span className="block whitespace-nowrap">
                               투자단계
                             </span>
-                            <input
-                              className={inputClass(false, "rounded-lg")}
-                              placeholder="Seed/Series A"
-                              value={row.stage}
-                              onChange={(e) =>
-                                updateInvestmentRow(
-                                  idx,
-                                  "stage",
-                                  e.target.value
-                                )
-                              }
-                            />
+                            <div className="relative">
+                              <input
+                                className={inputClass(false, "rounded-lg pr-9")}
+                                placeholder="목록에서 선택 또는 직접 입력"
+                                value={row.stage}
+                                autoComplete="off"
+                                onFocus={() => setActiveInvestmentStageRow(idx)}
+                                onBlur={() =>
+                                  window.setTimeout(() => {
+                                    setActiveInvestmentStageRow((prev) =>
+                                      prev === idx ? null : prev
+                                    )
+                                  }, 120)
+                                }
+                                onChange={(event) => {
+                                  setActiveInvestmentStageRow(idx)
+                                  updateInvestmentRow(
+                                    idx,
+                                    "stage",
+                                    event.target.value
+                                  )
+                                }}
+                              />
+                              <ChevronDown
+                                className="pointer-events-none absolute right-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400"
+                                aria-hidden="true"
+                              />
+                              {activeInvestmentStageRow === idx ? (
+                                <div className="absolute z-20 mt-1 w-full overflow-hidden rounded-lg border border-slate-200 bg-white shadow-lg">
+                                  {getFilteredInvestmentStageOptions(row.stage)
+                                    .length > 0 ? (
+                                    getFilteredInvestmentStageOptions(row.stage).map(
+                                      (option) => (
+                                        <button
+                                          key={option}
+                                          type="button"
+                                          className="w-full px-3 py-2 text-left text-xs text-slate-700 hover:bg-slate-50"
+                                          onMouseDown={(event) => {
+                                            event.preventDefault()
+                                            updateInvestmentRow(
+                                              idx,
+                                              "stage",
+                                              option
+                                            )
+                                            setActiveInvestmentStageRow(null)
+                                          }}
+                                        >
+                                          {option}
+                                        </button>
+                                      )
+                                    )
+                                  ) : (
+                                    <div className="px-3 py-2 text-xs text-slate-400">
+                                      추천 항목이 없습니다.
+                                    </div>
+                                  )}
+                                </div>
+                              ) : null}
+                            </div>
                           </label>
                           <label className="text-xs text-slate-500">
                             <span className="block whitespace-nowrap">
@@ -883,7 +1133,7 @@ export function CompanyDashboard({
                             <button
                               type="button"
                               className="rounded-xl border border-rose-200 px-3 py-2 text-xs font-semibold text-rose-600 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60"
-                              onClick={() => removeInvestmentRow(idx)}
+                              onClick={() => handleRemoveInvestmentRow(idx)}
                               disabled={investmentRows.length <= 1}
                             >
                               삭제

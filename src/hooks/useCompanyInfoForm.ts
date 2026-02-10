@@ -28,10 +28,47 @@ function formatNumberInput(value: string) {
   return digits.replace(/\B(?=(\d{3})+(?!\d))/g, ",")
 }
 
+function formatRevenueInput(value: string) {
+  const sanitized = value.replace(/[^\d.]/g, "")
+  if (!sanitized) return ""
+
+  const firstDotIndex = sanitized.indexOf(".")
+  const hasDot = firstDotIndex >= 0
+  const compact = hasDot
+    ? `${sanitized.slice(0, firstDotIndex)}.${sanitized
+        .slice(firstDotIndex + 1)
+        .replace(/\./g, "")}`
+    : sanitized
+  const [rawInteger = "", rawDecimal = ""] = compact.split(".")
+  const integerDigits = rawInteger.replace(/[^\d]/g, "")
+  const decimalDigits = rawDecimal.replace(/[^\d]/g, "").slice(0, 1)
+
+  let integerValue = integerDigits
+  if (!integerValue && hasDot) {
+    integerValue = "0"
+  }
+  const normalizedInteger =
+    integerValue.length > 1 ? integerValue.replace(/^0+(?=\d)/, "") : integerValue
+  const formattedInteger = normalizedInteger
+    ? normalizedInteger.replace(/\B(?=(\d{3})+(?!\d))/g, ",")
+    : ""
+
+  if (!hasDot) return formattedInteger
+  return `${formattedInteger || "0"}.${decimalDigits}`
+}
+
 function toNumber(value: string) {
   const digits = value.replace(/[^\d]/g, "")
   if (!digits) return null
   return Number(digits)
+}
+
+function toDecimalNumber(value: string) {
+  const normalized = value.replace(/,/g, "").trim()
+  if (!normalized) return null
+  const parsed = Number(normalized)
+  if (Number.isNaN(parsed)) return null
+  return Math.round(parsed * 10) / 10
 }
 
 function formatBusinessNumber(value: string) {
@@ -246,8 +283,8 @@ export function useCompanyInfoForm(companyId: string) {
       },
       finance: {
         revenue: {
-          y2025: toNumber(form.revenue2025),
-          y2026: toNumber(form.revenue2026),
+          y2025: toDecimalNumber(form.revenue2025),
+          y2026: toDecimalNumber(form.revenue2026),
         },
         capitalTotal: toNumber(form.capitalTotal),
       },
@@ -316,6 +353,7 @@ export function useCompanyInfoForm(companyId: string) {
     hasSavedData,
     savedInvestmentRows,
     formatNumberInput,
+    formatRevenueInput,
     formatBusinessNumber,
     markTouched: (field: keyof CompanyInfoForm) =>
       setTouched((prev) => ({ ...prev, [field]: true })),
