@@ -6,19 +6,123 @@ import {
   onAuthStateChanged,
   User as FirebaseUser
 } from "firebase/auth";
-import { doc, getDoc, setDoc } from "firebase/firestore";
+import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
 import { auth, db, isFirebaseConfigured } from "./firebase";
-import { User } from "./types";
+import { ConsultantAvailability, User } from "./types";
 import { initialUsers } from "./data";
+import type { CompanyInfoForm, CompanyInfoRecord } from "../../../types/company";
 
 interface AuthContextType {
   user: User | null;
   firebaseUser: FirebaseUser | null;
   loading: boolean;
   signIn: (email: string, password?: string) => Promise<void>;
-  signUp: (email: string, password: string, companyName: string, programName: string) => Promise<void>;
+  signUp: (payload: SignupPayload) => Promise<void>;
   signOut: () => Promise<void>;
   updateUserRole: (userId: string, role: string) => Promise<void>;
+}
+
+type SignupPayload =
+  | {
+      role: "company";
+      email: string;
+      password: string;
+      programName: string;
+      companyInfo: CompanyInfoForm;
+    }
+  | {
+      role: "consultant";
+      email: string;
+      password: string;
+      consultantInfo: ConsultantSignupInfo;
+    };
+
+type ConsultantSignupInfo = {
+  name: string;
+  organization: string;
+  email: string;
+  phone: string;
+  secondaryEmail: string;
+  secondaryPhone: string;
+  fixedMeetingLink: string;
+  expertise: string;
+  bio: string;
+};
+
+function toNumber(value: string) {
+  const digits = value.replace(/[^\d]/g, "");
+  if (!digits) return null;
+  return Number(digits);
+}
+
+function toDecimalNumber(value: string) {
+  const normalized = value.replace(/,/g, "").trim();
+  if (!normalized) return null;
+  const parsed = Number(normalized);
+  if (Number.isNaN(parsed)) return null;
+  return Math.round(parsed * 10) / 10;
+}
+
+function buildCompanyInfoRecord(form: CompanyInfoForm): CompanyInfoRecord {
+  return {
+    basic: {
+      companyInfo: form.companyInfo,
+      ceo: {
+        name: form.ceoName,
+        email: form.ceoEmail,
+        phone: form.ceoPhone,
+      },
+      foundedAt: form.foundedAt,
+      businessNumber: form.businessNumber,
+      primaryBusiness: form.primaryBusiness,
+      primaryIndustry: form.primaryIndustry,
+    },
+    locations: {
+      headOffice: form.headOffice,
+      branchOrLab: form.branchOffice,
+    },
+    workforce: {
+      fullTime: toNumber(form.workforceFullTime),
+      contract: toNumber(form.workforceContract),
+    },
+    finance: {
+      revenue: {
+        y2025: toDecimalNumber(form.revenue2025),
+        y2026: toDecimalNumber(form.revenue2026),
+      },
+      capitalTotal: toNumber(form.capitalTotal),
+    },
+    certifications: {
+      designation: form.certification,
+      tipsLipsHistory: form.tipsLipsHistory,
+    },
+    investments: [],
+    fundingPlan: {
+      desiredAmount2026: toNumber(form.desiredInvestment2026),
+      preValue: toNumber(form.desiredPreValue),
+    },
+    metadata: {
+      updatedAt: serverTimestamp(),
+      saveType: "final",
+    },
+  };
+}
+
+function buildDefaultAvailability(): ConsultantAvailability[] {
+  const scheduleDays = [2, 4];
+  const timeSlots = Array.from({ length: 9 }, (_, index) => {
+    const startHour = 9 + index;
+    const endHour = startHour + 1;
+    return {
+      start: `${String(startHour).padStart(2, "0")}:00`,
+      end: `${String(endHour).padStart(2, "0")}:00`,
+      available: false,
+    };
+  });
+  return scheduleDays.map((day) => ({
+    dayOfWeek: day,
+    slots: timeSlots,
+  }));
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -165,33 +269,104 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   // 회원가입 (Firebase 전용)
-  const signUp = async (email: string, password: string, companyName: string, programName: string) => {
+  const signUp = async (payload: SignupPayload) => {
     if (!isFirebaseConfigured || !auth || !db) {
       throw new Error("Firebase가 설정되지 않았습니다");
     }
 
     try {
-      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-      
-      // Firestore에 사용자 정보 저장
-      const newUser: Omit<User, "id"> = {
-        email,
-        companyName,
-        programName,
-        role: "user",
-        permissions: {
-          canViewAllApplications: false,
-          canManageConsultants: false,
-          canManagePrograms: false,
-        },
-        status: "active",
-        programs: [],
-        createdAt: new Date().toISOString(),
-        lastLoginAt: new Date().toISOString(),
-      };
-      
+      const userCredential = await createUserWithEmailAndPassword(
+        auth,
+        payload.email,
+        payload.password
+      );
+
+      let newUser: Omit<User, "id">;
+
+      if (payload.role === "company") {
+        const companyName = payload.companyInfo.companyInfo.trim();
+        newUser = {
+          email: payload.email,
+          companyName,
+          programName: payload.programName,
+          role: "user",
+          permissions: {
+            canViewAllApplications: false,
+            canManageConsultants: false,
+            canManagePrograms: false,
+          },
+          status: "active",
+          programs: [],
+          createdAt: new Date().toISOString(),
+          lastLoginAt: new Date().toISOString(),
+        };
+
+        const companyInfo = buildCompanyInfoRecord(payload.companyInfo);
+        await setDoc(
+          doc(db, "companies", userCredential.user.uid, "companyInfo", "info"),
+          {
+            ...companyInfo,
+            metadata: {
+              ...companyInfo.metadata,
+              createdAt: serverTimestamp(),
+            },
+          },
+          { merge: true }
+        );
+        await setDoc(
+          doc(db, "companies", userCredential.user.uid),
+          {
+            name: companyName || null,
+            updatedAt: serverTimestamp(),
+          },
+          { merge: true }
+        );
+      } else {
+        const consultantName = payload.consultantInfo.name.trim();
+        const consultantEmail = payload.consultantInfo.email.trim();
+        const organization = payload.consultantInfo.organization.trim();
+        newUser = {
+          email: payload.email,
+          companyName: organization || "컨설턴트",
+          programName: "컨설턴트",
+          role: "consultant",
+          permissions: {
+            canViewAllApplications: false,
+            canManageConsultants: false,
+            canManagePrograms: false,
+          },
+          status: "active",
+          programs: [],
+          createdAt: new Date().toISOString(),
+          lastLoginAt: new Date().toISOString(),
+        };
+
+        await setDoc(
+          doc(db, "consultants", userCredential.user.uid),
+          {
+            name: consultantName,
+            title: "컨설턴트",
+            email: consultantEmail || payload.email,
+            phone: payload.consultantInfo.phone.trim() || null,
+            organization: organization || null,
+            secondaryEmail: payload.consultantInfo.secondaryEmail.trim() || null,
+            secondaryPhone: payload.consultantInfo.secondaryPhone.trim() || null,
+            fixedMeetingLink: payload.consultantInfo.fixedMeetingLink.trim() || null,
+            expertise: payload.consultantInfo.expertise
+              .split(",")
+              .map((value) => value.trim())
+              .filter(Boolean),
+            bio: payload.consultantInfo.bio.trim() || `${consultantName} 컨설턴트`,
+            status: "active",
+            availability: buildDefaultAvailability(),
+            joinedDate: new Date().toISOString(),
+          },
+          { merge: true }
+        );
+      }
+
       await setDoc(doc(db, "users", userCredential.user.uid), newUser);
-      
+
       const appUser: User = {
         id: userCredential.user.uid,
         ...newUser,

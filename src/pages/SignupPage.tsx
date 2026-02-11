@@ -9,6 +9,23 @@ import {
   signUpWithEmail,
 } from "../firebase/auth"
 import type { Role } from "../types/auth"
+import { toast } from "sonner"
+
+function getSignupErrorMessage(error: any) {
+  const code = error?.code ?? ""
+  if (code === "auth/email-already-in-use") {
+    return "이미 사용 중인 이메일입니다."
+  }
+  if (code === "auth/invalid-email") {
+    return "올바르지 않은 이메일 형식입니다."
+  }
+  if (code === "auth/weak-password") {
+    return "비밀번호가 너무 약합니다. 더 강한 비밀번호를 입력해주세요."
+  }
+  return "회원가입에 실패했습니다. 입력값을 확인하세요."
+}
+
+const PENDING_SIGNUP_KEY = "pending-signup";
 
 export function SignupPage() {
   const [role, setRole] = useState<Role>("company")
@@ -39,19 +56,29 @@ export function SignupPage() {
     setLoadingEmail(true)
     setError(null)
     try {
-      const result = await signUpWithEmail(email, password)
-      const requestedRole = nextRole
-      const role: Role = "company"
-      await createUserProfile(
-        result.user.uid,
-        role,
-        requestedRole,
-        result.user.email
+      if (nextRole === "admin") {
+        const result = await signUpWithEmail(email, password)
+        await createUserProfile(
+          result.user.uid,
+          "admin",
+          null,
+          result.user.email,
+          { active: true }
+        )
+        navigate("/admin")
+        return
+      }
+      sessionStorage.setItem(
+        PENDING_SIGNUP_KEY,
+        JSON.stringify({
+          role: nextRole,
+          email: email.trim(),
+          password,
+        })
       )
-      await signOutUser()
-      navigate(`/pending?role=${nextRole}`)
+      navigate(`/signup-info?role=${nextRole}`)
     } catch (err) {
-      setError("회원가입에 실패했습니다. 입력값을 확인하세요.")
+      toast.error(getSignupErrorMessage(err))
     } finally {
       setLoadingEmail(false)
     }
@@ -67,23 +94,25 @@ export function SignupPage() {
         : await signInWithGoogle()
       const existingProfile = await getUserProfile(result.user.uid)
       if (existingProfile) {
-        setError("이미 가입된 계정입니다. 로그인 화면으로 이동해주세요.")
+        toast.error("이미 가입된 계정입니다. 로그인 화면으로 이동해주세요.")
         await signOutUser()
         navigate("/login")
         return
       }
-      const requestedRole = role
-      const assignedRole: Role = "company"
-      await createUserProfile(
-        result.user.uid,
-        assignedRole,
-        requestedRole,
-        result.user.email
-      )
-      await signOutUser()
-      navigate(`/pending?role=${role}`)
+      if (role === "admin") {
+        await createUserProfile(
+          result.user.uid,
+          "admin",
+          null,
+          result.user.email,
+          { active: true }
+        )
+        navigate("/admin")
+        return
+      }
+      navigate(`/signup-info?role=${role}`)
     } catch (err) {
-      setError("Google 회원가입에 실패했습니다.")
+      toast.error(getSignupErrorMessage(err))
     } finally {
       setLoadingGoogle(false)
     }

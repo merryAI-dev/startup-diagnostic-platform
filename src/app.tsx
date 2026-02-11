@@ -12,12 +12,15 @@ import { LoginPage } from "./pages/LoginPage"
 import { NotFoundPage } from "./pages/NotFoundPage"
 import { PendingPage } from "./pages/PendingPage"
 import { SignupPage } from "./pages/SignupPage"
+import { SignupInfoPage } from "./pages/SignupInfoPage"
+import { Toaster } from "sonner"
 function PublicLayout() {
   return (
     <div className="flex h-screen w-full flex-col overflow-hidden">
       <div className="flex-1 overflow-y-auto">
         <Outlet />
       </div>
+      <Toaster position="top-center" />
       <footer className="border-t border-slate-200 bg-slate-100 px-6 py-4 text-right text-xs text-slate-500">
         © MYSC. All rights reserved.
       </footer>
@@ -33,6 +36,7 @@ export function App() {
           <Route path="/" element={<HomeRedirect />} />
           <Route path="/login" element={<LoginPage />} />
           <Route path="/signup" element={<SignupPage />} />
+          <Route path="/signup-info" element={<SignupInfoPage />} />
           <Route path="/pending" element={<PendingPage />} />
           <Route path="*" element={<NotFoundPage />} />
         </Route>
