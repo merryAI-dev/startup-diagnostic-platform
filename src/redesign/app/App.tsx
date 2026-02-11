@@ -50,9 +50,9 @@ function AuthenticatedApp() {
       return (
         <>
           <Signup
-            onSignup={async (email: string, password: string, companyName: string, programName: string) => {
+            onSignup={async (payload) => {
               try {
-                await signUp(email, password, companyName, programName);
+                await signUp(payload);
                 toast.success("회원가입이 완료되었습니다");
               } catch (error: any) {
                 toast.error(error.message || "회원가입에 실패했습니다");

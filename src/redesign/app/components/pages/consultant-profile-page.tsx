@@ -22,6 +22,12 @@ interface ConsultantProfilePageProps {
   consultant: Consultant | null;
   defaultEmail?: string | null;
   saving?: boolean;
+  submitLabel?: string;
+  submitClassName?: string;
+  hideReset?: boolean;
+  hideDescription?: boolean;
+  onBack?: () => void;
+  backLabel?: string;
   onSubmit: (values: ConsultantProfileFormValues) => Promise<void> | void;
 }
 
@@ -46,6 +52,12 @@ export function ConsultantProfilePage({
   consultant,
   defaultEmail,
   saving = false,
+  submitLabel,
+  submitClassName,
+  hideReset = false,
+  hideDescription = false,
+  onBack,
+  backLabel,
   onSubmit,
 }: ConsultantProfilePageProps) {
   const [formValues, setFormValues] = useState<ConsultantProfileFormValues>(() =>
@@ -63,7 +75,11 @@ export function ConsultantProfilePage({
 
   const isInvalid =
     !formValues.name.trim() ||
+    !formValues.organization.trim() ||
     !formValues.email.trim() ||
+    !formValues.phone.trim() ||
+    !formValues.fixedMeetingLink.trim() ||
+    !formValues.expertise.trim() ||
     !formValues.bio.trim();
 
   function updateField<K extends keyof ConsultantProfileFormValues>(
@@ -82,20 +98,29 @@ export function ConsultantProfilePage({
     await onSubmit(formValues);
   }
 
+  const requiredMark = (
+    <span className="text-rose-600 text-xs self-start -mt-1" aria-hidden="true">
+      *
+    </span>
+  );
+
   return (
     <div className="p-8 max-w-4xl mx-auto">
       <Card>
         <CardHeader>
           <CardTitle>내 정보 입력</CardTitle>
-          <CardDescription>
-            관리자 계정 생성 시 사용하는 필드와 동일합니다. 저장하면 내 프로필에 반영됩니다.
-          </CardDescription>
+          {!hideDescription && (
+            <CardDescription>
+              관리자 계정 생성 시 사용하는 필드와 동일합니다. 저장하면 내 프로필에 반영됩니다.
+            </CardDescription>
+          )}
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="grid grid-cols-2 gap-4">
             <div>
               <Label className="mb-2 block" htmlFor="consultant-name">
                 컨설턴트명
+                {requiredMark}
               </Label>
               <Input
                 id="consultant-name"
@@ -109,6 +134,7 @@ export function ConsultantProfilePage({
             <div>
               <Label className="mb-2 block" htmlFor="consultant-organization">
                 소속
+                {requiredMark}
               </Label>
               <Input
                 id="consultant-organization"
@@ -121,6 +147,7 @@ export function ConsultantProfilePage({
             <div>
               <Label className="mb-2 block" htmlFor="consultant-email">
                 이메일
+                {requiredMark}
               </Label>
               <Input
                 id="consultant-email"
@@ -134,6 +161,7 @@ export function ConsultantProfilePage({
             <div>
               <Label className="mb-2 block" htmlFor="consultant-phone">
                 전화번호
+                {requiredMark}
               </Label>
               <Input
                 id="consultant-phone"
@@ -170,6 +198,7 @@ export function ConsultantProfilePage({
             <div className="col-span-2">
               <Label className="mb-2 block" htmlFor="consultant-meeting-link">
                 고정 화상회의 링크
+                {requiredMark}
               </Label>
               <Input
                 id="consultant-meeting-link"
@@ -182,6 +211,7 @@ export function ConsultantProfilePage({
             <div className="col-span-2">
               <Label className="mb-2 block" htmlFor="consultant-expertise">
                 전문 분야 (쉼표 구분)
+                {requiredMark}
               </Label>
               <Input
                 id="consultant-expertise"
@@ -194,6 +224,7 @@ export function ConsultantProfilePage({
             <div className="col-span-2">
               <Label className="mb-2 block" htmlFor="consultant-bio">
                 메모
+                {requiredMark}
               </Label>
               <Textarea
                 id="consultant-bio"
@@ -205,17 +236,34 @@ export function ConsultantProfilePage({
               />
             </div>
 
-            <div className="col-span-2 flex justify-end gap-2">
+            <div className={`col-span-2 flex ${onBack ? "justify-between" : "justify-end"} gap-2`}>
+              {onBack && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={onBack}
+                  disabled={saving}
+                  className="text-slate-500 hover:text-slate-700"
+                >
+                  {backLabel ?? "로그인으로 돌아가기"}
+                </Button>
+              )}
+              {!hideReset && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setFormValues(initialValues)}
+                  disabled={saving}
+                >
+                  초기화
+                </Button>
+              )}
               <Button
-                type="button"
-                variant="outline"
-                onClick={() => setFormValues(initialValues)}
-                disabled={saving}
+                type="submit"
+                disabled={saving || isInvalid}
+                className={submitClassName}
               >
-                초기화
-              </Button>
-              <Button type="submit" disabled={saving || isInvalid}>
-                {saving ? "저장 중..." : "정보 저장"}
+                {saving ? "저장 중..." : (submitLabel ?? "정보 저장")}
               </Button>
             </div>
           </form>
