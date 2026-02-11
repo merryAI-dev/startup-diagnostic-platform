@@ -31,7 +31,7 @@ export function RequireRole({
   role,
   children,
 }: {
-  role: Role
+  role: Role | Role[]
   children: JSX.Element
 }) {
   const { profile, loading } = useAuth()
@@ -41,7 +41,8 @@ export function RequireRole({
   if (!profile) {
     return <Navigate to="/signup" replace />
   }
-  if (profile.role !== role) {
+  const allowedRoles = Array.isArray(role) ? role : [role]
+  if (!allowedRoles.includes(profile.role)) {
     return <Navigate to="/" replace />
   }
   return children

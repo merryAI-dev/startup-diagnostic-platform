@@ -1,4 +1,4 @@
-export type Role = "admin" | "company"
+export type Role = "admin" | "company" | "consultant"
 
 export type UserProfile = {
   role: Role

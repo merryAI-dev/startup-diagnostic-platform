@@ -11,6 +11,7 @@ function Calendar({
   className,
   classNames,
   showOutsideDays = true,
+  components,
   ...props
 }: React.ComponentProps<typeof DayPicker>) {
   return (
@@ -66,6 +67,7 @@ function Calendar({
         IconRight: ({ className, ...props }) => (
           <ChevronRight className={cn("size-4", className)} {...props} />
         ),
+        ...components,
       }}
       {...props}
     />

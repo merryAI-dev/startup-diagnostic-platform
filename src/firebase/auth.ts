@@ -3,9 +3,7 @@ import {
   signInWithEmailAndPassword,
   signInWithPopup,
   createUserWithEmailAndPassword,
-  sendEmailVerification,
   signOut,
-  type User,
 } from "firebase/auth"
 import { auth } from "./client"
 
@@ -21,10 +19,6 @@ export function signInWithGoogle() {
 
 export function signUpWithEmail(email: string, password: string) {
   return createUserWithEmailAndPassword(auth, email, password)
-}
-
-export function sendVerificationEmail(user: User) {
-  return sendEmailVerification(user)
 }
 
 export function signOutUser() {

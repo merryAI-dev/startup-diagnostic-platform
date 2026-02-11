@@ -1,23 +1,29 @@
-import { useState } from "react";
-import { ChevronLeft, ChevronRight, Calendar, Clock, User, LayoutGrid, List, Filter } from "lucide-react";
-import { RegularOfficeHour } from "../../lib/types";
+import { useMemo, useState } from "react";
+import { ChevronLeft, ChevronRight, Calendar, List, Filter } from "lucide-react";
+import { Agenda, RegularOfficeHour } from "../../lib/types";
 import { Button } from "../ui/button";
 import { Badge } from "../ui/badge";
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameMonth, isSameDay, addMonths, subMonths, startOfWeek, endOfWeek, isToday, parseISO } from "date-fns";
 import { ko } from "date-fns/locale";
+import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuTrigger } from "../ui/dropdown-menu";
 
 interface RegularOfficeHoursCalendarProps {
   officeHours: RegularOfficeHour[];
+  agendas: Agenda[];
   onSelectOfficeHour: (id: string) => void;
 }
 
 type ViewMode = "calendar" | "list";
 
-export function RegularOfficeHoursCalendar({ officeHours, onSelectOfficeHour }: RegularOfficeHoursCalendarProps) {
+export function RegularOfficeHoursCalendar({
+  officeHours,
+  agendas,
+  onSelectOfficeHour,
+}: RegularOfficeHoursCalendarProps) {
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("calendar");
-  const [selectedConsultant, setSelectedConsultant] = useState<string>("all");
+  const [selectedAgendaIds, setSelectedAgendaIds] = useState<string[]>([]);
 
   // 캘린더 날짜 생성
   const monthStart = startOfMonth(currentMonth);
@@ -26,13 +32,16 @@ export function RegularOfficeHoursCalendar({ officeHours, onSelectOfficeHour }: 
   const calendarEnd = endOfWeek(monthEnd, { weekStartsOn: 0 });
   const calendarDays = eachDayOfInterval({ start: calendarStart, end: calendarEnd });
 
-  // 컨설턴트 목록
-  const consultants = Array.from(new Set(officeHours.map(oh => oh.consultant)));
-
   // 필터링된 오피스아워
-  const filteredOfficeHours = officeHours.filter(oh => 
-    selectedConsultant === "all" || oh.consultant === selectedConsultant
-  );
+  const filteredOfficeHours = officeHours.filter((oh) => {
+    const agendaMatch =
+      selectedAgendaIds.length === 0
+      || (oh.agendaIds ?? []).some((agendaId) =>
+        selectedAgendaIds.includes(agendaId)
+      );
+    return agendaMatch;
+  });
+  const hasSessions = filteredOfficeHours.length > 0;
 
   // 날짜별로 오피스아워를 펼쳐서 배열로 만들기
   const expandedSessions = filteredOfficeHours.flatMap(oh => 
@@ -60,6 +69,24 @@ export function RegularOfficeHoursCalendar({ officeHours, onSelectOfficeHour }: 
     return acc;
   }, {} as Record<string, typeof expandedSessions>);
 
+  const selectedAgendaLabel = useMemo(() => {
+    if (selectedAgendaIds.length === 0) return "아젠다 전체";
+    const names = agendas
+      .filter((agenda) => selectedAgendaIds.includes(agenda.id))
+      .map((agenda) => agenda.name);
+    if (names.length <= 2) return names.join(", ");
+    return `${names.slice(0, 2).join(", ")} 외 ${names.length - 2}개`;
+  }, [agendas, selectedAgendaIds]);
+
+  function toggleAgendaFilter(agendaId: string, checked: boolean) {
+    setSelectedAgendaIds((prev) => {
+      if (checked) {
+        return [...new Set([...prev, agendaId])];
+      }
+      return prev.filter((id) => id !== agendaId);
+    });
+  }
+
   return (
     <div className="h-full flex flex-col bg-gray-50">
       {/* Header */}
@@ -69,6 +96,9 @@ export function RegularOfficeHoursCalendar({ officeHours, onSelectOfficeHour }: 
             <h1 className="text-2xl font-bold text-gray-900">정기 오피스아워</h1>
             <p className="text-sm text-muted-foreground mt-1">
               매주 정해진 시간에 진행되는 오피스아워를 신청하세요
+            </p>
+            <p className="text-xs text-muted-foreground mt-1">
+              컨설턴트는 수락 후 확정됩니다.
             </p>
           </div>
           <div className="flex gap-2">
@@ -92,31 +122,50 @@ export function RegularOfficeHoursCalendar({ officeHours, onSelectOfficeHour }: 
         </div>
 
         {/* Filters */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 flex-wrap">
           <Filter className="w-4 h-4 text-muted-foreground" />
-          <div className="flex gap-2 flex-wrap">
-            <Button
-              variant={selectedConsultant === "all" ? "default" : "outline"}
-              size="sm"
-              onClick={() => setSelectedConsultant("all")}
-            >
-              전체
-            </Button>
-            {consultants.map((consultant) => (
-              <Button
-                key={consultant}
-                variant={selectedConsultant === consultant ? "default" : "outline"}
-                size="sm"
-                onClick={() => setSelectedConsultant(consultant)}
-              >
-                {consultant}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm">
+                {selectedAgendaLabel}
               </Button>
-            ))}
-          </div>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent className="w-72">
+              {agendas.map((agenda) => (
+                <DropdownMenuCheckboxItem
+                  key={agenda.id}
+                  checked={selectedAgendaIds.includes(agenda.id)}
+                  onCheckedChange={(checked) =>
+                    toggleAgendaFilter(agenda.id, Boolean(checked))
+                  }
+                >
+                  <div className="flex items-center gap-2">
+                    <Badge
+                      variant={agenda.scope === "internal" ? "secondary" : "outline"}
+                      className="text-[10px]"
+                    >
+                      {agenda.scope === "internal" ? "내부" : "외부"}
+                    </Badge>
+                    <span>{agenda.name}</span>
+                  </div>
+                </DropdownMenuCheckboxItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
 
-      {viewMode === "calendar" ? (
+      {!hasSessions ? (
+        <div className="flex-1 flex items-center justify-center p-8">
+          <div className="max-w-lg rounded-xl border bg-white p-8 text-center">
+            <h2 className="text-lg font-semibold text-gray-900">표시할 정기 오피스아워가 없습니다</h2>
+            <p className="mt-2 text-sm text-muted-foreground">
+              사업 기간 형식(YYYY-MM-DD 또는 25.12.22)을 확인하고, 기간이 오늘(2026-02-11) 기준 유효한지 확인해주세요.
+              요일은 화/목 고정이며, 아젠다 필터가 선택된 경우 해당 아젠다에 연결된 사업만 표시됩니다.
+            </p>
+          </div>
+        </div>
+      ) : viewMode === "calendar" ? (
         <div className="flex-1 flex overflow-hidden">
           {/* Main Calendar */}
           <div className="flex-1 p-6 overflow-y-auto">
@@ -214,7 +263,7 @@ export function RegularOfficeHoursCalendar({ officeHours, onSelectOfficeHour }: 
                               }}
                               className="text-xs p-1.5 rounded bg-primary/10 hover:bg-primary/20 transition-colors border-l-2 border-primary"
                             >
-                              <div className="font-medium truncate">{session.consultant}</div>
+                              <div className="font-medium truncate">배정 예정</div>
                               <div className="text-gray-600 truncate">{session.title.substring(0, 20)}</div>
                             </div>
                           ))}
@@ -255,10 +304,10 @@ export function RegularOfficeHoursCalendar({ officeHours, onSelectOfficeHour }: 
                   >
                     <div className="flex items-center gap-3 mb-3">
                       <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary font-semibold">
-                        {session.consultant[0]}
+                        ?
                       </div>
                       <div className="flex-1">
-                        <h3 className="font-medium text-gray-900">{session.consultant}</h3>
+                        <h3 className="font-medium text-gray-900">배정 예정</h3>
                         <p className="text-sm text-muted-foreground">{session.title}</p>
                       </div>
                     </div>
@@ -299,10 +348,10 @@ export function RegularOfficeHoursCalendar({ officeHours, onSelectOfficeHour }: 
                       <div className="flex items-start justify-between mb-4">
                         <div className="flex items-center gap-3">
                           <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center text-primary font-semibold text-lg">
-                            {session.consultant[0]}
+                            ?
                           </div>
                           <div>
-                            <h3 className="font-semibold text-gray-900">{session.consultant}</h3>
+                            <h3 className="font-semibold text-gray-900">배정 예정</h3>
                             <p className="text-sm text-muted-foreground">{session.title}</p>
                           </div>
                         </div>

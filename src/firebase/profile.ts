@@ -5,7 +5,6 @@ import {
   getDoc,
   serverTimestamp,
   setDoc,
-  updateDoc,
 } from "firebase/firestore"
 import { db } from "./client"
 import type { Role, UserProfile } from "../types/auth"
@@ -45,20 +44,5 @@ export async function createUserProfile(
     email: email ?? null,
     companyId,
     createdAt: serverTimestamp(),
-  })
-}
-
-export async function activateUserProfile(uid: string) {
-  const ref = doc(db, collectionName, uid)
-  await updateDoc(ref, {
-    active: true,
-    activatedAt: serverTimestamp(),
-  })
-}
-
-export async function updateProfileRole(uid: string, role: Role) {
-  const ref = doc(db, collectionName, uid)
-  await updateDoc(ref, {
-    role,
   })
 }

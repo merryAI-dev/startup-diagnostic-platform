@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
 import { Application, Program, User } from "../../lib/types";
 import { Badge } from "../ui/badge";
@@ -13,11 +13,20 @@ interface AdminDashboardChartsProps {
 
 export function AdminDashboardCharts({ applications, programs, currentUser }: AdminDashboardChartsProps) {
   const [selectedProgram, setSelectedProgram] = useState<string>("all");
+  const getProgressRate = (completed: number, target: number) => {
+    if (target <= 0) return 0;
+    const ratio = Math.round((completed / target) * 100);
+    return Math.min(100, Math.max(0, ratio));
+  };
+  const getValidDate = (value: Date | string) => {
+    const date = value instanceof Date ? value : new Date(value);
+    return Number.isNaN(date.getTime()) ? null : date;
+  };
 
   // 권한에 따라 프로그램 필터링
   const visiblePrograms = currentUser.role === "admin" 
     ? programs 
-    : programs.filter(p => currentUser.programs.includes(p.id));
+    : programs.filter((p) => currentUser.programs?.includes(p.id) ?? false);
 
   // 선택된 프로그램에 따라 신청 필터링
   const filteredApplications = selectedProgram === "all" 
@@ -38,7 +47,7 @@ export function AdminDashboardCharts({ applications, programs, currentUser }: Ad
     name: p.name,
     목표: p.targetHours,
     완료: p.completedHours,
-    진행률: Math.round((p.completedHours / p.targetHours) * 100),
+    진행률: getProgressRate(p.completedHours, p.targetHours),
     color: p.color,
   }));
 
@@ -51,15 +60,48 @@ export function AdminDashboardCharts({ applications, programs, currentUser }: Ad
     color: p.color,
   }));
 
-  // 월별 신청 추이 (최근 6개월)
-  const monthlyTrend = (() => {
-    const months = ["2025-09", "2025-10", "2025-11", "2025-12", "2026-01", "2026-02"];
-    return months.map(month => ({
-      month: month.split("-")[1] + "월",
-      신청수: Math.floor(Math.random() * 20) + 10,
-      완료수: Math.floor(Math.random() * 15) + 5,
+  // 월별 신청/완료 추이 (최근 6개월, 실제 데이터 기반)
+  const monthlyTrend = useMemo(() => {
+    const now = new Date();
+    const months = Array.from({ length: 6 }, (_, index) => {
+      const monthDate = new Date(now.getFullYear(), now.getMonth() - (5 - index), 1);
+      const year = monthDate.getFullYear();
+      const month = String(monthDate.getMonth() + 1).padStart(2, "0");
+      return {
+        key: `${year}-${month}`,
+        label: `${monthDate.getMonth() + 1}월`,
+      };
+    });
+
+    const counts = months.reduce<Record<string, { applied: number; completed: number }>>(
+      (acc, item) => {
+        acc[item.key] = { applied: 0, completed: 0 };
+        return acc;
+      },
+      {}
+    );
+
+    filteredApplications.forEach((application) => {
+      const createdAt = getValidDate(application.createdAt);
+      if (!createdAt) return;
+      const monthKey = `${createdAt.getFullYear()}-${String(createdAt.getMonth() + 1).padStart(
+        2,
+        "0"
+      )}`;
+      if (!counts[monthKey]) return;
+
+      counts[monthKey].applied += 1;
+      if (application.status === "completed") {
+        counts[monthKey].completed += 1;
+      }
+    });
+
+    return months.map((item) => ({
+      month: item.label,
+      신청수: counts[item.key]?.applied ?? 0,
+      완료수: counts[item.key]?.completed ?? 0,
     }));
-  })();
+  }, [filteredApplications]);
 
   // 주요 지표
   const totalApplications = filteredApplications.length;
@@ -77,10 +119,10 @@ export function AdminDashboardCharts({ applications, programs, currentUser }: Ad
       <div className="bg-white border-b px-8 py-6">
         <div className="flex items-center justify-between mb-4">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">대시보드</h1>
+            <h1 className="text-2xl font-bold text-gray-900">관리자 대시보드</h1>
             <p className="text-sm text-muted-foreground mt-1">
               {currentUser.role === "admin" 
-                ? "전체 프로그램 현황을 한눈에 확인하세요" 
+                ? "사업별 목표시간, 달성률, 신청 현황을 한눈에 확인하세요" 
                 : `담당 프로그램 현황 (${visiblePrograms.length}개 사업)`}
             </p>
           </div>
@@ -160,7 +202,7 @@ export function AdminDashboardCharts({ applications, programs, currentUser }: Ad
           <div className="grid grid-cols-2 gap-6">
             {/* Program Progress */}
             <div className="bg-white rounded-lg border p-6">
-              <h3 className="text-lg font-semibold text-gray-900 mb-4">사업별 목표 시수 진행률</h3>
+              <h3 className="text-lg font-semibold text-gray-900 mb-4">사업별 목표시간 달성률</h3>
               <ResponsiveContainer width="100%" height={300}>
                 <BarChart data={programProgress}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
@@ -286,13 +328,13 @@ export function AdminDashboardCharts({ applications, programs, currentUser }: Ad
                       사업명
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
-                      목표 시수
+                      목표시간
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
-                      완료 시수
+                      완료시간
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
-                      진행률
+                      달성률
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-semibold text-gray-700 uppercase tracking-wider">
                       신청 횟수
@@ -304,7 +346,10 @@ export function AdminDashboardCharts({ applications, programs, currentUser }: Ad
                 </thead>
                 <tbody className="divide-y divide-gray-200">
                   {visiblePrograms.map((program) => {
-                    const progressPercentage = Math.round((program.completedHours / program.targetHours) * 100);
+                    const progressPercentage = getProgressRate(
+                      program.completedHours,
+                      program.targetHours
+                    );
                     const remaining = program.maxApplications - program.usedApplications;
                     
                     return (

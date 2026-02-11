@@ -12,6 +12,13 @@ interface OfficeHourReportFormProps {
   application: Application;
   open: boolean;
   onClose: () => void;
+  onDefer?: () => void;
+  deadlineInfo?: {
+    deadline: Date;
+    daysLeft: number;
+    isOverdue: boolean;
+    overdueDays: number;
+  } | null;
   onSubmit: (report: Omit<OfficeHourReport, "id" | "createdAt" | "updatedAt" | "completedAt">) => void;
 }
 
@@ -19,6 +26,8 @@ export function OfficeHourReportForm({
   application, 
   open, 
   onClose, 
+  onDefer,
+  deadlineInfo,
   onSubmit 
 }: OfficeHourReportFormProps) {
   const [formData, setFormData] = useState({
@@ -119,6 +128,7 @@ export function OfficeHourReportForm({
   const handleSkip = () => {
     // Allow skipping but show warning
     toast.warning("보고서는 3일 이내 작성해주세요");
+    onDefer?.();
     onClose();
   };
 
@@ -126,19 +136,55 @@ export function OfficeHourReportForm({
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-4">
             <div>
               <DialogTitle className="text-2xl">오피스아워 보고서 작성</DialogTitle>
               <p className="text-sm text-muted-foreground mt-1">
                 {application.officeHourTitle}
               </p>
+              <p className="text-xs text-amber-700 mt-1">
+                세션 종료 후 3일 이내 보고서를 작성해야 합니다.
+              </p>
             </div>
-            <div className="flex items-center gap-2 bg-amber-50 text-amber-700 px-3 py-1.5 rounded-lg border border-amber-200">
-              <AlertCircle className="w-4 h-4" />
-              <span className="text-sm font-medium">작성 필수</span>
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 bg-amber-50 text-amber-700 px-3 py-1.5 rounded-lg border border-amber-200">
+                <AlertCircle className="w-4 h-4" />
+                <span className="text-sm font-medium">
+                  {deadlineInfo
+                    ? deadlineInfo.isOverdue
+                      ? `기한 초과 ${deadlineInfo.overdueDays}일`
+                      : `D-${Math.max(0, deadlineInfo.daysLeft)}`
+                    : "작성 필수"}
+                </span>
+              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                onClick={onClose}
+                className="text-slate-500 hover:text-slate-700"
+              >
+                <X className="w-4 h-4" />
+              </Button>
             </div>
           </div>
         </DialogHeader>
+
+        {deadlineInfo && (
+          <div
+            className={`mt-4 rounded-lg border px-4 py-3 text-sm ${
+              deadlineInfo.isOverdue
+                ? "border-red-200 bg-red-50 text-red-700"
+                : deadlineInfo.daysLeft <= 1
+                  ? "border-amber-200 bg-amber-50 text-amber-700"
+                  : "border-slate-200 bg-slate-50 text-slate-700"
+            }`}
+          >
+            {deadlineInfo.isOverdue
+              ? `보고서 제출 기한이 ${deadlineInfo.overdueDays}일 지났습니다. 빠르게 작성해주세요.`
+              : `보고서 제출 마감까지 ${Math.max(0, deadlineInfo.daysLeft)}일 남았습니다.`}
+          </div>
+        )}
 
         <form onSubmit={handleSubmit} className="space-y-6 mt-4">
           {/* 일시 */}

@@ -1,14 +1,13 @@
-import { useState } from "react"
-import { useNavigate } from "react-router-dom"
+import { useMemo, useState } from "react"
+import { useLocation, useNavigate } from "react-router-dom"
 import { AuthCard } from "../components/auth/AuthCard"
-import { createUserProfile } from "../firebase/profile"
+import { useAuth } from "../context/AuthContext"
+import { createUserProfile, getUserProfile } from "../firebase/profile"
 import {
-  sendVerificationEmail,
   signOutUser,
-  signUpWithEmail,
   signInWithGoogle,
+  signUpWithEmail,
 } from "../firebase/auth"
-import { auth } from "../firebase/client"
 import type { Role } from "../types/auth"
 
 export function SignupPage() {
@@ -16,14 +15,26 @@ export function SignupPage() {
   const [loadingEmail, setLoadingEmail] = useState(false)
   const [loadingGoogle, setLoadingGoogle] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const { user, profile } = useAuth()
   const navigate = useNavigate()
+  const location = useLocation()
   const isBusy = loadingEmail || loadingGoogle
+  const source = useMemo(() => {
+    const params = new URLSearchParams(location.search)
+    return params.get("source")
+  }, [location.search])
+  const isGoogleLoginContinuation = source === "google-login"
+  const hasGoogleSessionWithoutProfile = isGoogleLoginContinuation && !!user && !profile
 
   async function handleEmailSignup(
     nextRole: Role,
     email: string,
     password: string
   ) {
+    if (isGoogleLoginContinuation) {
+      setError("Google 계정으로 가입 중입니다. 아래 Google 버튼으로 완료해주세요.")
+      return
+    }
     if (isBusy) return
     setLoadingEmail(true)
     setError(null)
@@ -37,8 +48,6 @@ export function SignupPage() {
         requestedRole,
         result.user.email
       )
-      auth.languageCode = "ko"
-      await sendVerificationEmail(result.user)
       await signOutUser()
       navigate(`/pending?role=${nextRole}`)
     } catch (err) {
@@ -53,7 +62,16 @@ export function SignupPage() {
     setLoadingGoogle(true)
     setError(null)
     try {
-      const result = await signInWithGoogle()
+      const result = hasGoogleSessionWithoutProfile && user
+        ? { user }
+        : await signInWithGoogle()
+      const existingProfile = await getUserProfile(result.user.uid)
+      if (existingProfile) {
+        setError("이미 가입된 계정입니다. 로그인 화면으로 이동해주세요.")
+        await signOutUser()
+        navigate("/login")
+        return
+      }
       const requestedRole = role
       const assignedRole: Role = "company"
       await createUserProfile(
@@ -75,18 +93,31 @@ export function SignupPage() {
     <div className="flex min-h-[calc(100vh-5rem)] items-center justify-center">
       <AuthCard
         title="회원가입"
-        subtitle="회사 또는 관리자 계정을 생성하세요."
+        subtitle={
+          hasGoogleSessionWithoutProfile
+            ? "Google 계정 확인이 완료되었습니다. 역할 선택 후 가입을 완료하세요."
+            : "회사, 관리자, 컨설턴트 중 역할을 선택해 계정을 생성하세요."
+        }
         onGoogle={handleGoogleSignup}
         onSubmit={handleEmailSignup}
         onSwap={() => navigate("/login")}
         swapLabel="로그인"
         role={role}
         setRole={setRole}
-        showGoogle={false}
+        showGoogle
+        showEmailForm={!hasGoogleSessionWithoutProfile}
         showExtraStep
         loadingEmail={loadingEmail}
         loadingGoogle={loadingGoogle}
         error={error}
+        notice={
+          hasGoogleSessionWithoutProfile
+            ? "현재 로그인된 Google 계정으로 가입이 진행됩니다."
+            : isGoogleLoginContinuation
+              ? "Google 세션이 만료되었으면 Google 버튼을 눌러 다시 인증하세요."
+              : null
+        }
+        googleLabel="Google로 회원가입"
       />
     </div>
   )

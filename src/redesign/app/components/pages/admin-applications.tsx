@@ -33,19 +33,31 @@ export function AdminApplications({
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [typeFilter, setTypeFilter] = useState<string>("all");
+  const [companyFilter, setCompanyFilter] = useState<string>("all");
   const [selectedApplication, setSelectedApplication] = useState<Application | null>(null);
+
+  const companyOptions = Array.from(
+    new Set(
+      applications
+        .map((app) => app.companyName?.trim())
+        .filter((value): value is string => Boolean(value))
+    )
+  ).sort((a, b) => a.localeCompare(b));
 
   // Filter applications
   const filteredApplications = applications.filter((app) => {
     const matchesSearch =
       app.officeHourTitle?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      app.companyName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       app.consultant?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       app.agenda?.toLowerCase().includes(searchQuery.toLowerCase());
 
     const matchesStatus = statusFilter === "all" || app.status === statusFilter;
     const matchesType = typeFilter === "all" || app.type === typeFilter;
+    const matchesCompany =
+      companyFilter === "all" || app.companyName === companyFilter;
 
-    return matchesSearch && matchesStatus && matchesType;
+    return matchesSearch && matchesStatus && matchesType && matchesCompany;
   });
 
   // Sort by most recent
@@ -62,7 +74,6 @@ export function AdminApplications({
 
     switch (app.status) {
       case "pending":
-        actions.push({ label: "검토 시작", status: "review" });
         actions.push({ label: "즉시 확정", status: "confirmed" });
         actions.push({ label: "취소", status: "cancelled", variant: "destructive" });
         break;
@@ -107,12 +118,25 @@ export function AdminApplications({
             <div className="flex-1 relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
               <Input
-                placeholder="제목, 컨설턴트, 안건으로 검색..."
+                placeholder="기업, 제목, 안건으로 검색..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="pl-9"
               />
             </div>
+            <Select value={companyFilter} onValueChange={setCompanyFilter}>
+              <SelectTrigger className="w-52">
+                <SelectValue placeholder="기업 필터" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">전체 기업</SelectItem>
+                {companyOptions.map((companyName) => (
+                  <SelectItem key={companyName} value={companyName}>
+                    {companyName}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
             <Select value={statusFilter} onValueChange={setStatusFilter}>
               <SelectTrigger className="w-48">
                 <SelectValue placeholder="상태 필터" />
@@ -155,11 +179,10 @@ export function AdminApplications({
               <TableRow>
                 <TableHead>상태</TableHead>
                 <TableHead>유형</TableHead>
+                <TableHead>신청 기업</TableHead>
                 <TableHead>오피스아워</TableHead>
                 <TableHead>안건</TableHead>
-                <TableHead>컨설턴트</TableHead>
                 <TableHead>일정</TableHead>
-                <TableHead>신청일</TableHead>
                 <TableHead className="text-right">작업</TableHead>
               </TableRow>
             </TableHeader>
@@ -176,15 +199,17 @@ export function AdminApplications({
                       </Badge>
                     </TableCell>
                     <TableCell>
+                      <span className="text-sm font-medium">
+                        {app.companyName || "-"}
+                      </span>
+                    </TableCell>
+                    <TableCell>
                       <div className="max-w-xs">
                         <p className="text-sm font-medium truncate">{app.officeHourTitle}</p>
                       </div>
                     </TableCell>
                     <TableCell>
                       <span className="text-sm">{app.agenda}</span>
-                    </TableCell>
-                    <TableCell>
-                      <span className="text-sm">{app.consultant}</span>
                     </TableCell>
                     <TableCell>
                       {app.scheduledDate ? (
@@ -209,20 +234,8 @@ export function AdminApplications({
                         <span className="text-xs text-muted-foreground">-</span>
                       )}
                     </TableCell>
-                    <TableCell>
-                      <span className="text-sm text-muted-foreground">
-                        {format(new Date(app.createdAt), "M/d", { locale: ko })}
-                      </span>
-                    </TableCell>
                     <TableCell className="text-right">
                       <div className="flex items-center justify-end gap-2">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => setSelectedApplication(app)}
-                        >
-                          <Eye className="w-4 h-4" />
-                        </Button>
                         <DropdownMenu>
                           <DropdownMenuTrigger asChild>
                             <Button variant="ghost" size="sm">
@@ -254,11 +267,11 @@ export function AdminApplications({
                 ))
               ) : (
                 <TableRow>
-                  <TableCell colSpan={8} className="text-center py-12">
+                  <TableCell colSpan={7} className="text-center py-12">
                     <div className="flex flex-col items-center gap-2">
                       <Search className="w-12 h-12 text-muted-foreground" />
                       <p className="text-sm text-muted-foreground">
-                        {searchQuery || statusFilter !== "all" || typeFilter !== "all"
+                        {searchQuery || statusFilter !== "all" || typeFilter !== "all" || companyFilter !== "all"
                           ? "검색 결과가 없습니다"
                           : "신청 내역이 없습니다"}
                       </p>

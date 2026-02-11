@@ -42,7 +42,7 @@ export function App() {
             element={
               <RequireAuth>
                 <RequireApproved>
-                  <RequireRole role="admin">
+                  <RequireRole role={["admin", "consultant"]}>
                     <AdminShell />
                   </RequireRole>
                 </RequireApproved>

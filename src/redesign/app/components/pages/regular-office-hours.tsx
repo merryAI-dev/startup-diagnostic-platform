@@ -46,10 +46,10 @@ export function RegularOfficeHours({
                       <div className="flex-1 space-y-3">
                         <div>
                           <h3 className="mb-1">{oh.title}</h3>
-                          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                            <User className="w-4 h-4" />
-                            <span>{oh.consultant}</span>
-                          </div>
+                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                          <User className="w-4 h-4" />
+                          <span>컨설턴트 배정은 수락 후 확정됩니다</span>
+                        </div>
                         </div>
                         <p className="text-sm text-muted-foreground">
                           {oh.description}

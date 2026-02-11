@@ -268,10 +268,12 @@ class FirestoreService {
     await this.rateLimiter.waitForToken();
 
     try {
+      const hasCreatedAt = Object.prototype.hasOwnProperty.call(data, "createdAt");
+      const hasUpdatedAt = Object.prototype.hasOwnProperty.call(data, "updatedAt");
       const docData = {
         ...data,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
+        createdAt: hasCreatedAt ? data.createdAt : serverTimestamp(),
+        updatedAt: hasUpdatedAt ? data.updatedAt : serverTimestamp(),
       };
       const docRef = await addDoc(collection(db, collectionName), docData);
       return docRef.id;

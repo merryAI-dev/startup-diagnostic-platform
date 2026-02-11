@@ -20,6 +20,13 @@ export const programs: Program[] = [
     completedHours: 136,
     maxApplications: 120,
     usedApplications: 72,
+    internalTicketLimit: 80,
+    externalTicketLimit: 40,
+    periodStart: "2026-02-01",
+    periodEnd: "2026-05-31",
+    weekdays: ["TUE", "THU"],
+    agendaIds: ["1", "2", "3", "4"],
+    consultantIds: ["c1", "c2"],
   },
   {
     id: "p2",
@@ -30,6 +37,13 @@ export const programs: Program[] = [
     completedHours: 54,
     maxApplications: 60,
     usedApplications: 36,
+    internalTicketLimit: 45,
+    externalTicketLimit: 15,
+    periodStart: "2026-02-01",
+    periodEnd: "2026-04-30",
+    weekdays: ["TUE", "THU"],
+    agendaIds: ["2", "3", "5"],
+    consultantIds: ["c3"],
   },
   {
     id: "p3",
@@ -40,6 +54,13 @@ export const programs: Program[] = [
     completedHours: 240,
     maxApplications: 200,
     usedApplications: 120,
+    internalTicketLimit: 120,
+    externalTicketLimit: 80,
+    periodStart: "2026-02-01",
+    periodEnd: "2026-07-31",
+    weekdays: ["TUE", "THU"],
+    agendaIds: ["1", "2", "6", "7"],
+    consultantIds: ["c4", "c5"],
   },
   {
     id: "p4",
@@ -50,6 +71,13 @@ export const programs: Program[] = [
     completedHours: 40,
     maxApplications: 50,
     usedApplications: 30,
+    internalTicketLimit: 35,
+    externalTicketLimit: 15,
+    periodStart: "2026-02-01",
+    periodEnd: "2026-04-30",
+    weekdays: ["TUE", "THU"],
+    agendaIds: ["2", "8"],
+    consultantIds: ["c6"],
   },
   {
     id: "p5",
@@ -60,6 +88,13 @@ export const programs: Program[] = [
     completedHours: 67,
     maxApplications: 70,
     usedApplications: 42,
+    internalTicketLimit: 50,
+    externalTicketLimit: 20,
+    periodStart: "2026-02-01",
+    periodEnd: "2026-05-31",
+    weekdays: ["TUE", "THU"],
+    agendaIds: ["3", "4", "7"],
+    consultantIds: ["c2", "c5"],
   },
   {
     id: "p6",
@@ -70,18 +105,81 @@ export const programs: Program[] = [
     completedHours: 88,
     maxApplications: 70,
     usedApplications: 42,
+    internalTicketLimit: 50,
+    externalTicketLimit: 20,
+    periodStart: "2026-02-01",
+    periodEnd: "2026-05-31",
+    weekdays: ["TUE", "THU"],
+    agendaIds: ["3", "4", "6"],
+    consultantIds: ["c1", "c3"],
   },
 ];
 
 export const agendas: Agenda[] = [
-  { id: "1", name: "기술 개발", category: "EMA_기술" },
-  { id: "2", name: "임팩트 측정", category: "임팩트 측정" },
-  { id: "3", name: "비즈니스 모델 수립", category: "BM 수립" },
-  { id: "4", name: "고객 개발", category: "고객개발" },
-  { id: "5", name: "투자 유치", category: "투자" },
-  { id: "6", name: "마케팅 전략", category: "마케팅" },
-  { id: "7", name: "인사/조직 관리", category: "조직" },
-  { id: "8", name: "법률/계약", category: "법률" },
+  {
+    id: "1",
+    name: "기술 개발",
+    scope: "internal",
+    description: "기술 로드맵, 개발 우선순위, MVP 고도화",
+    category: "EMA_기술",
+    active: true,
+  },
+  {
+    id: "2",
+    name: "임팩트 측정",
+    scope: "internal",
+    description: "임팩트 지표 설계, 측정 체계 구축",
+    category: "임팩트 측정",
+    active: true,
+  },
+  {
+    id: "3",
+    name: "비즈니스 모델 수립",
+    scope: "internal",
+    description: "BM 진단 및 수익구조 설계",
+    category: "BM 수립",
+    active: true,
+  },
+  {
+    id: "4",
+    name: "고객 개발",
+    scope: "internal",
+    description: "타깃 고객 발굴 및 인터뷰 전략",
+    category: "고객개발",
+    active: true,
+  },
+  {
+    id: "5",
+    name: "투자 유치",
+    scope: "external",
+    description: "IR 자료 점검, 투자자 대응 전략",
+    category: "투자",
+    active: true,
+  },
+  {
+    id: "6",
+    name: "마케팅 전략",
+    scope: "external",
+    description: "채널 믹스 및 퍼포먼스 마케팅 기획",
+    category: "마케팅",
+    active: true,
+  },
+  {
+    id: "7",
+    name: "인사/조직 관리",
+    scope: "external",
+    description: "조직 운영, 채용 및 리더십 체계",
+    category: "조직",
+    active: true,
+  },
+  {
+    id: "8",
+    name: "법률/계약",
+    scope: "external",
+    description: "계약 검토 및 리스크 점검",
+    category: "법률",
+    active: true,
+  },
 ];
 
 export const regularOfficeHours: RegularOfficeHour[] = [
@@ -89,8 +187,11 @@ export const regularOfficeHours: RegularOfficeHour[] = [
     id: "r1",
     title: "2월 정기 오피스아워 - 임팩트 측정 전문",
     consultant: "김임팩트 컨설턴트",
+    consultantId: "c1",
+    programId: "p1",
     month: "2026-02",
     availableDates: ["2026-02-10", "2026-02-17", "2026-02-24"],
+    agendaIds: ["2", "3"],
     description:
       "임팩트 측정 및 평가 전문가와 함께하는 정기 오피스아워입니다. 임팩트 지표 설정, 측정 방법론, 보고서 작성 등을 논의할 수 있습니다.",
   },
@@ -98,8 +199,11 @@ export const regularOfficeHours: RegularOfficeHour[] = [
     id: "r2",
     title: "2월 정기 오피스아워 - 비즈니스 모델 컨설팅",
     consultant: "이비즈 컨설턴트",
+    consultantId: "c2",
+    programId: "p3",
     month: "2026-02",
     availableDates: ["2026-02-12", "2026-02-19", "2026-02-26"],
+    agendaIds: ["3", "4"],
     description:
       "비즈니스 모델 수립 및 개선을 위한 정기 오피스아워입니다. 수익 모델, 고객 세그먼트, 가치 제안 등을 함께 검토합니다.",
   },
@@ -107,6 +211,8 @@ export const regularOfficeHours: RegularOfficeHour[] = [
     id: "r3",
     title: "3월 정기 오피스아워 - 기술 개발 전략",
     consultant: "박기술 컨설턴트",
+    consultantId: "c3",
+    programId: "p2",
     month: "2026-03",
     availableDates: [
       "2026-03-10",
@@ -114,6 +220,7 @@ export const regularOfficeHours: RegularOfficeHour[] = [
       "2026-03-24",
       "2026-03-31",
     ],
+    agendaIds: ["1", "6"],
     description:
       "기술 개발 전략 및 R&D 관리 전문가와의 정기 오피스아워입니다. 기술 로드맵, 개발 우선순위, 협업 전략 등을 논의합니다.",
   },
@@ -151,7 +258,6 @@ export const initialMessages: Message[] = [
 export const getTimeSlots = (
   date: string,
 ): { time: string; available: boolean; reason?: string }[] => {
-  // Mock time slots - some are unavailable
   const allSlots = [
     "09:00",
     "10:00",
@@ -163,17 +269,10 @@ export const getTimeSlots = (
     "17:00",
   ];
 
-  return allSlots.map((time) => {
-    // Mock logic: make some slots unavailable
-    const isUnavailable = time === "11:00" || time === "16:00";
-    return {
-      time,
-      available: !isUnavailable,
-      reason: isUnavailable
-        ? "이미 예약된 시간입니다"
-        : undefined,
-    };
-  });
+  return allSlots.map((time) => ({
+    time,
+    available: true,
+  }));
 };
 
 export const initialConsultants: Consultant[] = [

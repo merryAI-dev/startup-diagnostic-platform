@@ -1,4 +1,27 @@
-import { Calendar, CalendarClock, FileText, Settings, LayoutDashboard, Shield, ClipboardList, Users, UserCog, MessageSquareText, Target, UsersRound, AlertCircle, TrendingUp, Newspaper, Bell, MessageSquare, Sparkles, CalendarRange, KanbanSquare, UserPlus } from "lucide-react";
+import { type ComponentType } from "react";
+import {
+  AlertCircle,
+  Bell,
+  Calendar,
+  CalendarClock,
+  CalendarRange,
+  ClipboardList,
+  FileText,
+  KanbanSquare,
+  LayoutDashboard,
+  MessageSquare,
+  MessageSquareText,
+  Newspaper,
+  Settings,
+  Shield,
+  Sparkles,
+  Target,
+  TrendingUp,
+  UserCog,
+  UserPlus,
+  Users,
+  UsersRound,
+} from "lucide-react";
 import { cn } from "../ui/utils";
 
 interface SidebarNavProps {
@@ -8,10 +31,18 @@ interface SidebarNavProps {
   disabledPages?: Set<string>;
 }
 
-const adminNavItems = [
+type NavItem = {
+  id: string;
+  label: string;
+  icon: ComponentType<{ className?: string }>;
+};
+
+const adminNavItems: NavItem[] = [
   { id: "admin-dashboard", label: "관리자 대시보드", icon: Shield },
   { id: "admin-applications", label: "신청 관리", icon: ClipboardList },
   { id: "admin-programs", label: "사업별 프로그램", icon: Target },
+  { id: "admin-program-list", label: "사업 관리", icon: FileText },
+  { id: "admin-agendas", label: "아젠다 관리", icon: FileText },
   { id: "admin-consultants", label: "컨설턴트 관리", icon: UserCog },
   { id: "admin-users", label: "사용자 관리", icon: Users },
   { id: "admin-communication", label: "커뮤니케이션 센터", icon: MessageSquareText },
@@ -19,7 +50,20 @@ const adminNavItems = [
   { id: "pending-reports", label: "미작성 보고서", icon: AlertCircle }, // 추가
 ];
 
-const userNavItems = [
+const consultantNavItems: NavItem[] = [
+  { id: "admin-dashboard", label: "담당 사업 현황", icon: LayoutDashboard },
+  { id: "consultant-calendar", label: "내 일정 캘린더", icon: CalendarRange },
+  {
+    id: "consultant-schedule-settings",
+    label: "내 스케줄 설정",
+    icon: CalendarClock,
+  },
+  { id: "consultant-profile", label: "내 정보 입력", icon: UserCog },
+  { id: "pending-reports", label: "오피스아워 일지", icon: FileText },
+  { id: "admin-applications", label: "신청 관리", icon: ClipboardList },
+];
+
+const userNavItems: NavItem[] = [
   { id: "dashboard", label: "대시보드", icon: LayoutDashboard },
   { id: "notifications", label: "알림", icon: Bell }, // 새로 추가
   { id: "messages", label: "메시지", icon: MessageSquare }, // 새로 추가
@@ -51,8 +95,13 @@ export function SidebarNav({
   userRole = "user",
   disabledPages,
 }: SidebarNavProps) {
-  const isAdminUser = userRole === "admin" || userRole === "consultant" || userRole === "staff";
-  const navItems = isAdminUser ? adminNavItems : userNavItems;
+  const isAdminUser = userRole === "admin" || userRole === "staff";
+  const isConsultantUser = userRole === "consultant";
+  const navItems = isAdminUser
+    ? adminNavItems
+    : isConsultantUser
+      ? consultantNavItems
+      : userNavItems;
   const companyCoreNavItems = userNavItems.filter((item) =>
     companyCoreNavIds.has(item.id)
   );
@@ -60,7 +109,7 @@ export function SidebarNav({
     (item) => !companyCoreNavIds.has(item.id)
   );
 
-  const renderNavButton = (item: (typeof userNavItems)[number]) => {
+  const renderNavButton = (item: NavItem) => {
     const Icon = item.icon;
     const isActive = currentPage === item.id;
     const isDisabled = disabledPages?.has(item.id) ?? false;
@@ -91,7 +140,7 @@ export function SidebarNav({
   return (
     <div className="w-64 border-r bg-white h-full flex flex-col">
       <nav className="flex-1 p-4 space-y-1">
-        {isAdminUser ? (
+        {isAdminUser || isConsultantUser ? (
           navItems.map((item) => renderNavButton(item))
         ) : (
           <>
