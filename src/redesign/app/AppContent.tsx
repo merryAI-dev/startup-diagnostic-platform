@@ -674,6 +674,8 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
   const [reportFormApplication, setReportFormApplication] = useState<Application | null>(null);
   const [reportBeingEdited, setReportBeingEdited] = useState<OfficeHourReport | null>(null);
   const [reportPopupDismissed, setReportPopupDismissed] = useState<Record<string, number>>({});
+  const reportPopupOpenedRef = useRef(false);
+  const reportPopupSessionKey = "office-hour-report-popup-shown";
 
   // 새로운 기능을 위한 상태
   const [notifications, setNotifications] = useState<Notification[]>(mockNotifications);
@@ -1246,7 +1248,12 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       || user.role === "admin"
       || (user.role !== "consultant" && user.role !== "staff")
       || reportFormOpen
+      || reportPopupOpenedRef.current
     ) {
+      return;
+    }
+    if (sessionStorage.getItem(reportPopupSessionKey) === "true") {
+      reportPopupOpenedRef.current = true;
       return;
     }
 
@@ -1268,12 +1275,14 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       })
       .map((app) => ({ app, endTime: getSessionEndTime(app) }))
       .filter((item) => item.endTime && now >= item.endTime)
-      .sort((a, b) => (a.endTime!.getTime() - b.endTime!.getTime()));
+      .sort((a, b) => (b.endTime!.getTime() - a.endTime!.getTime()));
 
     const firstCandidate = candidates[0];
     if (firstCandidate) {
       setReportFormApplication(firstCandidate.app);
       setReportFormOpen(true);
+      reportPopupOpenedRef.current = true;
+      sessionStorage.setItem(reportPopupSessionKey, "true");
     }
   }, [
     user,
@@ -1283,6 +1292,17 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     officeHourSlotList,
     reportPopupDismissed,
   ]);
+
+  useEffect(() => {
+    reportPopupOpenedRef.current = false;
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (reportFormOpen) {
+      reportPopupOpenedRef.current = true;
+      sessionStorage.setItem(reportPopupSessionKey, "true");
+    }
+  }, [reportFormOpen, reportPopupSessionKey]);
 
   // 미작성 보고서 알림 생성/정리
   useEffect(() => {
