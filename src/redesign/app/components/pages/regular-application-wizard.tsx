@@ -84,7 +84,11 @@ export function RegularApplicationWizard({
     const selectedDateKey = format(selectedDate, "yyyy-MM-dd");
     applications.forEach((application) => {
       if (application.type !== "regular") return;
-      if (application.agenda !== selectedAgenda.name) return;
+      if (application.agendaId) {
+        if (application.agendaId !== selectedAgenda.id) return;
+      } else if (application.agenda !== selectedAgenda.name) {
+        return;
+      }
       if (
         application.status !== "pending"
         && application.status !== "review"
