@@ -204,12 +204,12 @@ function isDateKey(value?: string): value is string {
 }
 
 function normalizeDateKey(value?: string): string | null {
-  if (!value) return null;
-  const trimmed = value.trim();
+  const raw = typeof value === "string" ? value : "";
+  const trimmed = raw.trim();
   if (!trimmed) return null;
   if (isDateKey(trimmed)) return trimmed;
 
-  const normalized = trimmed.replace(/[./\s]+/g, "-");
+  const normalized = raw.replace(/[./\s]+/g, "-").trim();
   const parts = normalized.split("-").filter(Boolean);
   if (parts.length !== 3) return null;
 
@@ -812,7 +812,10 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       regularOfficeHourList.map((officeHour) => [officeHour.id, officeHour])
     );
     const programNameById = new Map(
-      programList.map((program) => [program.id, program.name?.trim()].filter(([, name]) => name))
+      programList.flatMap((program) => {
+        const name = program.name?.trim();
+        return name ? [[program.id, name] as const] : [];
+      })
     );
 
     return applications.map((application) => {
@@ -866,8 +869,10 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
 
   const resolvedRegularOfficeHourList = useMemo(() => {
     const programNameById = new Map(
-      programList
-        .map((program) => [program.id, program.name?.trim()].filter(([, name]) => name))
+      programList.flatMap((program) => {
+        const name = program.name?.trim();
+        return name ? [[program.id, name] as const] : [];
+      })
     );
     return regularOfficeHourList.map((officeHour) => {
       if (!officeHour.programId) return officeHour;
@@ -1265,8 +1270,9 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       .filter((item) => item.endTime && now >= item.endTime)
       .sort((a, b) => (a.endTime!.getTime() - b.endTime!.getTime()));
 
-    if (candidates.length > 0) {
-      setReportFormApplication(candidates[0].app);
+    const firstCandidate = candidates[0];
+    if (firstCandidate) {
+      setReportFormApplication(firstCandidate.app);
       setReportFormOpen(true);
     }
   }, [
@@ -1322,11 +1328,12 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
               ? `기한 초과 ${deadlineInfo.overdueDays}일`
               : `D-${Math.max(0, deadlineInfo.daysLeft)}`
             : "작성 필요";
+          const priority: Notification["priority"] = deadlineInfo?.isOverdue ? "high" : "medium";
           return {
             ...n,
             title: "오피스아워 일지 작성 필요",
             content: `${sessionDate} 진행 세션 보고서를 작성해주세요. (${statusText})`,
-            priority: deadlineInfo?.isOverdue ? "high" : "medium",
+            priority,
           };
         });
 
@@ -1358,7 +1365,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
             createdAt: new Date(),
             userId: user.id,
             relatedId: app.id,
-            priority: deadlineInfo?.isOverdue ? "high" : "medium",
+            priority: (deadlineInfo?.isOverdue ? "high" : "medium") as Notification["priority"],
           };
         });
 
@@ -1642,7 +1649,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     const shouldClearConsultant = nextStatus === "review";
     const clearAssignmentPatch = shouldClearConsultant ? {
       consultant: "담당자 배정 중",
-      consultantId: null,
+      consultantId: "",
     } : {};
     const nextApplications = applications.map((app) =>
       app.id === id
@@ -1672,7 +1679,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     const slotId = targetApplication.officeHourSlotId;
     if (!slotId) return;
 
-    if (nextStatus === "cancelled") {
+    if (status === "cancelled") {
       const shouldOpen = !hasOtherActiveApplicationsForSlot(slotId, id, nextApplications);
       if (!shouldOpen) return;
       if (isFirebaseConfigured) {
