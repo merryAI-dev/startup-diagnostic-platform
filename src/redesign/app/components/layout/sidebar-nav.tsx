@@ -29,6 +29,7 @@ interface SidebarNavProps {
   onNavigate: (page: string) => void;
   userRole?: string;
   disabledPages?: Set<string>;
+  attentionPages?: Set<string>;
 }
 
 type NavItem = {
@@ -94,6 +95,7 @@ export function SidebarNav({
   onNavigate,
   userRole = "user",
   disabledPages,
+  attentionPages,
 }: SidebarNavProps) {
   const isAdminUser = userRole === "admin" || userRole === "staff";
   const isConsultantUser = userRole === "consultant";
@@ -113,6 +115,7 @@ export function SidebarNav({
     const Icon = item.icon;
     const isActive = currentPage === item.id;
     const isDisabled = disabledPages?.has(item.id) ?? false;
+    const needsAttention = attentionPages?.has(item.id) ?? false;
 
     return (
       <button
@@ -132,7 +135,10 @@ export function SidebarNav({
         )}
       >
         <Icon className="w-5 h-5" />
-        <span className="text-sm">{item.label}</span>
+        <span className="text-sm flex-1">{item.label}</span>
+        {needsAttention && (
+          <span className="h-2 w-2 rounded-full bg-red-500" />
+        )}
       </button>
     );
   };

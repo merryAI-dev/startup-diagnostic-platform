@@ -68,6 +68,7 @@ export function AdminConsultants({
   onUpdateConsultant,
   onAddConsultant,
 }: AdminConsultantsProps) {
+  const scheduleRange = `${TIME_SLOTS[0].start} ~ ${TIME_SLOTS[TIME_SLOTS.length - 1].end}`;
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [selectedConsultantId, setSelectedConsultantId] = useState<string | null>(
     null
@@ -353,7 +354,7 @@ export function AdminConsultants({
                 </div>
 
                 <div className="text-xs text-muted-foreground">
-                  화/목 가능 슬롯: <span className="font-semibold text-foreground">{availableSlots}</span>
+                  화/목 가능 시간: <span className="font-semibold text-foreground">{scheduleRange}</span>
                 </div>
 
                 <div className="space-y-1">
@@ -364,7 +365,11 @@ export function AdminConsultants({
                         const agenda = agendas.find((item) => item.id === agendaId);
                         if (!agenda) return null;
                         return (
-                          <Badge key={agendaId} variant="outline">
+                          <Badge
+                            key={agendaId}
+                            variant="outline"
+                            className="border-slate-200 bg-slate-900/5 text-slate-900 font-medium"
+                          >
                             {agenda.name}
                           </Badge>
                         );
