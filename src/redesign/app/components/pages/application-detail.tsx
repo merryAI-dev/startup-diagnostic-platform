@@ -27,6 +27,9 @@ interface ApplicationDetailProps {
   onBack: () => void;
   onSendMessage: (content: string, files: FileItem[]) => void;
   onCancelApplication: () => void;
+  currentUserRole?: string;
+  currentConsultantId?: string | null;
+  currentConsultantName?: string | null;
 }
 
 export function ApplicationDetail({
@@ -35,6 +38,9 @@ export function ApplicationDetail({
   onBack,
   onSendMessage,
   onCancelApplication,
+  currentUserRole,
+  currentConsultantId,
+  currentConsultantName,
 }: ApplicationDetailProps) {
   const [messageContent, setMessageContent] = useState("");
   const [messageFiles, setMessageFiles] = useState<FileItem[]>([]);
@@ -55,6 +61,20 @@ export function ApplicationDetail({
   ];
 
   const canCancel = application.status === "pending" || application.status === "review";
+  const shouldShowConsultant = (consultant?: string) =>
+    Boolean(consultant && consultant !== "담당자 배정 중");
+  const isConsultantUser = currentUserRole === "consultant";
+  const normalizeConsultantName = (value?: string | null) =>
+    (value ?? "").replace(/\s*컨설턴트\s*$/u, "").trim().toLowerCase();
+  const isAssignedToCurrentConsultant = () => {
+    if (!isConsultantUser) return false;
+    if (currentConsultantId && application.consultantId) {
+      return currentConsultantId === application.consultantId;
+    }
+    const appName = normalizeConsultantName(application.consultant);
+    const currentName = normalizeConsultantName(currentConsultantName);
+    return appName !== "" && currentName !== "" && appName === currentName;
+  };
 
   return (
     <div className="p-8 space-y-6">
@@ -69,9 +89,18 @@ export function ApplicationDetail({
               <h1>{application.officeHourTitle}</h1>
               <StatusChip status={application.status} />
             </div>
-            <p className="text-sm text-muted-foreground">
-              {application.consultant}
-            </p>
+            {shouldShowConsultant(application.consultant) && (
+              <div className="flex items-center gap-2">
+                <p className="text-sm text-muted-foreground">
+                  {application.consultant}
+                </p>
+                {isConsultantUser && !isAssignedToCurrentConsultant() && (
+                  <span className="text-xs px-2 py-0.5 rounded-full bg-muted text-muted-foreground">
+                    다른 컨설턴트
+                  </span>
+                )}
+              </div>
+            )}
           </div>
           {canCancel && (
             <Button

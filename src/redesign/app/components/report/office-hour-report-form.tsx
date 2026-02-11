@@ -152,12 +152,14 @@ export function OfficeHourReportForm({
   };
 
   return (
-    <Dialog open={open} onOpenChange={onClose}>
+    <Dialog open={open} onOpenChange={(nextOpen) => {
+      if (!nextOpen) onClose();
+    }}>
       <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <div className="flex items-center justify-between gap-4">
           <div>
-            <DialogTitle className="text-2xl">
+            <DialogTitle className="text-2xl whitespace-nowrap overflow-hidden text-ellipsis">
               {initialReport ? "오피스아워 보고서 수정" : "오피스아워 보고서 작성"}
             </DialogTitle>
             <p className="text-sm text-muted-foreground mt-1">
@@ -169,19 +171,19 @@ export function OfficeHourReportForm({
               </p>
             )}
           </div>
-            <div className="flex items-center gap-2">
-              <div className="flex items-center gap-2 bg-amber-50 text-amber-700 px-3 py-1.5 rounded-lg border border-amber-200">
-                <AlertCircle className="w-4 h-4" />
-                <span className="text-sm font-medium">
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 bg-amber-50 text-amber-700 px-3 py-1.5 rounded-lg border border-amber-200">
+              <AlertCircle className="w-4 h-4" />
+              <span className="text-sm font-medium whitespace-nowrap">
                   {deadlineInfo
                     ? deadlineInfo.isOverdue
                       ? `기한 초과 ${deadlineInfo.overdueDays}일`
                       : `D-${Math.max(0, deadlineInfo.daysLeft)}`
                     : "작성 필수"}
                 </span>
-              </div>
             </div>
           </div>
+        </div>
         </DialogHeader>
 
         {deadlineInfo && !initialReport && (

@@ -18,6 +18,9 @@ export function ApplicationHistory({
   applications,
   onViewApplication,
 }: ApplicationHistoryProps) {
+  const shouldShowConsultant = (consultant?: string) =>
+    Boolean(consultant && consultant !== "담당자 배정 중");
+
   const filterByStatus = (status?: ApplicationStatus) => {
     if (!status) return applications;
     return applications.filter((app) => app.status === status);
@@ -49,9 +52,16 @@ export function ApplicationHistory({
                   </div>
                   <div>
                     <h3 className="text-sm mb-1">{app.officeHourTitle}</h3>
-                    <p className="text-sm text-muted-foreground">
-                      {app.consultant} · {app.agenda}
-                    </p>
+                    {(() => {
+                      const parts = [];
+                      if (shouldShowConsultant(app.consultant)) parts.push(app.consultant);
+                      if (app.agenda) parts.push(app.agenda);
+                      return parts.length > 0 ? (
+                        <p className="text-sm text-muted-foreground">
+                          {parts.join(" · ")}
+                        </p>
+                      ) : null;
+                    })()}
                   </div>
                   <div className="flex items-center gap-4 text-xs text-muted-foreground">
                     {app.scheduledDate ? (

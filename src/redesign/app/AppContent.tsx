@@ -673,14 +673,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
   const [reportFormOpen, setReportFormOpen] = useState(false);
   const [reportFormApplication, setReportFormApplication] = useState<Application | null>(null);
   const [reportBeingEdited, setReportBeingEdited] = useState<OfficeHourReport | null>(null);
-  const [reportPopupDismissed, setReportPopupDismissed] = useState<Record<string, number>>(() => {
-    try {
-      const raw = sessionStorage.getItem("report-popup-dismissed");
-      return raw ? (JSON.parse(raw) as Record<string, number>) : {};
-    } catch {
-      return {};
-    }
-  });
+  const [reportPopupDismissed, setReportPopupDismissed] = useState<Record<string, number>>({});
 
   // 새로운 기능을 위한 상태
   const [notifications, setNotifications] = useState<Notification[]>(mockNotifications);
@@ -792,6 +785,17 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     return new Set(currentConsultant?.agendaIds ?? []);
   }, [currentConsultant?.agendaIds, resolvedRole]);
 
+  const agendaNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    agendaList.forEach((agenda) => {
+      const name = agenda.name?.trim();
+      if (name) {
+        map.set(agenda.id, name);
+      }
+    });
+    return map;
+  }, [agendaList]);
+
   const consultantAgendaNames = useMemo(() => {
     if (resolvedRole !== "consultant") return new Set<string>();
     const names = agendaList
@@ -800,40 +804,111 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     return new Set(names);
   }, [agendaList, consultantAgendaIds, resolvedRole]);
 
-  const scopedApplications = useMemo(() => {
-    if (resolvedRole !== "consultant") return applications;
-    return applications.filter((application) => {
-      const isAssignedToConsultant =
-        (application.consultantId && consultantIdCandidates.has(application.consultantId))
-        || (normalizeConsultantDisplayName(application.consultant) !== ""
-          && consultantNameCandidates.has(normalizeConsultantDisplayName(application.consultant)));
-      if (isAssignedToConsultant) return true;
+  const resolvedApplications = useMemo(() => {
+    const slotTitleById = new Map(
+      officeHourSlotList.map((slot) => [slot.id, slot.title])
+    );
+    const officeHourById = new Map(
+      regularOfficeHourList.map((officeHour) => [officeHour.id, officeHour])
+    );
+    const programNameById = new Map(
+      programList.map((program) => [program.id, program.name?.trim()].filter(([, name]) => name))
+    );
 
-      const isPending = application.status === "pending" || application.status === "review";
-      const isUnassigned = !application.consultantId
-        && (!application.consultant || application.consultant === "담당자 배정 중");
+    return applications.map((application) => {
+      const inferredProgramId = (() => {
+        if (application.programId) return application.programId;
+        if (application.officeHourId && application.officeHourId.includes(":")) {
+          return application.officeHourId.split(":")[0];
+        }
+        if (application.officeHourSlotId && application.officeHourSlotId.includes("_")) {
+          return application.officeHourSlotId.split("_")[0];
+        }
+        return undefined;
+      })();
 
-      const agendaMatch = consultantAgendaNames.has(application.agenda);
-      if (isPending && isUnassigned && agendaMatch) return true;
+      const agendaName = application.agendaId
+        ? agendaNameById.get(application.agendaId)
+        : undefined;
+      const resolvedAgenda = agendaName ?? application.agenda ?? "미지정";
 
-      const isConfirmed =
-        application.status === "confirmed" || application.status === "completed";
-      if (isConfirmed && agendaMatch) return true;
+      let resolvedOfficeHourTitle = application.officeHourTitle;
+      if (application.officeHourSlotId && slotTitleById.has(application.officeHourSlotId)) {
+        resolvedOfficeHourTitle = slotTitleById.get(application.officeHourSlotId)!;
+      } else if (application.officeHourId && officeHourById.has(application.officeHourId)) {
+        resolvedOfficeHourTitle = officeHourById.get(application.officeHourId)!.title;
+      }
 
-      const isCancelled = application.status === "cancelled";
-      return isCancelled && agendaMatch;
+      if (application.type === "regular" && inferredProgramId) {
+        const programName = programNameById.get(inferredProgramId);
+        if (programName) {
+          resolvedOfficeHourTitle = `${programName} 정기 오피스아워`;
+        }
+      } else if (application.type === "irregular" && agendaName) {
+        resolvedOfficeHourTitle = `비정기 오피스아워 - ${agendaName}`;
+      }
+
+      if (
+        resolvedAgenda === application.agenda
+        && resolvedOfficeHourTitle === application.officeHourTitle
+      ) {
+        return application;
+      }
+
+      return {
+        ...application,
+        programId: application.programId ?? inferredProgramId,
+        agenda: resolvedAgenda,
+        officeHourTitle: resolvedOfficeHourTitle,
+      };
     });
+  }, [agendaNameById, applications, officeHourSlotList, programList, regularOfficeHourList]);
+
+  const resolvedRegularOfficeHourList = useMemo(() => {
+    const programNameById = new Map(
+      programList
+        .map((program) => [program.id, program.name?.trim()].filter(([, name]) => name))
+    );
+    return regularOfficeHourList.map((officeHour) => {
+      if (!officeHour.programId) return officeHour;
+      const programName = programNameById.get(officeHour.programId);
+      if (!programName) return officeHour;
+      if (!officeHour.title.includes("정기 오피스아워")) return officeHour;
+      const nextTitle = `${programName} 정기 오피스아워`;
+      if (nextTitle === officeHour.title) return officeHour;
+      return {
+        ...officeHour,
+        title: nextTitle,
+      };
+    });
+  }, [programList, regularOfficeHourList]);
+
+  const scopedApplications = useMemo(() => {
+    if (resolvedRole === "user") {
+      const uid = firebaseUser?.uid ?? user.id;
+      return resolvedApplications.filter((application) => {
+        if (application.createdByUid && uid) {
+          return application.createdByUid === uid;
+        }
+        if (user.companyName) {
+          return application.companyName === user.companyName;
+        }
+        return false;
+      });
+    }
+    if (resolvedRole !== "consultant") return resolvedApplications;
+    return resolvedApplications;
   }, [
-    applications,
-    consultantAgendaNames,
-    consultantIdCandidates,
-    consultantNameCandidates,
+    firebaseUser?.uid,
+    resolvedApplications,
     resolvedRole,
+    user.companyName,
+    user.id,
   ]);
 
   const scopedRegularOfficeHourList = useMemo(() => {
-    if (resolvedRole !== "consultant") return regularOfficeHourList;
-    return regularOfficeHourList.filter((officeHour) => {
+    if (resolvedRole !== "consultant") return resolvedRegularOfficeHourList;
+    return resolvedRegularOfficeHourList.filter((officeHour) => {
       if (officeHour.consultantId && consultantIdCandidates.has(officeHour.consultantId)) {
         return true;
       }
@@ -843,7 +918,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
   }, [
     consultantIdCandidates,
     consultantNameCandidates,
-    regularOfficeHourList,
+    resolvedRegularOfficeHourList,
     resolvedRole,
   ]);
 
@@ -1154,14 +1229,9 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     return getReportDeadlineInfo(reportFormApplication);
   }, [reportFormApplication, officeHourSlotList]);
 
-  const dismissReportPopup = (applicationId: string) => {
-    const next = { ...reportPopupDismissed, [applicationId]: Date.now() };
-    setReportPopupDismissed(next);
-    try {
-      sessionStorage.setItem("report-popup-dismissed", JSON.stringify(next));
-    } catch {
-      // ignore storage errors
-    }
+  const dismissReportPopup = (applicationId: string, dismissForMs: number) => {
+    const until = Date.now() + dismissForMs;
+    setReportPopupDismissed((prev) => ({ ...prev, [applicationId]: until }));
   };
 
   // 세션 완료 후 보고서 작성 팝업
@@ -1187,10 +1257,9 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     const candidates = eligibleApps
       .filter((app) => !reportedAppIds.has(app.id))
       .filter((app) => {
-        const dismissedAt = reportPopupDismissed[app.id];
-        if (!dismissedAt) return true;
-        const sixHours = 6 * 60 * 60 * 1000;
-        return Date.now() - dismissedAt > sixHours;
+        const dismissedUntil = reportPopupDismissed[app.id];
+        if (!dismissedUntil) return true;
+        return Date.now() > dismissedUntil;
       })
       .map((app) => ({ app, endTime: getSessionEndTime(app) }))
       .filter((item) => item.endTime && now >= item.endTime)
@@ -1359,7 +1428,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
   };
 
   const handleSubmitRegularApplication = async (data: ApplicationFormData) => {
-    const officeHour = regularOfficeHourList.find((oh) => oh.id === data.officeHourId);
+    const officeHour = resolvedRegularOfficeHourList.find((oh) => oh.id === data.officeHourId);
     if (!officeHour) return;
 
     const scheduledDate = formatDateKey(data.date);
@@ -1388,6 +1457,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       officeHourSlotId: selectedSlot?.id ?? data.slotId,
       programId: officeHour.programId,
       officeHourTitle: officeHour.title,
+      agendaId: data.agendaId,
       companyName: user.companyName,
       consultant: "담당자 배정 중",
       sessionFormat: data.sessionFormat,
@@ -1450,6 +1520,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       type: "irregular",
       status: "review",
       officeHourTitle: `비정기 오피스아워 - ${agenda?.name || ""}`,
+      agendaId: data.agendaId,
       companyName: user.companyName,
       consultant: "담당자 배정 중",
       sessionFormat: data.sessionFormat,
@@ -1644,7 +1715,10 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       toast.error("담당 수락할 수 있는 상태가 아닙니다");
       return;
     }
-    if (!consultantAgendaNames.has(targetApplication.agenda)) {
+    const agendaOk = targetApplication.agendaId
+      ? consultantAgendaIds.has(targetApplication.agendaId)
+      : consultantAgendaNames.has(targetApplication.agenda);
+    if (!agendaOk) {
       toast.error("배정된 아젠다와 일치하지 않습니다");
       return;
     }
@@ -1864,7 +1938,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       && toNormalizedEmail(email) !== toNormalizedEmail(authEmail)
       && toNormalizedEmail(requestedSecondaryEmail) !== toNormalizedEmail(authEmail)
         ? authEmail
-        : requestedSecondaryEmail || undefined;
+        : requestedSecondaryEmail;
 
     const consultantId = currentConsultant?.id ?? firebaseUser?.uid ?? `consultant-${Date.now()}`;
     const nextConsultant: Consultant = {
@@ -1873,11 +1947,11 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       name,
       title: currentConsultant?.title ?? "컨설턴트",
       email,
-      phone: values.phone.trim() || undefined,
-      organization: values.organization.trim() || undefined,
+      phone: values.phone.trim(),
+      organization: values.organization.trim(),
       secondaryEmail: accessSafeSecondaryEmail,
-      secondaryPhone: values.secondaryPhone.trim() || undefined,
-      fixedMeetingLink: values.fixedMeetingLink.trim() || undefined,
+      secondaryPhone: values.secondaryPhone.trim(),
+      fixedMeetingLink: values.fixedMeetingLink.trim(),
       expertise: parseExpertiseInput(values.expertise),
       bio: values.bio.trim() || `${name} 컨설턴트`,
       status: currentConsultant?.status ?? "active",
@@ -2002,6 +2076,66 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
   };
 
   const handleUpdateAgenda = async (agendaId: string, data: Partial<Agenda>) => {
+    const prevAgenda = agendaList.find((agenda) => agenda.id === agendaId);
+    const nextName = typeof data.name === "string" ? data.name.trim() : "";
+    const prevName = prevAgenda?.name ?? "";
+    const shouldSyncName =
+      nextName.length > 0 && prevName.length > 0 && nextName !== prevName;
+
+    if (shouldSyncName) {
+      const nextApplications = applications.map((app) => {
+        const matchesAgendaId = app.agendaId === agendaId;
+        const matchesAgendaName = !app.agendaId && app.agenda === prevName;
+        if (!matchesAgendaId && !matchesAgendaName) return app;
+
+        const nextOfficeHourTitle =
+          app.type === "irregular"
+          && (app.officeHourTitle === `비정기 오피스아워 - ${prevName}`
+            || app.officeHourTitle.startsWith("비정기 오피스아워"))
+            ? app.officeHourTitle.replace(prevName, nextName)
+            : app.officeHourTitle;
+
+        return {
+          ...app,
+          agendaId,
+          agenda: nextName,
+          officeHourTitle: nextOfficeHourTitle,
+        };
+      });
+      setApplications(nextApplications);
+
+      if (isFirebaseConfigured) {
+        const appById = new Map(applications.map((app) => [app.id, app]));
+        const applicationUpdates = nextApplications
+          .filter((app) => app.agendaId === agendaId || app.agenda === nextName)
+          .filter((app) => {
+            const prev = appById.get(app.id);
+            return (
+              prev?.agendaId !== app.agendaId
+              || prev?.agenda !== app.agenda
+              || prev?.officeHourTitle !== app.officeHourTitle
+            );
+          })
+          .map((app) => ({
+            type: "update" as const,
+            collection: COLLECTIONS.OFFICE_HOUR_APPLICATIONS,
+            docId: app.id,
+            data: {
+              agendaId: app.agendaId,
+              agenda: app.agenda,
+              officeHourTitle: app.officeHourTitle,
+            },
+          }));
+
+        if (applicationUpdates.length > 0) {
+          const okApps = await officeHourApplicationCrud.batchUpdate(applicationUpdates);
+          if (!okApps) {
+            toast.error("신청 내역의 아젠다 이름 업데이트에 실패했습니다");
+          }
+        }
+      }
+    }
+
     setAgendaList((prev) =>
       prev.map((agenda) => (agenda.id === agendaId ? { ...agenda, ...data } : agenda))
     );
@@ -2036,6 +2170,107 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
   };
 
   const handleUpdateProgram = async (id: string, data: Partial<Program>) => {
+    const prevProgram = programList.find((program) => program.id === id);
+    const nextName = typeof data.name === "string" ? data.name.trim() : "";
+    const prevName = prevProgram?.name ?? "";
+    const shouldSyncTitles =
+      nextName.length > 0 && prevName.length > 0 && nextName !== prevName;
+
+    const buildRegularOfficeHourTitle = (name: string) => `${name} 정기 오피스아워`;
+    const nextDefaultTitle = shouldSyncTitles ? buildRegularOfficeHourTitle(nextName) : "";
+    const prevDefaultTitle = shouldSyncTitles ? buildRegularOfficeHourTitle(prevName) : "";
+
+    const updateOfficeHourTitle = (title: string | undefined) => {
+      if (!shouldSyncTitles || !title) return title ?? "";
+      if (title === prevDefaultTitle) return nextDefaultTitle;
+      if (title.endsWith("정기 오피스아워") && title.includes(prevName)) {
+        return title.replace(prevName, nextName);
+      }
+      return title;
+    };
+
+    if (shouldSyncTitles) {
+      const nextSlots = officeHourSlotList.map((slot) => {
+        if (slot.programId !== id) return slot;
+        const nextTitle = updateOfficeHourTitle(slot.title);
+        const nextDescription = slot.description?.startsWith(`${prevName} ·`)
+          ? slot.description.replace(prevName, nextName)
+          : slot.description;
+        if (nextTitle === slot.title && nextDescription === slot.description) return slot;
+        return {
+          ...slot,
+          title: nextTitle,
+          description: nextDescription,
+        };
+      });
+      setOfficeHourSlotList(nextSlots);
+
+      const nextApplications = applications.map((app) => {
+        if (app.programId !== id || app.type !== "regular") return app;
+        const nextTitle = updateOfficeHourTitle(app.officeHourTitle);
+        if (nextTitle === app.officeHourTitle) return app;
+        return {
+          ...app,
+          officeHourTitle: nextTitle,
+        };
+      });
+      setApplications(nextApplications);
+
+      if (isFirebaseConfigured) {
+        const slotById = new Map(officeHourSlotList.map((slot) => [slot.id, slot]));
+        const slotUpdates = nextSlots
+          .filter((slot) => slot.programId === id)
+          .filter((slot) => {
+            const prev = slotById.get(slot.id);
+            return (
+              prev?.title !== slot.title || prev?.description !== slot.description
+            );
+          })
+          .map((slot) => {
+            const data: Record<string, any> = { title: slot.title };
+            if (slot.description !== undefined) {
+              data.description = slot.description;
+            }
+            return {
+              type: "update" as const,
+              collection: COLLECTIONS.OFFICE_HOUR_SLOTS,
+              docId: slot.id,
+              data,
+            };
+          });
+
+        const appById = new Map(applications.map((app) => [app.id, app]));
+        const applicationUpdates = nextApplications
+          .filter((app) => app.programId === id && app.type === "regular")
+          .filter((app) => {
+            const prev = appById.get(app.id);
+            return prev?.officeHourTitle !== app.officeHourTitle;
+          })
+          .map((app) => ({
+            type: "update" as const,
+            collection: COLLECTIONS.OFFICE_HOUR_APPLICATIONS,
+            docId: app.id,
+            data: {
+              officeHourTitle: app.officeHourTitle,
+            },
+          }));
+
+        if (slotUpdates.length > 0) {
+          const okSlots = await officeHourSlotCrud.batchUpdate(slotUpdates);
+          if (!okSlots) {
+            toast.error("오피스아워 슬롯 이름 업데이트에 실패했습니다");
+          }
+        }
+
+        if (applicationUpdates.length > 0) {
+          const okApps = await officeHourApplicationCrud.batchUpdate(applicationUpdates);
+          if (!okApps) {
+            toast.error("신청 내역의 오피스아워 이름 업데이트에 실패했습니다");
+          }
+        }
+      }
+    }
+
     setProgramList((prev) => prev.map((program) => (program.id === id ? { ...program, ...data } : program)));
     if (isFirebaseConfigured) {
       const ok = await programCrud.update(
@@ -2292,7 +2527,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
         <main className="flex-1 overflow-y-auto bg-gray-50">
           {currentPage === "dashboard" && (
             <DashboardCalendar
-              applications={applications}
+              applications={resolvedApplications}
               user={user}
               programs={programList}
               onNavigate={handleNavigateLoose}
@@ -2301,7 +2536,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
 
           {currentPage === "regular" && (
             <RegularOfficeHoursCalendar
-              officeHours={regularOfficeHourList}
+              officeHours={resolvedRegularOfficeHourList}
               agendas={agendaList}
               onSelectOfficeHour={handleSelectOfficeHour}
             />
@@ -2310,7 +2545,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
           {currentPage === "regular-detail" && selectedOfficeHour && (
             <RegularOfficeHourDetail
               officeHour={selectedOfficeHour}
-              applications={applications}
+              applications={scopedApplications}
               onBack={() => handleNavigate("regular")}
               onStartApplication={handleStartRegularApplication}
               onViewApplication={handleViewApplication}
@@ -2320,8 +2555,8 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
           {currentPage === "regular-wizard" && selectedOfficeHour && (
             <RegularApplicationWizard
               officeHour={selectedOfficeHour}
-              officeHours={regularOfficeHourList}
-              applications={applications}
+              officeHours={resolvedRegularOfficeHourList}
+              applications={resolvedApplications}
               consultants={consultants}
               agendas={agendaList}
               onBack={() => handleNavigate("regular-detail", selectedOfficeHour.id)}
@@ -2351,7 +2586,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
 
           {currentPage === "history" && (
             <ApplicationHistoryCalendar
-              applications={applications}
+              applications={scopedApplications}
               onNavigate={handleNavigateLoose}
             />
           )}
@@ -2371,6 +2606,9 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
               onCancelApplication={() =>
                 handleCancelApplication(selectedApplication.id)
               }
+              currentUserRole={resolvedRole}
+              currentConsultantId={currentConsultant?.id ?? null}
+              currentConsultantName={currentConsultant?.name ?? null}
             />
           )}
 
@@ -2477,7 +2715,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
           {currentPage === "unified-calendar" && (
             <UnifiedCalendar
               currentUser={user}
-              applications={applications}
+              applications={resolvedApplications}
               programs={programList}
               onNavigateToApplication={(id) => {
                 handleNavigate("application", id);
@@ -2631,6 +2869,9 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
                 applications={scopedApplications}
                 onUpdateStatus={handleUpdateApplicationStatus}
                 onUpdateApplication={handleUpdateApplication}
+                currentUserRole={resolvedRole}
+                currentConsultantId={currentConsultant?.id ?? null}
+                currentConsultantName={currentConsultant?.name ?? null}
               />
             </ProtectedRoute>
           )}
@@ -2676,7 +2917,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
             <ProtectedRoute requiredRole="admin">
               <AdminPrograms
                 programs={programList}
-                applications={applications}
+                applications={resolvedApplications}
                 agendas={agendaList}
                 onAddProgram={handleAddProgram}
                 onUpdateProgram={handleUpdateProgram}
@@ -2690,7 +2931,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
             <ProtectedRoute requiredRole="admin">
               <AdminPrograms
                 programs={programList}
-                applications={applications}
+                applications={resolvedApplications}
                 agendas={agendaList}
                 onAddProgram={handleAddProgram}
                 onUpdateProgram={handleUpdateProgram}
@@ -2755,6 +2996,9 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
               open={reportFormOpen}
               deadlineInfo={reportFormDeadlineInfo}
               onClose={() => {
+                if (reportFormApplication && !reportBeingEdited) {
+                  dismissReportPopup(reportFormApplication.id, 60 * 60 * 1000);
+                }
                 setReportFormOpen(false);
                 setReportFormApplication(null);
                 setReportBeingEdited(null);

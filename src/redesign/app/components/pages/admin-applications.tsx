@@ -23,18 +23,38 @@ interface AdminApplicationsProps {
   applications: Application[];
   onUpdateStatus: (id: string, status: ApplicationStatus) => void;
   onUpdateApplication: (id: string, data: Partial<Application>) => void;
+  currentUserRole?: string;
+  currentConsultantId?: string | null;
+  currentConsultantName?: string | null;
 }
 
 export function AdminApplications({
   applications,
   onUpdateStatus,
   onUpdateApplication,
+  currentUserRole,
+  currentConsultantId,
+  currentConsultantName,
 }: AdminApplicationsProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [typeFilter, setTypeFilter] = useState<string>("all");
   const [companyFilter, setCompanyFilter] = useState<string>("all");
   const [selectedApplication, setSelectedApplication] = useState<Application | null>(null);
+  const isConsultantUser = currentUserRole === "consultant";
+
+  const normalizeConsultantName = (value?: string | null) =>
+    (value ?? "").replace(/\s*컨설턴트\s*$/u, "").trim().toLowerCase();
+
+  const isAssignedToCurrentConsultant = (app: Application) => {
+    if (!isConsultantUser) return false;
+    if (currentConsultantId && app.consultantId) {
+      return currentConsultantId === app.consultantId;
+    }
+    const appName = normalizeConsultantName(app.consultant);
+    const currentName = normalizeConsultantName(currentConsultantName);
+    return appName !== "" && currentName !== "" && appName === currentName;
+  };
 
   const companyOptions = Array.from(
     new Set(

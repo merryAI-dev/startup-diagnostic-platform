@@ -21,13 +21,27 @@ export function DashboardCalendar({ applications, user, programs, onNavigate }: 
   // 사용자의 프로그램만 필터링
   const userPrograms = programs.filter((p) => user.programs?.includes(p.id) || false);
 
+  const canViewAll =
+    user.permissions?.canViewAllApplications
+    || user.role === "admin"
+    || user.role === "staff"
+    || user.role === "consultant";
+  const companyName = user.companyName?.trim();
+  const userApplications = canViewAll
+    ? applications
+    : applications.filter((app) => {
+      if (app.createdByUid && app.createdByUid === user.id) return true;
+      if (companyName && app.companyName === companyName) return true;
+      return false;
+    });
+
   // 확정된 일정들
-  const confirmedApplications = applications.filter(
+  const confirmedApplications = userApplications.filter(
     (app) => app.status === "confirmed" && app.scheduledDate
   );
 
   // 대기중인 신청
-  const pendingApplications = applications.filter(
+  const pendingApplications = userApplications.filter(
     (app) => app.status === "pending" || app.status === "review"
   );
 
@@ -79,6 +93,16 @@ export function DashboardCalendar({ applications, user, programs, onNavigate }: 
       default:
         return "#6b7280"; // gray-500
     }
+  };
+
+  const shouldShowConsultant = (consultant?: string) =>
+    Boolean(consultant && consultant !== "담당자 배정 중");
+
+  const buildMetaLine = (app: Application) => {
+    const parts = [];
+    if (shouldShowConsultant(app.consultant)) parts.push(app.consultant);
+    if (app.agenda) parts.push(app.agenda);
+    return parts.join(" · ");
   };
 
   return (
@@ -172,10 +196,21 @@ export function DashboardCalendar({ applications, user, programs, onNavigate }: 
                     className="p-3 border rounded-lg hover:bg-gray-50 cursor-pointer transition-colors"
                   >
                     <div className="flex items-start justify-between gap-2 mb-1">
-                      <p className="text-sm font-medium line-clamp-1">{app.agenda}</p>
-                      <StatusChip status={app.status} size="sm" />
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium leading-snug break-words">
+                          {app.officeHourTitle}
+                        </p>
+                      </div>
+                      <StatusChip status={app.status} size="sm" className="shrink-0 whitespace-nowrap" />
                     </div>
-                    <p className="text-xs text-muted-foreground">{app.consultant}</p>
+                    {(() => {
+                      const metaLine = buildMetaLine(app);
+                      return metaLine ? (
+                        <p className="text-xs text-muted-foreground">
+                          {metaLine}
+                        </p>
+                      ) : null;
+                    })()}
                   </div>
                 ))}
                 {pendingApplications.length > 5 && (
@@ -298,7 +333,12 @@ export function DashboardCalendar({ applications, user, programs, onNavigate }: 
                             }}
                           >
                             <div className="font-medium truncate">{event.scheduledTime}</div>
-                            <div className="text-gray-600 truncate">{event.agenda}</div>
+                            <div className="text-gray-700 truncate">{event.officeHourTitle}</div>
+                            {event.agenda && (
+                              <div className="text-[11px] text-gray-500 truncate">
+                                {event.agenda}
+                              </div>
+                            )}
                           </div>
                         );
                       })}
@@ -344,8 +384,17 @@ export function DashboardCalendar({ applications, user, programs, onNavigate }: 
                     </div>
                     <StatusChip status={event.status} size="sm" />
                   </div>
-                  <h3 className="font-medium text-gray-900 mb-1">{event.agenda}</h3>
-                  <p className="text-sm text-muted-foreground mb-2">{event.consultant}</p>
+                  <h3 className="font-medium text-gray-900 mb-1">{event.officeHourTitle}</h3>
+                  {event.agenda && (
+                    <p className="text-xs text-muted-foreground mb-2">
+                      {event.agenda}
+                    </p>
+                  )}
+                  {shouldShowConsultant(event.consultant) && (
+                    <p className="text-sm text-muted-foreground mb-2">
+                      {event.consultant}
+                    </p>
+                  )}
                   <div className="flex items-center gap-2 text-xs text-muted-foreground">
                     <span className="px-2 py-1 bg-gray-100 rounded">
                       {event.sessionFormat === "online" ? "온라인" : "오프라인"}
@@ -379,8 +428,15 @@ export function DashboardCalendar({ applications, user, programs, onNavigate }: 
                       </span>
                       <span>{event.scheduledTime}</span>
                     </div>
-                    <h3 className="font-medium text-sm text-gray-900 mb-1">{event.agenda}</h3>
-                    <p className="text-xs text-muted-foreground">{event.consultant}</p>
+                    <h3 className="font-medium text-sm text-gray-900 mb-1">{event.officeHourTitle}</h3>
+                    {event.agenda && (
+                      <p className="text-xs text-muted-foreground mb-1">
+                        {event.agenda}
+                      </p>
+                    )}
+                    {shouldShowConsultant(event.consultant) && (
+                      <p className="text-xs text-muted-foreground">{event.consultant}</p>
+                    )}
                   </div>
                 ))}
               </div>
