@@ -12,6 +12,8 @@ interface PendingReportsDashboardProps {
   programs: Program[];
   currentUser: User;
   onCreateReport: (applicationId: string) => void;
+  onEditReport: (report: OfficeHourReport) => void;
+  onDeleteReport: (report: OfficeHourReport) => void;
 }
 
 interface PendingReportItem {
@@ -30,6 +32,8 @@ export function PendingReportsDashboard({
   programs,
   currentUser,
   onCreateReport,
+  onEditReport,
+  onDeleteReport,
 }: PendingReportsDashboardProps) {
   const getSessionEndTime = (app: Application) => {
     const durationHours = app.duration ?? 2;
@@ -147,6 +151,27 @@ export function PendingReportsDashboard({
   }, [pendingReports]);
 
   const overdueCount = pendingReports.filter((p) => p.isOverdue).length;
+  const submittedReports = useMemo(() => {
+    const appMap = new Map(applications.map((app) => [app.id, app]));
+    return reports
+      .map((report) => {
+        const application = appMap.get(report.applicationId);
+        if (!application) return null;
+        const program = programs.find((p) => p.id === (report.programId || application.programId));
+        return {
+          report,
+          application,
+          programName: program?.name || "알 수 없음",
+          programColor: program?.color || "#94a3b8",
+        };
+      })
+      .filter((item): item is NonNullable<typeof item> => Boolean(item))
+      .sort((a, b) => {
+        const timeA = new Date(a.report.updatedAt ?? a.report.createdAt).getTime();
+        const timeB = new Date(b.report.updatedAt ?? b.report.createdAt).getTime();
+        return timeB - timeA;
+      });
+  }, [applications, programs, reports]);
 
   return (
     <div className="h-full flex flex-col bg-gray-50">
@@ -336,6 +361,89 @@ export function PendingReportsDashboard({
                     >
                       보고서 작성
                     </Button>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
+        {/* 작성된 보고서 목록 */}
+        <div className="bg-white rounded-lg border mt-6">
+          <div className="p-6 border-b flex items-center justify-between">
+            <h3 className="font-semibold text-gray-900">작성된 보고서</h3>
+            <span className="text-sm text-muted-foreground">
+              {submittedReports.length}건
+            </span>
+          </div>
+          <div className="divide-y">
+            {submittedReports.length === 0 ? (
+              <div className="p-12 text-center">
+                <FileText className="w-12 h-12 text-slate-300 mx-auto mb-3" />
+                <p className="text-sm text-muted-foreground">
+                  작성된 보고서가 없습니다
+                </p>
+              </div>
+            ) : (
+              submittedReports.map(({ report, application, programName, programColor }) => (
+                <div
+                  key={report.id}
+                  className="p-4 hover:bg-gray-50 transition-colors"
+                >
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-3 mb-2">
+                        <div
+                          className="w-2 h-2 rounded-full"
+                          style={{ backgroundColor: programColor }}
+                        />
+                        <span className="text-xs text-muted-foreground">
+                          {programName}
+                        </span>
+                        <Badge variant="outline" className="text-xs">
+                          만족도 {report.satisfaction}점
+                        </Badge>
+                      </div>
+                      <h4 className="font-medium text-gray-900 mb-1 truncate">
+                        {application.officeHourTitle}
+                      </h4>
+                      <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+                        <div className="flex items-center gap-1.5">
+                          <Calendar className="w-3.5 h-3.5" />
+                          <span>
+                            {report.date
+                              ? format(new Date(report.date), "yyyy년 M월 d일", { locale: ko })
+                              : "-"}
+                          </span>
+                        </div>
+                        <span>•</span>
+                        <span>{report.consultantName || application.consultant}</span>
+                        <span>•</span>
+                        <span>
+                          수정일 {format(new Date(report.updatedAt ?? report.createdAt), "M/d", { locale: ko })}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => onEditReport(report)}
+                      >
+                        보기/수정
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          if (confirm("보고서를 되돌려 미작성 목록으로 보낼까요?")) {
+                            onDeleteReport(report);
+                          }
+                        }}
+                      >
+                        되돌리기
+                      </Button>
+                    </div>
                   </div>
                 </div>
               ))
