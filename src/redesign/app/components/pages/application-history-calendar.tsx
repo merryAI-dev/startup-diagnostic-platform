@@ -22,6 +22,9 @@ export function ApplicationHistoryCalendar({ applications, onNavigate }: Applica
   const [filterStatus, setFilterStatus] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState("");
 
+  const shouldShowConsultant = (consultant?: string) =>
+    Boolean(consultant && consultant !== "담당자 배정 중");
+
   // 캘린더 날짜 생성
   const monthStart = startOfMonth(currentMonth);
   const monthEnd = endOfMonth(currentMonth);
@@ -190,7 +193,9 @@ export function ApplicationHistoryCalendar({ applications, onNavigate }: Applica
                                   <h3 className="font-semibold text-gray-900">{app.agenda}</h3>
                                   <StatusChip status={app.status} size="sm" />
                                 </div>
-                                <p className="text-sm text-muted-foreground">{app.consultant}</p>
+                                {shouldShowConsultant(app.consultant) && (
+                                  <p className="text-sm text-muted-foreground">{app.consultant}</p>
+                                )}
                               </div>
                               <div className="text-right">
                                 {app.scheduledDate && (
@@ -378,7 +383,9 @@ export function ApplicationHistoryCalendar({ applications, onNavigate }: Applica
                       <span className="text-sm font-medium text-gray-900">{app.scheduledTime}</span>
                     </div>
                     <h3 className="font-medium text-gray-900 mb-1">{app.agenda}</h3>
-                    <p className="text-sm text-muted-foreground mb-2">{app.consultant}</p>
+                    {shouldShowConsultant(app.consultant) && (
+                      <p className="text-sm text-muted-foreground mb-2">{app.consultant}</p>
+                    )}
                     <div className="flex gap-2 text-xs">
                       <Badge variant="outline">
                         {app.sessionFormat === "online" ? "온라인" : "오프라인"}
@@ -418,7 +425,9 @@ export function ApplicationHistoryCalendar({ applications, onNavigate }: Applica
                       )}
                     </div>
                     <h3 className="font-semibold text-gray-900 mb-2 line-clamp-2">{app.agenda}</h3>
-                    <p className="text-sm text-muted-foreground mb-3">{app.consultant}</p>
+                    {shouldShowConsultant(app.consultant) && (
+                      <p className="text-sm text-muted-foreground mb-3">{app.consultant}</p>
+                    )}
                     <div className="flex gap-2 text-xs">
                       <Badge variant="outline">
                         {app.sessionFormat === "online" ? "온라인" : "오프라인"}

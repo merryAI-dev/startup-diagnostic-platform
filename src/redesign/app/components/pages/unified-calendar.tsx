@@ -265,17 +265,25 @@ export function UnifiedCalendar({
   );
 
   const renderDayContent = (props: DayContentProps) => {
-    const hasEvent = hasEvents(props.date);
+    const dateKey = toLocalDateKey(props.date);
+    const dayEvents = eventsByDate[dateKey] ?? [];
+    const hasEvent = dayEvents.length > 0;
+    const hasMyEvent = isConsultant && dayEvents.some((event) => isMyEvent(event));
     const isSelected = Boolean(props.activeModifiers.selected);
+    const underlineClass = isSelected
+      ? hasMyEvent
+        ? "bg-blue-200"
+        : "bg-white/80"
+      : hasMyEvent
+        ? "bg-blue-500"
+        : "bg-[#0A2540]/35";
 
     return (
       <div className="relative flex h-full w-full items-center justify-center">
         <span>{props.date.getDate()}</span>
         {hasEvent && (
           <span
-            className={`pointer-events-none absolute bottom-0.5 left-1/2 h-0.5 w-4 -translate-x-1/2 rounded-full ${
-              isSelected ? "bg-white/80" : "bg-[#0A2540]/35"
-            }`}
+            className={`pointer-events-none absolute bottom-0.5 left-1/2 h-0.5 w-4 -translate-x-1/2 rounded-full ${underlineClass}`}
           />
         )}
       </div>
@@ -655,14 +663,21 @@ export function UnifiedCalendar({
                   ) : (
                     <div className="space-y-3">
                       {selectedDateEvents.map((event: Application) => (
-                        <motion.div
-                          key={event.id}
-                          initial={{ opacity: 0, x: -20 }}
-                          animate={{ opacity: 1, x: 0 }}
-                          className="p-3 rounded-lg border-l-4 bg-slate-50 hover:bg-slate-100 cursor-pointer transition-colors"
-                          style={{ borderLeftColor: getProgramColor(event.programId) }}
-                          onClick={() => onNavigateToApplication?.(event.id)}
-                        >
+                          <motion.div
+                            key={event.id}
+                            initial={{ opacity: 0, x: -20 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            className={`p-3 rounded-lg border-l-4 cursor-pointer transition-colors ${
+                              isConsultant && isMyEvent(event) ? "bg-blue-50/70 hover:bg-blue-50" : "bg-slate-50 hover:bg-slate-100"
+                            }`}
+                            style={{
+                              borderLeftColor:
+                                isConsultant && isMyEvent(event)
+                                  ? "#3b82f6"
+                                  : getProgramColor(event.programId),
+                            }}
+                            onClick={() => onNavigateToApplication?.(event.id)}
+                          >
                           <div className="flex items-start justify-between mb-2">
                             <h4 className="font-medium text-sm text-[#0A2540] flex-1">
                               {event.officeHourTitle}
@@ -681,7 +696,14 @@ export function UnifiedCalendar({
                               <Users className="size-3" />
                               <span>{event.consultant}</span>
                               {isConsultant && (
-                                <Badge variant="outline" className="text-[10px]">
+                                <Badge
+                                  className={`text-[10px] ${
+                                    isMyEvent(event)
+                                      ? "bg-blue-100 text-blue-700 border-blue-200"
+                                      : "bg-slate-100 text-slate-600 border-slate-200"
+                                  }`}
+                                  variant="outline"
+                                >
                                   {isMyEvent(event) ? "내 일정" : "다른 컨설턴트"}
                                 </Badge>
                               )}
@@ -858,7 +880,15 @@ export function UnifiedCalendar({
                             animate={{ opacity: 1 }}
                           >
                             <Card
-                              className="p-4 hover:shadow-md transition-shadow cursor-pointer"
+                              className={`p-4 hover:shadow-md transition-shadow cursor-pointer ${
+                                isConsultant && isMyEvent(event) ? "bg-blue-50/60 border-blue-200" : ""
+                              }`}
+                              style={{
+                                borderLeft:
+                                  isConsultant && isMyEvent(event)
+                                    ? "4px solid #3b82f6"
+                                    : undefined,
+                              }}
                               onClick={() => onNavigateToApplication?.(event.id)}
                             >
                               <div className="flex items-start gap-4">
@@ -885,7 +915,14 @@ export function UnifiedCalendar({
                                       <Users className="size-4" />
                                       <span>{event.consultant}</span>
                                       {isConsultant && (
-                                        <Badge variant="outline" className="text-[10px]">
+                                        <Badge
+                                          className={`text-[10px] ${
+                                            isMyEvent(event)
+                                              ? "bg-blue-100 text-blue-700 border-blue-200"
+                                              : "bg-slate-100 text-slate-600 border-slate-200"
+                                          }`}
+                                          variant="outline"
+                                        >
                                           {isMyEvent(event) ? "내 일정" : "다른 컨설턴트"}
                                         </Badge>
                                       )}

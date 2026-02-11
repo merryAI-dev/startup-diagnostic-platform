@@ -6,6 +6,14 @@ import { AlertCircle, Clock, Calendar, FileText } from "lucide-react";
 import { addDays, format, differenceInDays } from "date-fns";
 import { ko } from "date-fns/locale";
 
+const parseLocalDate = (value?: string | null) => {
+  if (!value) return null;
+  const [year, month, day] = value.split("-").map(Number);
+  if (!year || !month || !day) return null;
+  const date = new Date(year, month - 1, day);
+  return Number.isNaN(date.getTime()) ? null : date;
+};
+
 interface PendingReportsDashboardProps {
   applications: Application[];
   reports: OfficeHourReport[];
@@ -46,7 +54,10 @@ export function PendingReportsDashboard({
     }
 
     if (app.scheduledDate) {
-      const fallback = new Date(`${app.scheduledDate}T23:59`);
+      const fallback = (() => {
+        const date = parseLocalDate(app.scheduledDate);
+        return date ? new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59) : null;
+      })();
       if (!Number.isNaN(fallback.getTime())) {
         return fallback;
       }
@@ -70,7 +81,7 @@ export function PendingReportsDashboard({
       .filter((app) => !reportedAppIds.has(app.id))
       .map((app) => {
         const sessionEnd = getSessionEndTime(app);
-        const effectiveEnd = sessionEnd ?? new Date(app.scheduledDate!);
+        const effectiveEnd = sessionEnd ?? parseLocalDate(app.scheduledDate!) ?? new Date();
         const daysSince = differenceInDays(now, effectiveEnd);
         const deadline = addDays(effectiveEnd, 3);
         const daysLeft = Math.max(0, differenceInDays(deadline, now));
@@ -331,7 +342,8 @@ export function PendingReportsDashboard({
                           <Calendar className="w-3.5 h-3.5" />
                           <span>
                             {format(
-                              new Date(item.application.scheduledDate!),
+                              parseLocalDate(item.application.scheduledDate!)
+                                ?? new Date(item.application.scheduledDate!),
                               "yyyy년 M월 d일",
                               { locale: ko }
                             )}
@@ -343,9 +355,7 @@ export function PendingReportsDashboard({
                         <div className="flex items-center gap-1.5">
                           <Clock className="w-3.5 h-3.5" />
                           <span
-                            className={
-                              item.isOverdue ? "text-red-600 font-medium" : ""
-                            }
+                            className={`whitespace-nowrap ${item.isOverdue ? "text-red-600 font-medium" : ""}`}
                           >
                             {item.isOverdue
                               ? `기한 초과 ${item.overdueDays}일`
@@ -412,7 +422,11 @@ export function PendingReportsDashboard({
                           <Calendar className="w-3.5 h-3.5" />
                           <span>
                             {report.date
-                              ? format(new Date(report.date), "yyyy년 M월 d일", { locale: ko })
+                              ? format(
+                                parseLocalDate(report.date) ?? new Date(report.date),
+                                "yyyy년 M월 d일",
+                                { locale: ko }
+                              )
                               : "-"}
                           </span>
                         </div>

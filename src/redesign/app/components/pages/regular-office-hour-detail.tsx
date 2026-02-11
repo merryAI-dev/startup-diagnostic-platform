@@ -99,43 +99,6 @@ export function RegularOfficeHourDetail({
             </CardContent>
           </Card>
 
-          {myApplications.length > 0 && (
-            <div>
-              <h3 className="mb-3">내 신청 내역</h3>
-              <div className="space-y-2">
-                {myApplications.map((app) => (
-                  <Card key={app.id}>
-                    <CardContent className="p-4">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                          <StatusChip status={app.status} />
-                          <div>
-                            <p className="text-sm">
-                              {app.scheduledDate
-                                ? format(new Date(app.scheduledDate), "M월 d일 (E) · ", {
-                                    locale: ko,
-                                  }) + app.scheduledTime
-                                : "일정 미정"}
-                            </p>
-                            <p className="text-xs text-muted-foreground">
-                              {app.agenda}
-                            </p>
-                          </div>
-                        </div>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => onViewApplication(app.id)}
-                        >
-                          상세
-                        </Button>
-                      </div>
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
-            </div>
-          )}
         </TabsContent>
 
         <TabsContent value="confirmed" className="space-y-4">
