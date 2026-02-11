@@ -36,7 +36,7 @@ export function AdminDashboardCharts({ applications, programs, currentUser }: Ad
   // 상태별 통계
   const statusStats = [
     { name: "대기중", value: filteredApplications.filter(a => a.status === "pending").length, color: "#eab308" },
-    { name: "검토중", value: filteredApplications.filter(a => a.status === "review").length, color: "#f97316" },
+    { name: "진행중", value: filteredApplications.filter(a => a.status === "review").length, color: "#f97316" },
     { name: "확정", value: filteredApplications.filter(a => a.status === "confirmed").length, color: "#3b82f6" },
     { name: "완료", value: filteredApplications.filter(a => a.status === "completed").length, color: "#10b981" },
     { name: "취소", value: filteredApplications.filter(a => a.status === "cancelled").length, color: "#ef4444" },
