@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../ui/dialog";
 import { Button } from "../ui/button";
 import { Label } from "../ui/label";
@@ -12,13 +12,14 @@ interface OfficeHourReportFormProps {
   application: Application;
   open: boolean;
   onClose: () => void;
-  onDefer?: () => void;
   deadlineInfo?: {
     deadline: Date;
     daysLeft: number;
     isOverdue: boolean;
     overdueDays: number;
   } | null;
+  initialReport?: OfficeHourReport | null;
+  submitLabel?: string;
   onSubmit: (report: Omit<OfficeHourReport, "id" | "createdAt" | "updatedAt" | "completedAt">) => void;
 }
 
@@ -26,22 +27,47 @@ export function OfficeHourReportForm({
   application, 
   open, 
   onClose, 
-  onDefer,
   deadlineInfo,
+  initialReport,
+  submitLabel,
   onSubmit 
 }: OfficeHourReportFormProps) {
-  const [formData, setFormData] = useState({
-    date: application.scheduledDate || "",
-    location: application.sessionFormat === "online" ? "온라인 (Zoom/Google Meet)" : "",
-    topic: application.agenda,
-    participants: [""],
-    content: "",
-    followUp: "",
-    duration: application.duration || 2,
-    satisfaction: 5,
-  });
+  const buildFormState = () => {
+    if (initialReport) {
+      return {
+        date: initialReport.date || application.scheduledDate || "",
+        location: initialReport.location || "",
+        topic: initialReport.topic || application.agenda,
+        participants:
+          initialReport.participants && initialReport.participants.length > 0
+            ? initialReport.participants
+            : [""],
+        content: initialReport.content || "",
+        followUp: initialReport.followUp || "",
+        duration: initialReport.duration || application.duration || 2,
+        satisfaction: initialReport.satisfaction || 5,
+      };
+    }
+    return {
+      date: application.scheduledDate || "",
+      location: application.sessionFormat === "online" ? "온라인 (Zoom/Google Meet)" : "",
+      topic: application.agenda,
+      participants: [""],
+      content: "",
+      followUp: "",
+      duration: application.duration || 2,
+      satisfaction: 5,
+    };
+  };
 
-  const [photos, setPhotos] = useState<string[]>([]);
+  const [formData, setFormData] = useState(buildFormState);
+  const [photos, setPhotos] = useState<string[]>(initialReport?.photos ?? []);
+
+  useEffect(() => {
+    if (!open) return;
+    setFormData(buildFormState());
+    setPhotos(initialReport?.photos ?? []);
+  }, [open, initialReport, application]);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handlePhotoUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -101,8 +127,8 @@ export function OfficeHourReportForm({
     try {
       const report: Omit<OfficeHourReport, "id" | "createdAt" | "updatedAt" | "completedAt"> = {
         applicationId: application.id,
-        consultantId: application.consultantId || "",
-        consultantName: application.consultant,
+        consultantId: initialReport?.consultantId || application.consultantId || "",
+        consultantName: initialReport?.consultantName || application.consultant,
         date: formData.date,
         location: formData.location,
         topic: formData.topic,
@@ -125,27 +151,24 @@ export function OfficeHourReportForm({
     }
   };
 
-  const handleSkip = () => {
-    // Allow skipping but show warning
-    toast.warning("보고서는 3일 이내 작성해주세요");
-    onDefer?.();
-    onClose();
-  };
-
   return (
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <div className="flex items-center justify-between gap-4">
-            <div>
-              <DialogTitle className="text-2xl">오피스아워 보고서 작성</DialogTitle>
-              <p className="text-sm text-muted-foreground mt-1">
-                {application.officeHourTitle}
-              </p>
+          <div>
+            <DialogTitle className="text-2xl">
+              {initialReport ? "오피스아워 보고서 수정" : "오피스아워 보고서 작성"}
+            </DialogTitle>
+            <p className="text-sm text-muted-foreground mt-1">
+              {application.officeHourTitle}
+            </p>
+            {!initialReport && (
               <p className="text-xs text-amber-700 mt-1">
                 세션 종료 후 3일 이내 보고서를 작성해야 합니다.
               </p>
-            </div>
+            )}
+          </div>
             <div className="flex items-center gap-2">
               <div className="flex items-center gap-2 bg-amber-50 text-amber-700 px-3 py-1.5 rounded-lg border border-amber-200">
                 <AlertCircle className="w-4 h-4" />
@@ -157,20 +180,11 @@ export function OfficeHourReportForm({
                     : "작성 필수"}
                 </span>
               </div>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                onClick={onClose}
-                className="text-slate-500 hover:text-slate-700"
-              >
-                <X className="w-4 h-4" />
-              </Button>
             </div>
           </div>
         </DialogHeader>
 
-        {deadlineInfo && (
+        {deadlineInfo && !initialReport && (
           <div
             className={`mt-4 rounded-lg border px-4 py-3 text-sm ${
               deadlineInfo.isOverdue
@@ -377,19 +391,11 @@ export function OfficeHourReportForm({
           {/* Submit Buttons */}
           <div className="flex gap-3 pt-4 border-t">
             <Button
-              type="button"
-              variant="outline"
-              onClick={handleSkip}
-              className="flex-1"
-            >
-              나중에 작성
-            </Button>
-            <Button
               type="submit"
               disabled={isSubmitting}
               className="flex-1"
             >
-              {isSubmitting ? "저장 중..." : "보고서 제출"}
+              {isSubmitting ? "저장 중..." : (submitLabel ?? "보고서 제출")}
             </Button>
           </div>
 
