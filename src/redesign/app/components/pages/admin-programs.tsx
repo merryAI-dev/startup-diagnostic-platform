@@ -211,6 +211,25 @@ export function AdminPrograms({
     })
   }, [applicationsByProgram, programs])
 
+  const summaryStats = useMemo(() => {
+    const totalPrograms = programs.length
+    const totalTargetHours = programs.reduce((sum, program) => sum + (program.targetHours || 0), 0)
+    const totalCompletedHours = programs.reduce((sum, program) => sum + (program.completedHours || 0), 0)
+    const avgAchievement =
+      totalPrograms === 0
+        ? 0
+        : Math.round(
+          programs.reduce((sum, program) => sum + getProgressRate(program.completedHours, program.targetHours), 0)
+          / totalPrograms
+        )
+    return {
+      totalPrograms,
+      totalTargetHours,
+      totalCompletedHours,
+      avgAchievement,
+    }
+  }, [programs])
+
   const selectedProgram = useMemo(
     () => programs.find((program) => program.id === selectedProgramId) ?? null,
     [programs, selectedProgramId]
@@ -378,23 +397,14 @@ export function AdminPrograms({
           <p className="text-sm text-muted-foreground mt-1">{pageDescription}</p>
         </div>
 
-        <div className="flex items-center gap-2">
-          {isManagementMode ? (
+        {isManagementMode && (
+          <div className="flex items-center gap-2">
             <Button onClick={() => setIsAddDialogOpen(true)}>
               <Plus className="w-4 h-4 mr-2" />
               사업 생성
             </Button>
-          ) : (
-            <Button
-              type="button"
-              variant="outline"
-              disabled={!onNavigate}
-              onClick={() => onNavigate?.("admin-program-list")}
-            >
-              사업 관리
-            </Button>
-          )}
-        </div>
+          </div>
+        )}
       </div>
 
       {isManagementMode ? (
@@ -467,63 +477,129 @@ export function AdminPrograms({
         </Card>
       ) : (
         <>
+          <Card className="border border-slate-200">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">전체 요약</CardTitle>
+              <CardDescription>
+                전체 사업 수와 시수 진행 상황을 빠르게 확인합니다.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="pt-0">
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div className="rounded-xl border border-slate-200 bg-white p-5">
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <Users className="w-3.5 h-3.5 text-slate-500" />
+                    전체 사업 수
+                  </div>
+                  <p className="text-2xl font-semibold text-slate-900 mt-3">
+                    {summaryStats.totalPrograms}개
+                  </p>
+                </div>
+                <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-5">
+                  <div className="flex items-center gap-2 text-xs text-amber-700">
+                    <Target className="w-3.5 h-3.5" />
+                    목표 시수 (전체)
+                  </div>
+                  <p className="text-2xl font-semibold text-amber-900 mt-3">
+                    {summaryStats.totalTargetHours}h
+                  </p>
+                </div>
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-5">
+                  <div className="flex items-center gap-2 text-xs text-emerald-700">
+                    <CheckCircle2 className="w-3.5 h-3.5" />
+                    완료 시수
+                  </div>
+                  <p className="text-2xl font-semibold text-emerald-900 mt-3">
+                    {summaryStats.totalCompletedHours}h
+                  </p>
+                </div>
+                <div className="rounded-xl border border-blue-200 bg-blue-50/60 p-5">
+                  <div className="flex items-center gap-2 text-xs text-blue-700">
+                    <Clock3 className="w-3.5 h-3.5" />
+                    평균 달성률
+                  </div>
+                  <p className="text-2xl font-semibold text-blue-900 mt-3">
+                    {summaryStats.avgAchievement}%
+                  </p>
+                  <Progress value={summaryStats.avgAchievement} className="h-2 mt-3" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
           <Card>
             <CardHeader>
               <CardTitle>사업별 요약</CardTitle>
               <CardDescription>
-                사업명, 시수 진행률, 신청 횟수만 빠르게 확인할 수 있습니다.
+                사업별 진행률과 신청 현황을 카드로 확인하세요.
               </CardDescription>
             </CardHeader>
-            <CardContent className="p-0 overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>사업명</TableHead>
-                    <TableHead>시수 진행률</TableHead>
-                    <TableHead>신청 횟수</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {programStats.length === 0 && (
-                    <TableRow>
-                      <TableCell colSpan={3} className="h-24 text-center text-sm text-muted-foreground">
-                        등록된 사업이 없습니다.
-                      </TableCell>
-                    </TableRow>
-                  )}
-
+            <CardContent>
+              {programStats.length === 0 ? (
+                <div className="h-24 text-center text-sm text-muted-foreground flex items-center justify-center">
+                  등록된 사업이 없습니다.
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                   {programStats.map((item) => {
                     const isSelected = selectedProgramId === item.program.id
                     return (
-                      <TableRow
+                      <button
                         key={item.program.id}
-                        className={isSelected ? "cursor-pointer bg-blue-50/60" : "cursor-pointer"}
+                        type="button"
                         onClick={() => setSelectedProgramId(item.program.id)}
+                        className={`text-left rounded-xl border p-4 transition-shadow ${
+                          isSelected ? "ring-2 ring-blue-200 shadow-md" : "hover:shadow-md"
+                        }`}
+                        style={{
+                          borderColor: item.program.color,
+                          background: `linear-gradient(135deg, ${item.program.color}14 0%, #ffffff 55%)`,
+                        }}
                       >
-                        <TableCell>
-                          <div className="flex items-center gap-2">
-                            <div
-                              className="w-2.5 h-2.5 rounded-full"
-                              style={{ backgroundColor: item.program.color }}
-                            />
-                            <span className="font-medium">{item.program.name}</span>
-                          </div>
-                        </TableCell>
-                        <TableCell>
-                          <div className="space-y-1 min-w-44">
-                            <div className="text-xs text-muted-foreground">
-                              {item.program.completedHours}h / {item.program.targetHours}h
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span
+                                className="inline-block h-2.5 w-2.5 rounded-full"
+                                style={{ backgroundColor: item.program.color }}
+                              />
+                              <span className="font-semibold text-slate-900">
+                                {item.program.name}
+                              </span>
                             </div>
-                            <Progress value={item.achievementRate} className="h-1.5" />
-                            <div className="text-xs font-medium">{item.achievementRate}%</div>
+                            <p className="text-xs text-muted-foreground mt-1">
+                              {prettyDateRange(item.program.periodStart, item.program.periodEnd)}
+                            </p>
                           </div>
-                        </TableCell>
-                        <TableCell>{item.totalSessions}건</TableCell>
-                      </TableRow>
+                          <Badge variant="outline">{item.totalSessions}건</Badge>
+                        </div>
+
+                        <div className="mt-4 space-y-2">
+                          <div className="text-xs text-muted-foreground">
+                            {item.program.completedHours}h / {item.program.targetHours}h
+                          </div>
+                          <Progress value={item.achievementRate} className="h-2" />
+                          <div className="text-sm font-semibold text-slate-900">
+                            달성률 {item.achievementRate}%
+                          </div>
+                        </div>
+
+                        <div className="mt-4 grid grid-cols-3 gap-2 text-xs text-muted-foreground">
+                          <div className="rounded-lg bg-white/70 border px-2 py-1 text-center">
+                            완료 {item.completedSessions}건
+                          </div>
+                          <div className="rounded-lg bg-white/70 border px-2 py-1 text-center">
+                            진행중 {item.pendingSessions + item.confirmedSessions}건
+                          </div>
+                          <div className="rounded-lg bg-white/70 border px-2 py-1 text-center">
+                            취소 {item.cancelledSessions}건
+                          </div>
+                        </div>
+                      </button>
                     )
                   })}
-                </TableBody>
-              </Table>
+                </div>
+              )}
             </CardContent>
           </Card>
 
