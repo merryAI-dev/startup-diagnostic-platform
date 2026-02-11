@@ -68,7 +68,9 @@ export function AdminConsultants({
   onUpdateConsultant,
   onAddConsultant,
 }: AdminConsultantsProps) {
-  const scheduleRange = `${TIME_SLOTS[0].start} ~ ${TIME_SLOTS[TIME_SLOTS.length - 1].end}`;
+  const scheduleRange = TIME_SLOTS.length > 0
+    ? `${TIME_SLOTS[0]?.start} ~ ${TIME_SLOTS[TIME_SLOTS.length - 1]?.end}`
+    : "일정 없음";
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [selectedConsultantId, setSelectedConsultantId] = useState<string | null>(
     null

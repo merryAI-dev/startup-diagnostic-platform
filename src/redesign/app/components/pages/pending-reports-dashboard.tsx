@@ -58,7 +58,7 @@ export function PendingReportsDashboard({
         const date = parseLocalDate(app.scheduledDate);
         return date ? new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59) : null;
       })();
-      if (!Number.isNaN(fallback.getTime())) {
+      if (fallback && !Number.isNaN(fallback.getTime())) {
         return fallback;
       }
     }
