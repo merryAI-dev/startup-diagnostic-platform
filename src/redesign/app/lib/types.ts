@@ -172,6 +172,7 @@ export interface Application {
   officeHourId?: string;
   officeHourSlotId?: string;
   officeHourTitle: string;
+  agendaId?: string;
   companyName?: string;
   consultant: string;
   consultantId?: string; // 컨설턴트 ID 추가
