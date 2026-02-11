@@ -117,7 +117,7 @@ export function ApplicationHistory({
             신청중 ({filterByStatus("pending").length})
           </TabsTrigger>
           <TabsTrigger value="review">
-            검토중 ({filterByStatus("review").length})
+            진행중 ({filterByStatus("review").length})
           </TabsTrigger>
           <TabsTrigger value="confirmed">
             확정 ({filterByStatus("confirmed").length})
