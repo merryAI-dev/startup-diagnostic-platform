@@ -87,8 +87,8 @@ export function AdminApplicationDetailModal({
 
   const getStatusLabel = (status: ApplicationStatus) => {
     const labels = {
-      pending: "신청중",
-      review: "검토중",
+      pending: "진행중",
+      review: "진행중",
       confirmed: "확정",
       cancelled: "취소",
       completed: "완료",
@@ -319,15 +319,14 @@ export function AdminApplicationDetailModal({
                     완료 처리
                   </Button>
                 )}
-                {application.status !== "cancelled" && application.status !== "completed" && (
+                {application.status === "confirmed" && (
                   <Button
                     size="sm"
-                    variant="destructive"
-                    onClick={() => handleStatusChange("cancelled")}
-                    className="transition-colors hover:bg-destructive/80 hover:text-white"
+                    variant="outline"
+                    onClick={() => handleStatusChange("review")}
                   >
                     <XCircle className="w-4 h-4 mr-2" />
-                    취소
+                    확정 취소
                   </Button>
                 )}
               </div>

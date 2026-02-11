@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { addDays, differenceInDays } from "date-fns";
@@ -69,7 +69,7 @@ import {
   PendingProfileApproval,
 } from "./lib/types";
 import { regularOfficeHours as initialRegularOfficeHours, initialApplications, initialMessages, agendas as initialAgendas, initialConsultants, initialMessageTemplates, initialUsers, programs as initialPrograms } from "./lib/data";
-import { COLLECTIONS, isFirebaseConfigured, useFirestoreCollection, useFirestoreCRUD } from "./hooks/use-firestore";
+import { COLLECTIONS, isFirebaseConfigured, useFirestoreCollection, useFirestoreCRUD, useFirestoreDocument } from "./hooks/use-firestore";
 import { mockNotifications, mockChatRooms, mockChatMessages, mockAIRecommendations, mockGoals, mockTeamMembers } from "./lib/advanced-mock-data";
 
 type AppPage = 
@@ -106,6 +106,12 @@ type AppPage =
   | "consultant-profile"
   | "consultant-schedule-settings"
   | "consultant-calendar";
+
+type SaveTypeMeta = {
+  metadata?: {
+    saveType?: "draft" | "final";
+  };
+};
 
 type RawProfileApprovalDoc = {
   id: string;
@@ -429,9 +435,14 @@ function normalizeSlotDoc(slot: OfficeHourSlot): OfficeHourSlot {
   };
 }
 
-function normalizeApplicationDoc(application: Application): Application {
+function normalizeApplicationDoc(
+  application: Application,
+  resolveCompanyName?: (value?: string | null) => string | null | undefined
+): Application {
+  const resolvedCompanyName = resolveCompanyName?.(application.companyName);
   return {
     ...application,
+    companyName: resolvedCompanyName ?? application.companyName,
     type: application.type ?? "regular",
     status: application.status ?? "pending",
     consultant: application.consultant ?? "담당자 배정 중",
@@ -476,21 +487,69 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     resolvedRole === "admin"
     || resolvedRole === "consultant"
     || resolvedRole === "staff";
+  const { data: companyDocs } = useFirestoreCollection<{ id: string; name?: string | null }>(
+    "companies",
+    {
+      enabled: isFirebaseConfigured,
+    }
+  );
+  const companyNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    companyDocs.forEach((doc) => {
+      const name = typeof doc.name === "string" ? doc.name.trim() : "";
+      if (name) {
+        map.set(doc.id, name);
+      }
+    });
+    return map;
+  }, [companyDocs]);
+  const resolveCompanyName = useCallback(
+    (value?: string | null) => {
+      if (!value) return undefined;
+      const looksLikeId = (candidate: string) =>
+        /^[A-Za-z0-9]{12,}$/.test(candidate);
+      if (companyNameById.has(value)) {
+        return companyNameById.get(value);
+      }
+      const trimmed = value.trim();
+      if (trimmed.startsWith("회사 ")) {
+        const idCandidate = trimmed.slice(3).trim();
+        if (companyNameById.has(idCandidate)) {
+          return companyNameById.get(idCandidate);
+        }
+        if (looksLikeId(idCandidate)) {
+          return "회사명 미입력";
+        }
+      }
+      if (looksLikeId(trimmed)) {
+        return "회사명 미입력";
+      }
+      return undefined;
+    },
+    [companyNameById]
+  );
   const fallbackUser =
     initialUsers.find((u) => u.role === resolvedRole) ?? initialUsers[0]!;
   const user: User = useMemo(() => {
+    const resolvedCompanyName = resolveCompanyName(profile?.companyId ?? null);
     return {
       ...fallbackUser,
       id: firebaseUser?.uid ?? fallbackUser.id,
       email: firebaseUser?.email ?? fallbackUser.email,
-      companyName: profile?.companyId
-        ? `회사 ${profile.companyId}`
-        : fallbackUser.companyName,
+      companyName: resolvedCompanyName
+        ?? (profile?.companyId ? "회사명 미입력" : fallbackUser.companyName),
       role: resolvedRole,
       programName: fallbackUser.programName ?? "MYSC",
       programs: fallbackUser.programs ?? [],
     };
-  }, [fallbackUser, firebaseUser?.email, firebaseUser?.uid, profile?.companyId, resolvedRole]);
+  }, [
+    fallbackUser,
+    firebaseUser?.email,
+    firebaseUser?.uid,
+    profile?.companyId,
+    resolvedRole,
+    resolveCompanyName,
+  ]);
 
   const adminPages = useMemo<Set<AppPage>>(
     () =>
@@ -556,8 +615,35 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
         ? "admin-dashboard"
         : "dashboard";
   const companyRecordId = profile?.companyId ?? firebaseUser?.uid ?? null;
+  const { data: companyInfoDoc } = useFirestoreDocument<SaveTypeMeta>(
+    companyRecordId ? `companies/${companyRecordId}/companyInfo` : "",
+    "info",
+    {
+      enabled: isFirebaseConfigured && resolvedRole === "user" && !!companyRecordId,
+    }
+  );
+  const { data: selfAssessmentDoc } = useFirestoreDocument<SaveTypeMeta>(
+    companyRecordId ? `companies/${companyRecordId}/selfAssessment` : "",
+    "info",
+    {
+      enabled: isFirebaseConfigured && resolvedRole === "user" && !!companyRecordId,
+    }
+  );
+  const companyInfoComplete = companyInfoDoc?.metadata?.saveType === "final";
+  const selfAssessmentComplete = selfAssessmentDoc?.metadata?.saveType === "final";
+  const needsCompanyInfoAttention =
+    resolvedRole === "user"
+    && isFirebaseConfigured
+    && !!companyRecordId
+    && (!companyInfoComplete || !selfAssessmentComplete);
+  const attentionPages = useMemo(
+    () => (needsCompanyInfoAttention ? new Set<AppPage>(["company-info"]) : undefined),
+    [needsCompanyInfoAttention]
+  );
   const [currentPage, setCurrentPage] = useState<AppPage>(initialPage);
   const [applications, setApplications] = useState<Application[]>(initialApplications);
+  const cancelledMigrationRan = useRef(false);
+  const reviewMigrationRan = useRef(false);
   const [regularOfficeHourList, setRegularOfficeHourList] = useState<RegularOfficeHour[]>(
     () => (isFirebaseConfigured ? [] : initialRegularOfficeHours)
   );
@@ -586,6 +672,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
   const [reports, setReports] = useState<OfficeHourReport[]>([]);
   const [reportFormOpen, setReportFormOpen] = useState(false);
   const [reportFormApplication, setReportFormApplication] = useState<Application | null>(null);
+  const [reportBeingEdited, setReportBeingEdited] = useState<OfficeHourReport | null>(null);
   const [reportPopupDismissed, setReportPopupDismissed] = useState<Record<string, number>>(() => {
     try {
       const raw = sessionStorage.getItem("report-popup-dismissed");
@@ -731,7 +818,10 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
 
       const isConfirmed =
         application.status === "confirmed" || application.status === "completed";
-      return isConfirmed && agendaMatch;
+      if (isConfirmed && agendaMatch) return true;
+
+      const isCancelled = application.status === "cancelled";
+      return isCancelled && agendaMatch;
     });
   }, [
     applications,
@@ -880,10 +970,78 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
   useEffect(() => {
     if (!isFirebaseConfigured) return;
     const normalized = officeHourApplicationDocs
-      .map(normalizeApplicationDoc)
+      .map((application) => normalizeApplicationDoc(application, resolveCompanyName))
       .sort((a, b) => getTimeValue(b.createdAt) - getTimeValue(a.createdAt));
     setApplications(normalized);
-  }, [officeHourApplicationDocs]);
+  }, [officeHourApplicationDocs, resolveCompanyName]);
+
+  useEffect(() => {
+    if (cancelledMigrationRan.current) return;
+    if (applications.length === 0) return;
+    const cancelledApps = applications.filter((app) => app.status === "cancelled");
+    if (cancelledApps.length === 0) {
+      cancelledMigrationRan.current = true;
+      return;
+    }
+
+    cancelledMigrationRan.current = true;
+    const updatedAt = new Date();
+    setApplications((prev) =>
+      prev.map((app) =>
+        app.status === "cancelled" ? { ...app, status: "review", updatedAt } : app
+      )
+    );
+
+    if (!isFirebaseConfigured) return;
+
+    Promise.all(
+      cancelledApps.map((app) =>
+        officeHourApplicationCrud.update(app.id, {
+          status: "review",
+          updatedAt,
+        })
+      )
+    ).catch(() => {
+      toast.error("취소 상태 복구에 실패했습니다");
+    });
+  }, [applications, isFirebaseConfigured, officeHourApplicationCrud]);
+
+  useEffect(() => {
+    if (reviewMigrationRan.current) return;
+    if (applications.length === 0) return;
+    const reviewApps = applications.filter((app) =>
+      app.status === "review"
+      && (Boolean(app.consultantId) || (app.consultant && app.consultant !== "담당자 배정 중"))
+    );
+    if (reviewApps.length === 0) {
+      reviewMigrationRan.current = true;
+      return;
+    }
+
+    reviewMigrationRan.current = true;
+    const updatedAt = new Date();
+    setApplications((prev) =>
+      prev.map((app) =>
+        app.status === "review"
+          && (Boolean(app.consultantId) || (app.consultant && app.consultant !== "담당자 배정 중"))
+          ? { ...app, status: "confirmed", updatedAt }
+          : app
+      )
+    );
+
+    if (!isFirebaseConfigured) return;
+
+    Promise.all(
+      reviewApps.map((app) =>
+        officeHourApplicationCrud.update(app.id, {
+          status: "confirmed",
+          updatedAt,
+        })
+      )
+    ).catch(() => {
+      toast.error("진행중 상태 확정 전환에 실패했습니다");
+    });
+  }, [applications, isFirebaseConfigured, officeHourApplicationCrud]);
   
   // Set initial page based on role
   const disabledPages = useMemo(() => {
@@ -1010,7 +1168,8 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
   useEffect(() => {
     if (
       !user
-      || (user.role !== "admin" && user.role !== "consultant" && user.role !== "staff")
+      || user.role === "admin"
+      || (user.role !== "consultant" && user.role !== "staff")
       || reportFormOpen
     ) {
       return;
@@ -1392,13 +1551,42 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     const targetApplication = applications.find((app) => app.id === id);
     if (!targetApplication) return;
 
+    const nextStatus = status === "cancelled" ? "review" : status;
+    const updatedAt = new Date();
+    const fallbackConsultantName =
+      currentConsultant?.name
+      ?? firebaseUser?.displayName?.trim()
+      ?? (firebaseUser?.email ? firebaseUser.email.split("@")[0] : "");
+    const fallbackConsultantId =
+      currentConsultant?.id ?? firebaseUser?.uid ?? null;
+    const shouldAssignConsultant =
+      status === "confirmed"
+      && resolvedRole === "consultant"
+      && fallbackConsultantId
+      && fallbackConsultantName;
+    const assignmentPatch = shouldAssignConsultant ? {
+      consultant: fallbackConsultantName,
+      consultantId: fallbackConsultantId,
+    } : {};
+    const shouldClearConsultant = nextStatus === "review";
+    const clearAssignmentPatch = shouldClearConsultant ? {
+      consultant: "담당자 배정 중",
+      consultantId: null,
+    } : {};
     const nextApplications = applications.map((app) =>
-      app.id === id ? { ...app, status, updatedAt: new Date() } : app
+      app.id === id
+        ? { ...app, status: nextStatus, updatedAt, ...assignmentPatch, ...clearAssignmentPatch }
+        : app
     );
 
     if (isFirebaseConfigured) {
-      const payload: Partial<Omit<Application, "id">> = { status };
-      if (status === "completed") {
+      const payload: Partial<Omit<Application, "id">> = {
+        status: nextStatus,
+        updatedAt,
+        ...assignmentPatch,
+        ...clearAssignmentPatch,
+      };
+      if (nextStatus === "completed") {
         payload.completedAt = new Date();
       }
       const updated = await officeHourApplicationCrud.update(id, payload);
@@ -1413,7 +1601,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     const slotId = targetApplication.officeHourSlotId;
     if (!slotId) return;
 
-    if (status === "cancelled") {
+    if (nextStatus === "cancelled") {
       const shouldOpen = !hasOtherActiveApplicationsForSlot(slotId, id, nextApplications);
       if (!shouldOpen) return;
       if (isFirebaseConfigured) {
@@ -1447,12 +1635,13 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     const targetApplication = applications.find((app) => app.id === id);
     if (!targetApplication) return;
 
-    const isPending = targetApplication.status === "pending";
+    const isAcceptableStatus =
+      targetApplication.status === "pending" || targetApplication.status === "review";
     const isUnassigned =
       !targetApplication.consultantId
       && (!targetApplication.consultant || targetApplication.consultant === "담당자 배정 중");
-    if (!isPending || !isUnassigned) {
-      toast.error("수락 요청을 할 수 있는 상태가 아닙니다");
+    if (!isAcceptableStatus || !isUnassigned) {
+      toast.error("담당 수락할 수 있는 상태가 아닙니다");
       return;
     }
     if (!consultantAgendaNames.has(targetApplication.agenda)) {
@@ -1460,10 +1649,28 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       return;
     }
 
+    const hasConflict =
+      Boolean(targetApplication.scheduledDate && targetApplication.scheduledTime)
+      && applications.some((app) => {
+        if (app.id === targetApplication.id) return false;
+        if (app.consultantId && app.consultantId !== currentConsultant.id) return false;
+        if (!app.consultantId && app.consultant !== currentConsultant.name) return false;
+        if (app.status !== "confirmed" && app.status !== "completed") return false;
+        return (
+          app.scheduledDate === targetApplication.scheduledDate
+          && app.scheduledTime === targetApplication.scheduledTime
+        );
+      });
+
+    if (hasConflict) {
+      toast.error("이미 동일한 시간에 확정된 일정이 있습니다");
+      return;
+    }
+
     const updatedAt = new Date();
     const nextApplication = {
       ...targetApplication,
-      status: "review" as const,
+      status: "confirmed" as const,
       consultant: currentConsultant.name,
       consultantId: currentConsultant.id,
       updatedAt,
@@ -1471,7 +1678,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
 
     if (isFirebaseConfigured) {
       const updated = await officeHourApplicationCrud.update(id, {
-        status: "review",
+        status: "confirmed",
         consultant: currentConsultant.name,
         consultantId: currentConsultant.id,
         updatedAt,
@@ -1486,7 +1693,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       );
     }
 
-    toast.success("수락 요청이 등록되었습니다.");
+    toast.success("수락이 완료되어 확정되었습니다.");
   };
 
   const handleConfirmApplication = async (id: string) => {
@@ -1527,16 +1734,22 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     }
 
     const updatedAt = new Date();
+    const assignmentPatch = {
+      consultant: currentConsultant.name,
+      consultantId: currentConsultant.id,
+    };
     const nextApplication = {
       ...targetApplication,
       status: "confirmed" as const,
       updatedAt,
+      ...assignmentPatch,
     };
 
     if (isFirebaseConfigured) {
       const updated = await officeHourApplicationCrud.update(id, {
         status: "confirmed",
         updatedAt,
+        ...assignmentPatch,
       });
       if (!updated) {
         toast.error("확정 처리에 실패했습니다");
@@ -2074,6 +2287,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
           onNavigate={handleNavigateLoose}
           userRole={user.role}
           disabledPages={disabledPages}
+          attentionPages={attentionPages}
         />
         <main className="flex-1 overflow-y-auto bg-gray-50">
           {currentPage === "dashboard" && (
@@ -2509,7 +2723,27 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
                   if (app) {
                     setReportFormApplication(app);
                     setReportFormOpen(true);
+                    setReportBeingEdited(null);
                   }
+                }}
+                onEditReport={(report) => {
+                  const app = scopedApplications.find((a) => a.id === report.applicationId);
+                  if (!app) {
+                    toast.error("보고서에 연결된 신청 정보를 찾을 수 없습니다");
+                    return;
+                  }
+                  setReportFormApplication(app);
+                  setReportFormOpen(true);
+                  setReportBeingEdited(report);
+                }}
+                onDeleteReport={(report) => {
+                  setReports((prev) => prev.filter((item) => item.id !== report.id));
+                  if (reportBeingEdited?.id === report.id) {
+                    setReportFormOpen(false);
+                    setReportFormApplication(null);
+                    setReportBeingEdited(null);
+                  }
+                  toast.success("보고서가 삭제되었습니다");
                 }}
               />
             </ProtectedRoute>
@@ -2520,52 +2754,69 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
               application={reportFormApplication}
               open={reportFormOpen}
               deadlineInfo={reportFormDeadlineInfo}
-              onDefer={() => dismissReportPopup(reportFormApplication.id)}
               onClose={() => {
-                dismissReportPopup(reportFormApplication.id);
                 setReportFormOpen(false);
                 setReportFormApplication(null);
+                setReportBeingEdited(null);
               }}
+              initialReport={reportBeingEdited}
+              submitLabel={reportBeingEdited ? "보고서 저장" : "보고서 제출"}
               onSubmit={(reportData) => {
-                const newReport: OfficeHourReport = {
-                  ...reportData,
-                  id: `rep${Date.now()}`,
-                  createdAt: new Date(),
-                  updatedAt: new Date(),
-                  completedAt: new Date(),
-                };
-                setReports([...reports, newReport]);
-                
-                setApplications(
-                  applications.map((app) =>
-                    app.id === reportFormApplication.id
-                      ? { ...app, updatedAt: new Date() }
-                      : app
-                  )
-                );
+                if (reportBeingEdited) {
+                  const updatedAt = new Date();
+                  setReports((prev) =>
+                    prev.map((report) =>
+                      report.id === reportBeingEdited.id
+                        ? {
+                          ...report,
+                          ...reportData,
+                          updatedAt,
+                        }
+                        : report
+                    )
+                  );
+                } else {
+                  const newReport: OfficeHourReport = {
+                    ...reportData,
+                    id: `rep${Date.now()}`,
+                    createdAt: new Date(),
+                    updatedAt: new Date(),
+                    completedAt: new Date(),
+                  };
+                  setReports([...reports, newReport]);
 
-                setNotifications(
-                  notifications.filter(
-                    (n) =>
-                      !(
-                        n.type === "report_reminder"
-                        && n.relatedId === reportFormApplication.id
-                      )
-                  )
-                );
-                setReportPopupDismissed((prev) => {
-                  const next = { ...prev };
-                  delete next[reportFormApplication.id];
-                  try {
-                    sessionStorage.setItem("report-popup-dismissed", JSON.stringify(next));
-                  } catch {
-                    // ignore storage errors
-                  }
-                  return next;
-                });
+                  setApplications(
+                    applications.map((app) =>
+                      app.id === reportFormApplication.id
+                        ? { ...app, updatedAt: new Date() }
+                        : app
+                    )
+                  );
+
+                  setNotifications(
+                    notifications.filter(
+                      (n) =>
+                        !(
+                          n.type === "report_reminder"
+                          && n.relatedId === reportFormApplication.id
+                        )
+                    )
+                  );
+                  setReportPopupDismissed((prev) => {
+                    const next = { ...prev };
+                    delete next[reportFormApplication.id];
+                    try {
+                      sessionStorage.setItem("report-popup-dismissed", JSON.stringify(next));
+                    } catch {
+                      // ignore storage errors
+                    }
+                    return next;
+                  });
+                }
                 setReportFormApplication(null);
                 setReportFormOpen(false);
-                toast.success("보고서가 제출되었습니다");
+                setReportBeingEdited(null);
+                toast.success(reportBeingEdited ? "보고서가 저장되었습니다" : "보고서가 제출되었습니다");
               }}
             />
           )}

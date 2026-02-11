@@ -46,11 +46,13 @@ export function AdminApplications({
 
   // Filter applications
   const filteredApplications = applications.filter((app) => {
-    const matchesSearch =
-      app.officeHourTitle?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      app.companyName?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      app.consultant?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      app.agenda?.toLowerCase().includes(searchQuery.toLowerCase());
+    const normalizedQuery = searchQuery.trim().toLowerCase();
+    const matchesSearch = normalizedQuery.length === 0
+      ? true
+      : app.officeHourTitle?.toLowerCase().includes(normalizedQuery)
+        || app.companyName?.toLowerCase().includes(normalizedQuery)
+        || app.consultant?.toLowerCase().includes(normalizedQuery)
+        || app.agenda?.toLowerCase().includes(normalizedQuery);
 
     const matchesStatus = statusFilter === "all" || app.status === statusFilter;
     const matchesType = typeFilter === "all" || app.type === typeFilter;
@@ -67,6 +69,9 @@ export function AdminApplications({
 
   const handleStatusChange = (id: string, newStatus: ApplicationStatus) => {
     onUpdateStatus(id, newStatus);
+    if (statusFilter !== "all" && statusFilter !== newStatus) {
+      setStatusFilter("all");
+    }
   };
 
   const getStatusActions = (app: Application) => {
@@ -74,16 +79,14 @@ export function AdminApplications({
 
     switch (app.status) {
       case "pending":
-        actions.push({ label: "즉시 확정", status: "confirmed" });
-        actions.push({ label: "취소", status: "cancelled", variant: "destructive" });
+        actions.push({ label: "확정", status: "confirmed" });
         break;
       case "review":
         actions.push({ label: "확정", status: "confirmed" });
-        actions.push({ label: "취소", status: "cancelled", variant: "destructive" });
         break;
       case "confirmed":
         actions.push({ label: "완료 처리", status: "completed" });
-        actions.push({ label: "취소", status: "cancelled", variant: "destructive" });
+        actions.push({ label: "확정 취소", status: "review" });
         break;
       case "cancelled":
         actions.push({ label: "재검토", status: "review" });
@@ -143,8 +146,8 @@ export function AdminApplications({
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">전체 상태</SelectItem>
-                <SelectItem value="pending">신청중</SelectItem>
-                <SelectItem value="review">검토중</SelectItem>
+                <SelectItem value="pending">진행중</SelectItem>
+                <SelectItem value="review">진행중</SelectItem>
                 <SelectItem value="confirmed">확정</SelectItem>
                 <SelectItem value="cancelled">취소</SelectItem>
                 <SelectItem value="completed">완료</SelectItem>
@@ -289,7 +292,7 @@ export function AdminApplications({
         <AdminApplicationDetailModal
           application={selectedApplication}
           onClose={() => setSelectedApplication(null)}
-          onUpdateStatus={onUpdateStatus}
+          onUpdateStatus={handleStatusChange}
           onUpdateApplication={onUpdateApplication}
         />
       )}

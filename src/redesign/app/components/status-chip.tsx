@@ -15,11 +15,11 @@ interface StatusChipProps {
 
 const statusConfig = {
   pending: {
-    label: "신청중",
-    className: "bg-blue-50 text-blue-700 border-blue-200",
+    label: "진행중",
+    className: "bg-amber-50 text-amber-700 border-amber-200",
   },
   review: {
-    label: "검토중",
+    label: "진행중",
     className: "bg-amber-50 text-amber-700 border-amber-200",
   },
   confirmed: {
