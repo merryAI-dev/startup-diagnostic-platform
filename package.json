@@ -8,7 +8,9 @@
     "build": "tsc -p tsconfig.json && vite build",
     "preview": "vite preview",
     "lint": "eslint .",
-    "lint:fix": "eslint . --fix"
+    "lint:fix": "eslint . --fix",
+    "migrate:officehour:created-by-uid": "node scripts/backfill-office-hour-created-by-uid.mjs",
+    "report:created-by-uid": "node scripts/report-created-by-uid.mjs"
   },
   "dependencies": {
     "@emotion/react": "11.14.0",

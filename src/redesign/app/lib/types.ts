@@ -9,7 +9,14 @@ export type OfficeHourType = "regular" | "irregular" | "custom";
 
 export type SessionFormat = "online" | "offline";
 
+export type OfficeHourSlotStatus = "open" | "booked" | "closed";
+
 export type UserRole = "user" | "admin" | "consultant" | "staff";
+export type ApprovalRole = "admin" | "company" | "consultant";
+
+export type AgendaScope = "internal" | "external";
+
+export type ProgramWeekday = "TUE" | "THU";
 
 export interface Program {
   id: string;
@@ -20,6 +27,13 @@ export interface Program {
   completedHours: number;
   maxApplications: number;
   usedApplications: number;
+  internalTicketLimit?: number;
+  externalTicketLimit?: number;
+  periodStart?: string; // YYYY-MM-DD
+  periodEnd?: string; // YYYY-MM-DD
+  weekdays?: ProgramWeekday[];
+  agendaIds?: string[];
+  consultantIds?: string[];
 }
 
 // 스타트업 실적 데이터
@@ -79,10 +93,25 @@ export interface User {
   lastLoginAt?: string | Date;
 }
 
+export interface PendingProfileApproval {
+  id: string;
+  email: string;
+  role: ApprovalRole;
+  requestedRole: ApprovalRole | null;
+  active: boolean;
+  companyId?: string | null;
+  createdAt?: Date | string;
+  activatedAt?: Date | string;
+}
+
 export interface Agenda {
   id: string;
   name: string;
-  category: string;
+  scope: AgendaScope;
+  description?: string;
+  active?: boolean;
+  // Legacy UI compatibility
+  category?: string;
 }
 
 export interface TimeSlot {
@@ -104,9 +133,36 @@ export interface RegularOfficeHour {
   id: string;
   title: string;
   consultant: string;
+  consultantId?: string;
+  programId?: string;
   month: string;
   availableDates: string[];
   description: string;
+  agendaIds?: string[];
+  slots?: {
+    id: string;
+    date: string;
+    startTime: string;
+    endTime: string;
+    status: OfficeHourSlotStatus;
+  }[];
+}
+
+export interface OfficeHourSlot {
+  id: string;
+  type: "regular";
+  programId?: string;
+  consultantId?: string;
+  consultantName: string;
+  title: string;
+  description?: string;
+  date: string; // YYYY-MM-DD
+  startTime: string; // HH:mm
+  endTime: string; // HH:mm
+  agendaIds?: string[];
+  status: OfficeHourSlotStatus;
+  createdAt?: Date | string;
+  updatedAt?: Date | string;
 }
 
 export interface Application {
@@ -114,6 +170,7 @@ export interface Application {
   type: OfficeHourType;
   status: ApplicationStatus;
   officeHourId?: string;
+  officeHourSlotId?: string;
   officeHourTitle: string;
   companyName?: string;
   consultant: string;
@@ -131,6 +188,7 @@ export interface Application {
   periodTo?: string;
   projectName?: string;
   isInternal?: boolean;
+  createdByUid?: string;
   programId?: string; // 어느 사업에 속하는지
   duration?: number; // 세션 시간 (시간 단위)
   createdAt: Date | string;
@@ -150,6 +208,10 @@ export interface Consultant {
   title?: string;
   email: string;
   phone?: string;
+  organization?: string;
+  secondaryEmail?: string;
+  secondaryPhone?: string;
+  fixedMeetingLink?: string;
   expertise: string[];
   bio: string;
   detailedBio?: string;
@@ -163,6 +225,7 @@ export interface Consultant {
   rating?: number;
   avatarUrl?: string;
   joinedDate?: Date | string;
+  agendaIds?: string[]; // 관리자가 매핑한 아젠다 ID 목록
   availability: ConsultantAvailability[];
 }
 

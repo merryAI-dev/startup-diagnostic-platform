@@ -9,13 +9,13 @@ import { Textarea } from "../ui/textarea";
 import { FileUpload } from "../file-upload";
 import { Calendar } from "../ui/calendar";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
-import { SessionFormat, FileItem } from "../../lib/types";
-import { agendas } from "../../lib/data";
+import { Agenda, SessionFormat, FileItem } from "../../lib/types";
 import { format } from "date-fns";
 import { ko } from "date-fns/locale";
 import { cn } from "../ui/utils";
 
 interface IrregularApplicationWizardProps {
+  agendas: Agenda[];
   onBack: () => void;
   onSubmit: (data: IrregularApplicationFormData) => void;
 }
@@ -40,6 +40,7 @@ const steps = [
 ];
 
 export function IrregularApplicationWizard({
+  agendas,
   onBack,
   onSubmit,
 }: IrregularApplicationWizardProps) {

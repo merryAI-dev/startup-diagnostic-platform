@@ -24,25 +24,77 @@ import { Input } from "../ui/input";
 import { Label } from "../ui/label";
 import { Textarea } from "../ui/textarea";
 import { toast } from "sonner";
+import type { DayContentProps } from "react-day-picker";
 
 interface UnifiedCalendarProps {
   currentUser: User;
   applications: Application[];
   programs: Program[];
   onNavigateToApplication?: (id: string) => void;
+  onRequestApplication?: (id: string) => void;
+  onConfirmApplication?: (id: string) => void;
+  currentConsultantId?: string | null;
+  currentConsultantName?: string | null;
 }
 
 type ViewMode = "month" | "week" | "day" | "list";
+
+function toLocalDateKey(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function parseLocalDateKey(value?: string): Date | null {
+  if (!value) return null;
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/u.exec(value.trim());
+  if (match) {
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    const day = Number(match[3]);
+    const parsed = new Date(year, month - 1, day);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+  const fallback = new Date(value);
+  return Number.isNaN(fallback.getTime()) ? null : fallback;
+}
+
+function toEventDateKey(value?: string | Date): string | null {
+  if (!value) return null;
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : toLocalDateKey(value);
+  }
+  const parsed = parseLocalDateKey(value);
+  return parsed ? toLocalDateKey(parsed) : null;
+}
+
+function clampDateToMonth(baseDate: Date, targetMonth: Date): Date {
+  const year = targetMonth.getFullYear();
+  const month = targetMonth.getMonth();
+  const day = baseDate.getDate();
+  const lastDay = new Date(year, month + 1, 0).getDate();
+  return new Date(year, month, Math.min(day, lastDay));
+}
 
 export function UnifiedCalendar({
   currentUser,
   applications,
   programs,
   onNavigateToApplication,
+  onRequestApplication,
+  onConfirmApplication,
+  currentConsultantId = null,
+  currentConsultantName = null,
 }: UnifiedCalendarProps) {
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
+  const [currentMonth, setCurrentMonth] = useState<Date>(
+    new Date(new Date().getFullYear(), new Date().getMonth(), 1),
+  );
   const [viewMode, setViewMode] = useState<ViewMode>("month");
   const [selectedProgram, setSelectedProgram] = useState<string | null>(null);
+  const [pendingAgendaFilter, setPendingAgendaFilter] = useState<string>("all");
+  const [pendingProgramFilter, setPendingProgramFilter] = useState<string>("all");
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [newEvent, setNewEvent] = useState({
     title: "",
@@ -103,14 +155,16 @@ export function UnifiedCalendar({
       ? applications.filter(app => app.programId === selectedProgram)
       : applications;
 
-    const confirmed = filtered.filter(
-      app => (app.status === "confirmed" || app.status === "completed") && app.scheduledDate
+    const scheduled = filtered.filter(
+      app =>
+        (app.status === "confirmed" || app.status === "completed")
+        && app.scheduledDate
     );
 
     const byDate: Record<string, Application[]> = {};
-    confirmed.forEach(app => {
-      if (!app.scheduledDate) return;
-      const key = app.scheduledDate;
+    scheduled.forEach((app) => {
+      const key = toEventDateKey(app.scheduledDate);
+      if (!key) return;
       const bucket = byDate[key] ?? (byDate[key] = []);
       bucket.push(app);
     });
@@ -119,14 +173,138 @@ export function UnifiedCalendar({
   }, [applications, selectedProgram]);
 
   // 선택된 날짜의 이벤트
-  const selectedDateKey = selectedDate.toISOString().split("T")[0] ?? "";
+  const selectedDateKey = toLocalDateKey(selectedDate);
   const selectedDateEvents = eventsByDate[selectedDateKey] ?? [];
+  const calendarMonth = new Date(
+    currentMonth.getFullYear(),
+    currentMonth.getMonth(),
+    1,
+  );
 
   // 캘린더에서 날짜에 이벤트가 있는지 체크
   const hasEvents = (date: Date) => {
-    const dateKey = date.toISOString().split("T")[0] ?? "";
+    const dateKey = toLocalDateKey(date);
     const events = eventsByDate[dateKey];
     return Boolean(events && events.length > 0);
+  };
+
+  const isConsultant = currentUser.role === "consultant";
+  const isMyEvent = (event: Application) => {
+    if (!isConsultant) return false;
+    if (currentConsultantId && event.consultantId === currentConsultantId) return true;
+    if (currentConsultantName && event.consultant === currentConsultantName) return true;
+    return false;
+  };
+  const pendingRequests = useMemo(() => {
+    if (!isConsultant) return [];
+    return applications
+      .filter((app) =>
+        (app.status === "pending" || app.status === "review")
+        && !app.consultantId
+        && (!app.consultant || app.consultant === "담당자 배정 중")
+      )
+      .sort((a, b) => {
+        const dateA = new Date(a.createdAt).getTime();
+        const dateB = new Date(b.createdAt).getTime();
+        return dateB - dateA;
+      });
+  }, [applications, isConsultant]);
+
+  const confirmRequests = useMemo(() => {
+    if (!isConsultant) return [];
+    return applications
+      .filter((app) => {
+        if (app.status !== "review") return false;
+        if (currentConsultantId && app.consultantId === currentConsultantId) return true;
+        if (currentConsultantName && app.consultant === currentConsultantName) return true;
+        return false;
+      })
+      .sort((a, b) => {
+        const dateA = new Date(a.updatedAt ?? a.createdAt).getTime();
+        const dateB = new Date(b.updatedAt ?? b.createdAt).getTime();
+        return dateB - dateA;
+      });
+  }, [applications, currentConsultantId, currentConsultantName, isConsultant]);
+
+  const agendaOptions = useMemo(() => {
+    const names = new Set<string>();
+    applications.forEach((app) => {
+      if (app.agenda) names.add(app.agenda);
+    });
+    return Array.from(names).sort((a, b) => a.localeCompare(b));
+  }, [applications]);
+
+  const filteredPendingRequests = useMemo(() => {
+    return pendingRequests.filter((app) => {
+      const agendaOk = pendingAgendaFilter === "all" || app.agenda === pendingAgendaFilter;
+      const programOk = pendingProgramFilter === "all" || app.programId === pendingProgramFilter;
+      return agendaOk && programOk;
+    });
+  }, [pendingRequests, pendingAgendaFilter, pendingProgramFilter]);
+
+  const filteredConfirmRequests = useMemo(() => {
+    return confirmRequests.filter((app) => {
+      const agendaOk = pendingAgendaFilter === "all" || app.agenda === pendingAgendaFilter;
+      const programOk = pendingProgramFilter === "all" || app.programId === pendingProgramFilter;
+      return agendaOk && programOk;
+    });
+  }, [confirmRequests, pendingAgendaFilter, pendingProgramFilter]);
+
+  const pendingProgramOptions = useMemo(() => {
+    return programs.filter((program) =>
+      pendingRequests.some((app) => app.programId === program.id)
+      || confirmRequests.some((app) => app.programId === program.id)
+    );
+  }, [confirmRequests, pendingRequests, programs]);
+
+  const renderPendingFilters = () => (
+    <div className="flex flex-wrap gap-2">
+      <Select value={pendingProgramFilter} onValueChange={setPendingProgramFilter}>
+        <SelectTrigger className="w-44">
+          <SelectValue placeholder="사업 전체" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="all">사업 전체</SelectItem>
+          {pendingProgramOptions.map((program) => (
+            <SelectItem key={program.id} value={program.id}>
+              {program.name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+
+      <Select value={pendingAgendaFilter} onValueChange={setPendingAgendaFilter}>
+        <SelectTrigger className="w-44">
+          <SelectValue placeholder="아젠다 전체" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="all">아젠다 전체</SelectItem>
+          {agendaOptions.map((agenda) => (
+            <SelectItem key={agenda} value={agenda}>
+              {agenda}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
+  );
+
+  const renderDayContent = (props: DayContentProps) => {
+    const hasEvent = hasEvents(props.date);
+    const isSelected = Boolean(props.activeModifiers.selected);
+
+    return (
+      <div className="relative flex h-full w-full items-center justify-center">
+        <span>{props.date.getDate()}</span>
+        {hasEvent && (
+          <span
+            className={`pointer-events-none absolute bottom-0.5 left-1/2 h-0.5 w-4 -translate-x-1/2 rounded-full ${
+              isSelected ? "bg-white/80" : "bg-[#0A2540]/35"
+            }`}
+          />
+        )}
+      </div>
+    );
   };
 
   // 이번 주 이벤트
@@ -139,7 +317,8 @@ export function UnifiedCalendar({
 
     return Object.entries(eventsByDate)
       .filter(([dateStr]) => {
-        const date = new Date(dateStr);
+        const date = parseLocalDateKey(dateStr);
+        if (!date) return false;
         return date >= weekStart && date < weekEnd;
       })
       .flatMap(([_, events]) => events)
@@ -169,21 +348,7 @@ export function UnifiedCalendar({
           <div className="flex items-center justify-between mb-4">
             <div>
               <h1 className="text-2xl font-bold text-[#0A2540] mb-1">통합 캘린더</h1>
-              <div className="flex items-center gap-3">
-                <p className="text-slate-600">모든 오피스아워 일정을 한눈에 확인하세요</p>
-                {/* 연결 상태 표시 */}
-                <Badge
-                  variant={isFirebaseReady ? "default" : "secondary"}
-                  className={`text-xs ${isFirebaseReady ? "bg-green-500" : ""}`}
-                >
-                  {isOnline ? (
-                    <Wifi className="size-3 mr-1" />
-                  ) : (
-                    <WifiOff className="size-3 mr-1" />
-                  )}
-                  {isFirebaseReady ? "실시간 동기화" : "로컬 모드"}
-                </Badge>
-              </div>
+              <p className="text-slate-600">모든 오피스아워 일정을 한눈에 확인하세요</p>
             </div>
 
             <div className="flex items-center gap-2">
@@ -304,17 +469,25 @@ export function UnifiedCalendar({
               <div className="flex gap-1 bg-slate-100 rounded-lg p-1">
                 <Button
                   size="sm"
-                  variant={viewMode === "month" ? "default" : "ghost"}
+                  variant="ghost"
                   onClick={() => setViewMode("month")}
-                  className={viewMode === "month" ? "bg-white shadow-sm" : ""}
+                  className={
+                    viewMode === "month"
+                      ? "bg-black text-white shadow-sm hover:bg-black"
+                      : "bg-black text-white/80 hover:bg-black"
+                  }
                 >
                   <Grid3x3 className="size-4" />
                 </Button>
                 <Button
                   size="sm"
-                  variant={viewMode === "list" ? "default" : "ghost"}
+                  variant="ghost"
                   onClick={() => setViewMode("list")}
-                  className={viewMode === "list" ? "bg-white shadow-sm" : ""}
+                  className={
+                    viewMode === "list"
+                      ? "bg-black text-white shadow-sm hover:bg-black"
+                      : "bg-black text-white/80 hover:bg-black"
+                  }
                 >
                   <List className="size-4" />
                 </Button>
@@ -345,9 +518,13 @@ export function UnifiedCalendar({
                         size="sm"
                         variant="outline"
                         onClick={() => {
-                          const newDate = new Date(selectedDate);
-                          newDate.setMonth(selectedDate.getMonth() - 1);
-                          setSelectedDate(newDate);
+                          const newMonth = new Date(
+                            currentMonth.getFullYear(),
+                            currentMonth.getMonth() - 1,
+                            1,
+                          );
+                          setCurrentMonth(newMonth);
+                          setSelectedDate((prev) => clampDateToMonth(prev, newMonth));
                         }}
                       >
                         <ChevronLeft className="size-4" />
@@ -355,7 +532,12 @@ export function UnifiedCalendar({
                       <Button
                         size="sm"
                         variant="outline"
-                        onClick={() => setSelectedDate(new Date())}
+                        onClick={() => {
+                          const today = new Date();
+                          const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+                          setCurrentMonth(monthStart);
+                          setSelectedDate(today);
+                        }}
                       >
                         오늘
                       </Button>
@@ -363,9 +545,13 @@ export function UnifiedCalendar({
                         size="sm"
                         variant="outline"
                         onClick={() => {
-                          const newDate = new Date(selectedDate);
-                          newDate.setMonth(selectedDate.getMonth() + 1);
-                          setSelectedDate(newDate);
+                          const newMonth = new Date(
+                            currentMonth.getFullYear(),
+                            currentMonth.getMonth() + 1,
+                            1,
+                          );
+                          setCurrentMonth(newMonth);
+                          setSelectedDate((prev) => clampDateToMonth(prev, newMonth));
                         }}
                       >
                         <ChevronRight className="size-4" />
@@ -374,25 +560,39 @@ export function UnifiedCalendar({
                   </div>
 
                   <Calendar
+                    key={`${calendarMonth.getFullYear()}-${calendarMonth.getMonth()}`}
                     mode="single"
                     selected={selectedDate}
-                    onSelect={(date) => date && setSelectedDate(date)}
-                    className="rounded-md border"
+                    month={calendarMonth}
+                    onSelect={(date) => {
+                      if (!date) return;
+                      setSelectedDate(date);
+                      const monthStart = new Date(date.getFullYear(), date.getMonth(), 1);
+                      setCurrentMonth(monthStart);
+                    }}
+                    onMonthChange={(month) => {
+                      const monthStart = new Date(month.getFullYear(), month.getMonth(), 1);
+                      setCurrentMonth(monthStart);
+                      setSelectedDate((prev) => clampDateToMonth(prev, monthStart));
+                    }}
+                    className="rounded-md"
                     modifiers={{
                       hasEvent: (date) => hasEvents(date),
                     }}
                     modifiersClassNames={{
-                      hasEvent: "bg-blue-50 font-semibold",
+                      hasEvent:
+                        "font-semibold text-[#0A2540]",
                     }}
+                    components={{ DayContent: renderDayContent }}
                   />
 
                   <div className="mt-4 flex items-center gap-4 text-sm text-slate-600">
                     <div className="flex items-center gap-2">
-                      <div className="w-3 h-3 rounded-full bg-blue-50 border-2 border-[#5DADE2]" />
+                      <div className="h-0.5 w-5 rounded-full bg-[#0A2540]/35" />
                       <span>일정 있음</span>
                     </div>
                     <div className="flex items-center gap-2">
-                      <div className="w-3 h-3 rounded-full bg-slate-100" />
+                      <div className="h-0.5 w-5 rounded-full bg-slate-200" />
                       <span>일정 없음</span>
                     </div>
                   </div>
@@ -401,6 +601,132 @@ export function UnifiedCalendar({
 
               {/* 선택된 날짜의 일정 */}
               <div>
+                {isConsultant && (
+                  <Card className="p-6 mb-6">
+                    <div className="flex items-center justify-between mb-4">
+                      <div>
+                        <h3 className="font-semibold text-[#0A2540]">수락 대기 요청</h3>
+                        <p className="text-xs text-slate-500 mt-1">
+                          아젠다 매핑된 요청 중에서 수락할 항목을 선택하세요
+                        </p>
+                      </div>
+                      <Badge variant="outline" className="text-xs">
+                        {filteredPendingRequests.length + filteredConfirmRequests.length}건
+                      </Badge>
+                    </div>
+
+                    <div className="mb-4">
+                      {renderPendingFilters()}
+                    </div>
+
+                    <div className="space-y-6">
+                      <div>
+                        <div className="flex items-center justify-between mb-3">
+                          <span className="text-sm font-semibold text-slate-700">수락 요청</span>
+                          <span className="text-xs text-slate-400">{filteredPendingRequests.length}건</span>
+                        </div>
+                        {filteredPendingRequests.length === 0 ? (
+                          <p className="text-sm text-slate-500 text-center py-4">
+                            수락 요청 가능한 항목이 없습니다
+                          </p>
+                        ) : (
+                          <div className="space-y-3">
+                            {filteredPendingRequests.slice(0, 5).map((event) => (
+                              <div
+                                key={event.id}
+                                className="rounded-lg border border-slate-200 bg-white p-3"
+                              >
+                                <div className="flex items-start justify-between gap-3">
+                                  <div className="min-w-0">
+                                    <p className="text-sm font-semibold text-[#0A2540] truncate">
+                                      {event.officeHourTitle}
+                                    </p>
+                                    <p className="text-xs text-slate-500 mt-1">
+                                      {event.companyName ?? "기업 미입력"} · {event.agenda}
+                                    </p>
+                                    <p className="text-xs text-slate-500 mt-1">
+                                      {event.scheduledDate
+                                        ? `${event.scheduledDate} ${event.scheduledTime ?? ""}`.trim()
+                                        : event.periodFrom
+                                          ? `${event.periodFrom} ~ ${event.periodTo ?? ""}`.trim()
+                                          : "일정 미정"}
+                                    </p>
+                                  </div>
+                                  <Button
+                                    size="sm"
+                                    onClick={() => onRequestApplication?.(event.id)}
+                                    disabled={!onRequestApplication}
+                                    className="shrink-0"
+                                  >
+                                    수락 요청
+                                  </Button>
+                                </div>
+                              </div>
+                            ))}
+                            {filteredPendingRequests.length > 5 && (
+                              <p className="text-xs text-slate-500 text-center">
+                                외 {filteredPendingRequests.length - 5}건
+                              </p>
+                            )}
+                          </div>
+                        )}
+                      </div>
+
+                      <div>
+                        <div className="flex items-center justify-between mb-3">
+                          <span className="text-sm font-semibold text-slate-700">확정 대기</span>
+                          <span className="text-xs text-slate-400">{filteredConfirmRequests.length}건</span>
+                        </div>
+                        {filteredConfirmRequests.length === 0 ? (
+                          <p className="text-sm text-slate-500 text-center py-4">
+                            확정 대기 중인 항목이 없습니다
+                          </p>
+                        ) : (
+                          <div className="space-y-3">
+                            {filteredConfirmRequests.slice(0, 5).map((event) => (
+                              <div
+                                key={event.id}
+                                className="rounded-lg border border-slate-200 bg-white p-3"
+                              >
+                                <div className="flex items-start justify-between gap-3">
+                                  <div className="min-w-0">
+                                    <p className="text-sm font-semibold text-[#0A2540] truncate">
+                                      {event.officeHourTitle}
+                                    </p>
+                                    <p className="text-xs text-slate-500 mt-1">
+                                      {event.companyName ?? "기업 미입력"} · {event.agenda}
+                                    </p>
+                                    <p className="text-xs text-slate-500 mt-1">
+                                      {event.scheduledDate
+                                        ? `${event.scheduledDate} ${event.scheduledTime ?? ""}`.trim()
+                                        : event.periodFrom
+                                          ? `${event.periodFrom} ~ ${event.periodTo ?? ""}`.trim()
+                                          : "일정 미정"}
+                                    </p>
+                                  </div>
+                                  <Button
+                                    size="sm"
+                                    onClick={() => onConfirmApplication?.(event.id)}
+                                    disabled={!onConfirmApplication}
+                                    className="shrink-0"
+                                  >
+                                    확정
+                                  </Button>
+                                </div>
+                              </div>
+                            ))}
+                            {filteredConfirmRequests.length > 5 && (
+                              <p className="text-xs text-slate-500 text-center">
+                                외 {filteredConfirmRequests.length - 5}건
+                              </p>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </Card>
+                )}
+
                 <Card className="p-6">
                   <h3 className="font-semibold text-[#0A2540] mb-4">
                     {selectedDate.toLocaleDateString("ko-KR", { month: "long", day: "numeric" })}
@@ -439,6 +765,11 @@ export function UnifiedCalendar({
                             <div className="flex items-center gap-2">
                               <Users className="size-3" />
                               <span>{event.consultant}</span>
+                              {isConsultant && (
+                                <Badge variant="outline" className="text-[10px]">
+                                  {isMyEvent(event) ? "내 일정" : "다른 컨설턴트"}
+                                </Badge>
+                              )}
                             </div>
                             <div className="flex items-center gap-2">
                               {event.sessionFormat === "online" ? (
@@ -483,7 +814,9 @@ export function UnifiedCalendar({
                               {event.officeHourTitle}
                             </p>
                             <p className="text-xs text-slate-500">
-                              {new Date(event.scheduledDate!).toLocaleDateString("ko-KR", {
+                              {(parseLocalDateKey(event.scheduledDate ?? "")
+                                ?? new Date(event.scheduledDate ?? "")
+                              ).toLocaleDateString("ko-KR", {
                                 month: "short",
                                 day: "numeric",
                               })}{" "}
@@ -504,8 +837,135 @@ export function UnifiedCalendar({
             </div>
           ) : (
             /* 리스트 뷰 */
-            <Card className="p-6">
-              <h2 className="text-lg font-semibold text-[#0A2540] mb-6">전체 일정</h2>
+            <div className="space-y-6">
+              {isConsultant && (
+                <Card className="p-6">
+                  <div className="flex items-center justify-between mb-4">
+                    <div>
+                      <h3 className="font-semibold text-[#0A2540]">수락 대기 요청</h3>
+                      <p className="text-xs text-slate-500 mt-1">
+                        아젠다 매핑된 요청 중에서 수락할 항목을 선택하세요
+                      </p>
+                    </div>
+                    <Badge variant="outline" className="text-xs">
+                      {filteredPendingRequests.length + filteredConfirmRequests.length}건
+                    </Badge>
+                  </div>
+
+                  <div className="mb-4">
+                    {renderPendingFilters()}
+                  </div>
+
+                  <div className="space-y-6">
+                    <div>
+                      <div className="flex items-center justify-between mb-3">
+                        <span className="text-sm font-semibold text-slate-700">수락 요청</span>
+                        <span className="text-xs text-slate-400">{filteredPendingRequests.length}건</span>
+                      </div>
+                      {filteredPendingRequests.length === 0 ? (
+                        <p className="text-sm text-slate-500 text-center py-4">
+                          수락 요청 가능한 항목이 없습니다
+                        </p>
+                      ) : (
+                        <div className="space-y-3">
+                          {filteredPendingRequests.slice(0, 5).map((event) => (
+                            <div
+                              key={event.id}
+                              className="rounded-lg border border-slate-200 bg-white p-3"
+                            >
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                  <p className="text-sm font-semibold text-[#0A2540] truncate">
+                                    {event.officeHourTitle}
+                                  </p>
+                                  <p className="text-xs text-slate-500 mt-1">
+                                    {event.companyName ?? "기업 미입력"} · {event.agenda}
+                                  </p>
+                                  <p className="text-xs text-slate-500 mt-1">
+                                    {event.scheduledDate
+                                      ? `${event.scheduledDate} ${event.scheduledTime ?? ""}`.trim()
+                                      : event.periodFrom
+                                        ? `${event.periodFrom} ~ ${event.periodTo ?? ""}`.trim()
+                                        : "일정 미정"}
+                                  </p>
+                                </div>
+                                <Button
+                                  size="sm"
+                                  onClick={() => onRequestApplication?.(event.id)}
+                                  disabled={!onRequestApplication}
+                                  className="shrink-0"
+                                >
+                                  수락 요청
+                                </Button>
+                              </div>
+                            </div>
+                          ))}
+                          {filteredPendingRequests.length > 5 && (
+                            <p className="text-xs text-slate-500 text-center">
+                              외 {filteredPendingRequests.length - 5}건
+                            </p>
+                          )}
+                        </div>
+                      )}
+                    </div>
+
+                    <div>
+                      <div className="flex items-center justify-between mb-3">
+                        <span className="text-sm font-semibold text-slate-700">확정 대기</span>
+                        <span className="text-xs text-slate-400">{filteredConfirmRequests.length}건</span>
+                      </div>
+                      {filteredConfirmRequests.length === 0 ? (
+                        <p className="text-sm text-slate-500 text-center py-4">
+                          확정 대기 중인 항목이 없습니다
+                        </p>
+                      ) : (
+                        <div className="space-y-3">
+                          {filteredConfirmRequests.slice(0, 5).map((event) => (
+                            <div
+                              key={event.id}
+                              className="rounded-lg border border-slate-200 bg-white p-3"
+                            >
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                  <p className="text-sm font-semibold text-[#0A2540] truncate">
+                                    {event.officeHourTitle}
+                                  </p>
+                                  <p className="text-xs text-slate-500 mt-1">
+                                    {event.companyName ?? "기업 미입력"} · {event.agenda}
+                                  </p>
+                                  <p className="text-xs text-slate-500 mt-1">
+                                    {event.scheduledDate
+                                      ? `${event.scheduledDate} ${event.scheduledTime ?? ""}`.trim()
+                                      : event.periodFrom
+                                        ? `${event.periodFrom} ~ ${event.periodTo ?? ""}`.trim()
+                                        : "일정 미정"}
+                                  </p>
+                                </div>
+                                <Button
+                                  size="sm"
+                                  onClick={() => onConfirmApplication?.(event.id)}
+                                  disabled={!onConfirmApplication}
+                                  className="shrink-0"
+                                >
+                                  확정
+                                </Button>
+                              </div>
+                            </div>
+                          ))}
+                          {filteredConfirmRequests.length > 5 && (
+                            <p className="text-xs text-slate-500 text-center">
+                              외 {filteredConfirmRequests.length - 5}건
+                            </p>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </Card>
+              )}
+
+              <Card className="p-6">
+                <h2 className="text-lg font-semibold text-[#0A2540] mb-6">전체 일정</h2>
 
               <div className="space-y-4">
                 {Object.entries(eventsByDate)
@@ -514,7 +974,7 @@ export function UnifiedCalendar({
                     <div key={date}>
                       <h3 className="font-medium text-slate-700 mb-3 flex items-center gap-2">
                         <CalendarIcon className="size-4" />
-                        {new Date(date).toLocaleDateString("ko-KR", {
+                        {(parseLocalDateKey(date) ?? new Date(date)).toLocaleDateString("ko-KR", {
                           year: "numeric",
                           month: "long",
                           day: "numeric",
@@ -557,6 +1017,11 @@ export function UnifiedCalendar({
                                     <div className="flex items-center gap-2">
                                       <Users className="size-4" />
                                       <span>{event.consultant}</span>
+                                      {isConsultant && (
+                                        <Badge variant="outline" className="text-[10px]">
+                                          {isMyEvent(event) ? "내 일정" : "다른 컨설턴트"}
+                                        </Badge>
+                                      )}
                                     </div>
                                     <div className="flex items-center gap-2">
                                       {event.sessionFormat === "online" ? (
@@ -588,7 +1053,8 @@ export function UnifiedCalendar({
                   </div>
                 )}
               </div>
-            </Card>
+              </Card>
+            </div>
           )}
         </div>
       </div>

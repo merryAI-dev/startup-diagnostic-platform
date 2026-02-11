@@ -3,7 +3,7 @@ import { Application, Program, OfficeHourReport, User } from "../../lib/types";
 import { Button } from "../ui/button";
 import { Badge } from "../ui/badge";
 import { AlertCircle, Clock, Calendar, FileText } from "lucide-react";
-import { format, differenceInDays } from "date-fns";
+import { addDays, format, differenceInDays } from "date-fns";
 import { ko } from "date-fns/locale";
 
 interface PendingReportsDashboardProps {
@@ -18,6 +18,8 @@ interface PendingReportItem {
   application: Application;
   daysSinceSession: number;
   isOverdue: boolean;
+  daysLeft: number;
+  overdueDays: number;
   programName: string;
   programColor: string;
 }
@@ -29,30 +31,62 @@ export function PendingReportsDashboard({
   currentUser,
   onCreateReport,
 }: PendingReportsDashboardProps) {
+  const getSessionEndTime = (app: Application) => {
+    const durationHours = app.duration ?? 2;
+
+    if (app.scheduledDate && app.scheduledTime) {
+      const start = new Date(`${app.scheduledDate}T${app.scheduledTime}`);
+      if (!Number.isNaN(start.getTime())) {
+        return new Date(start.getTime() + durationHours * 60 * 60 * 1000);
+      }
+    }
+
+    if (app.scheduledDate) {
+      const fallback = new Date(`${app.scheduledDate}T23:59`);
+      if (!Number.isNaN(fallback.getTime())) {
+        return fallback;
+      }
+    }
+
+    return null;
+  };
+
   // 미작성 보고서 목록 계산
   const pendingReports = useMemo(() => {
-    const completedApps = applications.filter(
-      (app) => app.status === "completed" && app.scheduledDate
+    const eligibleApps = applications.filter(
+      (app) =>
+        (app.status === "confirmed" || app.status === "completed")
+        && app.scheduledDate
     );
 
     const reportedAppIds = new Set(reports.map((r) => r.applicationId));
+    const now = new Date();
 
-    const pending: PendingReportItem[] = completedApps
+    const pending: PendingReportItem[] = eligibleApps
       .filter((app) => !reportedAppIds.has(app.id))
       .map((app) => {
-        const sessionDate = new Date(app.scheduledDate!);
-        const today = new Date();
-        const daysSince = differenceInDays(today, sessionDate);
+        const sessionEnd = getSessionEndTime(app);
+        const effectiveEnd = sessionEnd ?? new Date(app.scheduledDate!);
+        const daysSince = differenceInDays(now, effectiveEnd);
+        const deadline = addDays(effectiveEnd, 3);
+        const daysLeft = Math.max(0, differenceInDays(deadline, now));
+        const overdueDays = Math.max(0, differenceInDays(now, deadline));
 
         const program = programs.find((p) => p.id === app.programId);
 
         return {
           application: app,
           daysSinceSession: daysSince,
-          isOverdue: daysSince > 3,
+          isOverdue: now > deadline,
+          daysLeft,
+          overdueDays,
           programName: program?.name || "알 수 없음",
           programColor: program?.color || "#gray-500",
         };
+      })
+      .filter((item) => {
+        const sessionEnd = getSessionEndTime(item.application);
+        return sessionEnd ? now >= sessionEnd : true;
       })
       .sort((a, b) => b.daysSinceSession - a.daysSinceSession);
 
@@ -158,9 +192,9 @@ export function PendingReportsDashboard({
               <Clock className="w-4 h-4 text-amber-500" />
             </div>
             <div className="text-3xl font-bold text-amber-600">
-              {pendingReports.filter((p) => !p.isOverdue && p.daysSinceSession >= 2).length}건
+              {pendingReports.filter((p) => !p.isOverdue && p.daysLeft <= 1).length}건
             </div>
-            <p className="text-xs text-amber-600 mt-1">2일 이상 경과</p>
+            <p className="text-xs text-amber-600 mt-1">마감 1일 이내</p>
           </div>
         </div>
       </div>
@@ -288,7 +322,9 @@ export function PendingReportsDashboard({
                               item.isOverdue ? "text-red-600 font-medium" : ""
                             }
                           >
-                            {item.daysSinceSession}일 경과
+                            {item.isOverdue
+                              ? `기한 초과 ${item.overdueDays}일`
+                              : `D-${item.daysLeft}`}
                           </span>
                         </div>
                       </div>

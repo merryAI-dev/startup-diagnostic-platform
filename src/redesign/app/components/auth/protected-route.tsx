@@ -17,9 +17,15 @@ export function ProtectedRoute({
   fallback 
 }: ProtectedRouteProps) {
   const { user: firebaseUser, profile, loading } = useAppAuth();
+  const resolvedRole =
+    profile?.role === "admin"
+      ? "admin"
+      : profile?.role === "consultant"
+        ? "consultant"
+        : "user";
   const user = firebaseUser
     ? {
-        role: profile?.role === "admin" ? "admin" : "user",
+        role: resolvedRole,
       }
     : null;
 

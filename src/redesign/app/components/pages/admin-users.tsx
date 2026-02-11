@@ -3,7 +3,7 @@ import { Search, Filter, UserPlus, Mail, Building, Calendar, Shield } from "luci
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Badge } from "../ui/badge";
-import { UserWithPermissions } from "../../lib/types";
+import { PendingProfileApproval, UserWithPermissions } from "../../lib/types";
 import {
   Table,
   TableBody,
@@ -34,13 +34,28 @@ interface AdminUsersProps {
   users: UserWithPermissions[];
   onUpdateUser: (id: string, data: Partial<UserWithPermissions>) => void;
   onAddUser: (data: Omit<UserWithPermissions, "id" | "createdAt">) => void;
+  pendingApprovals: PendingProfileApproval[];
+  onApprovePendingUser: (
+    pendingProfile: PendingProfileApproval
+  ) => Promise<void> | void;
+  approvalSaving?: boolean;
 }
 
-export function AdminUsers({ users, onUpdateUser, onAddUser }: AdminUsersProps) {
+export function AdminUsers({
+  users,
+  onUpdateUser,
+  onAddUser,
+  pendingApprovals,
+  onApprovePendingUser,
+  approvalSaving = false,
+}: AdminUsersProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [selectedUser, setSelectedUser] = useState<UserWithPermissions | null>(null);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+  const [approvalSearchQuery, setApprovalSearchQuery] = useState("");
+  const [approvalRoleFilter, setApprovalRoleFilter] = useState<string>("all");
+  const [approvingUserId, setApprovingUserId] = useState<string | null>(null);
 
   const filteredUsers = users.filter((user) => {
     const matchesSearch =
@@ -73,13 +88,40 @@ export function AdminUsers({ users, onUpdateUser, onAddUser }: AdminUsersProps) 
     onUpdateUser(userId, { status });
   };
 
-  const formatDate = (date: Date | string) => {
+  const formatDate = (date?: Date | string) => {
+    if (!date) return "-";
     const parsedDate = date instanceof Date ? date : new Date(date);
+    if (Number.isNaN(parsedDate.getTime())) return "-";
     return new Intl.DateTimeFormat("ko-KR", {
       year: "numeric",
       month: "2-digit",
       day: "2-digit",
     }).format(parsedDate);
+  };
+
+  const getRoleLabel = (
+    role: PendingProfileApproval["requestedRole"] | PendingProfileApproval["role"]
+  ) => {
+    if (role === "admin") return "관리자";
+    if (role === "consultant") return "컨설턴트";
+    return "회사";
+  };
+
+  const filteredPendingApprovals = pendingApprovals.filter((pending) => {
+    const keyword = approvalSearchQuery.trim().toLowerCase();
+    const requestedRole = pending.requestedRole ?? pending.role;
+    const matchesSearch = !keyword || pending.email.toLowerCase().includes(keyword);
+    const matchesRole = approvalRoleFilter === "all" || requestedRole === approvalRoleFilter;
+    return matchesSearch && matchesRole;
+  });
+
+  const handleApprovePendingUser = async (pending: PendingProfileApproval) => {
+    setApprovingUserId(pending.id);
+    try {
+      await Promise.resolve(onApprovePendingUser(pending));
+    } finally {
+      setApprovingUserId(null);
+    }
   };
 
   const stats = {
@@ -100,6 +142,94 @@ export function AdminUsers({ users, onUpdateUser, onAddUser }: AdminUsersProps) 
               사용자 정보 및 권한을 관리합니다
             </p>
           </div>
+        </div>
+      </div>
+
+      <div className="bg-white rounded-lg border p-4 mb-6">
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+          <div>
+            <h2 className="text-lg font-semibold text-gray-900">가입 승인 대기</h2>
+            <p className="text-sm text-muted-foreground mt-1">
+              회원가입 후 승인 대기 중인 계정을 역할별로 승인합니다
+            </p>
+          </div>
+          <Badge variant="secondary" className="text-sm">
+            {pendingApprovals.length}건 대기
+          </Badge>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3 mb-4">
+          <div className="flex-1 min-w-[220px] relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+            <Input
+              placeholder="승인 대기 이메일 검색..."
+              value={approvalSearchQuery}
+              onChange={(e) => setApprovalSearchQuery(e.target.value)}
+              className="pl-10"
+            />
+          </div>
+          <Select value={approvalRoleFilter} onValueChange={setApprovalRoleFilter}>
+            <SelectTrigger className="w-44">
+              <SelectValue placeholder="요청 역할" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">전체 요청 역할</SelectItem>
+              <SelectItem value="company">회사</SelectItem>
+              <SelectItem value="admin">관리자</SelectItem>
+              <SelectItem value="consultant">컨설턴트</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="rounded-lg border overflow-hidden">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>이메일</TableHead>
+                <TableHead>요청 역할</TableHead>
+                <TableHead>현재 역할</TableHead>
+                <TableHead>가입일</TableHead>
+                <TableHead>액션</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {filteredPendingApprovals.map((pending) => {
+                const requestedRole = pending.requestedRole ?? pending.role;
+                const isApproving =
+                  approvalSaving || approvingUserId === pending.id;
+
+                return (
+                  <TableRow key={pending.id}>
+                    <TableCell className="text-sm">{pending.email || "-"}</TableCell>
+                    <TableCell>
+                      <Badge variant="outline">{getRoleLabel(requestedRole)}</Badge>
+                    </TableCell>
+                    <TableCell className="text-sm text-muted-foreground">
+                      {getRoleLabel(pending.role)}
+                    </TableCell>
+                    <TableCell className="text-sm text-muted-foreground">
+                      {formatDate(pending.createdAt)}
+                    </TableCell>
+                    <TableCell>
+                      <Button
+                        size="sm"
+                        disabled={isApproving}
+                        onClick={() => handleApprovePendingUser(pending)}
+                      >
+                        {isApproving ? "승인 중..." : "승인"}
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+
+          {filteredPendingApprovals.length === 0 && (
+            <div className="text-center py-8 text-sm text-muted-foreground">
+              승인 대기 계정이 없습니다
+            </div>
+          )}
         </div>
       </div>
 

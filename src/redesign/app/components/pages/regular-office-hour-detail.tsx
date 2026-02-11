@@ -40,7 +40,7 @@ export function RegularOfficeHourDetail({
         <h1 className="mb-2">{officeHour.title}</h1>
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <User className="w-4 h-4" />
-          <span>{officeHour.consultant}</span>
+          <span>컨설턴트 배정은 수락 후 확정됩니다</span>
         </div>
       </div>
 
@@ -88,8 +88,8 @@ export function RegularOfficeHourDetail({
                 <div className="flex-1">
                   <h3 className="mb-1">신청 안내</h3>
                   <p className="text-sm text-muted-foreground mb-4">
-                    아래 버튼을 클릭하여 오피스아워 신청을 시작하세요. 날짜 선택,
-                    진행 형태, 아젠다, 요청 내용 입력 순서로 진행됩니다.
+                    아래 버튼을 클릭하여 오피스아워 신청을 시작하세요. 날짜/시간,
+                    진행 형태, 요청 내용 입력 순서로 진행됩니다.
                   </p>
                   <Button onClick={onStartApplication}>
                     신청 시작하기

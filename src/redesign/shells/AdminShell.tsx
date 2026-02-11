@@ -4,7 +4,7 @@ import { AppContent } from "../app/AppContent"
 export function AdminShell() {
   return (
     <>
-      <AppContent roleOverride="admin" />
+      <AppContent />
       <Toaster position="top-center" />
     </>
   )

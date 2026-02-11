@@ -19,7 +19,7 @@ export function HomeRedirect() {
   }
   return (
     <Navigate
-      to={profile.role === "admin" ? "/admin" : "/company"}
+      to={profile.role === "admin" || profile.role === "consultant" ? "/admin" : "/company"}
       replace
     />
   )

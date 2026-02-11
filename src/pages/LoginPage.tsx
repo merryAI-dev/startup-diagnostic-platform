@@ -3,12 +3,8 @@ import { useNavigate } from "react-router-dom"
 import { AuthCard } from "../components/auth/AuthCard"
 import { useAuth } from "../context/AuthContext"
 import {
-  activateUserProfile,
-  createUserProfile,
   getUserProfile,
-  updateProfileRole,
 } from "../firebase/profile"
-import { auth } from "../firebase/client"
 import {
   signInWithEmail,
   signInWithGoogle,
@@ -16,7 +12,6 @@ import {
 import type { Role } from "../types/auth"
 
 export function LoginPage() {
-  const [role, setRole] = useState<Role>("company")
   const [loadingEmail, setLoadingEmail] = useState(false)
   const [loadingGoogle, setLoadingGoogle] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -24,10 +19,7 @@ export function LoginPage() {
   const { refreshProfile } = useAuth()
   const isBusy = loadingEmail || loadingGoogle
 
-  async function routeAfterLogin(
-    uid: string,
-    options: { skipAutoActivate?: boolean } = {}
-  ) {
+  async function routeAfterLogin(uid: string) {
     const profile = await getUserProfile(uid)
     if (!profile) {
       setError("프로필이 없습니다. 회원가입을 진행해주세요.")
@@ -35,36 +27,18 @@ export function LoginPage() {
       return
     }
     if (!profile.active) {
-      if (options.skipAutoActivate) {
-        navigate("/pending?reason=google")
-        return
-      }
-      // Ensure we have the latest verification state.
-      if (auth.currentUser) {
-        await auth.currentUser.reload()
-      }
-      if (
-        auth.currentUser?.emailVerified
-        && profile.requestedRole !== "admin"
-      ) {
-        if (profile.role !== "company") {
-          await updateProfileRole(uid, "company")
-        }
-        await activateUserProfile(uid)
-        const refreshed = await getUserProfile(uid)
-        if (refreshed?.active) {
-          navigate(refreshed.role === "admin" ? "/admin" : "/company")
-          return
-        }
-      }
       navigate("/pending")
       return
     }
-    navigate(profile.role === "admin" ? "/admin" : "/company")
+    navigate(
+      profile.role === "admin" || profile.role === "consultant"
+        ? "/admin"
+        : "/company"
+    )
   }
 
   async function handleEmailLogin(
-    _role: Role,
+    _unusedRole: Role,
     email: string,
     password: string
   ) {
@@ -90,17 +64,11 @@ export function LoginPage() {
       const result = await signInWithGoogle()
       const existingProfile = await getUserProfile(result.user.uid)
       if (!existingProfile) {
-        const requestedRole = role
-        const assignedRole: Role = "company"
-        await createUserProfile(
-          result.user.uid,
-          assignedRole,
-          requestedRole,
-          result.user.email
-        )
+        navigate("/signup?source=google-login")
+        return
       }
       await refreshProfile()
-      await routeAfterLogin(result.user.uid, { skipAutoActivate: true })
+      await routeAfterLogin(result.user.uid)
     } catch (err) {
       setError("Google 로그인에 실패했습니다.")
     } finally {
@@ -113,17 +81,17 @@ export function LoginPage() {
       <div className="w-full max-w-5xl">
         <AuthCard
           title="로그인"
-          subtitle="계정으로 로그인하세요."
+          subtitle="이메일/비밀번호 또는 Google 계정으로 로그인하세요."
           onGoogle={handleGoogleLogin}
           onSubmit={handleEmailLogin}
           onSwap={() => navigate("/signup")}
           swapLabel="회원가입"
-          role={role}
-          setRole={setRole}
-          showRoleSelector
+          role="company"
+          showRoleSelector={false}
           loadingEmail={loadingEmail}
           loadingGoogle={loadingGoogle}
           error={error}
+          googleLabel="Google로 로그인"
         />
       </div>
     </div>
