@@ -136,5 +136,17 @@ service cloud.firestore {
         );
       allow delete: if false;
     }
+
+    match /consents/{consentId} {
+      allow read: if isSignedIn()
+        && (request.auth.uid == resource.data.userId || isAdmin());
+      allow create: if isSignedIn()
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.type in ["privacy", "marketing"]
+        && request.resource.data.consented is bool
+        && request.resource.data.version is string
+        && request.resource.data.method is string;
+      allow update, delete: if false;
+    }
   }
 }
