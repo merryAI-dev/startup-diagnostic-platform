@@ -1,13 +1,13 @@
 import { useState } from "react";
 import { User, Database, Bell, Shield, Server, Activity, Wifi, WifiOff, HardDrive, RefreshCw, CheckCircle2 } from "lucide-react";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/card";
-import { User as UserType } from "../../lib/types";
-import { Button } from "../ui/button";
-import { Badge } from "../ui/badge";
-import { Switch } from "../ui/switch";
-import { isFirebaseConfigured } from "../../lib/firebase";
-import { useConnectionStatus } from "../../hooks/use-firestore";
-import { firestoreService } from "../../lib/firestore-service";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/redesign/app/components/ui/card";
+import { User as UserType } from "@/redesign/app/lib/types";
+import { Button } from "@/redesign/app/components/ui/button";
+import { Badge } from "@/redesign/app/components/ui/badge";
+import { Switch } from "@/redesign/app/components/ui/switch";
+import { isFirebaseConfigured } from "@/redesign/app/lib/firebase";
+import { useConnectionStatus } from "@/redesign/app/hooks/use-firestore";
+import { firestoreService } from "@/redesign/app/lib/firestore-service";
 import { toast } from "sonner";
 
 interface SettingsProps {

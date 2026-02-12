@@ -1,8 +1,8 @@
 import { Calendar, Clock, AlertCircle, CheckCircle2, MessageSquare, TrendingUp, Users } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
-import { Button } from "../ui/button";
-import { StatusChip } from "../status-chip";
-import { Application, Message } from "../../lib/types";
+import { Card, CardContent, CardHeader, CardTitle } from "@/redesign/app/components/ui/card";
+import { Button } from "@/redesign/app/components/ui/button";
+import { StatusChip } from "@/redesign/app/components/status-chip";
+import { Application, Message } from "@/redesign/app/lib/types";
 import { format } from "date-fns";
 import { ko } from "date-fns/locale";
 

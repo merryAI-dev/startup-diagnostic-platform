@@ -1,9 +1,9 @@
 import { useState, useMemo } from "react";
-import { Application, User, Program } from "../../lib/types";
-import { Card } from "../ui/card";
-import { Button } from "../ui/button";
-import { Badge } from "../ui/badge";
-import { Calendar } from "../ui/calendar";
+import { Application, User, Program } from "@/redesign/app/lib/types";
+import { Card } from "@/redesign/app/components/ui/card";
+import { Button } from "@/redesign/app/components/ui/button";
+import { Badge } from "@/redesign/app/components/ui/badge";
+import { Calendar } from "@/redesign/app/components/ui/calendar";
 import {
   Calendar as CalendarIcon, ChevronLeft, ChevronRight, Grid3x3,
   List, Filter, Download, Share2, Plus, Clock, MapPin, Video, Users,
@@ -16,13 +16,13 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "../ui/select";
-import { useCalendarService } from "../../hooks/use-calendar-service";
-import { useConnectionStatus } from "../../hooks/use-firestore";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "../ui/dialog";
-import { Input } from "../ui/input";
-import { Label } from "../ui/label";
-import { Textarea } from "../ui/textarea";
+} from "@/redesign/app/components/ui/select";
+import { useCalendarService } from "@/redesign/app/hooks/use-calendar-service";
+import { useConnectionStatus } from "@/redesign/app/hooks/use-firestore";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/redesign/app/components/ui/dialog";
+import { Input } from "@/redesign/app/components/ui/input";
+import { Label } from "@/redesign/app/components/ui/label";
+import { Textarea } from "@/redesign/app/components/ui/textarea";
 import { toast } from "sonner";
 import type { DayContentProps } from "react-day-picker";
 

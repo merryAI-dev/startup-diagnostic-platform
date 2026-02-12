@@ -1,5 +1,5 @@
 import { Bell, LogOut, User as UserIcon } from "lucide-react";
-import { Button } from "../ui/button";
+import { Button } from "@/redesign/app/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -7,8 +7,8 @@ import {
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from "../ui/dropdown-menu";
-import { User } from "../../lib/types";
+} from "@/redesign/app/components/ui/dropdown-menu";
+import { User } from "@/redesign/app/lib/types";
 
 interface TopbarProps {
   user: User;

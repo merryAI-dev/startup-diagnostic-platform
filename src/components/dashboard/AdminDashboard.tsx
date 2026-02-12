@@ -7,10 +7,10 @@ import {
 } from "firebase/firestore"
 import { useEffect, useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
-import { SELF_ASSESSMENT_SECTIONS } from "../../data/selfAssessment"
-import { db } from "../../firebase/client"
-import type { CompanyInfoRecord } from "../../types/company"
-import type { SelfAssessmentSections } from "../../types/selfAssessment"
+import { SELF_ASSESSMENT_SECTIONS } from "@/data/selfAssessment"
+import { db } from "@/firebase/client"
+import type { CompanyInfoRecord } from "@/types/company"
+import type { SelfAssessmentSections } from "@/types/selfAssessment"
 
 type AdminDashboardProps = {
   user: User

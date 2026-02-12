@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from "react"
 import { Plus, Tags } from "lucide-react"
-import { Agenda } from "../../lib/types"
-import { Badge } from "../ui/badge"
-import { Button } from "../ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "../ui/card"
+import { Agenda } from "@/redesign/app/lib/types"
+import { Badge } from "@/redesign/app/components/ui/badge"
+import { Button } from "@/redesign/app/components/ui/button"
+import { Card, CardContent, CardHeader, CardTitle } from "@/redesign/app/components/ui/card"
 import {
   Dialog,
   DialogContent,
@@ -11,12 +11,12 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
-} from "../ui/dialog"
-import { Input } from "../ui/input"
-import { Label } from "../ui/label"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../ui/table"
-import { Textarea } from "../ui/textarea"
+} from "@/redesign/app/components/ui/dialog"
+import { Input } from "@/redesign/app/components/ui/input"
+import { Label } from "@/redesign/app/components/ui/label"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/redesign/app/components/ui/select"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/redesign/app/components/ui/table"
+import { Textarea } from "@/redesign/app/components/ui/textarea"
 
 interface AdminAgendasProps {
   agendas: Agenda[]

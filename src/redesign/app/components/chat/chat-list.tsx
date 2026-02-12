@@ -1,11 +1,11 @@
-import { ChatRoom, User } from "../../lib/types";
+import { ChatRoom, User } from "@/redesign/app/lib/types";
 import { Search, Plus, Users, MessageSquare, Clock } from "lucide-react";
-import { Input } from "../ui/input";
-import { Button } from "../ui/button";
-import { Badge } from "../ui/badge";
-import { ScrollArea } from "../ui/scroll-area";
-import { Avatar } from "../ui/avatar";
-import { cn } from "../ui/utils";
+import { Input } from "@/redesign/app/components/ui/input";
+import { Button } from "@/redesign/app/components/ui/button";
+import { Badge } from "@/redesign/app/components/ui/badge";
+import { ScrollArea } from "@/redesign/app/components/ui/scroll-area";
+import { Avatar } from "@/redesign/app/components/ui/avatar";
+import { cn } from "@/redesign/app/components/ui/utils";
 import { useState } from "react";
 
 interface ChatListProps {

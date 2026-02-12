@@ -1,17 +1,17 @@
 import { useState } from "react";
-import { AIRecommendation, User, Consultant } from "../../lib/types";
-import { Card } from "../ui/card";
-import { Button } from "../ui/button";
-import { Badge } from "../ui/badge";
-import { Progress } from "../ui/progress";
-import { Separator } from "../ui/separator";
+import { AIRecommendation, User, Consultant } from "@/redesign/app/lib/types";
+import { Card } from "@/redesign/app/components/ui/card";
+import { Button } from "@/redesign/app/components/ui/button";
+import { Badge } from "@/redesign/app/components/ui/badge";
+import { Progress } from "@/redesign/app/components/ui/progress";
+import { Separator } from "@/redesign/app/components/ui/separator";
 import {
   Sparkles, UserCheck, BookOpen, Clock, Lightbulb,
   TrendingUp, Target, Calendar, ChevronRight, X, Check,
   Brain, Zap, Award, Users
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
-import { cn } from "../ui/utils";
+import { cn } from "@/redesign/app/components/ui/utils";
 
 interface AIRecommendationsProps {
   currentUser: User;

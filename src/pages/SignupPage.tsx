@@ -1,14 +1,14 @@
 import { useMemo, useState } from "react"
 import { useLocation, useNavigate } from "react-router-dom"
-import { AuthCard } from "../components/auth/AuthCard"
-import { useAuth } from "../context/AuthContext"
-import { createUserProfile, getUserProfile } from "../firebase/profile"
+import { AuthCard } from "@/components/auth/AuthCard"
+import { useAuth } from "@/context/AuthContext"
+import { createUserProfile, getUserProfile } from "@/firebase/profile"
 import {
   signOutUser,
   signInWithGoogle,
   signUpWithEmail,
-} from "../firebase/auth"
-import type { Role } from "../types/auth"
+} from "@/firebase/auth"
+import type { Role } from "@/types/auth"
 import { toast } from "sonner"
 
 function getSignupErrorMessage(error: any) {

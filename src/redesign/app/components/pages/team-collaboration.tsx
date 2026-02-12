@@ -1,12 +1,12 @@
 import { useState } from "react";
-import { TeamMember, User } from "../../lib/types";
-import { Card } from "../ui/card";
-import { Button } from "../ui/button";
-import { Input } from "../ui/input";
-import { Badge } from "../ui/badge";
-import { Avatar } from "../ui/avatar";
-import { ScrollArea } from "../ui/scroll-area";
-import { Separator } from "../ui/separator";
+import { TeamMember, User } from "@/redesign/app/lib/types";
+import { Card } from "@/redesign/app/components/ui/card";
+import { Button } from "@/redesign/app/components/ui/button";
+import { Input } from "@/redesign/app/components/ui/input";
+import { Badge } from "@/redesign/app/components/ui/badge";
+import { Avatar } from "@/redesign/app/components/ui/avatar";
+import { ScrollArea } from "@/redesign/app/components/ui/scroll-area";
+import { Separator } from "@/redesign/app/components/ui/separator";
 import {
   Dialog,
   DialogContent,
@@ -14,27 +14,27 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "../ui/dialog";
+} from "@/redesign/app/components/ui/dialog";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "../ui/select";
+} from "@/redesign/app/components/ui/select";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from "../ui/dropdown-menu";
+} from "@/redesign/app/components/ui/dropdown-menu";
 import {
   Users, UserPlus, Mail, MoreVertical, Shield, Edit, Trash2,
   CheckCircle2, XCircle, Crown, Star, Activity, Calendar, Search,
   MessageSquare, Phone, Video, Clock, TrendingUp
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
-import { cn } from "../ui/utils";
+import { cn } from "@/redesign/app/components/ui/utils";
 
 interface TeamCollaborationProps {
   currentUser: User;

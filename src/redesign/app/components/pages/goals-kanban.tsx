@@ -1,20 +1,20 @@
 import { useState } from "react";
-import { Goal, User, GoalComment } from "../../lib/types";
-import { Card } from "../ui/card";
-import { Button } from "../ui/button";
-import { Badge } from "../ui/badge";
-import { Progress } from "../ui/progress";
-import { Input } from "../ui/input";
-import { Textarea } from "../ui/textarea";
-import { Avatar } from "../ui/avatar";
-import { ScrollArea } from "../ui/scroll-area";
+import { Goal, User, GoalComment } from "@/redesign/app/lib/types";
+import { Card } from "@/redesign/app/components/ui/card";
+import { Button } from "@/redesign/app/components/ui/button";
+import { Badge } from "@/redesign/app/components/ui/badge";
+import { Progress } from "@/redesign/app/components/ui/progress";
+import { Input } from "@/redesign/app/components/ui/input";
+import { Textarea } from "@/redesign/app/components/ui/textarea";
+import { Avatar } from "@/redesign/app/components/ui/avatar";
+import { ScrollArea } from "@/redesign/app/components/ui/scroll-area";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "../ui/select";
+} from "@/redesign/app/components/ui/select";
 import {
   Dialog,
   DialogContent,
@@ -23,7 +23,7 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
-} from "../ui/dialog";
+} from "@/redesign/app/components/ui/dialog";
 import {
   Target, Plus, Calendar, Users, TrendingUp, AlertCircle,
   Flag, CheckCircle2, Clock, MoreVertical, Edit, Trash2,
@@ -35,8 +35,8 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from "../ui/dropdown-menu";
-import { cn } from "../ui/utils";
+} from "@/redesign/app/components/ui/dropdown-menu";
+import { cn } from "@/redesign/app/components/ui/utils";
 
 interface GoalsKanbanProps {
   currentUser: User;

@@ -1,13 +1,13 @@
 import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore"
 import { useEffect, useMemo, useState } from "react"
-import { db } from "../firebase/client"
+import { db } from "@/firebase/client"
 import type {
   AnswerValue,
   SelfAssessmentAnswer,
   SelfAssessmentSections,
   SelfAssessmentState,
-} from "../types/selfAssessment"
-import { SELF_ASSESSMENT_SECTIONS } from "../data/selfAssessment"
+} from "@/types/selfAssessment"
+import { SELF_ASSESSMENT_SECTIONS } from "@/data/selfAssessment"
 
 const DEFAULT_ANSWER: SelfAssessmentAnswer = {
   answer: null,

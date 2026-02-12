@@ -1,6 +1,6 @@
-import { Application, Program, User } from "../../lib/types";
-import { AdminDashboardCharts } from "./admin-dashboard-charts";
-import { ConsultantDashboard } from "./consultant-dashboard";
+import { Application, Program, User } from "@/redesign/app/lib/types";
+import { AdminDashboardCharts } from "@/redesign/app/components/pages/admin-dashboard-charts";
+import { ConsultantDashboard } from "@/redesign/app/components/pages/consultant-dashboard";
 
 interface AdminDashboardInteractiveProps {
   applications: Application[];

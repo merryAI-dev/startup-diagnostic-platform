@@ -1,10 +1,10 @@
 import { type FormEvent, useEffect, useMemo, useState } from "react";
-import { Consultant } from "../../lib/types";
-import { Button } from "../ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/card";
-import { Input } from "../ui/input";
-import { Label } from "../ui/label";
-import { Textarea } from "../ui/textarea";
+import { Consultant } from "@/redesign/app/lib/types";
+import { Button } from "@/redesign/app/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/redesign/app/components/ui/card";
+import { Input } from "@/redesign/app/components/ui/input";
+import { Label } from "@/redesign/app/components/ui/label";
+import { Textarea } from "@/redesign/app/components/ui/textarea";
 
 export type ConsultantProfileFormValues = {
   name: string;

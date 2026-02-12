@@ -4,15 +4,15 @@ import {
   RequireApproved,
   RequireAuth,
   RequireRole,
-} from "./components/auth/RouteGuards"
-import { AdminShell } from "./redesign/shells/AdminShell"
-import { CompanyShell } from "./redesign/shells/CompanyShell"
-import { HomeRedirect } from "./pages/HomeRedirect"
-import { LoginPage } from "./pages/LoginPage"
-import { NotFoundPage } from "./pages/NotFoundPage"
-import { PendingPage } from "./pages/PendingPage"
-import { SignupPage } from "./pages/SignupPage"
-import { SignupInfoPage } from "./pages/SignupInfoPage"
+} from "@/components/auth/RouteGuards"
+import { AdminShell } from "@/redesign/shells/AdminShell"
+import { CompanyShell } from "@/redesign/shells/CompanyShell"
+import { HomeRedirect } from "@/pages/HomeRedirect"
+import { LoginPage } from "@/pages/LoginPage"
+import { NotFoundPage } from "@/pages/NotFoundPage"
+import { PendingPage } from "@/pages/PendingPage"
+import { SignupPage } from "@/pages/SignupPage"
+import { SignupInfoPage } from "@/pages/SignupInfoPage"
 import { Toaster } from "sonner"
 function PublicLayout() {
   return (

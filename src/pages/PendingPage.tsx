@@ -1,8 +1,8 @@
 import { useEffect, useMemo } from "react"
 import { useLocation, useNavigate } from "react-router-dom"
-import { PendingApproval } from "../components/auth/PendingApproval"
-import { useAuth } from "../context/AuthContext"
-import type { Role } from "../types/auth"
+import { PendingApproval } from "@/components/auth/PendingApproval"
+import { useAuth } from "@/context/AuthContext"
+import type { Role } from "@/types/auth"
 
 export function PendingPage() {
   const { profile } = useAuth()

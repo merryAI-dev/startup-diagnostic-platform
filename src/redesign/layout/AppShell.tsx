@@ -1,6 +1,6 @@
 import type { ReactNode } from "react"
-import { SidebarNav } from "./SidebarNav"
-import { Topbar } from "./Topbar"
+import { SidebarNav } from "@/redesign/layout/SidebarNav"
+import { Topbar } from "@/redesign/layout/Topbar"
 
 type AppShellProps = {
   basePath: string

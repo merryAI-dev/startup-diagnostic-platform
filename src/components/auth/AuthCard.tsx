@@ -1,6 +1,6 @@
 import { useState } from "react"
-import type { Role } from "../../types/auth"
-import { RoleSelector } from "./RoleSelector"
+import type { Role } from "@/types/auth"
+import { RoleSelector } from "@/components/auth/RoleSelector"
 
 type AuthCardProps = {
   title: string

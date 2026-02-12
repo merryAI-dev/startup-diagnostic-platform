@@ -2,48 +2,48 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { addDays, differenceInDays } from "date-fns";
-import { useAuth as useAppAuth } from "../../context/AuthContext";
-import { signOutUser } from "../../firebase/auth";
-import { AdminDashboard } from "../../components/dashboard/AdminDashboard";
-import { CompanyDashboard } from "../../components/dashboard/CompanyDashboard";
-import { ProtectedRoute } from "./components/auth/protected-route";
-import { Topbar } from "./components/layout/topbar";
-import { SidebarNav } from "./components/layout/sidebar-nav";
-import { DashboardCalendar } from "./components/pages/dashboard-calendar";
-import { RegularOfficeHoursCalendar } from "./components/pages/regular-office-hours-calendar";
-import { RegularOfficeHourDetail } from "./components/pages/regular-office-hour-detail";
-import { RegularApplicationWizard, ApplicationFormData } from "./components/pages/regular-application-wizard";
-import { IrregularOfficeHoursCalendar } from "./components/pages/irregular-office-hours-calendar";
-import { IrregularApplicationWizard, IrregularApplicationFormData } from "./components/pages/irregular-application-wizard";
-import { ApplicationHistoryCalendar } from "./components/pages/application-history-calendar";
-import { ApplicationDetail } from "./components/pages/application-detail";
-import { Settings } from "./components/pages/settings";
-import { AdminDashboardInteractive } from "./components/pages/admin-dashboard-interactive";
-import { AdminApplications } from "./components/pages/admin-applications";
-import { AdminAgendas } from "./components/pages/admin-agendas";
-import { AdminConsultants } from "./components/pages/admin-consultants";
-import { AdminUsers } from "./components/pages/admin-users";
-import { AdminCommunication } from "./components/pages/admin-communication";
-import { AdminPrograms } from "./components/pages/admin-programs";
-import { ConsultantsDirectory } from "./components/pages/consultants-directory";
+import { useAuth as useAppAuth } from "@/context/AuthContext";
+import { signOutUser } from "@/firebase/auth";
+import { AdminDashboard } from "@/components/dashboard/AdminDashboard";
+import { CompanyDashboard } from "@/components/dashboard/CompanyDashboard";
+import { ProtectedRoute } from "@/redesign/app/components/auth/protected-route";
+import { Topbar } from "@/redesign/app/components/layout/topbar";
+import { SidebarNav } from "@/redesign/app/components/layout/sidebar-nav";
+import { DashboardCalendar } from "@/redesign/app/components/pages/dashboard-calendar";
+import { RegularOfficeHoursCalendar } from "@/redesign/app/components/pages/regular-office-hours-calendar";
+import { RegularOfficeHourDetail } from "@/redesign/app/components/pages/regular-office-hour-detail";
+import { RegularApplicationWizard, ApplicationFormData } from "@/redesign/app/components/pages/regular-application-wizard";
+import { IrregularOfficeHoursCalendar } from "@/redesign/app/components/pages/irregular-office-hours-calendar";
+import { IrregularApplicationWizard, IrregularApplicationFormData } from "@/redesign/app/components/pages/irregular-application-wizard";
+import { ApplicationHistoryCalendar } from "@/redesign/app/components/pages/application-history-calendar";
+import { ApplicationDetail } from "@/redesign/app/components/pages/application-detail";
+import { Settings } from "@/redesign/app/components/pages/settings";
+import { AdminDashboardInteractive } from "@/redesign/app/components/pages/admin-dashboard-interactive";
+import { AdminApplications } from "@/redesign/app/components/pages/admin-applications";
+import { AdminAgendas } from "@/redesign/app/components/pages/admin-agendas";
+import { AdminConsultants } from "@/redesign/app/components/pages/admin-consultants";
+import { AdminUsers } from "@/redesign/app/components/pages/admin-users";
+import { AdminCommunication } from "@/redesign/app/components/pages/admin-communication";
+import { AdminPrograms } from "@/redesign/app/components/pages/admin-programs";
+import { ConsultantsDirectory } from "@/redesign/app/components/pages/consultants-directory";
 import {
   ConsultantProfileFormValues,
   ConsultantProfilePage,
-} from "./components/pages/consultant-profile-page";
+} from "@/redesign/app/components/pages/consultant-profile-page";
 import {
   buildDefaultAvailability,
   ConsultantScheduleSettingsPage,
-} from "./components/pages/consultant-schedule-settings-page";
-import { PendingReportsDashboard } from "./components/pages/pending-reports-dashboard";
-import { OfficeHourReportForm } from "./components/report/office-hour-report-form";
-import { CompanyMetricsPage } from "./components/pages/company-metrics-page";
-import { CompanyNewsletter } from "./components/pages/company-newsletter";
-import { MessagesPage } from "./components/pages/messages-page";
-import { NotificationCenter } from "./components/notifications/notification-center";
-import { AIRecommendations } from "./components/ai/ai-recommendations";
-import { UnifiedCalendar } from "./components/pages/unified-calendar";
-import { GoalsKanban } from "./components/pages/goals-kanban";
-import { TeamCollaboration } from "./components/pages/team-collaboration";
+} from "@/redesign/app/components/pages/consultant-schedule-settings-page";
+import { PendingReportsDashboard } from "@/redesign/app/components/pages/pending-reports-dashboard";
+import { OfficeHourReportForm } from "@/redesign/app/components/report/office-hour-report-form";
+import { CompanyMetricsPage } from "@/redesign/app/components/pages/company-metrics-page";
+import { CompanyNewsletter } from "@/redesign/app/components/pages/company-newsletter";
+import { MessagesPage } from "@/redesign/app/components/pages/messages-page";
+import { NotificationCenter } from "@/redesign/app/components/notifications/notification-center";
+import { AIRecommendations } from "@/redesign/app/components/ai/ai-recommendations";
+import { UnifiedCalendar } from "@/redesign/app/components/pages/unified-calendar";
+import { GoalsKanban } from "@/redesign/app/components/pages/goals-kanban";
+import { TeamCollaboration } from "@/redesign/app/components/pages/team-collaboration";
 import {
   Application,
   Message,
@@ -67,10 +67,10 @@ import {
   RegularOfficeHour,
   OfficeHourSlotStatus,
   PendingProfileApproval,
-} from "./lib/types";
-import { regularOfficeHours as initialRegularOfficeHours, initialApplications, initialMessages, agendas as initialAgendas, initialConsultants, initialMessageTemplates, initialUsers, programs as initialPrograms } from "./lib/data";
-import { COLLECTIONS, isFirebaseConfigured, useFirestoreCollection, useFirestoreCRUD, useFirestoreDocument } from "./hooks/use-firestore";
-import { mockNotifications, mockChatRooms, mockChatMessages, mockAIRecommendations, mockGoals, mockTeamMembers } from "./lib/advanced-mock-data";
+} from "@/redesign/app/lib/types";
+import { regularOfficeHours as initialRegularOfficeHours, initialApplications, initialMessages, agendas as initialAgendas, initialConsultants, initialMessageTemplates, initialUsers, programs as initialPrograms } from "@/redesign/app/lib/data";
+import { COLLECTIONS, isFirebaseConfigured, useFirestoreCollection, useFirestoreCRUD, useFirestoreDocument } from "@/redesign/app/hooks/use-firestore";
+import { mockNotifications, mockChatRooms, mockChatMessages, mockAIRecommendations, mockGoals, mockTeamMembers } from "@/redesign/app/lib/advanced-mock-data";
 
 type AppPage = 
   | "dashboard" 

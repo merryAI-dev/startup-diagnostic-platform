@@ -1,8 +1,8 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react"
 import { onAuthStateChanged, type User } from "firebase/auth"
-import { auth } from "../firebase/client"
-import { getUserProfile } from "../firebase/profile"
-import type { UserProfile } from "../types/auth"
+import { auth } from "@/firebase/client"
+import { getUserProfile } from "@/firebase/profile"
+import type { UserProfile } from "@/types/auth"
 
 type AuthState = {
   user: User | null

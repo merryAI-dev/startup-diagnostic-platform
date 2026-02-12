@@ -1,11 +1,11 @@
 import { useState } from "react";
 import { Plus, Send, Edit, Trash2, Copy, Mail, MessageSquare } from "lucide-react";
-import { Button } from "../ui/button";
-import { Input } from "../ui/input";
-import { Label } from "../ui/label";
-import { Textarea } from "../ui/textarea";
-import { Badge } from "../ui/badge";
-import { MessageTemplate, Application } from "../../lib/types";
+import { Button } from "@/redesign/app/components/ui/button";
+import { Input } from "@/redesign/app/components/ui/input";
+import { Label } from "@/redesign/app/components/ui/label";
+import { Textarea } from "@/redesign/app/components/ui/textarea";
+import { Badge } from "@/redesign/app/components/ui/badge";
+import { MessageTemplate, Application } from "@/redesign/app/lib/types";
 import {
   Dialog,
   DialogContent,
@@ -13,16 +13,16 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
-} from "../ui/dialog";
+} from "@/redesign/app/components/ui/dialog";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "../ui/select";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
-import { Checkbox } from "../ui/checkbox";
+} from "@/redesign/app/components/ui/select";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/redesign/app/components/ui/tabs";
+import { Checkbox } from "@/redesign/app/components/ui/checkbox";
 import { toast } from "sonner";
 
 interface AdminCommunicationProps {

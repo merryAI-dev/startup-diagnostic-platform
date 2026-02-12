@@ -1,4 +1,4 @@
-import { cn } from "../components/ui/utils";
+import { cn } from "@/redesign/app/components/ui/utils";
 
 export type ApplicationStatus = 
   | "pending" 

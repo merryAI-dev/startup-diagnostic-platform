@@ -1,4 +1,4 @@
-import { PlaceholderPage } from "./PlaceholderPage"
+import { PlaceholderPage } from "@/redesign/pages/PlaceholderPage"
 
 export function UserDashboardPage() {
   return (

@@ -1,10 +1,10 @@
 import { useState, useMemo, useEffect } from "react";
-import { CompanyMetrics, MonthlyMetrics, User } from "../../lib/types";
-import { getCompanyMetrics, createCompanyMetrics, calculateGrowthRate, formatCurrency, formatNumber } from "../../lib/company-metrics-data";
-import { Button } from "../ui/button";
-import { Badge } from "../ui/badge";
-import { Input } from "../ui/input";
-import { Card } from "../ui/card";
+import { CompanyMetrics, MonthlyMetrics, User } from "@/redesign/app/lib/types";
+import { getCompanyMetrics, createCompanyMetrics, calculateGrowthRate, formatCurrency, formatNumber } from "@/redesign/app/lib/company-metrics-data";
+import { Button } from "@/redesign/app/components/ui/button";
+import { Badge } from "@/redesign/app/components/ui/badge";
+import { Input } from "@/redesign/app/components/ui/input";
+import { Card } from "@/redesign/app/components/ui/card";
 import {
   LineChart, Line, BarChart, Bar, AreaChart, Area,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,

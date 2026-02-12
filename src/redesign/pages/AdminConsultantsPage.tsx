@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react"
 import { Check, Clock, Mail, UserPlus, X } from "lucide-react"
-import { Badge } from "../ui/badge"
-import { Button } from "../ui/button"
+import { Badge } from "@/redesign/ui/badge"
+import { Button } from "@/redesign/ui/button"
 import {
   Dialog,
   DialogContent,
@@ -9,11 +9,11 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
-} from "../ui/dialog"
-import { Input } from "../ui/input"
-import { Label } from "../ui/label"
-import { cn } from "../ui/utils"
-import type { Consultant, ConsultantAvailability } from "../types"
+} from "@/redesign/ui/dialog"
+import { Input } from "@/redesign/ui/input"
+import { Label } from "@/redesign/ui/label"
+import { cn } from "@/redesign/ui/utils"
+import type { Consultant, ConsultantAvailability } from "@/redesign/types"
 
 const DAYS_OF_WEEK = ["일", "월", "화", "수", "목", "금", "토"]
 const TIME_SLOTS = [

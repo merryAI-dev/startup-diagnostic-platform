@@ -1,5 +1,5 @@
 import { Toaster } from "sonner"
-import { AppContent } from "../app/AppContent"
+import { AppContent } from "@/redesign/app/AppContent"
 
 export function AdminShell() {
   return (

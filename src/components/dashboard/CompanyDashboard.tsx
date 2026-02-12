@@ -1,11 +1,11 @@
 import type { User } from "firebase/auth"
 import { ChevronDown } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
-import { SELF_ASSESSMENT_SECTIONS } from "../../data/selfAssessment"
-import { useCompanyInfoForm } from "../../hooks/useCompanyInfoForm"
-import { useSelfAssessmentForm } from "../../hooks/useSelfAssessmentForm"
-import type { CompanyInfoForm } from "../../types/company"
-import { SelfAssessmentForm } from "./SelfAssessmentForm"
+import { SELF_ASSESSMENT_SECTIONS } from "@/data/selfAssessment"
+import { useCompanyInfoForm } from "@/hooks/useCompanyInfoForm"
+import { useSelfAssessmentForm } from "@/hooks/useSelfAssessmentForm"
+import type { CompanyInfoForm } from "@/types/company"
+import { SelfAssessmentForm } from "@/components/dashboard/SelfAssessmentForm"
 
 type CompanyDashboardProps = {
   onLogout: () => void

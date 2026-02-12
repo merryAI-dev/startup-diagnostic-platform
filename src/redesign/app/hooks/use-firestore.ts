@@ -13,8 +13,8 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { where, orderBy, QueryConstraint } from "firebase/firestore";
-import { isFirebaseConfigured, COLLECTIONS } from "../lib/firebase";
-import { firestoreService, BatchOperation } from "../lib/firestore-service";
+import { isFirebaseConfigured, COLLECTIONS } from "@/redesign/app/lib/firebase";
+import { firestoreService, BatchOperation } from "@/redesign/app/lib/firestore-service";
 
 // ──────────────────────────────────────────────
 // Connection Hook

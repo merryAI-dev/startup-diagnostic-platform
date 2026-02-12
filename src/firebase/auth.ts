@@ -5,7 +5,7 @@ import {
   createUserWithEmailAndPassword,
   signOut,
 } from "firebase/auth"
-import { auth } from "./client"
+import { auth } from "@/firebase/client"
 
 const googleProvider = new GoogleAuthProvider()
 

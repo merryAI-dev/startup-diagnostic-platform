@@ -1,12 +1,12 @@
 import { useState, useRef, useEffect } from "react";
-import { ChatRoom, ChatMessage, ChatAttachment, User } from "../../lib/types";
+import { ChatRoom, ChatMessage, ChatAttachment, User } from "@/redesign/app/lib/types";
 import { Send, Paperclip, Smile, MoreVertical, Phone, Video, X, Download, Image as ImageIcon, File } from "lucide-react";
-import { Input } from "../ui/input";
-import { Button } from "../ui/button";
-import { Avatar } from "../ui/avatar";
-import { ScrollArea } from "../ui/scroll-area";
-import { Badge } from "../ui/badge";
-import { cn } from "../ui/utils";
+import { Input } from "@/redesign/app/components/ui/input";
+import { Button } from "@/redesign/app/components/ui/button";
+import { Avatar } from "@/redesign/app/components/ui/avatar";
+import { ScrollArea } from "@/redesign/app/components/ui/scroll-area";
+import { Badge } from "@/redesign/app/components/ui/badge";
+import { cn } from "@/redesign/app/components/ui/utils";
 import { motion, AnimatePresence } from "motion/react";
 
 interface ChatWindowProps {

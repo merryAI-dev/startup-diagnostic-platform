@@ -1,7 +1,7 @@
 import { AlertCircle, CheckCircle } from "lucide-react";
-import { Program } from "../../lib/types";
-import { Progress } from "./progress";
-import { Badge } from "./badge";
+import { Program } from "@/redesign/app/lib/types";
+import { Progress } from "@/redesign/app/components/ui/progress";
+import { Badge } from "@/redesign/app/components/ui/badge";
 
 interface ProgramQuotaCardProps {
   program: Program;

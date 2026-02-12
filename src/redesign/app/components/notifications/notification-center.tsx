@@ -1,12 +1,12 @@
 import { useState } from "react";
-import { Notification } from "../../lib/types";
+import { Notification } from "@/redesign/app/lib/types";
 import { Bell, X, Check, CheckCheck, Trash2, Filter, Mail, Calendar, AlertCircle, MessageSquare, UserCheck } from "lucide-react";
-import { Button } from "../ui/button";
-import { Badge } from "../ui/badge";
-import { ScrollArea } from "../ui/scroll-area";
-import { Separator } from "../ui/separator";
+import { Button } from "@/redesign/app/components/ui/button";
+import { Badge } from "@/redesign/app/components/ui/badge";
+import { ScrollArea } from "@/redesign/app/components/ui/scroll-area";
+import { Separator } from "@/redesign/app/components/ui/separator";
 import { motion, AnimatePresence } from "motion/react";
-import { cn } from "../ui/utils";
+import { cn } from "@/redesign/app/components/ui/utils";
 
 interface NotificationCenterProps {
   notifications: Notification[];

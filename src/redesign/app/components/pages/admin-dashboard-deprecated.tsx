@@ -1,9 +1,9 @@
 import { BarChart3, Calendar, Clock3, Target } from "lucide-react";
 import { useMemo } from "react";
-import { initialApplications, programs as initialPrograms } from "../../lib/data";
-import { Badge } from "../ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
-import { Progress } from "../ui/progress";
+import { initialApplications, programs as initialPrograms } from "@/redesign/app/lib/data";
+import { Badge } from "@/redesign/app/components/ui/badge";
+import { Card, CardContent, CardHeader, CardTitle } from "@/redesign/app/components/ui/card";
+import { Progress } from "@/redesign/app/components/ui/progress";
 
 interface AdminDashboardDeprecatedProps {
   onNavigate: (page: string, id?: string) => void;

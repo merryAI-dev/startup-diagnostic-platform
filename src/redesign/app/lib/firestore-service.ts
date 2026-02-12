@@ -38,7 +38,7 @@ import {
   arrayRemove,
   runTransaction,
 } from "firebase/firestore";
-import { db, isFirebaseConfigured, COLLECTIONS } from "./firebase";
+import { db, isFirebaseConfigured, COLLECTIONS } from "@/redesign/app/lib/firebase";
 
 // ──────────────────────────────────────────────
 // Types

@@ -1,9 +1,9 @@
 import { useMemo, useState } from "react"
-import { SELF_ASSESSMENT_SECTIONS } from "../../data/selfAssessment"
+import { SELF_ASSESSMENT_SECTIONS } from "@/data/selfAssessment"
 import type {
   AnswerValue,
   SelfAssessmentSections,
-} from "../../types/selfAssessment"
+} from "@/types/selfAssessment"
 
 function AnswerToggle({
   value,

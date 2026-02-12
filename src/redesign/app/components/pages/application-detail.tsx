@@ -1,15 +1,15 @@
 import { ArrowLeft, Calendar, Clock, FileText, MessageSquare, Edit, XCircle } from "lucide-react";
-import { Button } from "../ui/button";
-import { Card, CardContent } from "../ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
-import { Textarea } from "../ui/textarea";
-import { StatusChip } from "../status-chip";
-import { Application, Message } from "../../lib/types";
+import { Button } from "@/redesign/app/components/ui/button";
+import { Card, CardContent } from "@/redesign/app/components/ui/card";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/redesign/app/components/ui/tabs";
+import { Textarea } from "@/redesign/app/components/ui/textarea";
+import { StatusChip } from "@/redesign/app/components/status-chip";
+import { Application, Message } from "@/redesign/app/lib/types";
 import { format } from "date-fns";
 import { ko } from "date-fns/locale";
 import { useState } from "react";
-import { FileUpload } from "../file-upload";
-import { FileItem } from "../../lib/types";
+import { FileUpload } from "@/redesign/app/components/file-upload";
+import { FileItem } from "@/redesign/app/lib/types";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -19,7 +19,7 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from "../ui/alert-dialog";
+} from "@/redesign/app/components/ui/alert-dialog";
 
 interface ApplicationDetailProps {
   application: Application;

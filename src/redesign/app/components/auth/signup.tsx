@@ -1,11 +1,11 @@
 import { useMemo, useState } from "react";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/card";
-import { Label } from "../ui/label";
-import { Input } from "../ui/input";
-import { Button } from "../ui/button";
-import { Textarea } from "../ui/textarea";
-import type { CompanyInfoForm } from "../../../types/company";
-import { DEFAULT_FORM } from "../../../types/company";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/redesign/app/components/ui/card";
+import { Label } from "@/redesign/app/components/ui/label";
+import { Input } from "@/redesign/app/components/ui/input";
+import { Button } from "@/redesign/app/components/ui/button";
+import { Textarea } from "@/redesign/app/components/ui/textarea";
+import type { CompanyInfoForm } from "@/redesign/types/company";
+import { DEFAULT_FORM } from "@/redesign/types/company";
 
 interface SignupProps {
   onSignup: (payload: SignupPayload) => void;

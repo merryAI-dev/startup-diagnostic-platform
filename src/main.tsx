@@ -1,8 +1,8 @@
 
 import { createRoot } from "react-dom/client"
-import { App } from "./app"
+import { App } from "@/app"
 import "./index.css"
-import { AuthProvider } from "./context/AuthContext"
+import { AuthProvider } from "@/context/AuthContext"
 
 const rootEl = document.getElementById("app")
 if (!rootEl) {
