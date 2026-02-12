@@ -7,7 +7,7 @@ import {
   setDoc,
 } from "firebase/firestore"
 import { db } from "@/firebase/client"
-import type { Role, UserProfile } from "@/types/auth"
+import type { ConsentSnapshot, Role, UserProfile } from "@/types/auth"
 import type { CompanyInfoForm, CompanyInfoRecord, InvestmentInput } from "@/types/company"
 
 const collectionName = "profiles"
@@ -111,6 +111,7 @@ export async function createUserProfile(
     investmentRows?: InvestmentInput[]
     consultantInfo?: ConsultantSignupInfo
     active?: boolean
+    consents?: ConsentSnapshot
   }
 ) {
   let companyId: string | null = null
@@ -204,5 +205,44 @@ export async function createUserProfile(
     email: email ?? null,
     companyId,
     createdAt: serverTimestamp(),
+    consents: options?.consents
+      ? {
+          privacy: options.consents.privacy
+            ? {
+                ...options.consents.privacy,
+                consentedAt: serverTimestamp(),
+              }
+            : undefined,
+          marketing: options.consents.marketing
+            ? {
+                ...options.consents.marketing,
+                consentedAt: serverTimestamp(),
+              }
+            : undefined,
+        }
+      : undefined,
   })
+
+  if (options?.consents) {
+    const consentEntries = ([
+      ["privacy", options.consents.privacy],
+      ["marketing", options.consents.marketing],
+    ] as const).filter(([, value]) => Boolean(value))
+
+    if (consentEntries.length > 0) {
+      await Promise.all(
+        consentEntries.map(([type, value]) =>
+          addDoc(collection(db, "consents"), {
+            userId: uid,
+            type,
+            consented: value?.consented ?? false,
+            version: value?.version ?? "v1.0",
+            method: value?.method ?? "unknown",
+            userAgent: value?.userAgent ?? null,
+            createdAt: serverTimestamp(),
+          })
+        )
+      )
+    }
+  }
 }
