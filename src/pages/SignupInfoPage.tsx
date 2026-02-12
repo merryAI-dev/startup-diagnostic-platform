@@ -281,6 +281,12 @@ function CompanySignupInfo({
   const [touched, setTouched] = useState<Partial<Record<keyof CompanyInfoForm, boolean>>>({})
   const [saving, setSaving] = useState(false)
   const [activeInvestmentStageRow, setActiveInvestmentStageRow] = useState<number | null>(null)
+  const [consentOpen, setConsentOpen] = useState(false)
+  const [consentPrivacy, setConsentPrivacy] = useState(false)
+  const [consentMarketing, setConsentMarketing] = useState(false)
+  const [consentError, setConsentError] = useState<string | null>(null)
+  const CONSENT_VERSION = "v1.0"
+  const CONSENT_METHOD = "company_signup_modal"
 
   const TIPS_LIPS_OPTIONS = ["TIPS", "LIPS", "없음"] as const
   const INVESTMENT_STAGE_OPTIONS = [
@@ -565,12 +571,31 @@ function CompanySignupInfo({
       const authUser = await ensureAuthUser()
       if (!authUser) return
       setSaving(true)
+      const userAgent = typeof navigator !== "undefined" ? navigator.userAgent : null
       await createUserProfile(
         authUser.uid,
         "company",
         requestedRole,
         authUser.email ?? userEmail,
-        { companyId: effectiveCompanyId, companyInfo: form, investmentRows }
+        {
+          companyId: effectiveCompanyId,
+          companyInfo: form,
+          investmentRows,
+          consents: {
+            privacy: {
+              consented: consentPrivacy,
+              version: CONSENT_VERSION,
+              method: CONSENT_METHOD,
+              userAgent,
+            },
+            marketing: {
+              consented: consentMarketing,
+              version: CONSENT_VERSION,
+              method: CONSENT_METHOD,
+              userAgent,
+            },
+          },
+        }
       )
       await onComplete()
     } catch (error) {
@@ -1105,7 +1130,15 @@ function CompanySignupInfo({
           </button>
           <button
             type="button"
-            onClick={handleSubmit}
+            onClick={() => {
+              if (!canSubmit || saving) return
+              if (!consentPrivacy) {
+                setConsentError(null)
+                setConsentOpen(true)
+                return
+              }
+              handleSubmit()
+            }}
             disabled={!canSubmit || saving}
             className="rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
           >
@@ -1113,6 +1146,116 @@ function CompanySignupInfo({
           </button>
         </div>
       </div>
+
+      {consentOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+          <div className="w-full max-w-lg rounded-2xl bg-white p-6 shadow-xl">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 className="text-lg font-semibold text-slate-900">약관 및 동의</h2>
+                <p className="mt-1 text-sm text-slate-500">
+                  회사 가입을 위해 아래 동의가 필요합니다.
+                </p>
+              </div>
+              <button
+                type="button"
+                className="text-slate-400 hover:text-slate-600"
+                onClick={() => setConsentOpen(false)}
+                aria-label="닫기"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="mt-5 space-y-4 text-sm">
+              <label className="flex items-start gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                <input
+                  type="checkbox"
+                  className="mt-1"
+                  checked={consentPrivacy}
+                  onChange={(e) => {
+                    setConsentPrivacy(e.target.checked)
+                    if (e.target.checked) setConsentError(null)
+                  }}
+                />
+                <span>
+                  <span className="font-semibold text-slate-900">개인정보 수집·이용 동의</span>{" "}
+                  <span className="text-rose-600">(필수)</span>
+                  <span className="block text-xs text-slate-500 mt-1">
+                    수집 목적, 항목, 보유·이용 기간, 동의 거부권을 포함합니다.
+                  </span>
+                </span>
+              </label>
+              <div className="max-h-40 overflow-y-auto rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600 leading-relaxed">
+                <p className="font-semibold text-slate-700">[개인정보 수집·이용 동의]</p>
+                <p className="mt-2">제1조 (수집 목적)</p>
+                <p>회사는 회원 가입 및 서비스 제공, 고객 문의 대응, 공지사항 전달을 위하여 개인정보를 수집·이용합니다.</p>
+                <p className="mt-2">제2조 (수집 항목)</p>
+                <p>필수: 회사명, 대표자 성명, 대표자 이메일, 대표자 전화번호, 사업자등록번호, 소재지 등 가입에 필요한 정보</p>
+                <p className="mt-2">제3조 (보유 및 이용 기간)</p>
+                <p>회원 탈퇴 시까지 보관하며, 관계 법령에 따라 보존이 필요한 경우 해당 기간 동안 보관합니다.</p>
+                <p className="mt-2">제4조 (동의 거부권 및 불이익)</p>
+                <p>동의를 거부할 권리가 있으며, 필수 항목 동의 거부 시 회원가입이 제한될 수 있습니다.</p>
+              </div>
+
+              <label className="flex items-start gap-3 rounded-lg border border-slate-200 px-3 py-2">
+                <input
+                  type="checkbox"
+                  className="mt-1"
+                  checked={consentMarketing}
+                  onChange={(e) => setConsentMarketing(e.target.checked)}
+                />
+                <span>
+                  <span className="font-semibold text-slate-900">마케팅 정보 수신 동의</span>{" "}
+                  <span className="text-slate-500">(선택)</span>
+                  <span className="block text-xs text-slate-500 mt-1">
+                    이벤트, 뉴스레터 등 안내를 받을 수 있습니다.
+                  </span>
+                </span>
+              </label>
+              <div className="max-h-36 overflow-y-auto rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600 leading-relaxed">
+                <p className="font-semibold text-slate-700">[마케팅 정보 수신 동의]</p>
+                <p className="mt-2">제1조 (수신 목적)</p>
+                <p>회사는 서비스 안내, 이벤트, 프로모션 등 마케팅 정보를 제공하기 위해 개인정보를 이용합니다.</p>
+                <p className="mt-2">제2조 (전송 방법)</p>
+                <p>이메일, 문자, 앱 알림 등 전자적 전송매체를 통해 안내합니다.</p>
+                <p className="mt-2">제3조 (보유 및 이용 기간)</p>
+                <p>동의 철회 시까지 보관·이용합니다.</p>
+                <p className="mt-2">제4조 (동의 거부권)</p>
+                <p>동의를 거부하더라도 서비스 이용에는 제한이 없습니다.</p>
+              </div>
+
+              {consentError ? (
+                <div className="text-xs text-rose-600">{consentError}</div>
+              ) : null}
+            </div>
+
+            <div className="mt-6 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                className="rounded-lg border border-slate-200 px-4 py-2 text-sm text-slate-600 hover:bg-slate-50"
+                onClick={() => setConsentOpen(false)}
+              >
+                취소
+              </button>
+              <button
+                type="button"
+                className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white"
+                onClick={() => {
+                  if (!consentPrivacy) {
+                    setConsentError("개인정보 수집·이용 동의는 필수입니다.")
+                    return
+                  }
+                  setConsentOpen(false)
+                  handleSubmit()
+                }}
+              >
+                동의하고 계속
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
