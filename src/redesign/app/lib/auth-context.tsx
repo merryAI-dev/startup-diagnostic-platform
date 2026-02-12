@@ -7,10 +7,10 @@ import {
   User as FirebaseUser
 } from "firebase/auth";
 import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
-import { auth, db, isFirebaseConfigured } from "./firebase";
-import { ConsultantAvailability, User } from "./types";
-import { initialUsers } from "./data";
-import type { CompanyInfoForm, CompanyInfoRecord } from "../../../types/company";
+import { auth, db, isFirebaseConfigured } from "@/redesign/app/lib/firebase";
+import { ConsultantAvailability, User } from "@/redesign/app/lib/types";
+import { initialUsers } from "@/redesign/app/lib/data";
+import type { CompanyInfoForm, CompanyInfoRecord } from "@/types/company";
 
 interface AuthContextType {
   user: User | null;

@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { User, ChatRoom, ChatMessage, ChatAttachment } from "../../lib/types";
-import { ChatList } from "../chat/chat-list";
-import { ChatWindow } from "../chat/chat-window";
+import { User, ChatRoom, ChatMessage, ChatAttachment } from "@/redesign/app/lib/types";
+import { ChatList } from "@/redesign/app/components/chat/chat-list";
+import { ChatWindow } from "@/redesign/app/components/chat/chat-window";
 import { MessageSquare } from "lucide-react";
 
 interface MessagesPageProps {

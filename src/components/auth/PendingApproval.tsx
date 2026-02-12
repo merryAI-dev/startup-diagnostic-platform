@@ -1,4 +1,4 @@
-import type { Role } from "../../types/auth"
+import type { Role } from "@/types/auth"
 
 type PendingApprovalProps = {
   role?: Role | null

@@ -1,9 +1,9 @@
 import { Calendar, Clock, ArrowRight, AlertCircle, CalendarClock } from "lucide-react";
-import { Button } from "../ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
-import { StatusChip } from "../status-chip";
-import { Application, User, Program } from "../../lib/types";
-import { ProgramQuotaCard } from "../ui/program-quota-card";
+import { Button } from "@/redesign/app/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/redesign/app/components/ui/card";
+import { StatusChip } from "@/redesign/app/components/status-chip";
+import { Application, User, Program } from "@/redesign/app/lib/types";
+import { ProgramQuotaCard } from "@/redesign/app/components/ui/program-quota-card";
 import { format } from "date-fns";
 import { ko } from "date-fns/locale";
 

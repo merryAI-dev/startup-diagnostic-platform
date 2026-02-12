@@ -22,7 +22,7 @@ import {
   UsersRound,
 } from "lucide-react"
 import { NavLink } from "react-router-dom"
-import { cn } from "../ui/utils"
+import { cn } from "@/redesign/ui/utils"
 
 type NavItem = {
   id: string

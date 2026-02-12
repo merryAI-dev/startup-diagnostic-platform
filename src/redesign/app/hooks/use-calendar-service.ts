@@ -12,9 +12,9 @@
  */
 
 import { useState, useCallback, useMemo } from "react";
-import { isFirebaseConfigured, COLLECTIONS } from "../lib/firebase";
-import { firestoreService } from "../lib/firestore-service";
-import { useCalendarEvents } from "./use-firestore";
+import { isFirebaseConfigured, COLLECTIONS } from "@/redesign/app/lib/firebase";
+import { firestoreService } from "@/redesign/app/lib/firestore-service";
+import { useCalendarEvents } from "@/redesign/app/hooks/use-firestore";
 
 export interface CalendarEventData {
   title: string;

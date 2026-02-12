@@ -7,8 +7,8 @@ import {
   MessageTemplate,
   UserWithPermissions,
   Program,
-} from "./types";
-import { generateLargeApplications } from "./large-mock-data";
+} from "@/redesign/app/lib/types";
+import { generateLargeApplications } from "@/redesign/app/lib/large-mock-data";
 
 export const programs: Program[] = [
   {

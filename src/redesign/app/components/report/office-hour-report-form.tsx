@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "../ui/dialog";
-import { Button } from "../ui/button";
-import { Label } from "../ui/label";
-import { Input } from "../ui/input";
-import { Textarea } from "../ui/textarea";
-import { Application, OfficeHourReport } from "../../lib/types";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/redesign/app/components/ui/dialog";
+import { Button } from "@/redesign/app/components/ui/button";
+import { Label } from "@/redesign/app/components/ui/label";
+import { Input } from "@/redesign/app/components/ui/input";
+import { Textarea } from "@/redesign/app/components/ui/textarea";
+import { Application, OfficeHourReport } from "@/redesign/app/lib/types";
 import { X, Upload, Star, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
 

@@ -1,19 +1,19 @@
 import { useState } from "react";
 import { ArrowLeft, Calendar as CalendarIcon, Check, AlertCircle } from "lucide-react";
-import { Button } from "../ui/button";
-import { Card, CardContent } from "../ui/card";
-import { Stepper } from "../stepper";
-import { Label } from "../ui/label";
-import { RadioGroup, RadioGroupItem } from "../ui/radio-group";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
-import { Textarea } from "../ui/textarea";
-import { FileUpload } from "../file-upload";
-import { Calendar } from "../ui/calendar";
-import { Agenda, Application, Consultant, RegularOfficeHour, SessionFormat, FileItem } from "../../lib/types";
-import { getTimeSlots } from "../../lib/data";
+import { Button } from "@/redesign/app/components/ui/button";
+import { Card, CardContent } from "@/redesign/app/components/ui/card";
+import { Stepper } from "@/redesign/app/components/stepper";
+import { Label } from "@/redesign/app/components/ui/label";
+import { RadioGroup, RadioGroupItem } from "@/redesign/app/components/ui/radio-group";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/redesign/app/components/ui/select";
+import { Textarea } from "@/redesign/app/components/ui/textarea";
+import { FileUpload } from "@/redesign/app/components/file-upload";
+import { Calendar } from "@/redesign/app/components/ui/calendar";
+import { Agenda, Application, Consultant, RegularOfficeHour, SessionFormat, FileItem } from "@/redesign/app/lib/types";
+import { getTimeSlots } from "@/redesign/app/lib/data";
 import { format } from "date-fns";
 import { ko } from "date-fns/locale";
-import { cn } from "../ui/utils";
+import { cn } from "@/redesign/app/components/ui/utils";
 
 interface RegularApplicationWizardProps {
   officeHour: RegularOfficeHour;

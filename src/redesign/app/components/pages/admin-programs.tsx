@@ -9,34 +9,34 @@ import {
   X,
   XCircle,
 } from "lucide-react"
-import { Agenda, Application, Program } from "../../lib/types"
-import { StatusChip } from "../status-chip"
-import { Badge } from "../ui/badge"
-import { Button } from "../ui/button"
+import { Agenda, Application, Program } from "@/redesign/app/lib/types"
+import { StatusChip } from "@/redesign/app/components/status-chip"
+import { Badge } from "@/redesign/app/components/ui/badge"
+import { Button } from "@/redesign/app/components/ui/button"
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
-} from "../ui/card"
+} from "@/redesign/app/components/ui/card"
 import {
   Dialog,
   DialogContent,
   DialogDescription,
   DialogHeader,
   DialogTitle,
-} from "../ui/dialog"
+} from "@/redesign/app/components/ui/dialog"
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "../ui/select"
-import { Input } from "../ui/input"
-import { Label } from "../ui/label"
-import { Progress } from "../ui/progress"
+} from "@/redesign/app/components/ui/select"
+import { Input } from "@/redesign/app/components/ui/input"
+import { Label } from "@/redesign/app/components/ui/label"
+import { Progress } from "@/redesign/app/components/ui/progress"
 import {
   Table,
   TableBody,
@@ -44,8 +44,8 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "../ui/table"
-import { Textarea } from "../ui/textarea"
+} from "@/redesign/app/components/ui/table"
+import { Textarea } from "@/redesign/app/components/ui/textarea"
 
 interface AdminProgramsProps {
   programs: Program[]

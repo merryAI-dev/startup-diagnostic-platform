@@ -1,11 +1,11 @@
 import { useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight, Calendar, List, Filter } from "lucide-react";
-import { Agenda, RegularOfficeHour } from "../../lib/types";
-import { Button } from "../ui/button";
-import { Badge } from "../ui/badge";
+import { Agenda, RegularOfficeHour } from "@/redesign/app/lib/types";
+import { Button } from "@/redesign/app/components/ui/button";
+import { Badge } from "@/redesign/app/components/ui/badge";
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameMonth, isSameDay, addMonths, subMonths, startOfWeek, endOfWeek, isToday, parseISO } from "date-fns";
 import { ko } from "date-fns/locale";
-import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuTrigger } from "../ui/dropdown-menu";
+import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuTrigger } from "@/redesign/app/components/ui/dropdown-menu";
 
 interface RegularOfficeHoursCalendarProps {
   officeHours: RegularOfficeHour[];

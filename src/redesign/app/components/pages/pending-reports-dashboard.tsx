@@ -1,7 +1,7 @@
 import { useMemo } from "react";
-import { Application, Program, OfficeHourReport, User } from "../../lib/types";
-import { Button } from "../ui/button";
-import { Badge } from "../ui/badge";
+import { Application, Program, OfficeHourReport, User } from "@/redesign/app/lib/types";
+import { Button } from "@/redesign/app/components/ui/button";
+import { Badge } from "@/redesign/app/components/ui/badge";
 import { AlertCircle, Clock, Calendar, FileText } from "lucide-react";
 import { addDays, format, differenceInDays } from "date-fns";
 import { ko } from "date-fns/locale";

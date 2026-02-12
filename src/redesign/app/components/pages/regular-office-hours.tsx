@@ -1,7 +1,7 @@
 import { Calendar, User, ArrowRight } from "lucide-react";
-import { Button } from "../ui/button";
-import { Card, CardContent } from "../ui/card";
-import { RegularOfficeHour } from "../../lib/types";
+import { Button } from "@/redesign/app/components/ui/button";
+import { Card, CardContent } from "@/redesign/app/components/ui/card";
+import { RegularOfficeHour } from "@/redesign/app/lib/types";
 import { format } from "date-fns";
 import { ko } from "date-fns/locale";
 

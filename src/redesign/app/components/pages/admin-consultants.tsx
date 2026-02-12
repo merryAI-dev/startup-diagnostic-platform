@@ -1,14 +1,14 @@
 import { useMemo, useState } from "react";
 import { Building2, Clock3, Link2, Mail, Phone, Plus, UserCog } from "lucide-react";
-import { Agenda, Consultant, ConsultantAvailability } from "../../lib/types";
-import { Badge } from "../ui/badge";
-import { Button } from "../ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "../ui/dialog";
-import { Input } from "../ui/input";
-import { Label } from "../ui/label";
-import { Textarea } from "../ui/textarea";
-import { cn } from "../ui/utils";
+import { Agenda, Consultant, ConsultantAvailability } from "@/redesign/app/lib/types";
+import { Badge } from "@/redesign/app/components/ui/badge";
+import { Button } from "@/redesign/app/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/redesign/app/components/ui/card";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/redesign/app/components/ui/dialog";
+import { Input } from "@/redesign/app/components/ui/input";
+import { Label } from "@/redesign/app/components/ui/label";
+import { Textarea } from "@/redesign/app/components/ui/textarea";
+import { cn } from "@/redesign/app/components/ui/utils";
 
 interface AdminConsultantsProps {
   consultants: Consultant[];

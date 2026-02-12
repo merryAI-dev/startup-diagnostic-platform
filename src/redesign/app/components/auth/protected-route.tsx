@@ -1,6 +1,6 @@
 import { ReactNode } from "react";
-import { useAuth as useAppAuth } from "../../../../context/AuthContext";
-import { Alert, AlertDescription } from "../ui/alert";
+import { useAuth as useAppAuth } from "@/context/AuthContext";
+import { Alert, AlertDescription } from "@/redesign/app/components/ui/alert";
 import { ShieldAlert } from "lucide-react";
 
 interface ProtectedRouteProps {

@@ -1,12 +1,12 @@
 import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore"
 import { useEffect, useMemo, useState } from "react"
-import { db } from "../firebase/client"
+import { db } from "@/firebase/client"
 import type {
   CompanyInfoForm,
   CompanyInfoRecord,
   InvestmentInput,
-} from "../types/company"
-import { DEFAULT_FORM } from "../types/company"
+} from "@/types/company"
+import { DEFAULT_FORM } from "@/types/company"
 
 const DEFAULT_INVESTMENTS: InvestmentInput[] = [
   {

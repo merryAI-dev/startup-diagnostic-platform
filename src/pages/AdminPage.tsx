@@ -1,7 +1,7 @@
 import { useNavigate } from "react-router-dom"
-import { AdminDashboard } from "../components/dashboard/AdminDashboard"
-import { signOutUser } from "../firebase/auth"
-import { useAuth } from "../context/AuthContext"
+import { AdminDashboard } from "@/components/dashboard/AdminDashboard"
+import { signOutUser } from "@/firebase/auth"
+import { useAuth } from "@/context/AuthContext"
 
 export function AdminPage() {
   const navigate = useNavigate()

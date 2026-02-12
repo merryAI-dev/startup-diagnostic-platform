@@ -1,5 +1,5 @@
 import { Check } from "lucide-react";
-import { cn } from "../components/ui/utils";
+import { cn } from "@/redesign/app/components/ui/utils";
 
 interface StepperProps {
   steps: string[];

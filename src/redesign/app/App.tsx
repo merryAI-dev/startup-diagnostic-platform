@@ -1,9 +1,9 @@
 import { useState, useEffect } from "react";
 import { Toaster, toast } from "sonner";
-import { AuthProvider, useAuth } from "./lib/auth-context";
-import { Login } from "./components/auth/login";
-import { Signup } from "./components/auth/signup";
-import { AppContent } from "./AppContent";
+import { AuthProvider, useAuth } from "@/redesign/app/lib/auth-context";
+import { Login } from "@/redesign/app/components/auth/login";
+import { Signup } from "@/redesign/app/components/auth/signup";
+import { AppContent } from "@/redesign/app/AppContent";
 
 type AuthPage = "login" | "signup";
 

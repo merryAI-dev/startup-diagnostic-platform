@@ -1,7 +1,7 @@
 import { Calendar, Filter, Search } from "lucide-react";
-import { Button } from "../ui/button";
-import { Badge } from "../ui/badge";
-import { Input } from "../ui/input";
+import { Button } from "@/redesign/app/components/ui/button";
+import { Badge } from "@/redesign/app/components/ui/badge";
+import { Input } from "@/redesign/app/components/ui/input";
 import { useState } from "react";
 
 export function IrregularOfficeHoursCalendar({ onNavigate }: { onNavigate: (page: string) => void }) {

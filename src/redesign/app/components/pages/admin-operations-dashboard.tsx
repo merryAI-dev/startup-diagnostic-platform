@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react";
-import { Application, Program } from "../../lib/types";
-import { Button } from "../ui/button";
-import { Badge } from "../ui/badge";
+import { Application, Program } from "@/redesign/app/lib/types";
+import { Button } from "@/redesign/app/components/ui/button";
+import { Badge } from "@/redesign/app/components/ui/badge";
 import { 
   BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer

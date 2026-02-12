@@ -1,13 +1,13 @@
 import { useState } from "react";
 import { Calendar, Clock, Search, Filter, Eye, CheckCircle2, XCircle, MoreVertical } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
-import { Button } from "../ui/button";
-import { Input } from "../ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../ui/table";
-import { Badge } from "../ui/badge";
-import { StatusChip } from "../status-chip";
-import { Application, ApplicationStatus } from "../../lib/types";
+import { Card, CardContent, CardHeader, CardTitle } from "@/redesign/app/components/ui/card";
+import { Button } from "@/redesign/app/components/ui/button";
+import { Input } from "@/redesign/app/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/redesign/app/components/ui/select";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/redesign/app/components/ui/table";
+import { Badge } from "@/redesign/app/components/ui/badge";
+import { StatusChip } from "@/redesign/app/components/status-chip";
+import { Application, ApplicationStatus } from "@/redesign/app/lib/types";
 import { format } from "date-fns";
 import { ko } from "date-fns/locale";
 import {
@@ -16,8 +16,8 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from "../ui/dropdown-menu";
-import { AdminApplicationDetailModal } from "./admin-application-detail-modal";
+} from "@/redesign/app/components/ui/dropdown-menu";
+import { AdminApplicationDetailModal } from "@/redesign/app/components/pages/admin-application-detail-modal";
 
 interface AdminApplicationsProps {
   applications: Application[];

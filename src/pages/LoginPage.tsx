@@ -1,15 +1,15 @@
 import { useState } from "react"
 import { useNavigate } from "react-router-dom"
-import { AuthCard } from "../components/auth/AuthCard"
-import { useAuth } from "../context/AuthContext"
+import { AuthCard } from "@/components/auth/AuthCard"
+import { useAuth } from "@/context/AuthContext"
 import {
   getUserProfile,
-} from "../firebase/profile"
+} from "@/firebase/profile"
 import {
   signInWithEmail,
   signInWithGoogle,
-} from "../firebase/auth"
-import type { Role } from "../types/auth"
+} from "@/firebase/auth"
+import type { Role } from "@/types/auth"
 
 export function LoginPage() {
   const [loadingEmail, setLoadingEmail] = useState(false)

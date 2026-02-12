@@ -1,6 +1,6 @@
 import { LogOut, User as UserIcon } from "lucide-react"
 import { Link } from "react-router-dom"
-import { Button } from "../ui/button"
+import { Button } from "@/redesign/ui/button"
 
 type TopbarProps = {
   title: string

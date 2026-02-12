@@ -1,8 +1,8 @@
 import { useMemo, useState } from "react";
 import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
-import { Application, Program, User } from "../../lib/types";
-import { Badge } from "../ui/badge";
-import { Button } from "../ui/button";
+import { Application, Program, User } from "@/redesign/app/lib/types";
+import { Badge } from "@/redesign/app/components/ui/badge";
+import { Button } from "@/redesign/app/components/ui/button";
 import { Calendar, TrendingUp, Users, Clock, Filter } from "lucide-react";
 
 interface AdminDashboardChartsProps {

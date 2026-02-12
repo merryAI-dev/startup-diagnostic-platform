@@ -1,9 +1,9 @@
 import { useState } from "react";
 import { ChevronLeft, ChevronRight, Calendar as CalendarIcon, Clock, FileText, Target } from "lucide-react";
-import { Application, User, Program } from "../../lib/types";
-import { Button } from "../ui/button";
-import { Badge } from "../ui/badge";
-import { StatusChip } from "../status-chip";
+import { Application, User, Program } from "@/redesign/app/lib/types";
+import { Button } from "@/redesign/app/components/ui/button";
+import { Badge } from "@/redesign/app/components/ui/badge";
+import { StatusChip } from "@/redesign/app/components/status-chip";
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameMonth, isSameDay, addMonths, subMonths, startOfWeek, endOfWeek, isToday } from "date-fns";
 import { ko } from "date-fns/locale";
 

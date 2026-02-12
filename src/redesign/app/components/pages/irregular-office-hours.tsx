@@ -1,11 +1,11 @@
 import { Plus, Filter } from "lucide-react";
-import { Button } from "../ui/button";
-import { Card, CardContent } from "../ui/card";
-import { StatusChip } from "../status-chip";
-import { Application } from "../../lib/types";
+import { Button } from "@/redesign/app/components/ui/button";
+import { Card, CardContent } from "@/redesign/app/components/ui/card";
+import { StatusChip } from "@/redesign/app/components/status-chip";
+import { Application } from "@/redesign/app/lib/types";
 import { format } from "date-fns";
 import { ko } from "date-fns/locale";
-import { EmptyState } from "../empty-state";
+import { EmptyState } from "@/redesign/app/components/empty-state";
 import { CalendarClock } from "lucide-react";
 
 interface IrregularOfficeHoursProps {

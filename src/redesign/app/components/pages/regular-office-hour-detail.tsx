@@ -1,11 +1,11 @@
 import { ArrowLeft, Calendar, User, Info } from "lucide-react";
-import { Button } from "../ui/button";
-import { Card, CardContent } from "../ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
-import { RegularOfficeHour, Application } from "../../lib/types";
+import { Button } from "@/redesign/app/components/ui/button";
+import { Card, CardContent } from "@/redesign/app/components/ui/card";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/redesign/app/components/ui/tabs";
+import { RegularOfficeHour, Application } from "@/redesign/app/lib/types";
 import { format } from "date-fns";
 import { ko } from "date-fns/locale";
-import { StatusChip } from "../status-chip";
+import { StatusChip } from "@/redesign/app/components/status-chip";
 
 interface RegularOfficeHourDetailProps {
   officeHour: RegularOfficeHour;

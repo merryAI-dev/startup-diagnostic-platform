@@ -1,4 +1,4 @@
-import { Notification, ChatRoom, ChatMessage, AIRecommendation, Goal, TeamMember, CalendarEvent } from "./types";
+import { Notification, ChatRoom, ChatMessage, AIRecommendation, Goal, TeamMember, CalendarEvent } from "@/redesign/app/lib/types";
 
 // 알림 Mock 데이터
 export const mockNotifications: Notification[] = [

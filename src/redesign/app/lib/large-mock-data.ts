@@ -1,4 +1,4 @@
-import { Application } from "./types";
+import { Application } from "@/redesign/app/lib/types";
 
 // 30개 이상의 스타트업 (사업별로 분산)
 export const startups = [

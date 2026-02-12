@@ -22,7 +22,7 @@ import {
   Users,
   UsersRound,
 } from "lucide-react";
-import { cn } from "../ui/utils";
+import { cn } from "@/redesign/app/components/ui/utils";
 
 interface SidebarNavProps {
   currentPage: string;

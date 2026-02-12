@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Upload, X, File } from "lucide-react";
-import { Button } from "./ui/button";
-import { cn } from "./ui/utils";
+import { Button } from "@/redesign/app/components/ui/button";
+import { cn } from "@/redesign/app/components/ui/utils";
 
 interface FileItem {
   id: string;

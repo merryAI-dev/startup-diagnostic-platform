@@ -1,4 +1,4 @@
-import type { SelfAssessmentSection } from "../types/selfAssessment"
+import type { SelfAssessmentSection } from "@/types/selfAssessment"
 
 export const SELF_ASSESSMENT_SECTIONS: SelfAssessmentSection[] = [
   {

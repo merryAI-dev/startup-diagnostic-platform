@@ -12,24 +12,24 @@ import {
 import { Calendar, Check, CheckCircle2, Clock, FileText, MapPin, User, XCircle } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { SELF_ASSESSMENT_SECTIONS } from "../../../../data/selfAssessment";
-import { db } from "../../../../firebase/client";
-import type { CompanyInfoRecord } from "../../../../types/company";
-import type { SelfAssessmentSections } from "../../../../types/selfAssessment";
-import { Application, ApplicationStatus } from "../../lib/types";
-import { StatusChip } from "../status-chip";
-import { Badge } from "../ui/badge";
-import { Button } from "../ui/button";
+import { SELF_ASSESSMENT_SECTIONS } from "@/data/selfAssessment";
+import { db } from "@/firebase/client";
+import type { CompanyInfoRecord } from "@/types/company";
+import type { SelfAssessmentSections } from "@/types/selfAssessment";
+import { Application, ApplicationStatus } from "@/redesign/app/lib/types";
+import { StatusChip } from "@/redesign/app/components/status-chip";
+import { Badge } from "@/redesign/app/components/ui/badge";
+import { Button } from "@/redesign/app/components/ui/button";
 import {
   Dialog,
   DialogContent,
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "../ui/dialog";
-import { Input } from "../ui/input";
-import { Label } from "../ui/label";
-import { Separator } from "../ui/separator";
+} from "@/redesign/app/components/ui/dialog";
+import { Input } from "@/redesign/app/components/ui/input";
+import { Label } from "@/redesign/app/components/ui/label";
+import { Separator } from "@/redesign/app/components/ui/separator";
 
 interface AdminApplicationDetailModalProps {
   application: Application;

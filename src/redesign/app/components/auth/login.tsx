@@ -1,9 +1,9 @@
 import { useState } from "react";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/card";
-import { Label } from "../ui/label";
-import { Input } from "../ui/input";
-import { Button } from "../ui/button";
-import { Alert, AlertDescription } from "../ui/alert";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/redesign/app/components/ui/card";
+import { Label } from "@/redesign/app/components/ui/label";
+import { Input } from "@/redesign/app/components/ui/input";
+import { Button } from "@/redesign/app/components/ui/button";
+import { Alert, AlertDescription } from "@/redesign/app/components/ui/alert";
 import { Shield } from "lucide-react";
 
 interface LoginProps {

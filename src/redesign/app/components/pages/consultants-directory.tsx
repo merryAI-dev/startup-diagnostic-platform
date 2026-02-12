@@ -1,15 +1,15 @@
 import { useState } from "react";
 import { Mail, Phone, Linkedin, Star, Award, GraduationCap, FileText, Calendar } from "lucide-react";
-import { Consultant } from "../../lib/types";
-import { Badge } from "../ui/badge";
-import { Button } from "../ui/button";
+import { Consultant } from "@/redesign/app/lib/types";
+import { Badge } from "@/redesign/app/components/ui/badge";
+import { Button } from "@/redesign/app/components/ui/button";
 import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
-} from "../ui/dialog";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
+} from "@/redesign/app/components/ui/dialog";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/redesign/app/components/ui/tabs";
 
 interface ConsultantsDirectoryProps {
   consultants: Consultant[];

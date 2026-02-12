@@ -1,6 +1,6 @@
 import { Navigate } from "react-router-dom"
-import { useAuth } from "../../context/AuthContext"
-import type { Role } from "../../types/auth"
+import { useAuth } from "@/context/AuthContext"
+import type { Role } from "@/types/auth"
 
 export function RequireAuth({ children }: { children: JSX.Element }) {
   const { user, loading } = useAuth()

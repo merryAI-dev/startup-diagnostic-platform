@@ -1,12 +1,12 @@
 import { useState, useMemo } from "react";
-import { User, CompanyMetrics, MonthlyMetrics } from "../../lib/types";
-import { getCompanyMetrics, createCompanyMetrics, formatCurrency, formatNumber, calculateGrowthRate } from "../../lib/company-metrics-data";
-import { generateCompanyRelevantNews, trendingKeywords, categoryColors, categoryLabels, NewsArticle } from "../../lib/news-data";
-import { Card } from "../ui/card";
-import { Badge } from "../ui/badge";
-import { Button } from "../ui/button";
-import { Separator } from "../ui/separator";
-import { Progress } from "../ui/progress";
+import { User, CompanyMetrics, MonthlyMetrics } from "@/redesign/app/lib/types";
+import { getCompanyMetrics, createCompanyMetrics, formatCurrency, formatNumber, calculateGrowthRate } from "@/redesign/app/lib/company-metrics-data";
+import { generateCompanyRelevantNews, trendingKeywords, categoryColors, categoryLabels, NewsArticle } from "@/redesign/app/lib/news-data";
+import { Card } from "@/redesign/app/components/ui/card";
+import { Badge } from "@/redesign/app/components/ui/badge";
+import { Button } from "@/redesign/app/components/ui/button";
+import { Separator } from "@/redesign/app/components/ui/separator";
+import { Progress } from "@/redesign/app/components/ui/progress";
 import {
   TrendingUp, TrendingDown, Calendar, Users, DollarSign,
   Award, Newspaper, ExternalLink, Sparkles, Download,

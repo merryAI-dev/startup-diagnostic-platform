@@ -1,7 +1,7 @@
 import { useNavigate } from "react-router-dom"
-import { CompanyDashboard } from "../../components/dashboard/CompanyDashboard"
-import { useAuth } from "../../context/AuthContext"
-import { signOutUser } from "../../firebase/auth"
+import { CompanyDashboard } from "@/components/dashboard/CompanyDashboard"
+import { useAuth } from "@/context/AuthContext"
+import { signOutUser } from "@/firebase/auth"
 
 export function LegacyCompanyInfoPage() {
   const navigate = useNavigate()

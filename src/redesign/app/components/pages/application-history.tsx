@@ -1,12 +1,12 @@
 import { Filter, Calendar, Clock } from "lucide-react";
-import { Button } from "../ui/button";
-import { Card, CardContent } from "../ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
-import { StatusChip } from "../status-chip";
-import { Application, ApplicationStatus } from "../../lib/types";
+import { Button } from "@/redesign/app/components/ui/button";
+import { Card, CardContent } from "@/redesign/app/components/ui/card";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/redesign/app/components/ui/tabs";
+import { StatusChip } from "@/redesign/app/components/status-chip";
+import { Application, ApplicationStatus } from "@/redesign/app/lib/types";
 import { format } from "date-fns";
 import { ko } from "date-fns/locale";
-import { EmptyState } from "../empty-state";
+import { EmptyState } from "@/redesign/app/components/empty-state";
 import { FileText } from "lucide-react";
 
 interface ApplicationHistoryProps {

@@ -6,9 +6,9 @@ import {
   serverTimestamp,
   setDoc,
 } from "firebase/firestore"
-import { db } from "./client"
-import type { Role, UserProfile } from "../types/auth"
-import type { CompanyInfoForm, CompanyInfoRecord, InvestmentInput } from "../types/company"
+import { db } from "@/firebase/client"
+import type { Role, UserProfile } from "@/types/auth"
+import type { CompanyInfoForm, CompanyInfoRecord, InvestmentInput } from "@/types/company"
 
 const collectionName = "profiles"
 

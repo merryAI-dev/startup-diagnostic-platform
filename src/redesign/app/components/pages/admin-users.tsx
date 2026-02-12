@@ -1,9 +1,9 @@
 import { useState } from "react";
 import { Search, Filter, UserPlus, Mail, Building, Calendar, Shield } from "lucide-react";
-import { Button } from "../ui/button";
-import { Input } from "../ui/input";
-import { Badge } from "../ui/badge";
-import { PendingProfileApproval, UserWithPermissions } from "../../lib/types";
+import { Button } from "@/redesign/app/components/ui/button";
+import { Input } from "@/redesign/app/components/ui/input";
+import { Badge } from "@/redesign/app/components/ui/badge";
+import { PendingProfileApproval, UserWithPermissions } from "@/redesign/app/lib/types";
 import {
   Table,
   TableBody,
@@ -11,7 +11,7 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "../ui/table";
+} from "@/redesign/app/components/ui/table";
 import {
   Dialog,
   DialogContent,
@@ -19,16 +19,16 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
-} from "../ui/dialog";
-import { Label } from "../ui/label";
-import { Checkbox } from "../ui/checkbox";
+} from "@/redesign/app/components/ui/dialog";
+import { Label } from "@/redesign/app/components/ui/label";
+import { Checkbox } from "@/redesign/app/components/ui/checkbox";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "../ui/select";
+} from "@/redesign/app/components/ui/select";
 
 interface AdminUsersProps {
   users: UserWithPermissions[];

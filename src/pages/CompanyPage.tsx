@@ -1,7 +1,7 @@
 import { useNavigate } from "react-router-dom"
-import { CompanyDashboard } from "../components/dashboard/CompanyDashboard"
-import { signOutUser } from "../firebase/auth"
-import { useAuth } from "../context/AuthContext"
+import { CompanyDashboard } from "@/components/dashboard/CompanyDashboard"
+import { signOutUser } from "@/firebase/auth"
+import { useAuth } from "@/context/AuthContext"
 
 export function CompanyPage() {
   const navigate = useNavigate()

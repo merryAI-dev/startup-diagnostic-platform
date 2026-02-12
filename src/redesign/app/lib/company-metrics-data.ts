@@ -1,4 +1,4 @@
-import { CompanyMetrics, MonthlyMetrics, Investment, Milestone } from "./types";
+import { CompanyMetrics, MonthlyMetrics, Investment, Milestone } from "@/redesign/app/lib/types";
 
 // 2026년 1월~10월 더미 데이터 생성
 function generateMonthlyMetrics(companyName: string): MonthlyMetrics[] {

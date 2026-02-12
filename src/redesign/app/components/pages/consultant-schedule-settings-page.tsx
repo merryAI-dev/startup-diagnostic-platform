@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { Clock3 } from "lucide-react";
-import { ConsultantAvailability } from "../../lib/types";
-import { Badge } from "../ui/badge";
-import { Button } from "../ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/card";
-import { cn } from "../ui/utils";
+import { ConsultantAvailability } from "@/redesign/app/lib/types";
+import { Badge } from "@/redesign/app/components/ui/badge";
+import { Button } from "@/redesign/app/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/redesign/app/components/ui/card";
+import { cn } from "@/redesign/app/components/ui/utils";
 
 interface ConsultantScheduleSettingsPageProps {
   consultantName?: string;
