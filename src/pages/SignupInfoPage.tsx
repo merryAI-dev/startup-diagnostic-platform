@@ -289,6 +289,7 @@ function CompanySignupInfo({
     return ref.id
   })
   const effectiveCompanyId = companyId ?? generatedCompanyId
+  const companyIdValue = effectiveCompanyId ?? ""
 
   if (!effectiveCompanyId) {
     return (
@@ -396,7 +397,7 @@ function CompanySignupInfo({
 
   async function loadCompanyFiles() {
     try {
-      const filesRef = collection(db, "companies", effectiveCompanyId, "files")
+      const filesRef = collection(db, "companies", companyIdValue, "files")
       const filesQuery = query(filesRef, orderBy("createdAt", "desc"))
       const snapshot = await getDocs(filesQuery)
       const items = await Promise.all(
@@ -451,7 +452,6 @@ function CompanySignupInfo({
     return new Promise<void>((resolve, reject) => {
       const task = uploadBytesResumable(storageRef(storage, storagePath), file)
       uploadTasksRef.current.set(docId, task)
-      setUploadingFileName(file.name)
       setUploads((prev) =>
         prev.map((item) =>
           item.id === docId ? { ...item, status: "uploading" } : item
@@ -484,7 +484,7 @@ function CompanySignupInfo({
           try {
             const downloadUrl = await getDownloadURL(task.snapshot.ref)
             await setDoc(
-              doc(db, "companies", effectiveCompanyId, "files", docId),
+              doc(db, "companies", companyIdValue, "files", docId),
               {
                 name: file.name,
                 size: file.size,
@@ -545,16 +545,16 @@ function CompanySignupInfo({
           return
         }
         await setDoc(
-          doc(db, "companies", effectiveCompanyId),
+          doc(db, "companies", companyIdValue),
           {
             ownerUid: authUser.uid,
             updatedAt: serverTimestamp(),
           },
           { merge: true }
         )
-        const filesRef = collection(db, "companies", effectiveCompanyId, "files")
+        const filesRef = collection(db, "companies", companyIdValue, "files")
         const docRef = doc(filesRef)
-        const storagePath = `company-files/${effectiveCompanyId}/${docRef.id}/${file.name}`
+        const storagePath = `company-files/${companyIdValue}/${docRef.id}/${file.name}`
         setUploads((prev) => [
           ...prev,
           {
@@ -630,7 +630,7 @@ function CompanySignupInfo({
       }
 
       try {
-        await deleteDoc(doc(db, "companies", effectiveCompanyId, "files", file.id))
+        await deleteDoc(doc(db, "companies", companyIdValue, "files", file.id))
         docDeleted = true
       } catch (error) {
         console.warn("Failed to delete file metadata:", error)
@@ -920,7 +920,7 @@ function CompanySignupInfo({
         requestedRole,
         authUser.email ?? userEmail,
         {
-          companyId: effectiveCompanyId,
+          companyId: companyIdValue,
           companyInfo: form,
           investmentRows,
           consents: {

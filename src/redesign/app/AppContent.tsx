@@ -78,6 +78,7 @@ import {
 } from "@/redesign/app/hooks/use-firestore";
 import { firestoreService } from "@/redesign/app/lib/firestore-service";
 import { mockNotifications, mockChatRooms, mockChatMessages, mockAIRecommendations, mockGoals, mockTeamMembers } from "@/redesign/app/lib/advanced-mock-data";
+import type { CompanyInfoRecord } from "@/types/company";
 
 type AppPage = 
   | "dashboard" 
@@ -119,6 +120,7 @@ type SaveTypeMeta = {
     saveType?: "draft" | "final";
   };
 };
+type CompanyInfoDoc = Partial<CompanyInfoRecord>;
 
 type RawProfileApprovalDoc = {
   id: string;
@@ -264,6 +266,22 @@ function normalizeConsultantDisplayName(value?: string | null): string {
     .replace(/\s*컨설턴트\s*$/u, "")
     .trim()
     .toLowerCase();
+}
+
+function isConsultantAvailableAt(
+  consultant: Consultant,
+  dateKey: string,
+  time: string
+): boolean {
+  if (!isDateKey(dateKey) || !time) return false;
+  const dayOfWeek = parseDateKey(dateKey).getDay();
+  const dayAvailability = consultant.availability.find(
+    (availability) => availability.dayOfWeek === dayOfWeek
+  );
+  if (!dayAvailability) return false;
+  return dayAvailability.slots.some(
+    (slot) => slot.start === time && slot.available
+  );
 }
 
 function parseExpertiseInput(value: string): string[] {
@@ -583,7 +601,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     [companyNameById]
   );
   const companyRecordId = profile?.companyId ?? firebaseUser?.uid ?? null;
-  const { data: companyInfoDoc } = useFirestoreDocumentOnce<SaveTypeMeta>(
+  const { data: companyInfoDoc } = useFirestoreDocumentOnce<CompanyInfoDoc>(
     companyRecordId ? `companies/${companyRecordId}/companyInfo` : "",
     "info",
     {
@@ -1549,6 +1567,36 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       toast.error("선택한 아젠다 정보를 찾지 못했습니다");
       return;
     }
+
+    const linkedConsultants = consultants.filter(
+      (consultant) =>
+        consultant.status === "active"
+        && (consultant.agendaIds ?? []).includes(data.agendaId)
+    );
+    if (linkedConsultants.length === 1) {
+      const primaryConsultant = linkedConsultants[0];
+      if (!primaryConsultant) {
+        toast.error("담당 컨설턴트를 확인할 수 없습니다");
+        return;
+      }
+      const available = isConsultantAvailableAt(
+        primaryConsultant,
+        scheduledDate,
+        data.time
+      );
+      if (!available) {
+        toast.error("선택한 시간은 컨설턴트 가능 시간이 아닙니다");
+        return;
+      }
+    } else if (linkedConsultants.length > 1) {
+      const availableCount = linkedConsultants.filter((consultant) =>
+        isConsultantAvailableAt(consultant, scheduledDate, data.time)
+      ).length;
+      if (availableCount === 0) {
+        toast.error("선택한 시간에 가능한 컨설턴트가 없습니다");
+        return;
+      }
+    }
     
     const newApplication: Application = {
       id: `app${Date.now()}`,
@@ -1842,6 +1890,19 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       return;
     }
 
+    if (
+      targetApplication.scheduledDate
+      && targetApplication.scheduledTime
+      && !isConsultantAvailableAt(
+        currentConsultant,
+        targetApplication.scheduledDate,
+        targetApplication.scheduledTime
+      )
+    ) {
+      toast.error("컨설턴트 설정상 가능한 시간이 아닙니다");
+      return;
+    }
+
     const updatedAt = new Date();
     const nextApplication = {
       ...targetApplication,
@@ -1905,6 +1966,19 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
 
     if (hasConflict) {
       toast.error("이미 동일한 시간에 확정된 일정이 있습니다");
+      return;
+    }
+
+    if (
+      targetApplication.scheduledDate
+      && targetApplication.scheduledTime
+      && !isConsultantAvailableAt(
+        currentConsultant,
+        targetApplication.scheduledDate,
+        targetApplication.scheduledTime
+      )
+    ) {
+      toast.error("컨설턴트 설정상 가능한 시간이 아닙니다");
       return;
     }
 
@@ -2276,6 +2350,8 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     const prevName = prevProgram?.name ?? "";
     const shouldSyncTitles =
       nextName.length > 0 && prevName.length > 0 && nextName !== prevName;
+    const hasAgendaUpdate = Array.isArray(data.agendaIds);
+    const nextAgendaIds = hasAgendaUpdate ? data.agendaIds ?? [] : undefined;
 
     const buildRegularOfficeHourTitle = (name: string) => `${name} 정기 오피스아워`;
     const nextDefaultTitle = shouldSyncTitles ? buildRegularOfficeHourTitle(nextName) : "";
@@ -2367,6 +2443,45 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
           const okApps = await officeHourApplicationCrud.batchUpdate(applicationUpdates);
           if (!okApps) {
             toast.error("신청 내역의 오피스아워 이름 업데이트에 실패했습니다");
+          }
+        }
+      }
+    }
+
+    if (hasAgendaUpdate && nextAgendaIds) {
+      setOfficeHourSlotList((prev) =>
+        prev.map((slot) =>
+          slot.programId === id ? { ...slot, agendaIds: nextAgendaIds } : slot
+        )
+      );
+      setRegularOfficeHourList((prev) =>
+        prev.map((officeHour) =>
+          officeHour.programId === id
+            ? { ...officeHour, agendaIds: nextAgendaIds }
+            : officeHour
+        )
+      );
+
+      if (isFirebaseConfigured) {
+        const slotUpdates = officeHourSlotList
+          .filter((slot) => slot.programId === id)
+          .filter((slot) => {
+            const prevAgendaIds = slot.agendaIds ?? [];
+            if (prevAgendaIds.length !== nextAgendaIds.length) return true;
+            const prevSet = new Set(prevAgendaIds);
+            return nextAgendaIds.some((agendaId) => !prevSet.has(agendaId));
+          })
+          .map((slot) => ({
+            type: "update" as const,
+            collection: COLLECTIONS.OFFICE_HOUR_SLOTS,
+            docId: slot.id,
+            data: { agendaIds: nextAgendaIds },
+          }));
+
+        if (slotUpdates.length > 0) {
+          const okSlots = await officeHourSlotCrud.batchUpdate(slotUpdates);
+          if (!okSlots) {
+            toast.error("슬롯 아젠다 업데이트에 실패했습니다");
           }
         }
       }
