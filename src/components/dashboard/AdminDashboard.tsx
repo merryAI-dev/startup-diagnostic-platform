@@ -5,10 +5,11 @@ import {
   getDoc,
   getDocs,
 } from "firebase/firestore"
+import { getDownloadURL, ref as storageRef } from "firebase/storage"
 import { useEffect, useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { SELF_ASSESSMENT_SECTIONS } from "@/data/selfAssessment"
-import { db } from "@/firebase/client"
+import { db, storage } from "@/firebase/client"
 import type { CompanyInfoRecord } from "@/types/company"
 import type { SelfAssessmentSections } from "@/types/selfAssessment"
 
@@ -31,6 +32,9 @@ export function AdminDashboard({
   const [companies, setCompanies] = useState<CompanySummary[]>([])
   const [selectedCompanyId, setSelectedCompanyId] = useState<string | null>(null)
   const [companyInfo, setCompanyInfo] = useState<CompanyInfoRecord | null>(null)
+  const [companyFiles, setCompanyFiles] = useState<
+    { id: string; name: string; size: number; downloadUrl: string | null }[]
+  >([])
   const [selfAssessment, setSelfAssessment] = useState<SelfAssessmentSections>(
     {}
   )
@@ -97,15 +101,17 @@ export function AdminDashboard({
       if (!selectedCompanyId) {
         setCompanyInfo(null)
         setSelfAssessment({})
+        setCompanyFiles([])
         return
       }
       setLoadingDetails(true)
       try {
-        const [infoSnap, assessmentSnap] = await Promise.all([
+        const [infoSnap, assessmentSnap, filesSnap] = await Promise.all([
           getDoc(doc(db, "companies", selectedCompanyId, "companyInfo", "info")),
           getDoc(
             doc(db, "companies", selectedCompanyId, "selfAssessment", "info")
           ),
+          getDocs(collection(db, "companies", selectedCompanyId, "files")),
         ])
         if (!mounted) return
         setCompanyInfo(
@@ -117,6 +123,28 @@ export function AdminDashboard({
           ? (assessmentSnap.data() as { sections?: SelfAssessmentSections })
           : null
         setSelfAssessment(assessmentData?.sections ?? {})
+        const files = await Promise.all(
+          filesSnap.docs.map(async (docSnap) => {
+            const data = docSnap.data() as {
+              name: string
+              size: number
+              storagePath: string
+            }
+            let downloadUrl: string | null = null
+            try {
+              downloadUrl = await getDownloadURL(storageRef(storage, data.storagePath))
+            } catch {
+              downloadUrl = null
+            }
+            return {
+              id: docSnap.id,
+              name: data.name,
+              size: data.size,
+              downloadUrl,
+            }
+          })
+        )
+        setCompanyFiles(files)
       } finally {
         if (mounted) {
           setLoadingDetails(false)
@@ -490,6 +518,47 @@ export function AdminDashboard({
                           {formatValue(companyInfo.fundingPlan?.preValue)}
                         </div>
                       </div>
+                    </div>
+
+                    <div className="rounded-xl border border-slate-100 bg-slate-50 p-4">
+                      <div className="text-xs font-semibold text-slate-600">
+                        업로드 자료
+                      </div>
+                      {companyFiles.length === 0 ? (
+                        <div className="mt-2 text-xs text-slate-400">
+                          업로드된 파일이 없습니다.
+                        </div>
+                      ) : (
+                        <div className="mt-3 space-y-2 text-xs">
+                          {companyFiles.map((file) => (
+                            <div
+                              key={file.id}
+                              className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2"
+                            >
+                              <span className="flex-1 text-slate-700">
+                                {file.name}
+                              </span>
+                              <span className="text-slate-400">
+                                {(file.size / (1024 * 1024)).toFixed(1)}MB
+                              </span>
+                              {file.downloadUrl ? (
+                                <a
+                                  href={file.downloadUrl}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="text-slate-600 hover:text-slate-900"
+                                >
+                                  보기/다운로드
+                                </a>
+                              ) : (
+                                <span className="text-slate-400">
+                                  링크 준비중
+                                </span>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
 
                     <div>

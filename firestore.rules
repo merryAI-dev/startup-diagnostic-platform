@@ -79,6 +79,20 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    match /companies/{companyId}/files/{fileId} {
+      allow read: if isSignedIn()
+        && (isCompanyOwner(companyId) || isAdmin());
+      allow create: if isSignedIn()
+        && isCompanyOwner(companyId)
+        && request.resource.data.createdByUid == request.auth.uid
+        && request.resource.data.storagePath is string
+        && request.resource.data.name is string
+        && request.resource.data.size is int;
+      allow delete: if isSignedIn()
+        && (isCompanyOwner(companyId) || isAdmin());
+      allow update: if false;
+    }
+
     match /consultants/{consultantId} {
       allow read: if isSignedIn();
       allow create: if isAdmin()
