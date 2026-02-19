@@ -77,7 +77,7 @@ type DaumPostcodeConstructor = new (options: {
 
 const DAUM_POSTCODE_SCRIPT_SRC =
   "https://t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"
-const TIPS_LIPS_OPTIONS = ["TIPS", "LIPS", "없음"] as const
+const TIPS_LIPS_OPTIONS = ["없음", "TIPS", "LIPS"] as const
 const INVESTMENT_STAGE_OPTIONS = [
   "Pre-Seed",
   "Seed",
@@ -176,8 +176,8 @@ function StepCard({
       type="button"
       onClick={onClick}
       className={`flex-1 rounded-2xl border px-3 py-2.5 text-left transition ${active
-          ? "border-slate-800 bg-slate-900 text-white shadow-md"
-          : "border-slate-300 bg-white text-slate-800 shadow-sm hover:bg-slate-50"
+        ? "border-slate-800 bg-slate-900 text-white shadow-md"
+        : "border-slate-300 bg-white text-slate-800 shadow-sm hover:bg-slate-50"
         }`}
     >
       <div className="flex items-center justify-between">
@@ -197,17 +197,16 @@ function StepCard({
         </div>
         <span
           className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs font-semibold ${active
-              ? "border border-white/20 bg-white/15 text-white"
-              : status === "complete"
+            ? "border border-white/20 bg-white/15 text-white"
+            : status === "complete"
               ? "bg-emerald-200 text-emerald-800"
               : "bg-amber-50 text-amber-700"
             }`}
         >
           {status === "incomplete" ? (
             <span
-              className={`inline-flex h-3 w-3 items-center justify-center text-[10px] font-bold ${
-                active ? "text-white" : "text-amber-700"
-              }`}
+              className={`inline-flex h-3 w-3 items-center justify-center text-[10px] font-bold ${active ? "text-white" : "text-amber-700"
+                }`}
               aria-hidden="true"
             >
               !
@@ -703,6 +702,30 @@ export function CompanyDashboard({
       .join(" ")
   }
 
+  function toggleTipsLips(option: (typeof TIPS_LIPS_OPTIONS)[number]) {
+    setForm((prev) => {
+      const current = prev.tipsLipsHistory
+        .split(",")
+        .map((value) => value.trim())
+        .filter(Boolean)
+      if (option === "없음") {
+        return {
+          ...prev,
+          tipsLipsHistory: current.includes("없음") ? "" : "없음",
+        }
+      }
+      const filtered = current.filter((value) => value !== "없음")
+      const exists = filtered.includes(option)
+      const next = exists
+        ? filtered.filter((value) => value !== option)
+        : [...filtered, option]
+      return {
+        ...prev,
+        tipsLipsHistory: next.join(", "),
+      }
+    })
+  }
+
   function openAddressSearchPopup(targetField: AddressFieldKey) {
     if (typeof window === "undefined") return
     const typedWindow = window as Window & {
@@ -864,17 +887,16 @@ export function CompanyDashboard({
                 {missingRequired > 0 && invalidRequired > 0 ? " · " : null}
                 {invalidRequired > 0 ? `형식 확인 ${invalidRequired}개` : null}
                 {(missingRequired > 0 || invalidRequired > 0) &&
-                (missingRequiredLabels.length > 0 || invalidRequiredLabels.length > 0)
+                  (missingRequiredLabels.length > 0 || invalidRequiredLabels.length > 0)
                   ? ` (${[
-                      ...missingRequiredLabels,
-                      ...invalidRequiredLabels,
-                    ]
-                      .slice(0, 3)
-                      .join(", ")}${
-                      missingRequiredLabels.length + invalidRequiredLabels.length > 3
-                        ? " 외"
-                        : ""
-                    })`
+                    ...missingRequiredLabels,
+                    ...invalidRequiredLabels,
+                  ]
+                    .slice(0, 3)
+                    .join(", ")}${missingRequiredLabels.length + invalidRequiredLabels.length > 3
+                    ? " 외"
+                    : ""
+                  })`
                   : null}
               </div>
             ) : null}
@@ -915,9 +937,8 @@ export function CompanyDashboard({
                 )}
               </div>
               <div
-                className={`flex flex-wrap items-center gap-2 ${
-                  assessmentComplete ? "" : "cursor-help"
-                }`}
+                className={`flex flex-wrap items-center gap-2 ${assessmentComplete ? "" : "cursor-help"
+                  }`}
                 title={
                   assessmentComplete
                     ? undefined
@@ -1303,7 +1324,7 @@ export function CompanyDashboard({
                                     )}
                                     <button
                                       type="button"
-                                      className="rounded-md border border-rose-200 px-2 py-1 text-xs text-rose-600 hover:border-rose-300 hover:text-rose-700 disabled:cursor-not-allowed disabled:opacity-60"
+                                      className="rounded-md border border-rose-200 px-2 py-1 text-xs text-rose-600 hover:border-rose-300 hover:bg-rose-50 hover:text-rose-700 disabled:cursor-not-allowed disabled:opacity-60"
                                       onClick={() =>
                                         handleFileDelete({
                                           id: item.id,
@@ -1471,7 +1492,7 @@ export function CompanyDashboard({
                       {investmentRows.map((row, idx) => (
                         <div
                           key={`investment-${idx}`}
-                          className="grid gap-3 rounded-xl border border-slate-100 bg-slate-50 p-3 sm:grid-cols-2 lg:grid-cols-[1fr_1fr_1fr_1fr_auto]"
+                          className="grid gap-3 rounded-xl border border-slate-100 bg-slate-50 p-3 sm:grid-cols-2 lg:grid-cols-4"
                         >
                           <label className="text-xs text-slate-500">
                             <span className="block whitespace-nowrap">
@@ -1572,31 +1593,32 @@ export function CompanyDashboard({
                               }
                             />
                           </label>
-                          <label className="text-xs text-slate-500">
-                            <span className="block whitespace-nowrap">
-                              주요주주명
-                            </span>
-                            <input
-                              className={inputClass(false, "rounded-lg")}
-                              placeholder="투자사/주주명"
-                              value={row.majorShareholder}
-                              onChange={(e) =>
-                                updateInvestmentRow(
-                                  idx,
-                                  "majorShareholder",
-                                  e.target.value
-                                )
-                              }
-                            />
-                          </label>
-                          <div className="flex items-end justify-end sm:col-span-2 lg:col-span-1">
+                          <div className="flex items-end gap-2">
+                            <label className="min-w-0 flex-1 text-xs text-slate-500">
+                              <span className="block whitespace-nowrap">
+                                주요주주명
+                              </span>
+                              <input
+                                className={inputClass(false, "rounded-lg")}
+                                placeholder="투자사/주주명"
+                                value={row.majorShareholder}
+                                onChange={(e) =>
+                                  updateInvestmentRow(
+                                    idx,
+                                    "majorShareholder",
+                                    e.target.value
+                                  )
+                                }
+                              />
+                            </label>
                             <button
                               type="button"
-                              className="rounded-xl border border-rose-200 px-3 py-2 text-xs font-semibold text-rose-600 hover:bg-rose-50 disabled:cursor-not-allowed disabled:opacity-60"
+                              className="mb-0.5 rounded-md border border-rose-200 p-2 text-rose-600 hover:border-rose-300 hover:bg-rose-50 hover:text-rose-700 disabled:cursor-not-allowed disabled:opacity-60"
                               onClick={() => handleRemoveInvestmentRow(idx)}
                               disabled={investmentRows.length <= 1}
+                              aria-label="삭제"
                             >
-                              삭제
+                              <Trash2 className="h-3.5 w-3.5" />
                             </button>
                           </div>
                         </div>
@@ -1631,44 +1653,42 @@ export function CompanyDashboard({
                           onBlur={() => markTouched("certification")}
                         />
                       </label>
-                      <label className="text-xs text-slate-500">
-                        TIPS/LIPS 이력
-                        <div className="relative">
-                          <select
-                            className={inputClass(
-                              isFieldInvalid("tipsLipsHistory"),
-                              "appearance-none pr-9"
-                            )}
-                            value={form.tipsLipsHistory}
-                            onChange={(e) =>
-                              setForm((prev) => ({
-                                ...prev,
-                                tipsLipsHistory: e.target.value,
-                              }))
-                            }
-                            onBlur={() => markTouched("tipsLipsHistory")}
-                          >
-                            <option value="">선택해주세요</option>
-                            {TIPS_LIPS_OPTIONS.map((option) => (
-                              <option key={option} value={option}>
+                      <div className="text-xs text-slate-500">
+                        <div>TIPS/LIPS 이력</div>
+                        <div className="mt-2 flex flex-wrap gap-3">
+                          {TIPS_LIPS_OPTIONS.map((option) => {
+                            const selected = form.tipsLipsHistory
+                              .split(",")
+                              .map((value) => value.trim())
+                              .filter(Boolean)
+                              .includes(option)
+                            const noneSelected = form.tipsLipsHistory
+                              .split(",")
+                              .map((value) => value.trim())
+                              .includes("없음")
+                            const disabled = option !== "없음" && noneSelected
+                            return (
+                              <label
+                                key={option}
+                                className={
+                                  disabled
+                                    ? "flex items-center gap-2 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-xs text-slate-300"
+                                    : "flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600"
+                                }
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={selected}
+                                  disabled={disabled}
+                                  onChange={() => toggleTipsLips(option)}
+                                  onBlur={() => markTouched("tipsLipsHistory")}
+                                />
                                 {option}
-                              </option>
-                            ))}
-                            {form.tipsLipsHistory.trim().length > 0 &&
-                            !TIPS_LIPS_OPTIONS.some(
-                              (option) => option === form.tipsLipsHistory
-                            ) ? (
-                              <option value={form.tipsLipsHistory}>
-                                {form.tipsLipsHistory}
-                              </option>
-                            ) : null}
-                          </select>
-                          <ChevronDown
-                            className="pointer-events-none absolute right-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400"
-                            aria-hidden="true"
-                          />
+                              </label>
+                            )
+                          })}
                         </div>
-                      </label>
+                      </div>
                     </div>
                   </section>
 
@@ -1718,22 +1738,23 @@ export function CompanyDashboard({
                     </div>
                   </section>
                 </div>
-              </div>
-            )
-          ) : null}
-        </div>
-        {snackbarMessage ? (
-          <div
-            className={`pointer-events-none fixed bottom-6 right-6 z-50 rounded-xl border px-4 py-2 text-sm font-semibold shadow-lg ${
-              snackbarMessage.includes("실패")
-                ? "border-rose-200 bg-rose-50 text-rose-700"
-                : "border-slate-800 bg-slate-900 text-white"
-            }`}
-          >
-            {snackbarMessage}
-          </div>
-        ) : null}
       </div>
+      )
+          ) : null}
     </div>
+        {
+    snackbarMessage ? (
+      <div
+        className={`pointer-events-none fixed bottom-6 right-6 z-50 rounded-xl border px-4 py-2 text-sm font-semibold shadow-lg ${snackbarMessage.includes("실패")
+            ? "border-rose-200 bg-rose-50 text-rose-700"
+            : "border-slate-800 bg-slate-900 text-white"
+          }`}
+      >
+        {snackbarMessage}
+      </div>
+    ) : null
+  }
+      </div >
+    </div >
   )
 }

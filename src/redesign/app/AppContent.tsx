@@ -69,7 +69,13 @@ import {
   PendingProfileApproval,
 } from "@/redesign/app/lib/types";
 import { regularOfficeHours as initialRegularOfficeHours, initialApplications, initialMessages, agendas as initialAgendas, initialConsultants, initialMessageTemplates, initialUsers, programs as initialPrograms } from "@/redesign/app/lib/data";
-import { COLLECTIONS, isFirebaseConfigured, useFirestoreCollection, useFirestoreCRUD, useFirestoreDocument } from "@/redesign/app/hooks/use-firestore";
+import {
+  COLLECTIONS,
+  isFirebaseConfigured,
+  useFirestoreCollection,
+  useFirestoreCRUD,
+  useFirestoreDocumentOnce,
+} from "@/redesign/app/hooks/use-firestore";
 import { mockNotifications, mockChatRooms, mockChatMessages, mockAIRecommendations, mockGoals, mockTeamMembers } from "@/redesign/app/lib/advanced-mock-data";
 
 type AppPage = 
@@ -468,6 +474,9 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
   const { user: firebaseUser, profile, loading } = useAppAuth();
   const navigate = useNavigate();
   const location = useLocation();
+  const routeSegment = location.pathname.split("/")[2] ?? "";
+  const routePage = routeSegment as AppPage;
+  const isCompanyInfoRoute = routeSegment === "company-info";
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -487,10 +496,46 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     resolvedRole === "admin"
     || resolvedRole === "consultant"
     || resolvedRole === "staff";
+  const isPage = useCallback(
+    (pages: AppPage[]) => pages.includes(routePage),
+    [routePage]
+  );
+  const needsApplications = isPage([
+    "dashboard",
+    "history",
+    "application",
+    "irregular",
+    "irregular-wizard",
+    "unified-calendar",
+    "admin-dashboard",
+    "admin-dashboard-deprecated",
+    "admin-applications",
+    "admin-communication",
+    "admin-programs",
+    "pending-reports",
+  ]);
+  const needsRegularOfficeHours = isPage([
+    "regular",
+    "regular-detail",
+    "regular-wizard",
+  ]);
+  const needsPrograms =
+    needsApplications
+    || needsRegularOfficeHours
+    || isPage(["admin-program-list", "consultant-calendar"]);
+  const needsAgendas =
+    needsApplications
+    || needsRegularOfficeHours
+    || isPage(["admin-agendas", "admin-consultants", "admin-programs"]);
+  const needsConsultants =
+    resolvedRole === "consultant"
+    || isPage(["consultants", "regular-wizard", "admin-consultants"]);
+  const needsOfficeHourSlots = needsApplications || needsRegularOfficeHours;
+  const needsCompanyLookup = isAdminLikeRole && needsApplications;
   const { data: companyDocs } = useFirestoreCollection<{ id: string; name?: string | null }>(
     "companies",
     {
-      enabled: isFirebaseConfigured,
+      enabled: isFirebaseConfigured && !isCompanyInfoRoute && needsCompanyLookup,
     }
   );
   const companyNameById = useMemo(() => {
@@ -615,14 +660,14 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
         ? "admin-dashboard"
         : "dashboard";
   const companyRecordId = profile?.companyId ?? firebaseUser?.uid ?? null;
-  const { data: companyInfoDoc } = useFirestoreDocument<SaveTypeMeta>(
+  const { data: companyInfoDoc } = useFirestoreDocumentOnce<SaveTypeMeta>(
     companyRecordId ? `companies/${companyRecordId}/companyInfo` : "",
     "info",
     {
       enabled: isFirebaseConfigured && resolvedRole === "user" && !!companyRecordId,
     }
   );
-  const { data: selfAssessmentDoc } = useFirestoreDocument<SaveTypeMeta>(
+  const { data: selfAssessmentDoc } = useFirestoreDocumentOnce<SaveTypeMeta>(
     companyRecordId ? `companies/${companyRecordId}/selfAssessment` : "",
     "info",
     {
@@ -690,20 +735,20 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     {
       orderByField: "name",
       orderDirection: "asc",
-      enabled: isFirebaseConfigured,
+      enabled: isFirebaseConfigured && !isCompanyInfoRoute && needsConsultants,
     }
   );
   const { data: agendaDocs } = useFirestoreCollection<Agenda>(COLLECTIONS.AGENDAS, {
     orderByField: "name",
     orderDirection: "asc",
-    enabled: isFirebaseConfigured,
+    enabled: isFirebaseConfigured && !isCompanyInfoRoute && needsAgendas,
   });
   const { data: programDocs } = useFirestoreCollection<Program>(
     COLLECTIONS.PROGRAMS,
     {
       orderByField: "name",
       orderDirection: "asc",
-      enabled: isFirebaseConfigured,
+      enabled: isFirebaseConfigured && !isCompanyInfoRoute && needsPrograms,
     }
   );
   const { data: officeHourSlotDocs } = useFirestoreCollection<OfficeHourSlot>(
@@ -711,19 +756,23 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     {
       orderByField: "date",
       orderDirection: "asc",
-      enabled: isFirebaseConfigured,
+      enabled: isFirebaseConfigured && !isCompanyInfoRoute && needsOfficeHourSlots,
     }
   );
   const { data: officeHourApplicationDocs } = useFirestoreCollection<Application>(
     COLLECTIONS.OFFICE_HOUR_APPLICATIONS,
     {
-      enabled: isFirebaseConfigured,
+      enabled: isFirebaseConfigured && !isCompanyInfoRoute && needsApplications,
     }
   );
   const { data: profileApprovalDocs } = useFirestoreCollection<RawProfileApprovalDoc>(
     "profiles",
     {
-      enabled: isFirebaseConfigured && resolvedRole === "admin",
+      enabled:
+        isFirebaseConfigured
+        && resolvedRole === "admin"
+        && !isCompanyInfoRoute
+        && isPage(["admin-users"]),
     }
   );
 
