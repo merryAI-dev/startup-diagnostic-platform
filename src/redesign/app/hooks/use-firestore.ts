@@ -138,6 +138,52 @@ export function useFirestoreDocument<T>(
 }
 
 // ──────────────────────────────────────────────
+// Generic Document Hook (One-time)
+// ──────────────────────────────────────────────
+export function useFirestoreDocumentOnce<T>(
+  collectionName: string,
+  docId: string | null,
+  options?: { enabled?: boolean }
+) {
+  const [data, setData] = useState<T | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
+
+  const enabled = options?.enabled !== false && !!docId;
+
+  useEffect(() => {
+    if (!isFirebaseConfigured || !enabled || !docId) {
+      setLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setLoading(true);
+    firestoreService
+      .getDocument<T>(collectionName, docId)
+      .then((doc) => {
+        if (cancelled) return;
+        setData(doc);
+        setError(null);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setError(err as Error);
+      })
+      .finally(() => {
+        if (cancelled) return;
+        setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [collectionName, docId, enabled]);
+
+  return { data, loading, error };
+}
+
+// ──────────────────────────────────────────────
 // CRUD Operations Hook
 // ──────────────────────────────────────────────
 export function useFirestoreCRUD<T extends Record<string, any>>(

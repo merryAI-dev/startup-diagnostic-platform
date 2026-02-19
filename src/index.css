@@ -9,4 +9,12 @@
   #app {
     @apply min-h-screen;
   }
+
+  button:not(:disabled):hover,
+  input[type="button"]:not(:disabled):hover,
+  input[type="submit"]:not(:disabled):hover,
+  input[type="reset"]:not(:disabled):hover,
+  [role="button"]:not([aria-disabled="true"]):hover {
+    @apply cursor-pointer;
+  }
 }
