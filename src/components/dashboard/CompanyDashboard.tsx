@@ -1,9 +1,36 @@
 import type { User } from "firebase/auth"
-import { ChevronDown } from "lucide-react"
+import {
+  collection,
+  deleteDoc,
+  doc,
+  getDocs,
+  orderBy,
+  query,
+  serverTimestamp,
+  setDoc,
+} from "firebase/firestore"
+import {
+  deleteObject,
+  getDownloadURL,
+  ref as storageRef,
+  uploadBytesResumable,
+  type UploadTask,
+} from "firebase/storage"
+import {
+  ChevronDown,
+  Eye,
+  FileImage,
+  FileText,
+  Loader2,
+  Trash2,
+  UploadCloud,
+} from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
+import { toast } from "sonner"
 import { SELF_ASSESSMENT_SECTIONS } from "@/data/selfAssessment"
 import { useCompanyInfoForm } from "@/hooks/useCompanyInfoForm"
 import { useSelfAssessmentForm } from "@/hooks/useSelfAssessmentForm"
+import { db, storage } from "@/firebase/client"
 import type { CompanyInfoForm } from "@/types/company"
 import { SelfAssessmentForm } from "@/components/dashboard/SelfAssessmentForm"
 
@@ -238,6 +265,290 @@ export function CompanyDashboard({
     saveSelfAssessment,
     saveSelfAssessmentDraft,
   } = useSelfAssessmentForm(companyId)
+
+  const [uploadingFiles, setUploadingFiles] = useState(false)
+  const [uploadError, setUploadError] = useState<string | null>(null)
+  const [deletedFileIds, setDeletedFileIds] = useState<Record<string, boolean>>(
+    {}
+  )
+  const [deletingFileIds, setDeletingFileIds] = useState<Record<string, boolean>>(
+    {}
+  )
+  const [companyFiles, setCompanyFiles] = useState<
+    {
+      id: string
+      name: string
+      size: number
+      storagePath: string
+      downloadUrl: string | null
+    }[]
+  >([])
+  const [uploads, setUploads] = useState<
+    {
+      id: string
+      name: string
+      progress: number
+      status: "queued" | "uploading" | "done" | "error" | "canceled"
+      storagePath: string
+      file?: File
+    }[]
+  >([])
+  const uploadTasksRef = useRef<Map<string, UploadTask>>(new Map())
+
+  const allowedExtensions = ["pdf", "png", "ai"]
+
+
+  async function loadCompanyFiles() {
+    try {
+      const filesRef = collection(db, "companies", companyId, "files")
+      const filesQuery = query(filesRef, orderBy("createdAt", "desc"))
+      const snapshot = await getDocs(filesQuery)
+      const items = await Promise.all(
+        snapshot.docs.map(async (docSnap) => {
+          const data = docSnap.data() as {
+            name: string
+            size: number
+            storagePath: string
+          }
+          let downloadUrl: string | null = null
+          try {
+            downloadUrl = await getDownloadURL(
+              storageRef(storage, data.storagePath)
+            )
+          } catch {
+            downloadUrl = null
+          }
+          return {
+            id: docSnap.id,
+            name: data.name,
+            size: data.size,
+            storagePath: data.storagePath,
+            downloadUrl,
+          }
+        })
+      )
+      setCompanyFiles(items)
+      setUploads((prev) =>
+        prev.filter(
+          (item) =>
+            !(item.status === "done" && items.some((saved) => saved.id === item.id))
+        )
+      )
+    } catch (error) {
+      console.warn("Failed to load company files:", error)
+    }
+  }
+
+  useEffect(() => {
+    if (!companyId) return
+    void loadCompanyFiles()
+  }, [companyId])
+
+  async function startUpload(
+    file: File,
+    docId: string,
+    storagePath: string
+  ) {
+    return new Promise<void>((resolve, reject) => {
+      const task = uploadBytesResumable(storageRef(storage, storagePath), file)
+      uploadTasksRef.current.set(docId, task)
+      setUploads((prev) =>
+        prev.map((item) =>
+          item.id === docId ? { ...item, status: "uploading" } : item
+        )
+      )
+      task.on(
+        "state_changed",
+        (snapshot) => {
+          const rawProgress = Math.round(
+            (snapshot.bytesTransferred / snapshot.totalBytes) * 100
+          )
+          const progress =
+            rawProgress >= 100 ? 99 : Math.max(0, Math.min(rawProgress, 99))
+          setUploads((prev) =>
+            prev.map((item) =>
+              item.id === docId ? { ...item, progress } : item
+            )
+          )
+        },
+        (error) => {
+          uploadTasksRef.current.delete(docId)
+          setUploads((prev) =>
+            prev.map((item) =>
+              item.id === docId ? { ...item, status: "error" } : item
+            )
+          )
+          reject(error)
+        },
+        async () => {
+          try {
+            const downloadUrl = await getDownloadURL(task.snapshot.ref)
+            await setDoc(doc(db, "companies", companyId, "files", docId), {
+              name: file.name,
+              size: file.size,
+              contentType: file.type || null,
+              storagePath,
+              createdByUid: user.uid,
+              createdAt: serverTimestamp(),
+            })
+            setUploads((prev) =>
+              prev.filter((item) => item.id !== docId)
+            )
+            setCompanyFiles((prev) => [
+              {
+                id: docId,
+                name: file.name,
+                size: file.size,
+                storagePath,
+                downloadUrl,
+              },
+              ...prev,
+            ])
+            toast.success(`${file.name} 업로드 완료`)
+            resolve()
+          } catch (error) {
+            setUploads((prev) =>
+              prev.map((item) =>
+                item.id === docId ? { ...item, status: "error" } : item
+              )
+            )
+            reject(error)
+          } finally {
+            uploadTasksRef.current.delete(docId)
+          }
+        }
+      )
+    })
+  }
+
+  async function handleFileUpload(files: FileList | null) {
+    if (!files || files.length === 0) return
+    setUploadError(null)
+    setUploadingFiles(true)
+    try {
+      const entries = Array.from(files)
+      const uploadJobs = entries.map(async (file) => {
+        const extension = file.name.split(".").pop()?.toLowerCase() ?? ""
+        if (!allowedExtensions.includes(extension)) {
+          setUploadError("PDF, PNG, AI 파일만 업로드할 수 있습니다.")
+          return
+        }
+        if (file.size > 50 * 1024 * 1024) {
+          setUploadError("파일은 50MB 이하만 업로드할 수 있습니다.")
+          return
+        }
+        await setDoc(
+          doc(db, "companies", companyId),
+          {
+            ownerUid: user.uid,
+            updatedAt: serverTimestamp(),
+          },
+          { merge: true }
+        )
+        const filesRef = collection(db, "companies", companyId, "files")
+        const docRef = doc(filesRef)
+        const storagePath = `company-files/${companyId}/${docRef.id}/${file.name}`
+        setUploads((prev) => [
+          ...prev,
+          {
+            id: docRef.id,
+            name: file.name,
+            progress: 0,
+            status: "queued",
+            storagePath,
+            file,
+          },
+        ])
+        await startUpload(file, docRef.id, storagePath)
+      })
+      await Promise.all(uploadJobs)
+    } catch (error) {
+      console.warn("File upload failed:", error)
+      setUploadError("파일 업로드에 실패했습니다. 다시 시도해주세요.")
+    } finally {
+      setUploadingFiles(false)
+    }
+  }
+
+  function cancelUpload(targetId: string) {
+    const task = uploadTasksRef.current.get(targetId)
+    if (!task) return
+    task.cancel()
+    uploadTasksRef.current.delete(targetId)
+    setUploads((prev) =>
+      prev.map((item) =>
+        item.id === targetId ? { ...item, status: "canceled" } : item
+      )
+    )
+  }
+
+  async function retryUpload(targetId: string) {
+    const target = uploads.find((item) => item.id === targetId)
+    if (!target || !target.file) return
+    setUploads((prev) =>
+      prev.map((item) =>
+        item.id === targetId
+          ? { ...item, status: "queued", progress: 0 }
+          : item
+      )
+    )
+    try {
+      await startUpload(target.file, target.id, target.storagePath)
+      await loadCompanyFiles()
+    } catch (error) {
+      console.warn("Retry upload failed:", error)
+    }
+  }
+
+  async function handleFileDelete(file: { id: string; storagePath: string }) {
+    let storageDeleted = false
+    let docDeleted = false
+    try {
+      setDeletingFileIds((prev) => ({ ...prev, [file.id]: true }))
+      try {
+        await deleteObject(storageRef(storage, file.storagePath))
+        storageDeleted = true
+      } catch (error: any) {
+        const code = error?.code ?? ""
+        if (code === "storage/object-not-found") {
+          storageDeleted = true
+        } else {
+          throw error
+        }
+      }
+
+      try {
+        await deleteDoc(doc(db, "companies", companyId, "files", file.id))
+        docDeleted = true
+      } catch (error) {
+        console.warn("Failed to delete file metadata:", error)
+      }
+
+      await loadCompanyFiles()
+      if (!docDeleted) {
+        toast.warning("파일은 삭제되었지만 목록 정리에 실패했습니다.")
+      } else {
+        setDeletedFileIds((prev) => ({ ...prev, [file.id]: true }))
+        setTimeout(() => {
+          setDeletedFileIds((prev) => {
+            const next = { ...prev }
+            delete next[file.id]
+            return next
+          })
+        }, 2000)
+        toast.success("파일이 삭제되었습니다.")
+      }
+    } catch (error) {
+      console.warn("Failed to delete file:", error)
+      toast.error("파일 삭제에 실패했습니다.")
+    } finally {
+      setDeletingFileIds((prev) => {
+        const next = { ...prev }
+        delete next[file.id]
+        return next
+      })
+    }
+  }
 
   const sectionStatus = useMemo<StatusItem[]>(() => {
     const isFilled = (value: string) => value.trim().length > 0
@@ -847,6 +1158,174 @@ export function CompanyDashboard({
                           onBlur={() => markTouched("workforceContract")}
                         />
                       </label>
+                    </div>
+                  </section>
+
+                  <section>
+                    <div className="text-sm font-semibold text-slate-700">
+                      자료 업로드
+                    </div>
+                    <div className="mt-3 rounded-xl border border-slate-200 bg-gradient-to-br from-slate-50 via-white to-slate-50 p-4">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div className="flex items-center gap-3">
+                          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-900 text-white">
+                            <UploadCloud className="h-5 w-5" />
+                          </div>
+                          <div>
+                            <div className="text-sm font-semibold text-slate-900">
+                              회사 자료 업로드
+                            </div>
+                            <div className="text-xs text-slate-500">
+                              PDF, PNG, AI · 최대 50MB · 여러 파일 가능
+                            </div>
+                          </div>
+                        </div>
+                        <label className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800">
+                          파일 선택
+                          <input
+                            type="file"
+                            multiple
+                            accept=".pdf,.png,.ai"
+                            className="hidden"
+                            onChange={(event) => handleFileUpload(event.target.files)}
+                            disabled={uploadingFiles}
+                          />
+                        </label>
+                      </div>
+                      <div className="mt-3 flex items-center gap-3 text-[11px] text-slate-500">
+                        <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-1">
+                          <FileText className="h-3.5 w-3.5" /> PDF
+                        </span>
+                        <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-1">
+                          <FileImage className="h-3.5 w-3.5" /> PNG/AI
+                        </span>
+                      </div>
+                      {uploadError ? (
+                        <div className="mt-2 text-xs text-rose-600">{uploadError}</div>
+                      ) : null}
+                      {uploads.length === 0 && companyFiles.length === 0 ? (
+                        <div className="mt-3 text-xs text-slate-400">
+                          업로드된 파일이 없습니다.
+                        </div>
+                      ) : (
+                        <div className="mt-3 space-y-2 text-xs">
+                          {[
+                            ...uploads.map((item) => ({
+                              kind: "upload" as const,
+                              id: item.id,
+                              name: item.name,
+                              size: null as number | null,
+                              status: item.status,
+                              progress: item.progress,
+                              downloadUrl: null as string | null,
+                            })),
+                            ...companyFiles
+                              .filter((file) => !uploads.some((item) => item.id === file.id))
+                              .map((file) => ({
+                                kind: "file" as const,
+                                id: file.id,
+                                name: file.name,
+                                size: file.size,
+                                status: "done" as const,
+                                progress: 100,
+                                downloadUrl: file.downloadUrl,
+                                storagePath: file.storagePath,
+                              })),
+                          ].map((item) => (
+                            <div
+                              key={item.id}
+                              className={`flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 ${
+                                item.kind === "file" && deletingFileIds[item.id]
+                                  ? "opacity-60 pointer-events-none"
+                                  : ""
+                              }`}
+                            >
+                              <span className="flex-1 text-slate-700">
+                                {item.name}
+                              </span>
+                              <span className="text-slate-400">
+                                {item.size !== null
+                                  ? `${(item.size / (1024 * 1024)).toFixed(1)}MB`
+                                  : item.status === "uploading"
+                                    ? `${item.progress}%`
+                                    : item.status === "done"
+                                      ? "업로드 완료"
+                                      : `${item.progress}%`}
+                              </span>
+                              <div className="flex items-center gap-2">
+                                {item.kind === "upload" && item.status === "uploading" ? (
+                                  <button
+                                    type="button"
+                                    className="text-xs text-slate-500 hover:text-slate-700"
+                                    onClick={() => cancelUpload(item.id)}
+                                  >
+                                    업로드 취소
+                                  </button>
+                                ) : null}
+                                {item.kind === "upload" && item.status === "error" ? (
+                                  <button
+                                    type="button"
+                                    className="text-xs text-slate-600 hover:text-slate-900"
+                                    onClick={() => retryUpload(item.id)}
+                                  >
+                                    재시도
+                                  </button>
+                                ) : null}
+                                {item.kind === "upload" && item.status === "queued" ? (
+                                  <span className="text-xs text-slate-400">대기중</span>
+                                ) : null}
+                                {item.kind === "upload" && item.status === "error" ? (
+                                  <span className="text-xs text-rose-600">실패</span>
+                                ) : null}
+                                {item.kind === "upload" && item.status === "canceled" ? (
+                                  <span className="text-xs text-slate-400">취소됨</span>
+                                ) : null}
+                                {item.kind === "file" && deletedFileIds[item.id] ? (
+                                  <span className="text-xs text-emerald-600">삭제됨</span>
+                                ) : null}
+                                {item.kind === "file" && !deletedFileIds[item.id] ? (
+                                  <>
+                                    {item.downloadUrl ? (
+                                      <a
+                                        href={item.downloadUrl}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="inline-flex items-center gap-1 rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-600 hover:text-slate-900"
+                                        aria-label="미리보기"
+                                      >
+                                        <Eye className="h-3.5 w-3.5" />
+                                        미리보기
+                                      </a>
+                                    ) : (
+                                      <span className="text-slate-400">
+                                        링크 준비중
+                                      </span>
+                                    )}
+                                    <button
+                                      type="button"
+                                      className="rounded-md border border-rose-200 px-2 py-1 text-xs text-rose-600 hover:border-rose-300 hover:text-rose-700 disabled:cursor-not-allowed disabled:opacity-60"
+                                      onClick={() =>
+                                        handleFileDelete({
+                                          id: item.id,
+                                          storagePath: item.storagePath,
+                                        })
+                                      }
+                                      aria-label="파일 삭제"
+                                      disabled={Boolean(deletingFileIds[item.id])}
+                                    >
+                                      {deletingFileIds[item.id] ? (
+                                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                      ) : (
+                                        <Trash2 className="h-3.5 w-3.5" />
+                                      )}
+                                    </button>
+                                  </>
+                                ) : null}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   </section>
 

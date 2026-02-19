@@ -1,0 +1,30 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isSignedIn()
+        && get(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.role == "admin"
+        && get(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.active == true;
+    }
+
+    function isCompanyOwner(companyId) {
+      return isSignedIn()
+        && get(/databases/$(database)/documents/companies/$(companyId)).data.ownerUid == request.auth.uid;
+    }
+
+    match /company-files/{companyId}/{fileId}/{fileName} {
+      function isAllowedFile() {
+        return request.resource.size <= 50 * 1024 * 1024
+          && request.resource.name.matches(".*\\.(pdf|PDF|png|PNG|ai|AI)$");
+      }
+
+      allow read: if isAdmin() || isCompanyOwner(companyId);
+      allow write: if isCompanyOwner(companyId) && isAllowedFile();
+    }
+  }
+}
