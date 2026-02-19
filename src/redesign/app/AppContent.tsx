@@ -515,6 +515,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     "irregular",
     "irregular-wizard",
     "unified-calendar",
+    "consultant-calendar",
     "admin-dashboard",
     "admin-dashboard-deprecated",
     "admin-applications",
@@ -581,21 +582,42 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     },
     [companyNameById]
   );
+  const companyRecordId = profile?.companyId ?? firebaseUser?.uid ?? null;
+  const { data: companyInfoDoc } = useFirestoreDocumentOnce<SaveTypeMeta>(
+    companyRecordId ? `companies/${companyRecordId}/companyInfo` : "",
+    "info",
+    {
+      enabled: isFirebaseConfigured && resolvedRole === "user" && !!companyRecordId,
+    }
+  );
+  const { data: selfAssessmentDoc } = useFirestoreDocumentOnce<SaveTypeMeta>(
+    companyRecordId ? `companies/${companyRecordId}/selfAssessment` : "",
+    "info",
+    {
+      enabled: isFirebaseConfigured && resolvedRole === "user" && !!companyRecordId,
+    }
+  );
   const fallbackUser =
     initialUsers.find((u) => u.role === resolvedRole) ?? initialUsers[0]!;
   const user: User = useMemo(() => {
+    const companyNameFromInfo =
+      resolvedRole === "user"
+        ? companyInfoDoc?.basic?.companyInfo?.trim() || null
+        : null;
     const resolvedCompanyName = resolveCompanyName(profile?.companyId ?? null);
     return {
       ...fallbackUser,
       id: firebaseUser?.uid ?? fallbackUser.id,
       email: firebaseUser?.email ?? fallbackUser.email,
-      companyName: resolvedCompanyName
+      companyName: companyNameFromInfo
+        ?? resolvedCompanyName
         ?? (profile?.companyId ? "회사명 미입력" : fallbackUser.companyName),
       role: resolvedRole,
       programName: fallbackUser.programName ?? "MYSC",
       programs: fallbackUser.programs ?? [],
     };
   }, [
+    companyInfoDoc?.basic?.companyInfo,
     fallbackUser,
     firebaseUser?.email,
     firebaseUser?.uid,
@@ -667,21 +689,6 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       : isAdminLikeRole
         ? "admin-dashboard"
         : "dashboard";
-  const companyRecordId = profile?.companyId ?? firebaseUser?.uid ?? null;
-  const { data: companyInfoDoc } = useFirestoreDocumentOnce<SaveTypeMeta>(
-    companyRecordId ? `companies/${companyRecordId}/companyInfo` : "",
-    "info",
-    {
-      enabled: isFirebaseConfigured && resolvedRole === "user" && !!companyRecordId,
-    }
-  );
-  const { data: selfAssessmentDoc } = useFirestoreDocumentOnce<SaveTypeMeta>(
-    companyRecordId ? `companies/${companyRecordId}/selfAssessment` : "",
-    "info",
-    {
-      enabled: isFirebaseConfigured && resolvedRole === "user" && !!companyRecordId,
-    }
-  );
   const companyInfoComplete = companyInfoDoc?.metadata?.saveType === "final";
   const selfAssessmentComplete = selfAssessmentDoc?.metadata?.saveType === "final";
   const needsCompanyInfoAttention =
@@ -952,9 +959,13 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
   const scopedApplications = useMemo(() => {
     if (resolvedRole === "user") {
       const uid = firebaseUser?.uid ?? user.id;
+      const email = firebaseUser?.email ?? user.email;
       return resolvedApplications.filter((application) => {
         if (application.createdByUid && uid) {
           return application.createdByUid === uid;
+        }
+        if (application.applicantEmail && email) {
+          return application.applicantEmail === email;
         }
         if (user.companyName) {
           return application.companyName === user.companyName;
@@ -965,10 +976,12 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     if (resolvedRole !== "consultant") return resolvedApplications;
     return resolvedApplications;
   }, [
+    firebaseUser?.email,
     firebaseUser?.uid,
     resolvedApplications,
     resolvedRole,
     user.companyName,
+    user.email,
     user.id,
   ]);
 
@@ -2597,6 +2610,22 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     <div className="h-screen flex flex-col">
       <Topbar
         user={scopedUser}
+        displayName={
+          resolvedRole === "consultant"
+            ? currentConsultant?.name ?? scopedUser.companyName
+            : resolvedRole === "admin" || resolvedRole === "staff"
+              ? undefined
+              : scopedUser.companyName
+        }
+        roleLabel={
+          resolvedRole === "admin"
+            ? "관리자"
+            : resolvedRole === "consultant"
+              ? "컨설턴트"
+              : resolvedRole === "staff"
+                ? "스태프"
+                : "회사"
+        }
         onNavigate={handleNavigateLoose}
         disabledPages={disabledPages}
         onLogout={async () => {
@@ -2698,6 +2727,25 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
               currentConsultantId={currentConsultant?.id ?? null}
               currentConsultantName={currentConsultant?.name ?? null}
             />
+          )}
+          {currentPage === "application" && !selectedApplication && (
+            <div className="p-10">
+              <div className="rounded-2xl border border-slate-200 bg-white p-8">
+                <h2 className="text-lg font-semibold text-slate-900">
+                  신청 정보를 찾지 못했습니다
+                </h2>
+                <p className="mt-2 text-sm text-slate-600">
+                  링크가 잘못되었거나 접근 권한이 없을 수 있습니다.
+                </p>
+                <button
+                  type="button"
+                  className="mt-5 rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                  onClick={() => handleNavigate("dashboard")}
+                >
+                  대시보드로 돌아가기
+                </button>
+              </div>
+            </div>
           )}
 
           {currentPage === "settings" && (

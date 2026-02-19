@@ -12,13 +12,31 @@ import { User } from "@/redesign/app/lib/types";
 
 interface TopbarProps {
   user: User;
+  displayName?: string;
+  roleLabel?: string;
   onLogout: () => void;
   onNavigate?: (page: string) => void;
   disabledPages?: Set<string>;
 }
 
-export function Topbar({ user, onLogout, onNavigate, disabledPages }: TopbarProps) {
+export function Topbar({
+  user,
+  displayName,
+  roleLabel,
+  onLogout,
+  onNavigate,
+  disabledPages,
+}: TopbarProps) {
   const companyInfoDisabled = disabledPages?.has("company-info") ?? false;
+  const resolvedRoleLabel = roleLabel
+    ?? (user.role === "admin"
+      ? "관리자"
+      : user.role === "consultant"
+        ? "컨설턴트"
+        : user.role === "staff"
+          ? "스태프"
+          : "회사");
+  const resolvedDisplayName = displayName || user.companyName;
 
   return (
     <div className="h-16 border-b bg-white flex items-center justify-between px-6">
@@ -46,7 +64,12 @@ export function Topbar({ user, onLogout, onNavigate, disabledPages }: TopbarProp
           <DropdownMenuContent align="end" className="w-56">
             <DropdownMenuLabel>
               <div className="flex flex-col">
-                <span>{user.companyName}</span>
+                <div className="flex items-center gap-2">
+                  <span>{resolvedDisplayName}</span>
+                  <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600">
+                    {resolvedRoleLabel}
+                  </span>
+                </div>
                 <span className="text-xs text-muted-foreground">{user.email}</span>
               </div>
             </DropdownMenuLabel>
