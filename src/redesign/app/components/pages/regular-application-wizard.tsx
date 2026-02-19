@@ -62,16 +62,6 @@ export function RegularApplicationWizard({
   const [requestContent, setRequestContent] = useState("");
   const [files, setFiles] = useState<FileItem[]>([]);
 
-  const programOfficeHours = officeHour.programId
-    ? officeHours.filter((item) => item.programId === officeHour.programId)
-    : [officeHour];
-  const availableDateStrings = Array.from(
-    new Set(programOfficeHours.flatMap((item) => item.availableDates ?? []))
-  ).sort();
-  const availableDates = availableDateStrings.map((d) => new Date(d));
-  const selectedAgenda = agendas.find((agenda) => agenda.id === selectedAgendaId);
-  const agendaName = selectedAgenda?.name;
-
   const blockedAgendaTimes = new Set<string>();
   const consultantPool = selectedAgendaId
     ? consultants.filter(
@@ -80,6 +70,23 @@ export function RegularApplicationWizard({
         && (consultant.agendaIds ?? []).includes(selectedAgendaId)
     )
     : [];
+  const programOfficeHours = officeHour.programId
+    ? officeHours.filter((item) => item.programId === officeHour.programId)
+    : [officeHour];
+  const selectedAgenda = agendas.find((agenda) => agenda.id === selectedAgendaId);
+  const agendaName = selectedAgenda?.name;
+  const singleConsultant = consultantPool.length === 1 ? consultantPool[0] : null;
+  const scopedOfficeHours = singleConsultant
+    ? programOfficeHours.filter(
+      (item) =>
+        item.consultantId === singleConsultant.id
+        || item.consultant === singleConsultant.name
+    )
+    : programOfficeHours;
+  const availableDateStrings = Array.from(
+    new Set(scopedOfficeHours.flatMap((item) => item.availableDates ?? []))
+  ).sort();
+  const availableDates = availableDateStrings.map((d) => new Date(d));
   if (selectedAgenda && selectedDate) {
     const selectedDateKey = format(selectedDate, "yyyy-MM-dd");
     applications.forEach((application) => {
@@ -106,9 +113,15 @@ export function RegularApplicationWizard({
 
   const timeSlots = selectedDate ? (() => {
     const selectedDateKey = format(selectedDate, "yyyy-MM-dd");
-    const slotsForDate = programOfficeHours.flatMap((item) =>
+    const slotsForDate = scopedOfficeHours.flatMap((item) =>
       item.slots?.filter((slot) => slot.date === selectedDateKey) ?? []
     );
+    const availabilityRequired = Boolean(singleConsultant);
+    const dayAvailability = availabilityRequired
+      ? singleConsultant?.availability.find(
+        (day) => day.dayOfWeek === selectedDate.getDay()
+      )
+      : undefined;
 
     if (slotsForDate.length > 0) {
       const byTime = new Map<string, { hasOpen: boolean; slotId?: string }>();
@@ -129,7 +142,15 @@ export function RegularApplicationWizard({
         .sort(([a], [b]) => a.localeCompare(b))
         .map(([time, meta]) => {
           const blockedByAgenda = blockedAgendaTimes.has(time);
-          const available = meta.hasOpen && !blockedByAgenda;
+          const consultantAvailable = availabilityRequired
+            ? Boolean(
+              dayAvailability?.slots.some(
+                (slotAvailability) =>
+                  slotAvailability.start === time && slotAvailability.available
+              )
+            )
+            : true;
+          const available = meta.hasOpen && !blockedByAgenda && consultantAvailable;
           return {
             time,
             available,
@@ -137,7 +158,9 @@ export function RegularApplicationWizard({
               ? undefined
               : blockedByAgenda
                 ? "이미 예약된 시간입니다"
-                : "예약 불가한 시간입니다",
+                : consultantAvailable
+                  ? "예약 불가한 시간입니다"
+                  : "컨설턴트 가능 시간이 아닙니다",
             slotId: meta.slotId,
           };
         });
@@ -145,20 +168,16 @@ export function RegularApplicationWizard({
 
     return getTimeSlots(selectedDate.toISOString()).map((slot) => {
       const blockedByAgenda = blockedAgendaTimes.has(slot.time);
-      const dayAvailability = selectedDate
-        ? consultantPool.map((consultant) =>
-          consultant.availability.find((day) => day.dayOfWeek === selectedDate.getDay())
-        )
-        : [];
-      const consultantAvailable =
-        consultantPool.length === 0
-          ? true
-          : dayAvailability.some((availability) =>
-            availability?.slots.some(
+      const consultantAvailable = availabilityRequired
+        ? Boolean(
+          singleConsultant?.availability
+            .find((day) => day.dayOfWeek === selectedDate.getDay())
+            ?.slots.some(
               (slotAvailability) =>
                 slotAvailability.start === slot.time && slotAvailability.available
             )
-          );
+        )
+        : true;
       return {
         ...slot,
         available: slot.available && !blockedByAgenda && consultantAvailable,
