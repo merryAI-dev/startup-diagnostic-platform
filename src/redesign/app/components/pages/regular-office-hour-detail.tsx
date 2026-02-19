@@ -1,9 +1,9 @@
-import { ArrowLeft, Calendar, User, Info } from "lucide-react";
+import { ArrowLeft, Calendar, Info } from "lucide-react";
 import { Button } from "@/redesign/app/components/ui/button";
 import { Card, CardContent } from "@/redesign/app/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/redesign/app/components/ui/tabs";
 import { RegularOfficeHour, Application } from "@/redesign/app/lib/types";
-import { format } from "date-fns";
+import { format, isBefore, parseISO, startOfDay } from "date-fns";
 import { ko } from "date-fns/locale";
 import { StatusChip } from "@/redesign/app/components/status-chip";
 
@@ -38,10 +38,7 @@ export function RegularOfficeHourDetail({
           목록으로
         </Button>
         <h1 className="mb-2">{officeHour.title}</h1>
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <User className="w-4 h-4" />
-          <span>컨설턴트 배정은 수락 후 확정됩니다</span>
-        </div>
+        <p className="text-sm text-muted-foreground">{officeHour.description}</p>
       </div>
 
       <Tabs defaultValue="info" className="w-full">
@@ -65,15 +62,19 @@ export function RegularOfficeHourDetail({
               <div>
                 <h3 className="mb-2">신청 가능 일정</h3>
                 <div className="flex flex-wrap gap-2">
-                  {officeHour.availableDates.map((date) => (
-                    <div
-                      key={date}
-                      className="px-3 py-2 bg-muted rounded-lg text-sm"
-                    >
-                      <Calendar className="w-4 h-4 inline mr-2" />
-                      {format(new Date(date), "M월 d일 (E)", { locale: ko })}
-                    </div>
-                  ))}
+                  {officeHour.availableDates
+                    .filter((date) =>
+                      !isBefore(parseISO(date), startOfDay(new Date()))
+                    )
+                    .map((date) => (
+                      <div
+                        key={date}
+                        className="px-3 py-2 bg-muted rounded-lg text-sm"
+                      >
+                        <Calendar className="w-4 h-4 inline mr-2" />
+                        {format(parseISO(date), "M월 d일 (E)", { locale: ko })}
+                      </div>
+                    ))}
                 </div>
               </div>
             </CardContent>

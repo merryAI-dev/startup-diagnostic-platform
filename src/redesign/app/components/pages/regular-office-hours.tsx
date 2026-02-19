@@ -1,4 +1,4 @@
-import { Calendar, User, ArrowRight } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 import { Button } from "@/redesign/app/components/ui/button";
 import { Card, CardContent } from "@/redesign/app/components/ui/card";
 import { RegularOfficeHour } from "@/redesign/app/lib/types";
@@ -46,20 +46,10 @@ export function RegularOfficeHours({
                       <div className="flex-1 space-y-3">
                         <div>
                           <h3 className="mb-1">{oh.title}</h3>
-                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                          <User className="w-4 h-4" />
-                          <span>컨설턴트 배정은 수락 후 확정됩니다</span>
-                        </div>
                         </div>
                         <p className="text-sm text-muted-foreground">
                           {oh.description}
                         </p>
-                        <div className="flex items-center gap-2 text-sm">
-                          <Calendar className="w-4 h-4 text-muted-foreground" />
-                          <span>
-                            신청 가능 일정: {oh.availableDates.length}개
-                          </span>
-                        </div>
                       </div>
                       <Button onClick={() => onSelectOfficeHour(oh.id)}>
                         상세 보기

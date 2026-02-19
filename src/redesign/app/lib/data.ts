@@ -26,7 +26,6 @@ export const programs: Program[] = [
     periodEnd: "2026-05-31",
     weekdays: ["TUE", "THU"],
     agendaIds: ["1", "2", "3", "4"],
-    consultantIds: ["c1", "c2"],
   },
   {
     id: "p2",
@@ -43,7 +42,6 @@ export const programs: Program[] = [
     periodEnd: "2026-04-30",
     weekdays: ["TUE", "THU"],
     agendaIds: ["2", "3", "5"],
-    consultantIds: ["c3"],
   },
   {
     id: "p3",
@@ -60,7 +58,6 @@ export const programs: Program[] = [
     periodEnd: "2026-07-31",
     weekdays: ["TUE", "THU"],
     agendaIds: ["1", "2", "6", "7"],
-    consultantIds: ["c4", "c5"],
   },
   {
     id: "p4",
@@ -77,7 +74,6 @@ export const programs: Program[] = [
     periodEnd: "2026-04-30",
     weekdays: ["TUE", "THU"],
     agendaIds: ["2", "8"],
-    consultantIds: ["c6"],
   },
   {
     id: "p5",
@@ -94,7 +90,6 @@ export const programs: Program[] = [
     periodEnd: "2026-05-31",
     weekdays: ["TUE", "THU"],
     agendaIds: ["3", "4", "7"],
-    consultantIds: ["c2", "c5"],
   },
   {
     id: "p6",
@@ -111,7 +106,6 @@ export const programs: Program[] = [
     periodEnd: "2026-05-31",
     weekdays: ["TUE", "THU"],
     agendaIds: ["3", "4", "6"],
-    consultantIds: ["c1", "c3"],
   },
 ];
 
