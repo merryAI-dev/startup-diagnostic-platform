@@ -76,6 +76,7 @@ import {
   useFirestoreCRUD,
   useFirestoreDocumentOnce,
 } from "@/redesign/app/hooks/use-firestore";
+import { firestoreService } from "@/redesign/app/lib/firestore-service";
 import { mockNotifications, mockChatRooms, mockChatMessages, mockAIRecommendations, mockGoals, mockTeamMembers } from "@/redesign/app/lib/advanced-mock-data";
 
 type AppPage = 
@@ -477,6 +478,13 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
   const routeSegment = location.pathname.split("/")[2] ?? "";
   const routePage = routeSegment as AppPage;
   const isCompanyInfoRoute = routeSegment === "company-info";
+  useEffect(() => {
+    if (!isFirebaseConfigured) return;
+    console.log(
+      "[Firestore] active subscriptions:",
+      firestoreService.getActiveSubscriptionCount()
+    );
+  }, [routePage]);
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -686,7 +694,9 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     [needsCompanyInfoAttention]
   );
   const [currentPage, setCurrentPage] = useState<AppPage>(initialPage);
-  const [applications, setApplications] = useState<Application[]>(initialApplications);
+  const [applications, setApplications] = useState<Application[]>(() =>
+    isFirebaseConfigured ? [] : initialApplications
+  );
   const cancelledMigrationRan = useRef(false);
   const reviewMigrationRan = useRef(false);
   const [regularOfficeHourList, setRegularOfficeHourList] = useState<RegularOfficeHour[]>(
@@ -1099,14 +1109,15 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
   }, [officeHourSlotDocs, programList]);
 
   useEffect(() => {
-    if (!isFirebaseConfigured) return;
+    if (!isFirebaseConfigured || !needsApplications) return;
     const normalized = officeHourApplicationDocs
       .map((application) => normalizeApplicationDoc(application, resolveCompanyName))
       .sort((a, b) => getTimeValue(b.createdAt) - getTimeValue(a.createdAt));
     setApplications(normalized);
-  }, [officeHourApplicationDocs, resolveCompanyName]);
+  }, [officeHourApplicationDocs, resolveCompanyName, needsApplications]);
 
   useEffect(() => {
+    if (!needsApplications) return;
     if (cancelledMigrationRan.current) return;
     if (applications.length === 0) return;
     const cancelledApps = applications.filter((app) => app.status === "cancelled");
@@ -1135,9 +1146,10 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     ).catch(() => {
       toast.error("취소 상태 복구에 실패했습니다");
     });
-  }, [applications, isFirebaseConfigured, officeHourApplicationCrud]);
+  }, [applications, isFirebaseConfigured, officeHourApplicationCrud, needsApplications]);
 
   useEffect(() => {
+    if (!needsApplications) return;
     if (reviewMigrationRan.current) return;
     if (applications.length === 0) return;
     const reviewApps = applications.filter((app) =>
@@ -1172,7 +1184,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     ).catch(() => {
       toast.error("진행중 상태 확정 전환에 실패했습니다");
     });
-  }, [applications, isFirebaseConfigured, officeHourApplicationCrud]);
+  }, [applications, isFirebaseConfigured, officeHourApplicationCrud, needsApplications]);
   
   // Set initial page based on role
   const disabledPages = useMemo(() => {
