@@ -1117,7 +1117,6 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
         usedApplications: doc.usedApplications ?? 0,
         weekdays: doc.weekdays ?? ["TUE", "THU"],
         agendaIds: doc.agendaIds ?? [],
-        consultantIds: doc.consultantIds ?? [],
       }))
     );
   }, [programDocs]);
@@ -1634,18 +1633,42 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
         return;
       }
 
-      if (payload.officeHourSlotId) {
-        const slotUpdated = await officeHourSlotCrud.update(payload.officeHourSlotId, {
-          status: "booked",
-        });
+      if (payload.officeHourSlotId && selectedSlot) {
+        const matchingSlots = officeHourSlotList.filter((slot) =>
+          slot.type === "regular"
+          && slot.programId === payload.programId
+          && slot.date === selectedSlot.date
+          && slot.startTime === selectedSlot.startTime
+        );
+        const updates = matchingSlots.map((slot) => ({
+          type: "update" as const,
+          collection: COLLECTIONS.OFFICE_HOUR_SLOTS,
+          docId: slot.id,
+          data: { status: "booked" },
+        }));
+        const slotUpdated = updates.length > 0
+          ? await officeHourSlotCrud.batchUpdate(updates)
+          : await officeHourSlotCrud.update(payload.officeHourSlotId, {
+            status: "booked",
+          });
         if (!slotUpdated) {
           toast.error("신청은 저장됐지만 슬롯 상태 업데이트에 실패했습니다");
         }
       }
     } else {
       setApplications((prev) => [...prev, newApplication]);
-      if (newApplication.officeHourSlotId) {
-        applyLocalSlotStatus(newApplication.officeHourSlotId, "booked");
+      if (newApplication.officeHourSlotId && selectedSlot) {
+        const matchingSlots = officeHourSlotList.filter((slot) =>
+          slot.type === "regular"
+          && slot.programId === newApplication.programId
+          && slot.date === selectedSlot.date
+          && slot.startTime === selectedSlot.startTime
+        );
+        if (matchingSlots.length > 0) {
+          matchingSlots.forEach((slot) => applyLocalSlotStatus(slot.id, "booked"));
+        } else {
+          applyLocalSlotStatus(newApplication.officeHourSlotId, "booked");
+        }
       }
     }
 
@@ -2327,7 +2350,6 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
   const handleAddProgram = async (data: Omit<Program, "id">) => {
     const payload: Omit<Program, "id"> = {
       ...data,
-      consultantIds: data.consultantIds ?? [],
     };
     if (isFirebaseConfigured) {
       const createdId = await programCrud.create(payload);
@@ -2512,16 +2534,19 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       return;
     }
 
-    const linkedConsultantIds = targetProgram.consultantIds ?? [];
-    if (linkedConsultantIds.length === 0) {
-      toast.error("연결된 컨설턴트가 없습니다");
+    const programAgendaIds = targetProgram.agendaIds ?? [];
+    if (programAgendaIds.length === 0) {
+      toast.error("연결된 아젠다가 없습니다");
       return;
     }
 
-    const linkedConsultants = consultants.filter(
-      (consultant) =>
-        linkedConsultantIds.includes(consultant.id) && consultant.status === "active"
-    );
+    const linkedConsultants = consultants.filter((consultant) => {
+      if (consultant.status !== "active") return false;
+      const consultantAgendaIds = consultant.agendaIds ?? [];
+      return consultantAgendaIds.some((agendaId) =>
+        programAgendaIds.includes(agendaId)
+      );
+    });
     if (linkedConsultants.length === 0) {
       toast.error("활성 상태의 연결 컨설턴트가 없습니다");
       return;
@@ -2547,6 +2572,10 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     const existingSlotsById = new Map(officeHourSlotList.map((slot) => [slot.id, slot]));
     const generatedSlots: OfficeHourSlot[] = [];
 
+    const baseTitle = `${targetProgram.name} 정기 오피스아워`;
+    const baseDescription = targetProgram.description?.trim() || `${targetProgram.name} 사업`;
+    const timeKeysByDate = new Map<string, Set<string>>();
+
     linkedConsultants.forEach((consultant) => {
       targetDates.forEach((dateKey) => {
         const dayOfWeek = parseDateKey(dateKey).getDay();
@@ -2554,31 +2583,40 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
           (availability) => availability.dayOfWeek === dayOfWeek
         );
         if (!dayAvailability) return;
-
         dayAvailability.slots
           .filter((slot) => slot.available)
           .forEach((slot) => {
-            const slotId = `${programId}_${consultant.id}_${dateKey}_${slot.start}`.replace(
-              /:/g,
-              "-"
-            );
-            const existing = existingSlotsById.get(slotId);
-
-            generatedSlots.push({
-              id: slotId,
-              type: "regular",
-              programId,
-              consultantId: consultant.id,
-              consultantName: consultant.name,
-              title: `${targetProgram.name} 정기 오피스아워`,
-              description: `${targetProgram.name} · ${consultant.name}`,
-              date: dateKey,
-              startTime: slot.start,
-              endTime: slot.end,
-              agendaIds: targetProgram.agendaIds ?? [],
-              status: existing?.status ?? "open",
-            });
+            const key = `${slot.start}-${slot.end}`;
+            const existing = timeKeysByDate.get(dateKey);
+            if (existing) {
+              existing.add(key);
+            } else {
+              timeKeysByDate.set(dateKey, new Set([key]));
+            }
           });
+      });
+    });
+
+    timeKeysByDate.forEach((timeKeys, dateKey) => {
+      timeKeys.forEach((timeKey) => {
+        const [startTime, endTime] = timeKey.split("-");
+        if (!startTime || !endTime) return;
+        const slotId = `${programId}_${dateKey}_${startTime}`.replace(/:/g, "-");
+        const existing = existingSlotsById.get(slotId);
+
+        generatedSlots.push({
+          id: slotId,
+          type: "regular",
+          programId,
+          consultantName: "담당자 배정 중",
+          title: baseTitle,
+          description: baseDescription,
+          date: dateKey,
+          startTime,
+          endTime,
+          agendaIds: targetProgram.agendaIds ?? [],
+          status: existing?.status ?? "open",
+        });
       });
     });
 

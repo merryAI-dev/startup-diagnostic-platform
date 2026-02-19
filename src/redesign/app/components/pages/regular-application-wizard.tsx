@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { ArrowLeft, Calendar as CalendarIcon, Check, AlertCircle } from "lucide-react";
 import { Button } from "@/redesign/app/components/ui/button";
 import { Card, CardContent } from "@/redesign/app/components/ui/card";
@@ -11,7 +11,7 @@ import { FileUpload } from "@/redesign/app/components/file-upload";
 import { Calendar } from "@/redesign/app/components/ui/calendar";
 import { Agenda, Application, Consultant, RegularOfficeHour, SessionFormat, FileItem } from "@/redesign/app/lib/types";
 import { getTimeSlots } from "@/redesign/app/lib/data";
-import { format } from "date-fns";
+import { format, isBefore, parseISO, startOfDay } from "date-fns";
 import { ko } from "date-fns/locale";
 import { cn } from "@/redesign/app/components/ui/utils";
 
@@ -63,30 +63,35 @@ export function RegularApplicationWizard({
   const [files, setFiles] = useState<FileItem[]>([]);
 
   const blockedAgendaTimes = new Set<string>();
+  const consultantsByAgendaId = useMemo(() => {
+    const map = new Map<string, Consultant[]>();
+    consultants.forEach((consultant) => {
+      if (consultant.status !== "active") return;
+      (consultant.agendaIds ?? []).forEach((agendaId) => {
+        const existing = map.get(agendaId);
+        if (existing) {
+          existing.push(consultant);
+        } else {
+          map.set(agendaId, [consultant]);
+        }
+      });
+    });
+    return map;
+  }, [consultants]);
   const consultantPool = selectedAgendaId
-    ? consultants.filter(
-      (consultant) =>
-        consultant.status === "active"
-        && (consultant.agendaIds ?? []).includes(selectedAgendaId)
-    )
+    ? consultantsByAgendaId.get(selectedAgendaId) ?? []
     : [];
   const programOfficeHours = officeHour.programId
     ? officeHours.filter((item) => item.programId === officeHour.programId)
     : [officeHour];
   const selectedAgenda = agendas.find((agenda) => agenda.id === selectedAgendaId);
   const agendaName = selectedAgenda?.name;
-  const singleConsultant = consultantPool.length === 1 ? consultantPool[0] : null;
-  const scopedOfficeHours = singleConsultant
-    ? programOfficeHours.filter(
-      (item) =>
-        item.consultantId === singleConsultant.id
-        || item.consultant === singleConsultant.name
-    )
-    : programOfficeHours;
-  const availableDateStrings = Array.from(
-    new Set(scopedOfficeHours.flatMap((item) => item.availableDates ?? []))
-  ).sort();
-  const availableDates = availableDateStrings.map((d) => new Date(d));
+  const todayStart = startOfDay(new Date());
+  const availableDateKeys = new Set(
+    programOfficeHours
+      .flatMap((item) => item.availableDates ?? [])
+      .map((date) => format(parseISO(date), "yyyy-MM-dd"))
+  );
   if (selectedAgenda && selectedDate) {
     const selectedDateKey = format(selectedDate, "yyyy-MM-dd");
     applications.forEach((application) => {
@@ -113,15 +118,15 @@ export function RegularApplicationWizard({
 
   const timeSlots = selectedDate ? (() => {
     const selectedDateKey = format(selectedDate, "yyyy-MM-dd");
-    const slotsForDate = scopedOfficeHours.flatMap((item) =>
+    const slotsForDate = programOfficeHours.flatMap((item) =>
       item.slots?.filter((slot) => slot.date === selectedDateKey) ?? []
     );
-    const availabilityRequired = Boolean(singleConsultant);
-    const dayAvailability = availabilityRequired
-      ? singleConsultant?.availability.find(
-        (day) => day.dayOfWeek === selectedDate.getDay()
+    const availabilityRequired = consultantPool.length > 0;
+    const dayAvailabilityList = availabilityRequired
+      ? consultantPool.map((consultant) =>
+        consultant.availability.find((day) => day.dayOfWeek === selectedDate.getDay())
       )
-      : undefined;
+      : [];
 
     if (slotsForDate.length > 0) {
       const byTime = new Map<string, { hasOpen: boolean; slotId?: string }>();
@@ -143,8 +148,8 @@ export function RegularApplicationWizard({
         .map(([time, meta]) => {
           const blockedByAgenda = blockedAgendaTimes.has(time);
           const consultantAvailable = availabilityRequired
-            ? Boolean(
-              dayAvailability?.slots.some(
+            ? dayAvailabilityList.some((availability) =>
+              availability?.slots.some(
                 (slotAvailability) =>
                   slotAvailability.start === time && slotAvailability.available
               )
@@ -169,8 +174,8 @@ export function RegularApplicationWizard({
     return getTimeSlots(selectedDate.toISOString()).map((slot) => {
       const blockedByAgenda = blockedAgendaTimes.has(slot.time);
       const consultantAvailable = availabilityRequired
-        ? Boolean(
-          singleConsultant?.availability
+        ? consultantPool.some((consultant) =>
+          consultant.availability
             .find((day) => day.dayOfWeek === selectedDate.getDay())
             ?.slots.some(
               (slotAvailability) =>
@@ -232,9 +237,10 @@ export function RegularApplicationWizard({
       files,
     });
   };
-  const linkedAgendas = agendas.filter((agenda) =>
-    (officeHour.agendaIds ?? []).includes(agenda.id)
-  );
+  const linkedAgendas = agendas.filter((agenda) => {
+    if (!(officeHour.agendaIds ?? []).includes(agenda.id)) return false;
+    return (consultantsByAgendaId.get(agenda.id) ?? []).length > 0;
+  });
 
   return (
     <div className="p-8 space-y-6">
@@ -256,9 +262,6 @@ export function RegularApplicationWizard({
             <div className="space-y-6">
               <div>
                 <h3 className="mb-4">아젠다를 선택하세요</h3>
-                <p className="text-sm text-muted-foreground mb-4">
-                  선택한 아젠다 기준으로 담당 컨설턴트가 배정됩니다.
-                </p>
                 <div className="space-y-3">
                   <Label>아젠다 선택</Label>
                   <Select
@@ -308,11 +311,11 @@ export function RegularApplicationWizard({
                         setSelectedTime("");
                         setSelectedSlotId(undefined);
                       }}
-                      disabled={(date) =>
-                        !availableDates.some(
-                          (d) => d.toDateString() === date.toDateString()
-                        )
-                      }
+                      disabled={(date) => {
+                        if (isBefore(date, todayStart)) return true;
+                        const dateKey = format(date, "yyyy-MM-dd");
+                        return !availableDateKeys.has(dateKey);
+                      }}
                       className="rounded-md border"
                     />
                   </div>

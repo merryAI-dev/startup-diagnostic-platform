@@ -263,8 +263,8 @@ export function RegularOfficeHoursCalendar({
                               }}
                               className="text-xs p-1.5 rounded bg-primary/10 hover:bg-primary/20 transition-colors border-l-2 border-primary"
                             >
-                              <div className="font-medium truncate">배정 예정</div>
-                              <div className="text-gray-600 truncate">{session.title.substring(0, 20)}</div>
+                            <div className="font-medium truncate">{session.title}</div>
+                            <div className="text-gray-600 truncate">{session.description}</div>
                             </div>
                           ))}
                           {sessions.length > 3 && (
@@ -302,16 +302,8 @@ export function RegularOfficeHoursCalendar({
                     onClick={() => onSelectOfficeHour(session.id)}
                     className="border rounded-lg p-4 hover:shadow-md cursor-pointer transition-all group"
                   >
-                    <div className="flex items-center gap-3 mb-3">
-                      <div className="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center text-primary font-semibold">
-                        ?
-                      </div>
-                      <div className="flex-1">
-                        <h3 className="font-medium text-gray-900">배정 예정</h3>
-                        <p className="text-sm text-muted-foreground">{session.title}</p>
-                      </div>
-                    </div>
-                    <div className="mt-3">
+                    <div className="space-y-2">
+                      <h3 className="font-medium text-gray-900">{session.title}</h3>
                       <p className="text-sm text-muted-foreground line-clamp-2">
                         {session.description}
                       </p>
@@ -346,26 +338,17 @@ export function RegularOfficeHoursCalendar({
                       className="bg-white border rounded-lg p-5 hover:shadow-lg cursor-pointer transition-all group"
                     >
                       <div className="flex items-start justify-between mb-4">
-                        <div className="flex items-center gap-3">
-                          <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center text-primary font-semibold text-lg">
-                            ?
-                          </div>
-                          <div>
-                            <h3 className="font-semibold text-gray-900">배정 예정</h3>
-                            <p className="text-sm text-muted-foreground">{session.title}</p>
-                          </div>
+                        <div>
+                          <h3 className="font-semibold text-gray-900">{session.title}</h3>
+                          <p className="text-sm text-muted-foreground line-clamp-2">
+                            {session.description}
+                          </p>
                         </div>
                         <div className="text-right">
                           <div className="text-xs text-muted-foreground mt-0.5">
                             {format(parseISO(session.date), "M월 d일", { locale: ko })}
                           </div>
                         </div>
-                      </div>
-
-                      <div className="space-y-2">
-                        <p className="text-sm text-muted-foreground line-clamp-2">
-                          {session.description}
-                        </p>
                       </div>
                     </div>
                   ))}

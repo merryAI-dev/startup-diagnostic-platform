@@ -33,7 +33,6 @@ export interface Program {
   periodEnd?: string; // YYYY-MM-DD
   weekdays?: ProgramWeekday[];
   agendaIds?: string[];
-  consultantIds?: string[];
 }
 
 // 스타트업 실적 데이터
