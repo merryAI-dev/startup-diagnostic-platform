@@ -307,15 +307,8 @@ function groupSlotsToRegularOfficeHours(slots: OfficeHourSlot[]): RegularOfficeH
   slots.forEach((slot) => {
     if (!isDateKey(slot.date)) return;
     const month = slot.date.slice(0, 7);
-    const consultantNameValue =
-      typeof slot.consultantName === "string" ? slot.consultantName.trim() : "";
-    const normalizedConsultantName = normalizeConsultantDisplayName(consultantNameValue);
-    const consultantKey =
-      slot.consultantId
-      ?? (normalizedConsultantName || consultantNameValue || "no-consultant");
     const groupKey = [
       slot.programId ?? "no-program",
-      consultantKey,
       month,
     ].join(":");
     const slotTitle = typeof slot.title === "string" ? slot.title.trim() : "";
@@ -323,7 +316,7 @@ function groupSlotsToRegularOfficeHours(slots: OfficeHourSlot[]): RegularOfficeH
       slotTitle.length > 0
       ? slotTitle
       : `${month.replace("-", "년 ")}월 정기 오피스아워`;
-    const consultantName = consultantNameValue || "담당 컨설턴트 미지정";
+    const consultantName = "담당자 배정 중";
 
     const existing = grouped.get(groupKey);
     if (!existing) {
