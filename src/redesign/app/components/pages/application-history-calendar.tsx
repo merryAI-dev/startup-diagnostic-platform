@@ -67,6 +67,7 @@ export function ApplicationHistoryCalendar({ applications, onNavigate }: Applica
     { value: "pending", label: "대기중" },
     { value: "review", label: "진행중" },
     { value: "confirmed", label: "확정" },
+    { value: "rejected", label: "거절됨" },
     { value: "completed", label: "완료" },
     { value: "cancelled", label: "취소" },
   ];
@@ -83,6 +84,8 @@ export function ApplicationHistoryCalendar({ applications, onNavigate }: Applica
         return "#f97316";
       case "cancelled":
         return "#ef4444";
+      case "rejected":
+        return "#f43f5e";
       default:
         return "#6b7280";
     }
@@ -195,6 +198,11 @@ export function ApplicationHistoryCalendar({ applications, onNavigate }: Applica
                                 </div>
                                 {shouldShowConsultant(app.consultant) && (
                                   <p className="text-sm text-muted-foreground">{app.consultant}</p>
+                                )}
+                                {app.status === "rejected" && app.rejectionReason && (
+                                  <p className="text-xs text-rose-600 mt-1">
+                                    거절 사유: {app.rejectionReason}
+                                  </p>
                                 )}
                               </div>
                               <div className="text-right">
@@ -427,6 +435,11 @@ export function ApplicationHistoryCalendar({ applications, onNavigate }: Applica
                     <h3 className="font-semibold text-gray-900 mb-2 line-clamp-2">{app.agenda}</h3>
                     {shouldShowConsultant(app.consultant) && (
                       <p className="text-sm text-muted-foreground mb-3">{app.consultant}</p>
+                    )}
+                    {app.status === "rejected" && app.rejectionReason && (
+                      <p className="text-xs text-rose-600 mb-3">
+                        거절 사유: {app.rejectionReason}
+                      </p>
                     )}
                     <div className="flex gap-2 text-xs">
                       <Badge variant="outline">

@@ -90,6 +90,7 @@ export function AdminApplicationDetailModal({
       pending: "진행중",
       review: "진행중",
       confirmed: "확정",
+      rejected: "거절됨",
       cancelled: "취소",
       completed: "완료",
     };
@@ -307,16 +308,6 @@ export function AdminApplicationDetailModal({
                   >
                     <CheckCircle2 className="w-4 h-4 mr-2" />
                     확정
-                  </Button>
-                )}
-                {application.status === "confirmed" && (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => handleStatusChange("completed")}
-                  >
-                    <Check className="w-4 h-4 mr-2" />
-                    완료 처리
                   </Button>
                 )}
                 {application.status === "confirmed" && (

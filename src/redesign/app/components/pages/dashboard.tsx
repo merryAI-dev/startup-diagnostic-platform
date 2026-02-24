@@ -21,6 +21,9 @@ export function Dashboard({ applications, user, programs, onNavigate }: Dashboar
   const pendingApplications = applications.filter(
     (app) => app.status === "pending" || app.status === "review"
   );
+  const rejectedApplications = applications.filter(
+    (app) => app.status === "rejected"
+  );
 
   // 사용자의 프로그램만 필터링 - user.programs가 없으면 빈 배열 사용
   const userPrograms = programs.filter((p) => user.programs?.includes(p.id) || false);
@@ -160,6 +163,48 @@ export function Dashboard({ applications, user, programs, onNavigate }: Dashboar
           </Card>
         )}
       </div>
+
+      {rejectedApplications.length > 0 && (
+        <div>
+          <div className="flex items-center justify-between mb-4">
+            <h2>거절된 신청</h2>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => onNavigate("history")}
+            >
+              전체 보기
+              <ArrowRight className="w-4 h-4 ml-1" />
+            </Button>
+          </div>
+          <div className="grid gap-4">
+            {rejectedApplications.map((app) => (
+              <Card key={app.id}>
+                <CardContent className="p-4">
+                  <div className="flex items-start justify-between">
+                    <div className="space-y-2 flex-1">
+                      <div className="flex items-center gap-2">
+                        <h3 className="text-sm">{app.officeHourTitle}</h3>
+                        <StatusChip status={app.status} />
+                      </div>
+                      <p className="text-sm text-muted-foreground">
+                        {app.consultant} · {app.agenda}
+                      </p>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => onNavigate("application", app.id)}
+                    >
+                      확인
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Quick actions */}
       <div>

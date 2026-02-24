@@ -44,6 +44,9 @@ export function DashboardCalendar({ applications, user, programs, onNavigate }: 
   const pendingApplications = userApplications.filter(
     (app) => app.status === "pending" || app.status === "review"
   );
+  const rejectedApplications = userApplications.filter(
+    (app) => app.status === "rejected"
+  );
 
   // 캘린더 날짜 생성
   const monthStart = startOfMonth(currentMonth);
@@ -90,6 +93,8 @@ export function DashboardCalendar({ applications, user, programs, onNavigate }: 
         return "#eab308"; // yellow-500
       case "review":
         return "#f97316"; // orange-500
+      case "rejected":
+        return "#f43f5e"; // rose-500
       default:
         return "#6b7280"; // gray-500
     }
@@ -211,6 +216,11 @@ export function DashboardCalendar({ applications, user, programs, onNavigate }: 
                         </p>
                       ) : null;
                     })()}
+                    {app.rejectionReason && (
+                      <p className="text-xs text-rose-600 mt-1">
+                        거절 사유: {app.rejectionReason}
+                      </p>
+                    )}
                   </div>
                 ))}
                 {pendingApplications.length > 5 && (
@@ -221,6 +231,52 @@ export function DashboardCalendar({ applications, user, programs, onNavigate }: 
                     onClick={() => onNavigate("history")}
                   >
                     전체 보기 ({pendingApplications.length})
+                  </Button>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Rejected Applications */}
+          {rejectedApplications.length > 0 && (
+            <div className="mt-8">
+              <h2 className="font-semibold text-gray-900 mb-4">거절된 신청</h2>
+              <div className="space-y-2">
+                {rejectedApplications.slice(0, 5).map((app) => (
+                  <div
+                    key={app.id}
+                    onClick={() => onNavigate("application", app.id)}
+                    className="p-3 border rounded-lg hover:bg-gray-50 cursor-pointer transition-colors"
+                  >
+                    <div className="flex items-start justify-between gap-2 mb-1">
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium leading-snug break-words">
+                          {app.officeHourTitle}
+                        </p>
+                      </div>
+                      <StatusChip status={app.status} size="sm" className="shrink-0 whitespace-nowrap" />
+                    </div>
+                    {(() => {
+                      const metaLine = buildMetaLine(app);
+                      return metaLine ? (
+                        <p className="text-xs text-muted-foreground">
+                          {metaLine}
+                        </p>
+                      ) : null;
+                    })()}
+                    <p className="text-xs text-rose-600 mt-1">
+                      거절 사유: {app.rejectionReason?.trim() || "사유가 등록되지 않았습니다."}
+                    </p>
+                  </div>
+                ))}
+                {rejectedApplications.length > 5 && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="w-full"
+                    onClick={() => onNavigate("history")}
+                  >
+                    전체 보기 ({rejectedApplications.length})
                   </Button>
                 )}
               </div>

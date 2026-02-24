@@ -32,6 +32,7 @@ interface UnifiedCalendarProps {
   programs: Program[];
   onNavigateToApplication?: (id: string) => void;
   onRequestApplication?: (id: string) => void;
+  onRejectApplication?: (id: string, reason: string) => void;
   onConfirmApplication?: (id: string) => void;
   currentConsultantId?: string | null;
   currentConsultantName?: string | null;
@@ -83,6 +84,7 @@ export function UnifiedCalendar({
   programs,
   onNavigateToApplication,
   onRequestApplication,
+  onRejectApplication,
   onConfirmApplication: _onConfirmApplication,
   currentConsultantId = null,
   currentConsultantName = null,
@@ -96,6 +98,10 @@ export function UnifiedCalendar({
   const [pendingAgendaFilter, setPendingAgendaFilter] = useState<string>("all");
   const [pendingProgramFilter, setPendingProgramFilter] = useState<string>("all");
   const [showCreateDialog, setShowCreateDialog] = useState(false);
+  const [actionDialogOpen, setActionDialogOpen] = useState(false);
+  const [actionTarget, setActionTarget] = useState<Application | null>(null);
+  const [actionType, setActionType] = useState<"accept" | "reject">("accept");
+  const [rejectReason, setRejectReason] = useState("");
   const [newEvent, setNewEvent] = useState({
     title: "",
     date: "",
@@ -264,6 +270,34 @@ export function UnifiedCalendar({
     </div>
   );
 
+  const openAcceptDialog = (event: Application) => {
+    setActionType("accept");
+    setActionTarget(event);
+    setRejectReason("");
+    setActionDialogOpen(true);
+  };
+
+  const openRejectDialog = (event: Application) => {
+    setActionType("reject");
+    setActionTarget(event);
+    setRejectReason("");
+    setActionDialogOpen(true);
+  };
+
+  const handleConfirmAction = () => {
+    if (!actionTarget) return;
+    if (actionType === "accept") {
+      onRequestApplication?.(actionTarget.id);
+    } else {
+      const reason = rejectReason.trim();
+      if (!reason) return;
+      onRejectApplication?.(actionTarget.id, reason);
+    }
+    setActionDialogOpen(false);
+    setActionTarget(null);
+    setRejectReason("");
+  };
+
   const renderDayContent = (props: DayContentProps) => {
     const dateKey = toLocalDateKey(props.date);
     const dayEvents = eventsByDate[dateKey] ?? [];
@@ -428,6 +462,57 @@ export function UnifiedCalendar({
                         {calendarService.isLoading ? "등록 중..." : "일정 등록"}
                       </Button>
                     </div>
+                  </div>
+                </DialogContent>
+              </Dialog>
+
+              <Dialog open={actionDialogOpen} onOpenChange={setActionDialogOpen}>
+                <DialogContent className="sm:max-w-md">
+                  <DialogHeader>
+                    <DialogTitle>
+                      {actionType === "accept" ? "수락 확인" : "거절 사유 입력"}
+                    </DialogTitle>
+                  </DialogHeader>
+                  <div className="space-y-4 py-2">
+                    {actionType === "accept" ? (
+                      <div className="text-sm text-slate-600 space-y-2">
+                        <p>이 요청을 수락하면 아래 컨설턴트로 배정됩니다.</p>
+                        <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-slate-700">
+                          {currentConsultantName
+                            ?? currentUser.companyName
+                            ?? "현재 로그인한 컨설턴트"}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        <Label htmlFor="reject-reason">거절 사유</Label>
+                        <Textarea
+                          id="reject-reason"
+                          value={rejectReason}
+                          onChange={(e) => setRejectReason(e.target.value)}
+                          placeholder="거절 사유를 입력해주세요"
+                          className="min-h-[100px]"
+                        />
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex justify-end gap-2">
+                    <Button
+                      variant="outline"
+                      onClick={() => {
+                        setActionDialogOpen(false);
+                        setActionTarget(null);
+                        setRejectReason("");
+                      }}
+                    >
+                      취소
+                    </Button>
+                    <Button
+                      onClick={handleConfirmAction}
+                      disabled={actionType === "reject" && rejectReason.trim().length === 0}
+                    >
+                      확인
+                    </Button>
                   </div>
                 </DialogContent>
               </Dialog>
@@ -626,14 +711,27 @@ export function UnifiedCalendar({
                                           : "일정 미정"}
                                     </p>
                                   </div>
-                                  <Button
-                                    size="sm"
-                                    onClick={() => actionHandler?.(event.id)}
-                                    disabled={!actionHandler}
-                                    className="shrink-0"
-                                  >
-                                    {actionLabel}
-                                  </Button>
+                                  <div className="flex items-center gap-2 shrink-0">
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      onClick={() => {
+                                        openRejectDialog(event);
+                                      }}
+                                    >
+                                      거절
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      onClick={() => {
+                                        if (!actionHandler) return;
+                                        openAcceptDialog(event);
+                                      }}
+                                      disabled={!actionHandler}
+                                    >
+                                      {actionLabel}
+                                    </Button>
+                                  </div>
                                 </div>
                               </div>
                             );
@@ -829,17 +927,30 @@ export function UnifiedCalendar({
                                         : "일정 미정"}
                                   </p>
                                 </div>
-                                <Button
-                                  size="sm"
-                                  onClick={() => actionHandler?.(event.id)}
-                                  disabled={!actionHandler}
-                                  className="shrink-0"
-                                >
-                                  {actionLabel}
-                                </Button>
+                                <div className="flex items-center gap-2 shrink-0">
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => {
+                                      openRejectDialog(event);
+                                    }}
+                                  >
+                                    거절
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    onClick={() => {
+                                      if (!actionHandler) return;
+                                      openAcceptDialog(event);
+                                    }}
+                                    disabled={!actionHandler}
+                                  >
+                                    {actionLabel}
+                                  </Button>
+                                </div>
                               </div>
                             </div>
-                            );
+                          );
                           })}
                           {filteredPendingRequests.length > 5 && (
                             <p className="text-xs text-slate-500 text-center">
