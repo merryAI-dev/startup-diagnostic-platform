@@ -1,7 +1,10 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Application, Program, OfficeHourReport, User } from "@/redesign/app/lib/types";
 import { Button } from "@/redesign/app/components/ui/button";
 import { Badge } from "@/redesign/app/components/ui/badge";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/redesign/app/components/ui/dialog";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/redesign/app/components/ui/select";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/redesign/app/components/ui/table";
 import { AlertCircle, Clock, Calendar, FileText } from "lucide-react";
 import { addDays, format, differenceInDays } from "date-fns";
 import { ko } from "date-fns/locale";
@@ -48,6 +51,17 @@ export function PendingReportsDashboard({
   onDeleteReport,
 }: PendingReportsDashboardProps) {
   const isConsultantUser = currentUser.role === "consultant";
+  const isAdminUser = currentUser.role === "admin";
+  const [reportProgramFilter, setReportProgramFilter] = useState("all");
+  const [reportConsultantFilter, setReportConsultantFilter] = useState("all");
+  const [reportStatusFilter, setReportStatusFilter] = useState("all");
+  const [selectedReportItem, setSelectedReportItem] = useState<{
+    report: OfficeHourReport;
+    application: Application;
+    programName: string;
+    programColor: string;
+    programId: string;
+  } | null>(null);
 
   const normalizeConsultantName = (value?: string | null) =>
     (value ?? "").replace(/\s*컨설턴트\s*$/u, "").trim().toLowerCase();
@@ -200,6 +214,7 @@ export function PendingReportsDashboard({
             application: syntheticApp,
             programName: program?.name || "비정기",
             programColor: program?.color || "#94a3b8",
+            programId: report.programId || "manual",
           };
         }
         if (!application) return null;
@@ -210,6 +225,7 @@ export function PendingReportsDashboard({
           application,
           programName: program?.name || "알 수 없음",
           programColor: program?.color || "#94a3b8",
+          programId: report.programId || application.programId || "unknown",
         };
       })
       .filter((item): item is NonNullable<typeof item> => Boolean(item))
@@ -219,6 +235,99 @@ export function PendingReportsDashboard({
         return timeB - timeA;
       });
   }, [applications, programs, reports, isConsultantUser, currentConsultantId, currentConsultantName]);
+
+  const reportProgramOptions = useMemo(() => {
+    const map = new Map<string, string>();
+    submittedReports.forEach((item) => {
+      if (!map.has(item.programId)) {
+        map.set(item.programId, item.programName);
+      }
+    });
+    return Array.from(map.entries()).map(([id, name]) => ({ id, name }));
+  }, [submittedReports]);
+
+  const reportConsultantOptions = useMemo(() => {
+    return Array.from(
+      new Set(
+        submittedReports.map(
+          (item) => item.report.consultantName || item.application.consultant
+        )
+      )
+    ).filter(Boolean);
+  }, [submittedReports]);
+
+  const filteredSubmittedReports = useMemo(() => {
+    return submittedReports.filter((item) => {
+      const matchesProgram = reportProgramFilter === "all" || item.programId === reportProgramFilter;
+      const consultantLabel = item.report.consultantName || item.application.consultant;
+      const matchesConsultant =
+        reportConsultantFilter === "all" || consultantLabel === reportConsultantFilter;
+      return matchesProgram && matchesConsultant;
+    });
+  }, [submittedReports, reportProgramFilter, reportConsultantFilter]);
+
+  const reportProgramOptionsAll = useMemo(() => {
+    const map = new Map<string, { name: string; color: string }>();
+    pendingReports.forEach((item) => {
+      const programId = item.application.programId || "unknown";
+      if (!map.has(programId)) {
+        map.set(programId, { name: item.programName, color: item.programColor });
+      }
+    });
+    submittedReports.forEach((item) => {
+      if (!map.has(item.programId)) {
+        map.set(item.programId, { name: item.programName, color: item.programColor });
+      }
+    });
+    return Array.from(map.entries()).map(([id, meta]) => ({ id, ...meta }));
+  }, [pendingReports, submittedReports]);
+
+  const reportConsultantOptionsAll = useMemo(() => {
+    const pendingNames = pendingReports.map((item) => item.application.consultant);
+    const submittedNames = submittedReports.map(
+      (item) => item.report.consultantName || item.application.consultant
+    );
+    return Array.from(new Set([...pendingNames, ...submittedNames])).filter(Boolean);
+  }, [pendingReports, submittedReports]);
+
+  const reportRows = useMemo(() => {
+    const submittedMap = new Map(submittedReports.map((item) => [item.report.applicationId, item]));
+    const rows = pendingReports.map((item) => ({
+      type: "pending" as const,
+      application: item.application,
+      programName: item.programName,
+      programColor: item.programColor,
+      programId: item.application.programId || "unknown",
+      consultantName: item.application.consultant,
+      statusLabel: "미작성",
+      report: null,
+      dueLabel: item.isOverdue ? `${item.overdueDays}일 초과` : `D-${item.daysLeft}`,
+      dueOverdue: item.isOverdue,
+    }));
+    submittedReports.forEach((item) => {
+      rows.push({
+        type: "submitted" as const,
+        application: item.application,
+        programName: item.programName,
+        programColor: item.programColor,
+        programId: item.programId,
+        consultantName: item.report.consultantName || item.application.consultant,
+        statusLabel: "작성",
+        report: item.report,
+        dueLabel: "작성됨",
+        dueOverdue: false,
+      });
+    });
+
+    return rows.filter((row) => {
+      const matchesProgram = reportProgramFilter === "all" || row.programId === reportProgramFilter;
+      const matchesConsultant =
+        reportConsultantFilter === "all" || row.consultantName === reportConsultantFilter;
+      const matchesStatus =
+        reportStatusFilter === "all" || row.statusLabel === reportStatusFilter;
+      return matchesProgram && matchesConsultant && matchesStatus;
+    });
+  }, [pendingReports, submittedReports, reportProgramFilter, reportConsultantFilter, reportStatusFilter]);
 
   return (
     <div className="h-full flex flex-col bg-gray-50">
@@ -305,258 +414,275 @@ export function PendingReportsDashboard({
 
         </div>
 
-        {/* 미작성 보고서 목록 */}
-        <div className="bg-white rounded-lg border">
-          <div className="p-6 border-b">
-            <h3 className="font-semibold text-gray-900">보고서 작성이 필요한 세션</h3>
-          </div>
-          <div className="divide-y">
-            {pendingReports.length === 0 ? (
-              <div className="p-12 text-center">
-                <FileText className="w-12 h-12 text-green-500 mx-auto mb-3" />
-                <p className="text-sm text-muted-foreground">
-                  모든 보고서가 작성되었습니다!
-                </p>
-              </div>
-            ) : (
-              pendingReports.map((item) => (
-                <div
-                  key={item.application.id}
-                  className={`p-4 hover:bg-gray-50 transition-colors ${
-                    item.isOverdue ? "bg-red-50/50" : ""
-                  }`}
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-3 mb-2">
-                        <div
-                          className="w-2 h-2 rounded-full"
-                          style={{ backgroundColor: item.programColor }}
-                        />
-                        <span className="text-xs text-muted-foreground">
-                          {item.programName}
-                        </span>
-                        {item.isOverdue && (
-                          <Badge variant="destructive" className="text-xs">
-                            기한 초과
-                          </Badge>
-                        )}
-                      </div>
-                      <h4 className="font-medium text-gray-900 mb-1">
-                        {item.application.officeHourTitle}
-                      </h4>
-                      <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                        <div className="flex items-center gap-1.5">
-                          <Calendar className="w-3.5 h-3.5" />
-                          <span>
-                            {format(
-                              parseLocalDate(item.application.scheduledDate!)
-                                ?? new Date(item.application.scheduledDate!),
-                              "yyyy년 M월 d일",
-                              { locale: ko }
-                            )}
-                          </span>
-                        </div>
-                        <span>•</span>
-                        <span>{item.application.consultant}</span>
-                        <span>•</span>
-                        <div className="flex items-center gap-1.5">
-                          <Clock className="w-3.5 h-3.5" />
-                          <span
-                            className={`whitespace-nowrap ${item.isOverdue ? "text-red-600 font-medium" : ""}`}
-                          >
-                            {item.isOverdue
-                              ? `기한 초과 ${item.overdueDays}일`
-                              : `D-${item.daysLeft}`}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                    <Button
-                      size="sm"
-                      onClick={() => onCreateReport(item.application.id)}
-                      variant={item.isOverdue ? "destructive" : "default"}
-                    >
-                      보고서 작성
-                    </Button>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-
-        {/* 비정기 오피스아워 일지 작성 */}
+        {/* 오피스아워 보고서 현황 */}
         <div className="bg-white rounded-lg border mt-6">
-          <div className="p-6 border-b flex items-start justify-between gap-4">
-            <div>
-              <h3 className="font-semibold text-gray-900">비정기 오피스아워 일지 작성</h3>
-              <p className="text-sm text-muted-foreground mt-1">
-                비정기 오피스아워 세션에 대해 일지를 작성해주세요.
-              </p>
+          <div className="p-6 border-b space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="font-semibold text-gray-900">오피스아워 보고서 현황</h3>
+              <span className="text-sm text-muted-foreground">
+                {reportRows.length}건
+              </span>
             </div>
-            <Button
-              size="lg"
-              className="bg-slate-900 text-white hover:bg-slate-800"
-              onClick={() => onCreateReport("irregular-manual")}
-            >
-              새 일지 작성
-            </Button>
+            <div className="flex flex-wrap items-center gap-3">
+              <Select value={reportProgramFilter} onValueChange={setReportProgramFilter}>
+                <SelectTrigger className="w-48">
+                  <SelectValue placeholder="사업 필터" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">전체 사업</SelectItem>
+                  {reportProgramOptionsAll.map((program) => (
+                    <SelectItem key={program.id} value={program.id}>
+                      {program.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Select value={reportConsultantFilter} onValueChange={setReportConsultantFilter}>
+                <SelectTrigger className="w-52">
+                  <SelectValue placeholder="컨설턴트 필터" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">전체 컨설턴트</SelectItem>
+                  {reportConsultantOptionsAll.map((name) => (
+                    <SelectItem key={name} value={name}>
+                      {name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Select value={reportStatusFilter} onValueChange={setReportStatusFilter}>
+                <SelectTrigger className="w-40">
+                  <SelectValue placeholder="상태 필터" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">전체 상태</SelectItem>
+                  <SelectItem value="작성">작성</SelectItem>
+                  <SelectItem value="미작성">미작성</SelectItem>
+                </SelectContent>
+              </Select>
+              {!isAdminUser && (
+                <Button
+                  size="sm"
+                  className="bg-slate-900 text-white hover:bg-slate-800"
+                  onClick={() => onCreateReport("irregular-manual")}
+                >
+                  새 일지 작성
+                </Button>
+              )}
+            </div>
           </div>
           <div className="divide-y">
-            {irregularPendingReports.map((item) => (
-              <div
-                key={item.application.id}
-                className={`p-4 hover:bg-gray-50 transition-colors ${
-                  item.isOverdue ? "bg-red-50/50" : ""
-                }`}
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-3 mb-2">
-                      <div
-                        className="w-2 h-2 rounded-full"
-                        style={{ backgroundColor: item.programColor }}
-                      />
-                      <span className="text-xs text-muted-foreground">
-                        {item.programName}
-                      </span>
-                      {item.isOverdue && (
-                        <Badge variant="destructive" className="text-xs">
-                          기한 초과
-                        </Badge>
-                      )}
-                    </div>
-                    <h4 className="font-medium text-gray-900 mb-1">
-                      {item.application.officeHourTitle}
-                    </h4>
-                    <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                      <div className="flex items-center gap-1.5">
-                        <Calendar className="w-3.5 h-3.5" />
-                        <span>
-                          {format(
-                            parseLocalDate(item.application.scheduledDate!)
-                              ?? new Date(item.application.scheduledDate!),
-                            "yyyy년 M월 d일",
-                            { locale: ko }
-                          )}
-                        </span>
-                      </div>
-                      <span>•</span>
-                      <span>{item.application.consultant}</span>
-                      <span>•</span>
-                      <div className="flex items-center gap-1.5">
-                        <Clock className="w-3.5 h-3.5" />
-                        <span
-                          className={`whitespace-nowrap ${item.isOverdue ? "text-red-600 font-medium" : ""}`}
-                        >
-                          {item.isOverdue
-                            ? `기한 초과 ${item.overdueDays}일`
-                            : `D-${item.daysLeft}`}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                  <Button
-                    size="sm"
-                    onClick={() => onCreateReport(item.application.id)}
-                    variant={item.isOverdue ? "destructive" : "default"}
-                  >
-                    보고서 작성
-                  </Button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* 작성된 보고서 목록 */}
-        <div className="bg-white rounded-lg border mt-6">
-          <div className="p-6 border-b flex items-center justify-between">
-            <h3 className="font-semibold text-gray-900">작성된 보고서</h3>
-            <span className="text-sm text-muted-foreground">
-              {submittedReports.length}건
-            </span>
-          </div>
-          <div className="divide-y">
-            {submittedReports.length === 0 ? (
+            {reportRows.length === 0 ? (
               <div className="p-12 text-center">
                 <FileText className="w-12 h-12 text-slate-300 mx-auto mb-3" />
                 <p className="text-sm text-muted-foreground">
-                  작성된 보고서가 없습니다
+                  보고서 데이터가 없습니다
                 </p>
               </div>
             ) : (
-              submittedReports.map(({ report, application, programName, programColor }) => (
-                <div
-                  key={report.id}
-                  className="p-4 hover:bg-gray-50 transition-colors"
-                >
-                  <div className="flex items-center justify-between gap-4">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-3 mb-2">
-                        <div
-                          className="w-2 h-2 rounded-full"
-                          style={{ backgroundColor: programColor }}
-                        />
-                        <span className="text-xs text-muted-foreground">
-                          {programName}
-                        </span>
-                        <Badge variant="outline" className="text-xs">
-                          만족도 {report.satisfaction}점
-                        </Badge>
-                      </div>
-                      <h4 className="font-medium text-gray-900 mb-1 truncate">
-                        {application.officeHourTitle}
-                      </h4>
-                      <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-                        <div className="flex items-center gap-1.5">
-                          <Calendar className="w-3.5 h-3.5" />
-                          <span>
-                            {report.date
-                              ? format(
-                                parseLocalDate(report.date) ?? new Date(report.date),
-                                "yyyy년 M월 d일",
-                                { locale: ko }
-                              )
-                              : "-"}
+              <div className="max-h-[560px] overflow-y-auto">
+                <Table>
+                  <TableHeader className="sticky top-0 bg-white z-10">
+                    <TableRow>
+                      <TableHead>상태</TableHead>
+                      <TableHead>사업</TableHead>
+                      <TableHead>컨설턴트</TableHead>
+                      <TableHead>오피스아워</TableHead>
+                      <TableHead>기한</TableHead>
+                      <TableHead>진행일</TableHead>
+                      <TableHead>작성일</TableHead>
+                      <TableHead className="text-right">관리</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {reportRows.map((row) => (
+                      <TableRow key={`${row.type}-${row.application.id}`}>
+                        <TableCell>
+                          <span className="text-sm text-muted-foreground">
+                            {row.statusLabel}
                           </span>
-                        </div>
-                        <span>•</span>
-                        <span>{report.consultantName || application.consultant}</span>
-                        <span>•</span>
-                        <span>
-                          수정일 {format(new Date(report.updatedAt ?? report.createdAt), "M/d", { locale: ko })}
-                        </span>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => onEditReport(report)}
-                      >
-                        보기/수정
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => {
-                          if (confirm("보고서를 되돌려 미작성 목록으로 보낼까요?")) {
-                            onDeleteReport(report);
-                          }
-                        }}
-                      >
-                        되돌리기
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-              ))
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-2">
+                            <span className="w-2 h-2 rounded-full" style={{ backgroundColor: row.programColor }} />
+                            <span className="text-sm">{row.programName}</span>
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-sm text-muted-foreground">
+                          {row.consultantName}
+                        </TableCell>
+                        <TableCell className="text-sm">
+                          <div className="max-w-[220px] truncate">{row.application.officeHourTitle}</div>
+                        </TableCell>
+                        <TableCell>
+                          <Badge
+                            variant="secondary"
+                            className={
+                              row.dueOverdue
+                                ? "bg-rose-100 text-rose-700"
+                                : row.statusLabel === "작성"
+                                  ? "bg-blue-100 text-blue-700"
+                                  : "bg-slate-100 text-slate-600"
+                            }
+                          >
+                            {row.dueLabel}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-sm text-muted-foreground">
+                          {row.application.scheduledDate
+                            ? format(
+                              parseLocalDate(row.application.scheduledDate)
+                                ?? new Date(row.application.scheduledDate),
+                              "yyyy.MM.dd",
+                              { locale: ko }
+                            )
+                            : "-"}
+                        </TableCell>
+                        <TableCell className="text-sm text-muted-foreground">
+                          {row.report?.date
+                            ? format(
+                              parseLocalDate(row.report.date) ?? new Date(row.report.date),
+                              "yyyy.MM.dd",
+                              { locale: ko }
+                            )
+                            : "-"}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {row.type === "submitted" ? (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() =>
+                                setSelectedReportItem({
+                                  report: row.report!,
+                                  application: row.application,
+                                  programName: row.programName,
+                                  programColor: row.programColor,
+                                  programId: row.programId,
+                                })
+                              }
+                            >
+                              상세
+                            </Button>
+                          ) : isAdminUser ? (
+                            <span className="text-xs text-muted-foreground">-</span>
+                          ) : (
+                            <Button
+                              size="sm"
+                              onClick={() => onCreateReport(row.application.id)}
+                            >
+                              작성
+                            </Button>
+                          )}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
             )}
           </div>
         </div>
       </div>
+      <Dialog open={!!selectedReportItem} onOpenChange={(open) => {
+        if (!open) setSelectedReportItem(null);
+      }}>
+        <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
+          {selectedReportItem && (
+            <div className="space-y-6">
+              <DialogHeader>
+                <DialogTitle>오피스아워 일지 상세</DialogTitle>
+              </DialogHeader>
+              <div className="grid grid-cols-2 gap-4 text-sm">
+                <div>
+                  <div className="text-xs text-muted-foreground">사업</div>
+                  <div className="font-medium">{selectedReportItem.programName}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-muted-foreground">컨설턴트</div>
+                  <div className="font-medium">
+                    {selectedReportItem.report.consultantName || selectedReportItem.application.consultant}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs text-muted-foreground">오피스아워</div>
+                  <div className="font-medium">{selectedReportItem.application.officeHourTitle}</div>
+                </div>
+                <div>
+                  <div className="text-xs text-muted-foreground">진행일</div>
+                  <div className="font-medium">
+                    {selectedReportItem.application.scheduledDate
+                      ? format(
+                        parseLocalDate(selectedReportItem.application.scheduledDate)
+                          ?? new Date(selectedReportItem.application.scheduledDate),
+                        "yyyy년 M월 d일",
+                        { locale: ko }
+                      )
+                      : "-"}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs text-muted-foreground">작성일</div>
+                  <div className="font-medium">
+                    {selectedReportItem.report.date
+                      ? format(
+                        parseLocalDate(selectedReportItem.report.date)
+                          ?? new Date(selectedReportItem.report.date),
+                        "yyyy년 M월 d일",
+                        { locale: ko }
+                      )
+                      : "-"}
+                  </div>
+                </div>
+              </div>
+              <div>
+                <div className="text-xs text-muted-foreground mb-1">주제</div>
+                <div className="rounded-lg border px-3 py-2 text-sm">
+                  {selectedReportItem.report.topic || "-"}
+                </div>
+              </div>
+              <div>
+                <div className="text-xs text-muted-foreground mb-1">참여자</div>
+                <div className="rounded-lg border px-3 py-2 text-sm">
+                  {(selectedReportItem.report.participants ?? []).join(", ") || "-"}
+                </div>
+              </div>
+              <div>
+                <div className="text-xs text-muted-foreground mb-1">세션 내용</div>
+                <div className="rounded-lg border px-3 py-2 text-sm whitespace-pre-wrap">
+                  {selectedReportItem.report.content || "-"}
+                </div>
+              </div>
+              <div>
+                <div className="text-xs text-muted-foreground mb-1">팔로업</div>
+                <div className="rounded-lg border px-3 py-2 text-sm whitespace-pre-wrap">
+                  {selectedReportItem.report.followUp || "-"}
+                </div>
+              </div>
+              {selectedReportItem.report.photos?.length > 0 && (
+                <div>
+                  <div className="text-xs text-muted-foreground mb-2">사진</div>
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                    {selectedReportItem.report.photos.map((url, idx) => (
+                      <img
+                        key={`${url}-${idx}`}
+                        src={url}
+                        alt="report"
+                        className="rounded-lg border object-cover h-32 w-full"
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
+              <div className="flex justify-end">
+                <Button variant="outline" onClick={() => setSelectedReportItem(null)}>
+                  닫기
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
