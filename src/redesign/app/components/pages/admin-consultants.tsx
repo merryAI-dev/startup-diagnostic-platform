@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Building2, Clock3, Link2, Mail, Phone, Plus, UserCog } from "lucide-react";
+import { Clock3, Mail, Phone, Plus, UserCog } from "lucide-react";
 import { Agenda, Consultant, ConsultantAvailability } from "@/redesign/app/lib/types";
 import { Badge } from "@/redesign/app/components/ui/badge";
 import { Button } from "@/redesign/app/components/ui/button";
@@ -7,6 +7,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/redesign/app/compone
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/redesign/app/components/ui/dialog";
 import { Input } from "@/redesign/app/components/ui/input";
 import { Label } from "@/redesign/app/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/redesign/app/components/ui/select";
+import { Switch } from "@/redesign/app/components/ui/switch";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/redesign/app/components/ui/table";
 import { Textarea } from "@/redesign/app/components/ui/textarea";
 import { cn } from "@/redesign/app/components/ui/utils";
 
@@ -68,15 +71,14 @@ export function AdminConsultants({
   onUpdateConsultant,
   onAddConsultant,
 }: AdminConsultantsProps) {
-  const scheduleRange = TIME_SLOTS.length > 0
-    ? `${TIME_SLOTS[0]?.start} ~ ${TIME_SLOTS[TIME_SLOTS.length - 1]?.end}`
-    : "일정 없음";
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [selectedConsultantId, setSelectedConsultantId] = useState<string | null>(
     null
   );
   const [isScheduleDialogOpen, setIsScheduleDialogOpen] = useState(false);
   const [isAgendaMapDialogOpen, setIsAgendaMapDialogOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [agendaFilter, setAgendaFilter] = useState("all");
 
   const selectedConsultant = useMemo(
     () =>
@@ -95,6 +97,17 @@ export function AdminConsultants({
     ).length;
     return { total, active, withLink, withPhone, mapped };
   }, [consultants]);
+
+  const filteredConsultants = useMemo(() => {
+    const normalizedQuery = searchQuery.trim().toLowerCase();
+    return consultants.filter((consultant) => {
+      const matchesQuery = !normalizedQuery
+        || consultant.name.toLowerCase().includes(normalizedQuery);
+      const matchesAgenda = agendaFilter === "all"
+        || (consultant.agendaIds ?? []).includes(agendaFilter);
+      return matchesQuery && matchesAgenda;
+    });
+  }, [consultants, searchQuery, agendaFilter]);
 
   function toggleSlot(dayOfWeek: number, slotStart: string) {
     if (!selectedConsultant) return;
@@ -265,6 +278,37 @@ export function AdminConsultants({
         </Dialog>
       </div>
 
+      <Card>
+        <CardContent className="p-4">
+          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+            <div className="flex items-center gap-3">
+              <Input
+                value={searchQuery}
+                onChange={(event) => setSearchQuery(event.target.value)}
+                placeholder="컨설턴트 이름 검색"
+                className="w-full md:w-64"
+              />
+              <Select value={agendaFilter} onValueChange={setAgendaFilter}>
+                <SelectTrigger className="w-48">
+                  <SelectValue placeholder="아젠다 필터" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">전체 아젠다</SelectItem>
+                  {agendas.map((agenda) => (
+                    <SelectItem key={agenda.id} value={agenda.id}>
+                      {agenda.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="text-sm text-muted-foreground">
+              {filteredConsultants.length}명 / 전체 {consultants.length}명
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
       <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
         <Card>
           <CardContent className="p-4">
@@ -302,229 +346,237 @@ export function AdminConsultants({
         </Card>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-        {consultants.map((consultant) => {
-          const normalizedAvailability = normalizeAvailability(consultant.availability);
-          const availableSlots = normalizedAvailability.reduce((sum, day) => {
-            return sum + day.slots.filter((slot) => slot.available).length;
-          }, 0);
+      <Card>
+        <CardContent className="p-0">
+          <div className="max-h-[60vh] overflow-y-auto">
+            <Table>
+              <TableHeader className="sticky top-0 bg-white z-10">
+                <TableRow>
+                  <TableHead>컨설턴트</TableHead>
+                  <TableHead>연락처</TableHead>
+                  <TableHead>상태</TableHead>
+                  <TableHead>아젠다</TableHead>
+                  <TableHead className="text-right">관리</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filteredConsultants.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={5} className="h-24 text-center text-sm text-muted-foreground">
+                      검색 결과가 없습니다.
+                    </TableCell>
+                  </TableRow>
+                )}
+                {filteredConsultants.map((consultant) => {
+                  const agendaLabels = (consultant.agendaIds ?? [])
+                    .map((agendaId) => agendas.find((item) => item.id === agendaId)?.name)
+                    .filter(Boolean) as string[];
+                  const visibleAgendaLabels = agendaLabels.slice(0, 2);
+                  const extraAgendaCount = agendaLabels.length - visibleAgendaLabels.length;
 
-          return (
-            <Card key={consultant.id}>
-              <CardHeader className="pb-2">
-                <CardTitle className="flex items-start justify-between">
-                  <div className="space-y-1">
-                    <div className="text-base">{consultant.name}</div>
-                    <div className="text-xs text-muted-foreground font-normal">
-                      {consultant.organization || "소속 미입력"}
-                    </div>
-                  </div>
-                  <Badge
-                    variant={consultant.status === "active" ? "secondary" : "outline"}
-                    className={
-                      consultant.status === "active"
-                        ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                        : ""
-                    }
-                  >
-                    {consultant.status === "active" ? "활성" : "비활성"}
-                  </Badge>
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <div className="grid grid-cols-1 gap-2 text-sm">
-                  <div className="flex items-center gap-2 text-muted-foreground">
-                    <Mail className="w-4 h-4" />
-                    <span>{consultant.email}</span>
-                  </div>
-                  <div className="flex items-center gap-2 text-muted-foreground">
-                    <Phone className="w-4 h-4" />
-                    <span>{consultant.phone || "-"}</span>
-                  </div>
-                  <div className="flex items-center gap-2 text-muted-foreground">
-                    <Building2 className="w-4 h-4" />
-                    <span>보조 이메일: {consultant.secondaryEmail || "-"}</span>
-                  </div>
-                  <div className="flex items-center gap-2 text-muted-foreground">
-                    <Building2 className="w-4 h-4" />
-                    <span>보조 전화: {consultant.secondaryPhone || "-"}</span>
-                  </div>
-                  <div className="flex items-center gap-2 text-muted-foreground">
-                    <Link2 className="w-4 h-4" />
-                    <span className="truncate">{consultant.fixedMeetingLink || "-"}</span>
-                  </div>
-                </div>
-
-                <div className="text-xs text-muted-foreground">
-                  화/목 가능 시간: <span className="font-semibold text-foreground">{scheduleRange}</span>
-                </div>
-
-                <div className="space-y-1">
-                  <div className="text-xs text-muted-foreground">매핑된 아젠다</div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {(consultant.agendaIds ?? []).length > 0 ? (
-                      (consultant.agendaIds ?? []).map((agendaId) => {
-                        const agenda = agendas.find((item) => item.id === agendaId);
-                        if (!agenda) return null;
-                        return (
+                  return (
+                    <TableRow key={consultant.id}>
+                      <TableCell>
+                        <div className="space-y-1">
+                          <div className="font-medium">{consultant.name}</div>
+                          <div className="text-xs text-muted-foreground">
+                            {consultant.organization || "소속 미입력"}
+                          </div>
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-sm text-muted-foreground space-y-1">
+                        <div className="flex items-center gap-2">
+                          <Mail className="w-3.5 h-3.5" />
+                          <span>{consultant.email}</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Phone className="w-3.5 h-3.5" />
+                          <span>{consultant.phone || "-"}</span>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-3">
+                          <Switch
+                            checked={consultant.status === "active"}
+                            onCheckedChange={(checked) =>
+                              onUpdateConsultant(consultant.id, {
+                                status: checked ? "active" : "inactive",
+                              })
+                            }
+                          />
                           <Badge
-                            key={agendaId}
-                            variant="outline"
-                            className="border-slate-200 bg-slate-900/5 text-slate-900 font-medium"
+                            variant="secondary"
+                            className={
+                              consultant.status === "active"
+                                ? "bg-emerald-100 text-emerald-700"
+                                : "bg-slate-100 text-slate-600"
+                            }
                           >
-                            {agenda.name}
+                            {consultant.status === "active" ? "활성" : "비활성"}
                           </Badge>
-                        );
-                      })
-                    ) : (
-                      <span className="text-xs text-muted-foreground">
-                        연결된 아젠다가 없습니다.
-                      </span>
-                    )}
-                  </div>
-                </div>
-
-                <div className="flex gap-2">
-                  <Dialog
-                    open={isAgendaMapDialogOpen && selectedConsultantId === consultant.id}
-                    onOpenChange={(open) => {
-                      setIsAgendaMapDialogOpen(open);
-                      if (open) {
-                        setSelectedConsultantId(consultant.id);
-                      }
-                    }}
-                  >
-                    <DialogTrigger asChild>
-                      <Button
-                        variant="outline"
-                        className="flex-1"
-                        onClick={() => setSelectedConsultantId(consultant.id)}
-                      >
-                        아젠다 매핑
-                      </Button>
-                    </DialogTrigger>
-                    <DialogContent className="max-w-2xl">
-                      <DialogHeader>
-                        <DialogTitle>{consultant.name} 아젠다 매핑</DialogTitle>
-                        <DialogDescription>
-                          이 컨설턴트가 담당 가능한 아젠다를 선택하세요. 선택 결과는 사업 관리 화면의 컨설턴트 선택에 반영됩니다.
-                        </DialogDescription>
-                      </DialogHeader>
-
-                      <div className="space-y-2 max-h-[60vh] overflow-y-auto pr-1">
-                        {agendas.length === 0 ? (
-                          <p className="text-sm text-muted-foreground">
-                            등록된 아젠다가 없습니다. 상단에서 먼저 아젠다를 추가해주세요.
-                          </p>
-                        ) : (
-                          agendas.map((agenda) => {
-                            const checked = (selectedConsultant?.agendaIds ?? []).includes(
-                              agenda.id
-                            );
-                            return (
-                              <button
-                                key={agenda.id}
-                                type="button"
-                                onClick={() => toggleConsultantAgenda(agenda.id, !checked)}
-                                className={cn(
-                                  "w-full rounded-lg border px-3 py-2 text-left text-sm transition",
-                                  checked
-                                    ? "border-slate-900 bg-slate-900 text-white"
-                                    : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-                                )}
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex flex-wrap gap-1.5">
+                          {visibleAgendaLabels.length > 0 ? (
+                            <>
+                              {visibleAgendaLabels.map((label) => (
+                                <Badge
+                                  key={label}
+                                  variant="outline"
+                                  className="border-slate-200 bg-slate-900/5 text-slate-900 font-medium"
+                                >
+                                  {label}
+                                </Badge>
+                              ))}
+                              {extraAgendaCount > 0 && (
+                                <Badge variant="outline" className="border-slate-200 text-slate-500">
+                                  +{extraAgendaCount}
+                                </Badge>
+                              )}
+                            </>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">
+                              연결된 아젠다가 없습니다.
+                            </span>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex items-center justify-end gap-2">
+                          <Dialog
+                            open={isAgendaMapDialogOpen && selectedConsultantId === consultant.id}
+                            onOpenChange={(open) => {
+                              setIsAgendaMapDialogOpen(open);
+                              if (open) {
+                                setSelectedConsultantId(consultant.id);
+                              }
+                            }}
+                          >
+                            <DialogTrigger asChild>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => setSelectedConsultantId(consultant.id)}
                               >
-                                <div className="flex items-center justify-between gap-3">
-                                  <span>{agenda.name}</span>
-                                  <span className="text-xs opacity-80">
-                                    {agenda.scope === "internal" ? "내부" : "외부"}
-                                  </span>
-                                </div>
-                              </button>
-                            );
-                          })
-                        )}
-                      </div>
-                    </DialogContent>
-                  </Dialog>
+                                아젠다 매핑
+                              </Button>
+                            </DialogTrigger>
+                            <DialogContent className="max-w-2xl">
+                              <DialogHeader>
+                                <DialogTitle>{consultant.name} 아젠다 매핑</DialogTitle>
+                                <DialogDescription>
+                                  이 컨설턴트가 담당 가능한 아젠다를 선택하세요. 선택 결과는 사업 관리 화면의 컨설턴트 선택에 반영됩니다.
+                                </DialogDescription>
+                              </DialogHeader>
 
-                  <Dialog
-                    open={isScheduleDialogOpen && selectedConsultantId === consultant.id}
-                    onOpenChange={(open) => {
-                      setIsScheduleDialogOpen(open);
-                      if (open) {
-                        setSelectedConsultantId(consultant.id);
-                      }
-                    }}
-                  >
-                    <DialogTrigger asChild>
-                      <Button
-                        variant="outline"
-                        className="flex-1"
-                        onClick={() => setSelectedConsultantId(consultant.id)}
-                      >
-                        <Clock3 className="w-4 h-4 mr-2" />
-                        가능 시간 관리
-                      </Button>
-                    </DialogTrigger>
-                    <DialogContent className="max-w-3xl">
-                      <DialogHeader>
-                        <DialogTitle className="flex items-center gap-2">
-                          <UserCog className="w-4 h-4" />
-                          {consultant.name} 컨설턴트 가능 시간
-                        </DialogTitle>
-                        <DialogDescription>
-                          요일은 화/목 고정이며 09:00부터 18:00까지 1시간 단위로 설정합니다.
-                        </DialogDescription>
-                      </DialogHeader>
+                              <div className="space-y-2 max-h-[60vh] overflow-y-auto pr-1">
+                                {agendas.length === 0 ? (
+                                  <p className="text-sm text-muted-foreground">
+                                    등록된 아젠다가 없습니다. 상단에서 먼저 아젠다를 추가해주세요.
+                                  </p>
+                                ) : (
+                                  agendas.map((agenda) => {
+                                    const checked = (selectedConsultant?.agendaIds ?? []).includes(
+                                      agenda.id
+                                    );
+                                    return (
+                                      <button
+                                        key={agenda.id}
+                                        type="button"
+                                        onClick={() => toggleConsultantAgenda(agenda.id, !checked)}
+                                        className={cn(
+                                          "w-full rounded-lg border px-3 py-2 text-left text-sm transition",
+                                          checked
+                                            ? "border-slate-900 bg-slate-900 text-white"
+                                            : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                                        )}
+                                      >
+                                        <div className="flex items-center justify-between gap-3">
+                                          <span>{agenda.name}</span>
+                                          <span className="text-xs opacity-80">
+                                            {agenda.scope === "internal" ? "내부" : "외부"}
+                                          </span>
+                                        </div>
+                                      </button>
+                                    );
+                                  })
+                                )}
+                              </div>
+                            </DialogContent>
+                          </Dialog>
 
-                      <div className="space-y-4 max-h-[65vh] overflow-y-auto pr-1">
-                        {normalizeAvailability(selectedConsultant?.availability).map((day) => {
-                          const dayInfo = SCHEDULE_DAYS.find((item) => item.value === day.dayOfWeek);
-                          return (
-                            <div key={day.dayOfWeek} className="border rounded-lg p-4">
-                              <div className="text-sm font-semibold mb-3">
-                                {dayInfo?.label || "-"}요일
+                          <Dialog
+                            open={isScheduleDialogOpen && selectedConsultantId === consultant.id}
+                            onOpenChange={(open) => {
+                              setIsScheduleDialogOpen(open);
+                              if (open) {
+                                setSelectedConsultantId(consultant.id);
+                              }
+                            }}
+                          >
+                            <DialogTrigger asChild>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => setSelectedConsultantId(consultant.id)}
+                              >
+                                <Clock3 className="w-4 h-4 mr-2" />
+                                가능 시간 관리
+                              </Button>
+                            </DialogTrigger>
+                            <DialogContent className="max-w-3xl">
+                              <DialogHeader>
+                                <DialogTitle className="flex items-center gap-2">
+                                  <UserCog className="w-4 h-4" />
+                                  {consultant.name} 컨설턴트 가능 시간
+                                </DialogTitle>
+                                <DialogDescription>
+                                  요일은 화/목 고정이며 09:00부터 18:00까지 1시간 단위로 설정합니다.
+                                </DialogDescription>
+                              </DialogHeader>
+
+                              <div className="space-y-4 max-h-[65vh] overflow-y-auto pr-1">
+                                {normalizeAvailability(selectedConsultant?.availability).map((day) => {
+                                  const dayInfo = SCHEDULE_DAYS.find((item) => item.value === day.dayOfWeek);
+                                  return (
+                                    <div key={day.dayOfWeek} className="border rounded-lg p-4">
+                                      <div className="text-sm font-semibold mb-3">
+                                        {dayInfo?.label || "-"}요일
+                                      </div>
+                                      <div className="grid grid-cols-3 md:grid-cols-5 gap-2">
+                                        {day.slots.map((slot) => (
+                                          <button
+                                            key={`${day.dayOfWeek}-${slot.start}`}
+                                            type="button"
+                                            onClick={() => toggleSlot(day.dayOfWeek, slot.start)}
+                                            className={cn(
+                                              "rounded-lg border px-2 py-2 text-xs transition",
+                                              slot.available
+                                                ? "border-slate-900 bg-slate-900 text-white"
+                                                : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+                                            )}
+                                          >
+                                            {slot.start}
+                                          </button>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  );
+                                })}
                               </div>
-                              <div className="grid grid-cols-3 md:grid-cols-5 gap-2">
-                                {day.slots.map((slot) => (
-                                  <button
-                                    key={`${day.dayOfWeek}-${slot.start}`}
-                                    type="button"
-                                    onClick={() => toggleSlot(day.dayOfWeek, slot.start)}
-                                    className={cn(
-                                      "rounded-lg border px-2 py-2 text-xs transition",
-                                      slot.available
-                                        ? "border-slate-900 bg-slate-900 text-white"
-                                        : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
-                                    )}
-                                  >
-                                    {slot.start}
-                                  </button>
-                                ))}
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </DialogContent>
-                  </Dialog>
-                  <Button
-                    variant="ghost"
-                    onClick={() =>
-                      onUpdateConsultant(consultant.id, {
-                        status:
-                          consultant.status === "active" ? "inactive" : "active",
-                      })
-                    }
-                  >
-                    {consultant.status === "active" ? "비활성화" : "활성화"}
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          );
-        })}
-      </div>
+                            </DialogContent>
+                          </Dialog>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 }

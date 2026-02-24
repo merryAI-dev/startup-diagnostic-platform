@@ -473,6 +473,26 @@ function normalizeApplicationDoc(
   };
 }
 
+function normalizeReportDoc(report: OfficeHourReport): OfficeHourReport {
+  return {
+    ...report,
+    consultantName: report.consultantName ?? "컨설턴트",
+    date: report.date ?? "",
+    location: report.location ?? "",
+    topic: report.topic ?? "",
+    participants: report.participants ?? [],
+    content: report.content ?? "",
+    followUp: report.followUp ?? "",
+    photos: report.photos ?? [],
+    duration: report.duration ?? 0,
+    satisfaction: report.satisfaction ?? 0,
+    programId: report.programId ?? "",
+    createdAt: report.createdAt ? normalizeDateValue(report.createdAt) : new Date(),
+    updatedAt: report.updatedAt ? normalizeDateValue(report.updatedAt) : new Date(),
+    completedAt: report.completedAt ? normalizeDateValue(report.completedAt) : undefined,
+  };
+}
+
 function omitId<T extends { id: string }>(item: T): Omit<T, "id"> {
   const { id: _ignored, ...rest } = item;
   return Object.fromEntries(
@@ -807,6 +827,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
   const [reportFormOpen, setReportFormOpen] = useState(false);
   const [reportFormApplication, setReportFormApplication] = useState<Application | null>(null);
   const [reportBeingEdited, setReportBeingEdited] = useState<OfficeHourReport | null>(null);
+  const [reportFormIsManual, setReportFormIsManual] = useState(false);
   const [reportPopupDismissed, setReportPopupDismissed] = useState<Record<string, number>>({});
   const reportPopupOpenedRef = useRef(false);
   const reportPopupSessionKey = "office-hour-report-popup-shown";
@@ -855,6 +876,14 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       enabled: isFirebaseConfigured && !isCompanyInfoRoute && needsApplications,
     }
   );
+  const { data: reportDocs } = useFirestoreCollection<OfficeHourReport>(
+    COLLECTIONS.REPORTS,
+    {
+      orderByField: "createdAt",
+      orderDirection: "desc",
+      enabled: isFirebaseConfigured && !isCompanyInfoRoute && needsApplications,
+    }
+  );
   const { data: profileApprovalDocs } = useFirestoreCollection<RawProfileApprovalDoc>(
     "profiles",
     {
@@ -886,6 +915,9 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
   );
   const officeHourApplicationCrud = useFirestoreCRUD<Omit<Application, "id">>(
     COLLECTIONS.OFFICE_HOUR_APPLICATIONS
+  );
+  const reportCrud = useFirestoreCRUD<Omit<OfficeHourReport, "id">>(
+    COLLECTIONS.REPORTS
   );
   const profileCrud = useFirestoreCRUD<Record<string, unknown>>("profiles");
 
@@ -1401,6 +1433,14 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
   }, [officeHourApplicationDocs, resolveCompanyName, needsApplications]);
 
   useEffect(() => {
+    if (!isFirebaseConfigured || !needsApplications) return;
+    const normalized = reportDocs
+      .map(normalizeReportDoc)
+      .sort((a, b) => getTimeValue(b.createdAt) - getTimeValue(a.createdAt));
+    setReports(normalized);
+  }, [isFirebaseConfigured, reportDocs, needsApplications]);
+
+  useEffect(() => {
     if (!needsApplications) return;
     if (cancelledMigrationRan.current) return;
     cancelledMigrationRan.current = true;
@@ -1551,9 +1591,9 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
   };
 
   const reportFormDeadlineInfo = useMemo(() => {
-    if (!reportFormApplication) return null;
+    if (!reportFormApplication || reportFormIsManual) return null;
     return getReportDeadlineInfo(reportFormApplication);
-  }, [reportFormApplication, officeHourSlotList]);
+  }, [reportFormApplication, reportFormIsManual, officeHourSlotList]);
 
   // 자동 완료 처리 (세션 종료 시간이 지난 확정 건): 3분 주기로 점검
   useEffect(() => {
@@ -3586,6 +3626,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
             <ProtectedRoute allowedRoles={["consultant"]}>
               <ConsultantProfilePage
                 consultant={currentConsultant}
+                agendas={agendaList}
                 defaultEmail={firebaseUser?.email}
                 saving={consultantCrud.saving}
                 onSubmit={handleSaveConsultantProfile}
@@ -3646,6 +3687,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
                 currentUserRole={resolvedRole}
                 currentConsultantId={currentConsultant?.id ?? null}
                 currentConsultantName={currentConsultant?.name ?? null}
+                currentConsultantAgendaIds={currentConsultant?.agendaIds ?? []}
               />
             </ProtectedRoute>
           )}
@@ -3742,12 +3784,38 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
                 reports={reports}
                 programs={scopedProgramList}
                 currentUser={scopedUser}
+                currentConsultantId={currentConsultant?.id ?? null}
+                currentConsultantName={currentConsultant?.name ?? null}
                 onCreateReport={(applicationId) => {
+                  if (applicationId === "irregular-manual") {
+                    const now = new Date();
+                    const today = now.toISOString().slice(0, 10);
+                    const manualApp: Application = {
+                      id: `manual-${Date.now()}`,
+                      type: "irregular",
+                      status: "completed",
+                      officeHourTitle: "비정기 오피스아워 (수동)",
+                      consultant: currentConsultant?.name ?? "컨설턴트",
+                      consultantId: currentConsultant?.id ?? "",
+                      sessionFormat: "online",
+                      agenda: "비정기 오피스아워",
+                      requestContent: "",
+                      scheduledDate: today,
+                      createdAt: now,
+                      updatedAt: now,
+                    };
+                    setReportFormApplication(manualApp);
+                    setReportFormOpen(true);
+                    setReportBeingEdited(null);
+                    setReportFormIsManual(true);
+                    return;
+                  }
                   const app = scopedApplications.find((a) => a.id === applicationId);
                   if (app) {
                     setReportFormApplication(app);
                     setReportFormOpen(true);
                     setReportBeingEdited(null);
+                    setReportFormIsManual(false);
                   }
                 }}
                 onEditReport={(report) => {
@@ -3759,6 +3827,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
                   setReportFormApplication(app);
                   setReportFormOpen(true);
                   setReportBeingEdited(report);
+                  setReportFormIsManual(false);
                 }}
                 onDeleteReport={(report) => {
                   setReports((prev) => prev.filter((item) => item.id !== report.id));
@@ -3766,6 +3835,10 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
                     setReportFormOpen(false);
                     setReportFormApplication(null);
                     setReportBeingEdited(null);
+                    setReportFormIsManual(false);
+                  }
+                  if (isFirebaseConfigured && report.id) {
+                    void reportCrud.remove(report.id);
                   }
                   toast.success("보고서가 삭제되었습니다");
                 }}
@@ -3779,16 +3852,33 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
               open={reportFormOpen}
               deadlineInfo={reportFormDeadlineInfo}
               onClose={() => {
-                if (reportFormApplication && !reportBeingEdited) {
+                if (reportFormApplication && !reportBeingEdited && !reportFormIsManual) {
                   dismissReportPopup(reportFormApplication.id, 60 * 60 * 1000);
                 }
                 setReportFormOpen(false);
                 setReportFormApplication(null);
                 setReportBeingEdited(null);
+                setReportFormIsManual(false);
               }}
               initialReport={reportBeingEdited}
               submitLabel={reportBeingEdited ? "보고서 저장" : "보고서 제출"}
               onSubmit={(reportData) => {
+                const normalizedConsultantName = (() => {
+                  const raw = reportData.consultantName?.trim();
+                  if (raw && !raw.includes("담당자 배정 중")) return raw;
+                  return currentConsultant?.name?.trim()
+                    || reportData.consultantName
+                    || "컨설턴트";
+                })();
+                const normalizedReportData = {
+                  ...reportData,
+                  consultantId:
+                    reportData.consultantId
+                      || reportBeingEdited?.consultantId
+                      || currentConsultant?.id
+                      || "",
+                  consultantName: normalizedConsultantName,
+                };
                 if (reportBeingEdited) {
                   const updatedAt = new Date();
                   setReports((prev) =>
@@ -3796,53 +3886,65 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
                       report.id === reportBeingEdited.id
                         ? {
                           ...report,
-                          ...reportData,
+                          ...normalizedReportData,
                           updatedAt,
                         }
                         : report
                     )
                   );
+                  if (isFirebaseConfigured) {
+                    void reportCrud.update(reportBeingEdited.id, {
+                      ...normalizedReportData,
+                      updatedAt,
+                    });
+                  }
                 } else {
                   const newReport: OfficeHourReport = {
-                    ...reportData,
+                    ...normalizedReportData,
                     id: `rep${Date.now()}`,
                     createdAt: new Date(),
                     updatedAt: new Date(),
                     completedAt: new Date(),
                   };
-                  setReports([...reports, newReport]);
+                  if (isFirebaseConfigured) {
+                    void reportCrud.create(omitId(newReport));
+                  } else {
+                    setReports([...reports, newReport]);
+                  }
+                  if (!reportFormIsManual && reportFormApplication) {
+                    setApplications(
+                      applications.map((app) =>
+                        app.id === reportFormApplication.id
+                          ? { ...app, updatedAt: new Date() }
+                          : app
+                      )
+                    );
 
-                  setApplications(
-                    applications.map((app) =>
-                      app.id === reportFormApplication.id
-                        ? { ...app, updatedAt: new Date() }
-                        : app
-                    )
-                  );
-
-                  setNotifications(
-                    notifications.filter(
-                      (n) =>
-                        !(
-                          n.type === "report_reminder"
-                          && n.relatedId === reportFormApplication.id
-                        )
-                    )
-                  );
-                  setReportPopupDismissed((prev) => {
-                    const next = { ...prev };
-                    delete next[reportFormApplication.id];
-                    try {
-                      sessionStorage.setItem("report-popup-dismissed", JSON.stringify(next));
-                    } catch {
-                      // ignore storage errors
-                    }
-                    return next;
-                  });
+                    setNotifications(
+                      notifications.filter(
+                        (n) =>
+                          !(
+                            n.type === "report_reminder"
+                            && n.relatedId === reportFormApplication.id
+                          )
+                      )
+                    );
+                    setReportPopupDismissed((prev) => {
+                      const next = { ...prev };
+                      delete next[reportFormApplication.id];
+                      try {
+                        sessionStorage.setItem("report-popup-dismissed", JSON.stringify(next));
+                      } catch {
+                        // ignore storage errors
+                      }
+                      return next;
+                    });
+                  }
                 }
                 setReportFormApplication(null);
                 setReportFormOpen(false);
                 setReportBeingEdited(null);
+                setReportFormIsManual(false);
                 toast.success(reportBeingEdited ? "보고서가 저장되었습니다" : "보고서가 제출되었습니다");
               }}
             />
