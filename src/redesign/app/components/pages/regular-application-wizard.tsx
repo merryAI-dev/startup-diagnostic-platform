@@ -1,6 +1,15 @@
 import { useMemo, useState } from "react";
 import { ArrowLeft, Calendar as CalendarIcon, Check, AlertCircle } from "lucide-react";
 import { Button } from "@/redesign/app/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/redesign/app/components/ui/alert-dialog";
 import { Card, CardContent } from "@/redesign/app/components/ui/card";
 import { Stepper } from "@/redesign/app/components/stepper";
 import { Label } from "@/redesign/app/components/ui/label";
@@ -21,6 +30,8 @@ interface RegularApplicationWizardProps {
   applications: Application[];
   consultants: Consultant[];
   agendas: Agenda[];
+  remainingInternalTickets: number;
+  remainingExternalTickets: number;
   onBack: () => void;
   onSubmit: (data: ApplicationFormData) => void;
 }
@@ -50,6 +61,8 @@ export function RegularApplicationWizard({
   applications,
   consultants,
   agendas,
+  remainingInternalTickets,
+  remainingExternalTickets,
   onBack,
   onSubmit,
 }: RegularApplicationWizardProps) {
@@ -61,6 +74,8 @@ export function RegularApplicationWizard({
   const [selectedAgendaId, setSelectedAgendaId] = useState("");
   const [requestContent, setRequestContent] = useState("");
   const [files, setFiles] = useState<FileItem[]>([]);
+  const [ticketAlertOpen, setTicketAlertOpen] = useState(false);
+  const [ticketAlertMessage, setTicketAlertMessage] = useState("");
 
   const blockedAgendaTimes = new Set<string>();
   const consultantsByAgendaId = useMemo(() => {
@@ -196,10 +211,17 @@ export function RegularApplicationWizard({
     });
   })() : [];
 
+  const isAgendaSelectable = (agenda: Agenda) => {
+    if (agenda.scope === "internal") return remainingInternalTickets > 0;
+    return remainingExternalTickets > 0;
+  };
+
   const isStepValid = () => {
     switch (currentStep) {
       case 1:
-        return linkedAgendas.length > 0 && selectedAgendaId;
+        if (activeAgendas.length === 0 || !selectedAgendaId) return false;
+        if (!selectedAgenda) return false;
+        return isAgendaSelectable(selectedAgenda);
       case 2:
         return selectedDate && selectedTime;
       case 3:
@@ -212,6 +234,17 @@ export function RegularApplicationWizard({
   };
 
   const handleNext = () => {
+    if (currentStep === 1 && selectedAgenda) {
+      if (!isAgendaSelectable(selectedAgenda)) {
+        setTicketAlertMessage(
+          selectedAgenda.scope === "internal"
+            ? "내부 티켓이 모두 소진되어 내부 오피스아워를 신청할 수 없습니다."
+            : "외부 티켓이 모두 소진되어 외부 오피스아워를 신청할 수 없습니다."
+        );
+        setTicketAlertOpen(true);
+        return;
+      }
+    }
     if (currentStep < steps.length) {
       setCurrentStep(currentStep + 1);
     }
@@ -237,13 +270,23 @@ export function RegularApplicationWizard({
       files,
     });
   };
-  const linkedAgendas = agendas.filter((agenda) => {
-    if (!(officeHour.agendaIds ?? []).includes(agenda.id)) return false;
-    return (consultantsByAgendaId.get(agenda.id) ?? []).length > 0;
-  });
+  const activeAgendas = agendas.filter((agenda) => agenda.active !== false);
 
   return (
     <div className="p-8 space-y-6">
+      <AlertDialog open={ticketAlertOpen} onOpenChange={setTicketAlertOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>티켓이 부족합니다</AlertDialogTitle>
+            <AlertDialogDescription>
+              {ticketAlertMessage}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogAction>확인</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       <div>
         <Button variant="ghost" onClick={onBack} className="mb-4">
           <ArrowLeft className="w-4 h-4 mr-2" />
@@ -272,23 +315,34 @@ export function RegularApplicationWizard({
                       setSelectedTime("");
                       setSelectedSlotId(undefined);
                     }}
-                    disabled={linkedAgendas.length === 0}
+                    disabled={activeAgendas.length === 0}
                   >
                     <SelectTrigger>
                       <SelectValue placeholder="아젠다를 선택하세요" />
                     </SelectTrigger>
                     <SelectContent>
-                      {linkedAgendas.map((agenda) => (
-                        <SelectItem key={agenda.id} value={agenda.id}>
-                          {agenda.name} · {agenda.scope === "internal" ? "내부" : "외부"}
-                        </SelectItem>
-                      ))}
+                      {activeAgendas.map((agenda) => {
+                        const disabled = !isAgendaSelectable(agenda);
+                        return (
+                          <SelectItem key={agenda.id} value={agenda.id} disabled={disabled}>
+                            {agenda.name} · {agenda.scope === "internal" ? "내부" : "외부"}
+                            {disabled ? " (티켓 소진)" : ""}
+                          </SelectItem>
+                        );
+                      })}
                     </SelectContent>
                   </Select>
-                  {linkedAgendas.length === 0 && (
+                  {activeAgendas.length === 0 && (
                     <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
-                      연결된 아젠다가 없습니다. 관리자에게 사업의 아젠다 설정을 요청해주세요.
+                      활성 아젠다가 없습니다. 관리자에게 아젠다 활성화를 요청해주세요.
                     </div>
+                  )}
+                  {activeAgendas.length > 0
+                    && remainingInternalTickets <= 0
+                    && remainingExternalTickets <= 0 && (
+                      <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                        내부/외부 티켓이 모두 소진되어 신청할 수 없습니다.
+                      </div>
                   )}
                 </div>
               </div>

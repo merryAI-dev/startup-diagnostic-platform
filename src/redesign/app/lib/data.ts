@@ -25,7 +25,6 @@ export const programs: Program[] = [
     periodStart: "2026-02-01",
     periodEnd: "2026-05-31",
     weekdays: ["TUE", "THU"],
-    agendaIds: ["1", "2", "3", "4"],
   },
   {
     id: "p2",
@@ -41,7 +40,6 @@ export const programs: Program[] = [
     periodStart: "2026-02-01",
     periodEnd: "2026-04-30",
     weekdays: ["TUE", "THU"],
-    agendaIds: ["2", "3", "5"],
   },
   {
     id: "p3",
@@ -57,7 +55,6 @@ export const programs: Program[] = [
     periodStart: "2026-02-01",
     periodEnd: "2026-07-31",
     weekdays: ["TUE", "THU"],
-    agendaIds: ["1", "2", "6", "7"],
   },
   {
     id: "p4",
@@ -73,7 +70,6 @@ export const programs: Program[] = [
     periodStart: "2026-02-01",
     periodEnd: "2026-04-30",
     weekdays: ["TUE", "THU"],
-    agendaIds: ["2", "8"],
   },
   {
     id: "p5",
@@ -89,7 +85,6 @@ export const programs: Program[] = [
     periodStart: "2026-02-01",
     periodEnd: "2026-05-31",
     weekdays: ["TUE", "THU"],
-    agendaIds: ["3", "4", "7"],
   },
   {
     id: "p6",
@@ -105,7 +100,6 @@ export const programs: Program[] = [
     periodStart: "2026-02-01",
     periodEnd: "2026-05-31",
     weekdays: ["TUE", "THU"],
-    agendaIds: ["3", "4", "6"],
   },
 ];
 
@@ -185,7 +179,6 @@ export const regularOfficeHours: RegularOfficeHour[] = [
     programId: "p1",
     month: "2026-02",
     availableDates: ["2026-02-10", "2026-02-17", "2026-02-24"],
-    agendaIds: ["2", "3"],
     description:
       "임팩트 측정 및 평가 전문가와 함께하는 정기 오피스아워입니다. 임팩트 지표 설정, 측정 방법론, 보고서 작성 등을 논의할 수 있습니다.",
   },
@@ -197,7 +190,6 @@ export const regularOfficeHours: RegularOfficeHour[] = [
     programId: "p3",
     month: "2026-02",
     availableDates: ["2026-02-12", "2026-02-19", "2026-02-26"],
-    agendaIds: ["3", "4"],
     description:
       "비즈니스 모델 수립 및 개선을 위한 정기 오피스아워입니다. 수익 모델, 고객 세그먼트, 가치 제안 등을 함께 검토합니다.",
   },
@@ -214,7 +206,6 @@ export const regularOfficeHours: RegularOfficeHour[] = [
       "2026-03-24",
       "2026-03-31",
     ],
-    agendaIds: ["1", "6"],
     description:
       "기술 개발 전략 및 R&D 관리 전문가와의 정기 오피스아워입니다. 기술 로드맵, 개발 우선순위, 협업 전략 등을 논의합니다.",
   },

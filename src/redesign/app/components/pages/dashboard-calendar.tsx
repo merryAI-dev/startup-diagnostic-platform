@@ -1,6 +1,6 @@
-import { useState } from "react";
-import { ChevronLeft, ChevronRight, Calendar as CalendarIcon, Clock, FileText, Target } from "lucide-react";
-import { Application, User, Program } from "@/redesign/app/lib/types";
+import { useMemo, useState } from "react";
+import { ChevronLeft, ChevronRight, Calendar as CalendarIcon, Clock } from "lucide-react";
+import { Application, User, Program, Agenda } from "@/redesign/app/lib/types";
 import { Button } from "@/redesign/app/components/ui/button";
 import { Badge } from "@/redesign/app/components/ui/badge";
 import { StatusChip } from "@/redesign/app/components/status-chip";
@@ -11,15 +11,31 @@ interface DashboardCalendarProps {
   applications: Application[];
   user: User;
   programs: Program[];
+  agendas: Agenda[];
+  ticketOverrides?: Record<string, { internal?: number; external?: number }>;
   onNavigate: (page: string, id?: string) => void;
 }
 
-export function DashboardCalendar({ applications, user, programs, onNavigate }: DashboardCalendarProps) {
+export function DashboardCalendar({
+  applications,
+  user,
+  programs,
+  agendas,
+  ticketOverrides,
+  onNavigate,
+}: DashboardCalendarProps) {
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState<Date | null>(new Date());
 
-  // 사용자의 프로그램만 필터링
-  const userPrograms = programs.filter((p) => user.programs?.includes(p.id) || false);
+  const userPrograms = programs;
+  const agendaScopeById = useMemo(
+    () => new Map(agendas.map((agenda) => [agenda.id, agenda.scope])),
+    [agendas]
+  );
+  const agendaScopeByName = useMemo(
+    () => new Map(agendas.map((agenda) => [agenda.name, agenda.scope])),
+    [agendas]
+  );
 
   const canViewAll =
     user.permissions?.canViewAllApplications
@@ -47,6 +63,66 @@ export function DashboardCalendar({ applications, user, programs, onNavigate }: 
   const rejectedApplications = userApplications.filter(
     (app) => app.status === "rejected"
   );
+
+  const getApplicationScope = (app: Application) => {
+    if (app.type === "irregular" && typeof app.isInternal === "boolean") {
+      return app.isInternal ? "internal" : "external";
+    }
+    if (app.agendaId && agendaScopeById.has(app.agendaId)) {
+      return agendaScopeById.get(app.agendaId) ?? null;
+    }
+    if (app.agenda && agendaScopeByName.has(app.agenda)) {
+      return agendaScopeByName.get(app.agenda) ?? null;
+    }
+    return null;
+  };
+
+  const ticketStats = useMemo(() => {
+    const overrides = ticketOverrides ?? {};
+    const totalInternal = userPrograms.reduce((sum, program) => {
+      const override = overrides[program.id]?.internal;
+      const value =
+        typeof override === "number" ? override : (program.internalTicketLimit ?? 0);
+      return sum + value;
+    }, 0);
+    const totalExternal = userPrograms.reduce((sum, program) => {
+      const override = overrides[program.id]?.external;
+      const value =
+        typeof override === "number" ? override : (program.externalTicketLimit ?? 0);
+      return sum + value;
+    }, 0);
+    let reservedInternal = 0;
+    let reservedExternal = 0;
+    let completedInternal = 0;
+    let completedExternal = 0;
+
+    userApplications.forEach((app) => {
+      const scope = getApplicationScope(app);
+      if (!scope) return;
+      const isReserved =
+        app.status === "pending" || app.status === "review" || app.status === "confirmed";
+      const isCompleted = app.status === "completed";
+      if (!isReserved && !isCompleted) return;
+      if (scope === "internal") {
+        if (isCompleted) completedInternal += 1;
+        else reservedInternal += 1;
+      } else {
+        if (isCompleted) completedExternal += 1;
+        else reservedExternal += 1;
+      }
+    });
+
+    return {
+      totalInternal,
+      totalExternal,
+      reservedInternal,
+      reservedExternal,
+      completedInternal,
+      completedExternal,
+      remainingInternal: Math.max(0, totalInternal - reservedInternal - completedInternal),
+      remainingExternal: Math.max(0, totalExternal - reservedExternal - completedExternal),
+    };
+  }, [userApplications, userPrograms, agendaScopeById, agendaScopeByName]);
 
   // 캘린더 날짜 생성
   const monthStart = startOfMonth(currentMonth);
@@ -138,55 +214,52 @@ export function DashboardCalendar({ applications, user, programs, onNavigate }: 
       </div>
 
       <div className="flex-1 flex overflow-hidden">
-        {/* Left Sidebar - Program Quotas */}
+        {/* Left Sidebar - Ticket Summary */}
         <div className="w-80 bg-white border-r p-6 overflow-y-auto">
-          <h2 className="font-semibold text-gray-900 mb-4">사업별 신청 현황</h2>
+          <h2 className="font-semibold text-gray-900 mb-4">티켓 현황</h2>
           <div className="space-y-4">
-            {userPrograms.map((program) => {
-              const remainingApplications = program.maxApplications - program.usedApplications;
-              const usagePercentage = Math.round(
-                (program.usedApplications / program.maxApplications) * 100
-              );
-
-              return (
-                <div
-                  key={program.id}
-                  className="border rounded-lg p-4 hover:shadow-sm transition-shadow"
-                >
-                  <div className="flex items-center gap-2 mb-3">
-                    <div
-                      className="w-3 h-3 rounded-full flex-shrink-0"
-                      style={{ backgroundColor: program.color }}
-                    />
-                    <h3 className="font-semibold text-sm">{program.name}</h3>
-                  </div>
-                  
-                  <div className="space-y-2">
-                    <div className="flex justify-between text-sm">
-                      <span className="text-muted-foreground">신청 횟수</span>
-                      <span className="font-semibold">
-                        {program.usedApplications} / {program.maxApplications}회
-                      </span>
-                    </div>
-                    <div className="flex justify-between text-sm">
-                      <span className="text-muted-foreground">남은 횟수</span>
-                      <span className={`font-semibold ${remainingApplications <= 3 ? 'text-red-600' : 'text-gray-900'}`}>
-                        {remainingApplications}회
-                      </span>
-                    </div>
-                    <div className="h-2 bg-gray-100 rounded-full overflow-hidden mt-2">
-                      <div
-                        className="h-full transition-all"
-                        style={{
-                          width: `${usagePercentage}%`,
-                          backgroundColor: program.color,
-                        }}
-                      />
-                    </div>
-                  </div>
+            <div className="border rounded-lg p-4">
+              <div className="text-sm font-semibold text-gray-900 mb-2">내부 티켓</div>
+              <div className="text-2xl font-bold text-gray-900">
+                {ticketStats.remainingInternal}
+                <span className="text-sm font-normal text-muted-foreground">
+                  {" "}
+                  / {ticketStats.totalInternal}
+                </span>
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">
+                예약 {ticketStats.reservedInternal} · 완료 {ticketStats.completedInternal}
+              </p>
+            </div>
+            <div className="border rounded-lg p-4">
+              <div className="text-sm font-semibold text-gray-900 mb-2">외부 티켓</div>
+              <div className="text-2xl font-bold text-gray-900">
+                {ticketStats.remainingExternal}
+                <span className="text-sm font-normal text-muted-foreground">
+                  {" "}
+                  / {ticketStats.totalExternal}
+                </span>
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">
+                예약 {ticketStats.reservedExternal} · 완료 {ticketStats.completedExternal}
+              </p>
+            </div>
+            <div className="border rounded-lg p-4">
+              <div className="text-sm font-semibold text-gray-900 mb-2">참여 사업</div>
+              {userPrograms.length > 0 ? (
+                <div className="flex flex-wrap gap-1.5">
+                  {userPrograms.map((program) => (
+                    <Badge key={program.id} variant="outline">
+                      {program.name}
+                    </Badge>
+                  ))}
                 </div>
-              );
-            })}
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  참여 중인 사업이 없습니다.
+                </p>
+              )}
+            </div>
           </div>
 
           {/* Pending Applications */}

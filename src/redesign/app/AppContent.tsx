@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { addDays, differenceInDays } from "date-fns";
+import { deleteField, where } from "firebase/firestore";
 import { useAuth as useAppAuth } from "@/context/AuthContext";
 import { signOutUser } from "@/firebase/auth";
 import { AdminDashboard } from "@/components/dashboard/AdminDashboard";
@@ -74,6 +75,7 @@ import {
   isFirebaseConfigured,
   useFirestoreCollection,
   useFirestoreCRUD,
+  useFirestoreDocument,
   useFirestoreDocumentOnce,
 } from "@/redesign/app/hooks/use-firestore";
 import { firestoreService } from "@/redesign/app/lib/firestore-service";
@@ -329,7 +331,6 @@ function groupSlotsToRegularOfficeHours(slots: OfficeHourSlot[]): RegularOfficeH
         month,
         availableDates: [slot.date],
         description: slot.description?.trim() || "정기 오피스아워",
-        agendaIds: slot.agendaIds ?? [],
         slots: [
           {
             id: slot.id,
@@ -345,7 +346,6 @@ function groupSlotsToRegularOfficeHours(slots: OfficeHourSlot[]): RegularOfficeH
 
     const nextDates = new Set(existing.availableDates);
     nextDates.add(slot.date);
-    const nextAgendaIds = new Set([...(existing.agendaIds ?? []), ...(slot.agendaIds ?? [])]);
     const nextSlots = [...(existing.slots ?? [])];
     nextSlots.push({
       id: slot.id,
@@ -358,7 +358,6 @@ function groupSlotsToRegularOfficeHours(slots: OfficeHourSlot[]): RegularOfficeH
     grouped.set(groupKey, {
       ...existing,
       availableDates: Array.from(nextDates).sort(),
-      agendaIds: Array.from(nextAgendaIds),
       slots: nextSlots.sort((a, b) => {
         const dateComp = a.date.localeCompare(b.date);
         if (dateComp !== 0) return dateComp;
@@ -392,7 +391,6 @@ function groupProgramsToRegularOfficeHours(programs: Program[]): RegularOfficeHo
         month,
         availableDates: [dateKey],
         description: program.description?.trim() || `${program.name} 사업`,
-        agendaIds: program.agendaIds ?? [],
       });
       return;
     }
@@ -552,10 +550,33 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     || isPage(["consultants", "regular-wizard", "admin-consultants"]);
   const needsOfficeHourSlots = needsApplications || needsRegularOfficeHours;
   const needsCompanyLookup = isAdminLikeRole && needsApplications;
+  const needsCompanyDirectory = isPage(["admin-programs", "admin-program-list"]);
+  const needsCompanyOwnershipLookup =
+    isFirebaseConfigured
+    && resolvedRole === "user"
+    && !!firebaseUser?.uid
+    && !isCompanyInfoRoute;
   const { data: companyDocs } = useFirestoreCollection<{ id: string; name?: string | null }>(
     "companies",
     {
-      enabled: isFirebaseConfigured && !isCompanyInfoRoute && needsCompanyLookup,
+      enabled:
+        isFirebaseConfigured
+        && !isCompanyInfoRoute
+        && (needsCompanyLookup || needsCompanyDirectory),
+    }
+  );
+  const { data: ownedCompanyDocs } = useFirestoreCollection<{ id: string; ownerUid?: string | null }>(
+    "companies",
+    {
+      constraints: [where("ownerUid", "==", firebaseUser?.uid ?? "")],
+      enabled: needsCompanyOwnershipLookup,
+    }
+  );
+  const { data: companyUserDocs } = useFirestoreCollection<User>(
+    COLLECTIONS.USERS,
+    {
+      constraints: [where("role", "==", "user")],
+      enabled: isFirebaseConfigured && !isCompanyInfoRoute && needsCompanyDirectory,
     }
   );
   const companyNameById = useMemo(() => {
@@ -568,6 +589,37 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     });
     return map;
   }, [companyDocs]);
+  const [users, setUsers] = useState<UserWithPermissions[]>(initialUsers);
+  const companyDirectory = useMemo(() => {
+    if (isFirebaseConfigured) {
+      const programsByCompanyId = new Map(
+        companyUserDocs.map((doc) => [doc.id, doc.programs ?? []])
+      );
+      if (companyDocs.length > 0) {
+        return companyDocs.map((doc) => ({
+          id: doc.id,
+          name: doc.name?.trim()
+            || companyNameById.get(doc.id)
+            || "회사명 미입력",
+          programs: programsByCompanyId.get(doc.id) ?? [],
+        }));
+      }
+      return companyUserDocs.map((doc) => ({
+        id: doc.id,
+        name: doc.companyName?.trim()
+          || companyNameById.get(doc.id)
+          || "회사명 미입력",
+        programs: doc.programs ?? [],
+      }));
+    }
+    return users
+      .filter((u) => u.role === "user")
+      .map((u) => ({
+        id: u.id,
+        name: u.companyName?.trim() || "회사명 미입력",
+        programs: u.programs ?? [],
+      }));
+  }, [companyDocs, companyNameById, companyUserDocs, isFirebaseConfigured, users]);
   const resolveCompanyName = useCallback(
     (value?: string | null) => {
       if (!value) return undefined;
@@ -593,7 +645,10 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     },
     [companyNameById]
   );
-  const companyRecordId = profile?.companyId ?? firebaseUser?.uid ?? null;
+  const companyRecordId = useMemo(() => {
+    const ownedId = ownedCompanyDocs[0]?.id ?? null;
+    return ownedId ?? profile?.companyId ?? firebaseUser?.uid ?? null;
+  }, [firebaseUser?.uid, ownedCompanyDocs, profile?.companyId]);
   const { data: companyInfoDoc } = useFirestoreDocumentOnce<CompanyInfoDoc>(
     companyRecordId ? `companies/${companyRecordId}/companyInfo` : "",
     "info",
@@ -601,6 +656,11 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       enabled: isFirebaseConfigured && resolvedRole === "user" && !!companyRecordId,
     }
   );
+  const { data: companyMetaDoc } = useFirestoreDocument<{
+    programTicketOverrides?: Record<string, { internal?: number; external?: number }>;
+  }>("companies", companyRecordId ?? null, {
+    enabled: isFirebaseConfigured && resolvedRole === "user" && !!companyRecordId,
+  });
   const { data: selfAssessmentDoc } = useFirestoreDocumentOnce<SaveTypeMeta>(
     companyRecordId ? `companies/${companyRecordId}/selfAssessment` : "",
     "info",
@@ -717,6 +777,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
   );
   const cancelledMigrationRan = useRef(false);
   const reviewMigrationRan = useRef(false);
+  const programAgendaCleanupRan = useRef(false);
   const [regularOfficeHourList, setRegularOfficeHourList] = useState<RegularOfficeHour[]>(
     () => (isFirebaseConfigured ? [] : initialRegularOfficeHours)
   );
@@ -736,7 +797,6 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
   const [agendaList, setAgendaList] = useState<Agenda[]>(
     () => (isFirebaseConfigured ? [] : initialAgendas)
   );
-  const [users, setUsers] = useState<UserWithPermissions[]>(initialUsers);
   const [templates, setTemplates] = useState<MessageTemplate[]>(initialMessageTemplates);
   const [programList, setProgramList] = useState<Program[]>(
     () => (isFirebaseConfigured ? [] : initialPrograms)
@@ -997,16 +1057,72 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     user.id,
   ]);
 
-  const scopedRegularOfficeHourList = useMemo(() => {
-    if (resolvedRole !== "consultant") return resolvedRegularOfficeHourList;
-    return resolvedRegularOfficeHourList.filter((officeHour) => {
-      if (officeHour.consultantId && consultantIdCandidates.has(officeHour.consultantId)) {
-        return true;
-      }
-      const consultantName = normalizeConsultantDisplayName(officeHour.consultant);
-      return consultantName !== "" && consultantNameCandidates.has(consultantName);
-    });
+  const agendaScopeById = useMemo(
+    () => new Map(agendaList.map((agenda) => [agenda.id, agenda.scope])),
+    [agendaList]
+  );
+  const agendaScopeByName = useMemo(
+    () => new Map(agendaList.map((agenda) => [agenda.name, agenda.scope])),
+    [agendaList]
+  );
+
+  const companyProgramIds = useMemo(() => {
+    if (resolvedRole !== "user") return new Set<string>();
+    const ids = new Set<string>();
+    const candidateIds = new Set(
+      [companyRecordId, firebaseUser?.uid, profile?.companyId, user.id].filter(
+        (value): value is string => Boolean(value)
+      )
+    );
+    if (candidateIds.size > 0) {
+      programList.forEach((program) => {
+        if (!program.companyIds || program.companyIds.length === 0) return;
+        const matched = program.companyIds.some((id) => candidateIds.has(id));
+        if (matched) ids.add(program.id);
+      });
+    }
+    if (ids.size > 0) return ids;
+    if (user.programs && user.programs.length > 0) {
+      return new Set(user.programs);
+    }
+    if (user.programName) {
+      programList.forEach((program) => {
+        if (program.name === user.programName) {
+          ids.add(program.id);
+        }
+      });
+    }
+    return ids;
   }, [
+    companyRecordId,
+    firebaseUser?.uid,
+    profile?.companyId,
+    programList,
+    resolvedRole,
+    user.id,
+    user.programName,
+    user.programs,
+  ]);
+
+  const scopedRegularOfficeHourList = useMemo(() => {
+    if (resolvedRole === "consultant") {
+      return resolvedRegularOfficeHourList.filter((officeHour) => {
+        if (officeHour.consultantId && consultantIdCandidates.has(officeHour.consultantId)) {
+          return true;
+        }
+        const consultantName = normalizeConsultantDisplayName(officeHour.consultant);
+        return consultantName !== "" && consultantNameCandidates.has(consultantName);
+      });
+    }
+    if (resolvedRole === "user") {
+      return resolvedRegularOfficeHourList.filter((officeHour) => {
+        if (!officeHour.programId) return false;
+        return companyProgramIds.has(officeHour.programId);
+      });
+    }
+    return resolvedRegularOfficeHourList;
+  }, [
+    companyProgramIds,
     consultantIdCandidates,
     consultantNameCandidates,
     resolvedRegularOfficeHourList,
@@ -1015,30 +1131,97 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
 
   const consultantProgramIds = useMemo(() => {
     if (resolvedRole !== "consultant") return new Set<string>();
-    const ids = new Set<string>();
-    if (currentConsultant?.id) {
-      programList.forEach((program) => {
-        const programAgendaIds = program.agendaIds ?? [];
-        const hasAgendaMatch = programAgendaIds.some((agendaId) =>
-          consultantAgendaIds.has(agendaId)
-        );
-        if (hasAgendaMatch) {
-          ids.add(program.id);
-        }
-      });
-    }
-    scopedApplications.forEach((application) => {
-      if (application.programId) {
-        ids.add(application.programId);
-      }
-    });
-    return ids;
-  }, [consultantAgendaIds, currentConsultant?.id, programList, resolvedRole, scopedApplications]);
+    return new Set(programList.map((program) => program.id));
+  }, [programList, resolvedRole]);
 
   const scopedProgramList = useMemo(() => {
-    if (resolvedRole !== "consultant") return programList;
-    return programList.filter((program) => consultantProgramIds.has(program.id));
-  }, [consultantProgramIds, programList, resolvedRole]);
+    if (resolvedRole === "consultant") {
+      return programList.filter((program) => consultantProgramIds.has(program.id));
+    }
+    if (resolvedRole === "user") {
+      return programList.filter((program) => companyProgramIds.has(program.id));
+    }
+    return programList;
+  }, [companyProgramIds, consultantProgramIds, programList, resolvedRole]);
+
+  const ticketStats = useMemo(() => {
+    if (resolvedRole !== "user") {
+      return {
+        totalInternal: 0,
+        totalExternal: 0,
+        reservedInternal: 0,
+        reservedExternal: 0,
+        completedInternal: 0,
+        completedExternal: 0,
+        remainingInternal: 0,
+        remainingExternal: 0,
+      };
+    }
+    const overrides = companyMetaDoc?.programTicketOverrides ?? {};
+    const totalInternal = scopedProgramList.reduce((sum, program) => {
+      const override = overrides[program.id]?.internal;
+      const value =
+        typeof override === "number" ? override : (program.internalTicketLimit ?? 0);
+      return sum + value;
+    }, 0);
+    const totalExternal = scopedProgramList.reduce((sum, program) => {
+      const override = overrides[program.id]?.external;
+      const value =
+        typeof override === "number" ? override : (program.externalTicketLimit ?? 0);
+      return sum + value;
+    }, 0);
+    let reservedInternal = 0;
+    let reservedExternal = 0;
+    let completedInternal = 0;
+    let completedExternal = 0;
+
+    const resolveScope = (app: Application) => {
+      if (app.type === "irregular" && typeof app.isInternal === "boolean") {
+        return app.isInternal ? "internal" : "external";
+      }
+      if (app.agendaId && agendaScopeById.has(app.agendaId)) {
+        return agendaScopeById.get(app.agendaId) ?? null;
+      }
+      if (app.agenda && agendaScopeByName.has(app.agenda)) {
+        return agendaScopeByName.get(app.agenda) ?? null;
+      }
+      return null;
+    };
+
+    scopedApplications.forEach((app) => {
+      const scope = resolveScope(app);
+      if (!scope) return;
+      const isReserved =
+        app.status === "pending" || app.status === "review" || app.status === "confirmed";
+      const isCompleted = app.status === "completed";
+      if (!isReserved && !isCompleted) return;
+      if (scope === "internal") {
+        if (isCompleted) completedInternal += 1;
+        else reservedInternal += 1;
+      } else {
+        if (isCompleted) completedExternal += 1;
+        else reservedExternal += 1;
+      }
+    });
+
+    return {
+      totalInternal,
+      totalExternal,
+      reservedInternal,
+      reservedExternal,
+      completedInternal,
+      completedExternal,
+      remainingInternal: Math.max(0, totalInternal - reservedInternal - completedInternal),
+      remainingExternal: Math.max(0, totalExternal - reservedExternal - completedExternal),
+    };
+  }, [
+    agendaScopeById,
+    agendaScopeByName,
+    companyMetaDoc?.programTicketOverrides,
+    resolvedRole,
+    scopedApplications,
+    scopedProgramList,
+  ]);
 
   const scopedUser = useMemo<User>(() => {
     if (resolvedRole !== "consultant") return user;
@@ -1110,10 +1293,29 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
           (doc.internalTicketLimit ?? 0) + (doc.externalTicketLimit ?? 0),
         usedApplications: doc.usedApplications ?? 0,
         weekdays: doc.weekdays ?? ["TUE", "THU"],
-        agendaIds: doc.agendaIds ?? [],
+        companyLimit: doc.companyLimit ?? 0,
+        companyIds: doc.companyIds ?? [],
       }))
     );
   }, [programDocs]);
+
+  useEffect(() => {
+    if (!isFirebaseConfigured || resolvedRole !== "admin") return;
+    if (programAgendaCleanupRan.current) return;
+    const targets = programDocs.filter((doc) => (doc as Record<string, any>).agendaIds != null);
+    if (targets.length === 0) {
+      programAgendaCleanupRan.current = true;
+      return;
+    }
+    programAgendaCleanupRan.current = true;
+    const ops = targets.map((doc) => ({
+      type: "update" as const,
+      collection: COLLECTIONS.PROGRAMS,
+      docId: doc.id,
+      data: { agendaIds: deleteField() },
+    }));
+    void programCrud.batchUpdate(ops);
+  }, [isFirebaseConfigured, programCrud, programDocs, resolvedRole]);
 
   useEffect(() => {
     if (!isFirebaseConfigured) return;
@@ -1294,6 +1496,65 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     if (!reportFormApplication) return null;
     return getReportDeadlineInfo(reportFormApplication);
   }, [reportFormApplication, officeHourSlotList]);
+
+  // 자동 완료 처리 (세션 종료 시간이 지난 확정 건): 3분 주기로 점검
+  useEffect(() => {
+    let isRunning = false;
+    const runAutoComplete = async () => {
+      if (isRunning) return;
+      isRunning = true;
+      try {
+        const now = new Date();
+        const candidates = applications
+          .filter((app) => app.status === "confirmed")
+          .map((app) => ({ app, endTime: getSessionEndTime(app) }))
+          .filter((item) => item.endTime && now >= item.endTime);
+
+        if (candidates.length === 0) return;
+
+        const updatesById = new Map<string, { completedAt: Date; updatedAt: Date }>();
+        candidates.forEach(({ app, endTime }) => {
+          const completedAt = endTime ?? now;
+          updatesById.set(app.id, { completedAt, updatedAt: now });
+        });
+
+        setApplications((prev) =>
+          prev.map((app) => {
+            const meta = updatesById.get(app.id);
+            if (!meta) return app;
+            return {
+              ...app,
+              status: "completed" as const,
+              completedAt: meta.completedAt,
+              updatedAt: meta.updatedAt,
+            };
+          })
+        );
+
+        if (!isFirebaseConfigured) return;
+
+        const operations = Array.from(updatesById.entries()).map(([id, meta]) => ({
+          type: "update" as const,
+          collection: COLLECTIONS.OFFICE_HOUR_APPLICATIONS,
+          docId: id,
+          data: {
+            status: "completed",
+            completedAt: meta.completedAt,
+            updatedAt: meta.updatedAt,
+          },
+        }));
+        await officeHourApplicationCrud.batchUpdate(operations);
+      } finally {
+        isRunning = false;
+      }
+    };
+
+    runAutoComplete();
+    const intervalId = window.setInterval(runAutoComplete, 180000);
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [applications, officeHourSlotList, isFirebaseConfigured, officeHourApplicationCrud]);
 
   const dismissReportPopup = (applicationId: string, dismissForMs: number) => {
     const until = Date.now() + dismissForMs;
@@ -1535,6 +1796,19 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       toast.error("선택한 아젠다 정보를 찾지 못했습니다");
       return;
     }
+    if (resolvedRole === "user") {
+      const scope = agenda.scope === "internal" ? "internal" : "external";
+      const remaining =
+        scope === "internal" ? ticketStats.remainingInternal : ticketStats.remainingExternal;
+      if (remaining <= 0) {
+        toast.error(
+          scope === "internal"
+            ? "내부 티켓이 모두 소진되어 신청할 수 없습니다"
+            : "외부 티켓이 모두 소진되어 신청할 수 없습니다"
+        );
+        return;
+      }
+    }
 
     const linkedConsultants = consultants.filter(
       (consultant) =>
@@ -1655,6 +1929,19 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     data: IrregularApplicationFormData
   ) => {
     const agenda = agendaList.find((a) => a.id === data.agendaId);
+    if (resolvedRole === "user") {
+      const remaining = data.isInternal
+        ? ticketStats.remainingInternal
+        : ticketStats.remainingExternal;
+      if (remaining <= 0) {
+        toast.error(
+          data.isInternal
+            ? "내부 티켓이 모두 소진되어 신청할 수 없습니다"
+            : "외부 티켓이 모두 소진되어 신청할 수 없습니다"
+        );
+        return;
+      }
+    }
     
     const newApplication: Application = {
       id: `app${Date.now()}`,
@@ -2471,8 +2758,6 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     const prevName = prevProgram?.name ?? "";
     const shouldSyncTitles =
       nextName.length > 0 && prevName.length > 0 && nextName !== prevName;
-    const hasAgendaUpdate = Array.isArray(data.agendaIds);
-    const nextAgendaIds = hasAgendaUpdate ? data.agendaIds ?? [] : undefined;
 
     const buildRegularOfficeHourTitle = (name: string) => `${name} 정기 오피스아워`;
     const nextDefaultTitle = shouldSyncTitles ? buildRegularOfficeHourTitle(nextName) : "";
@@ -2569,45 +2854,6 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       }
     }
 
-    if (hasAgendaUpdate && nextAgendaIds) {
-      setOfficeHourSlotList((prev) =>
-        prev.map((slot) =>
-          slot.programId === id ? { ...slot, agendaIds: nextAgendaIds } : slot
-        )
-      );
-      setRegularOfficeHourList((prev) =>
-        prev.map((officeHour) =>
-          officeHour.programId === id
-            ? { ...officeHour, agendaIds: nextAgendaIds }
-            : officeHour
-        )
-      );
-
-      if (isFirebaseConfigured) {
-        const slotUpdates = officeHourSlotList
-          .filter((slot) => slot.programId === id)
-          .filter((slot) => {
-            const prevAgendaIds = slot.agendaIds ?? [];
-            if (prevAgendaIds.length !== nextAgendaIds.length) return true;
-            const prevSet = new Set(prevAgendaIds);
-            return nextAgendaIds.some((agendaId) => !prevSet.has(agendaId));
-          })
-          .map((slot) => ({
-            type: "update" as const,
-            collection: COLLECTIONS.OFFICE_HOUR_SLOTS,
-            docId: slot.id,
-            data: { agendaIds: nextAgendaIds },
-          }));
-
-        if (slotUpdates.length > 0) {
-          const okSlots = await officeHourSlotCrud.batchUpdate(slotUpdates);
-          if (!okSlots) {
-            toast.error("슬롯 아젠다 업데이트에 실패했습니다");
-          }
-        }
-      }
-    }
-
     setProgramList((prev) => prev.map((program) => (program.id === id ? { ...program, ...data } : program)));
     if (isFirebaseConfigured) {
       const ok = await programCrud.update(
@@ -2622,6 +2868,38 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     toast.success("사업 정보가 업데이트되었습니다");
   };
 
+  const handleUpdateProgramCompanies = async (programId: string, companyIds: string[]) => {
+    const targetProgram = programList.find((program) => program.id === programId);
+    if (!targetProgram) {
+      toast.error("사업 정보를 찾을 수 없습니다");
+      return;
+    }
+    const uniqueCompanyIds = Array.from(new Set(companyIds));
+    const companyLimit = targetProgram.companyLimit ?? 0;
+    if (companyLimit > 0 && uniqueCompanyIds.length > companyLimit) {
+      toast.error(`참여 기업 수는 최대 ${companyLimit}개까지 가능합니다`);
+      return;
+    }
+
+    setProgramList((prev) =>
+      prev.map((program) =>
+        program.id === programId ? { ...program, companyIds: uniqueCompanyIds } : program
+      )
+    );
+
+    if (isFirebaseConfigured) {
+      const ok = await programCrud.update(programId, {
+        companyIds: uniqueCompanyIds,
+      } as Partial<Omit<Program, "id">>);
+      if (!ok) {
+        toast.error("참여 기업 업데이트에 실패했습니다");
+        return;
+      }
+    }
+
+    toast.success("참여 기업 구성이 업데이트되었습니다");
+  };
+
   const handleGenerateProgramSlots = async (programId: string) => {
     const targetProgram = programList.find((program) => program.id === programId);
     if (!targetProgram) {
@@ -2633,9 +2911,11 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       return;
     }
 
-    const programAgendaIds = targetProgram.agendaIds ?? [];
-    if (programAgendaIds.length === 0) {
-      toast.error("연결된 아젠다가 없습니다");
+    const activeAgendaIds = agendaList
+      .filter((agenda) => agenda.active !== false)
+      .map((agenda) => agenda.id);
+    if (activeAgendaIds.length === 0) {
+      toast.error("활성 아젠다가 없습니다");
       return;
     }
 
@@ -2643,7 +2923,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       if (consultant.status !== "active") return false;
       const consultantAgendaIds = consultant.agendaIds ?? [];
       return consultantAgendaIds.some((agendaId) =>
-        programAgendaIds.includes(agendaId)
+        activeAgendaIds.includes(agendaId)
       );
     });
     if (linkedConsultants.length === 0) {
@@ -2713,7 +2993,6 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
           date: dateKey,
           startTime,
           endTime,
-          agendaIds: targetProgram.agendaIds ?? [],
           status: existing?.status ?? "open",
         });
       });
@@ -2898,14 +3177,16 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
             <DashboardCalendar
               applications={resolvedApplications}
               user={user}
-              programs={programList}
+              programs={scopedProgramList}
+              agendas={agendaList}
+              ticketOverrides={companyMetaDoc?.programTicketOverrides}
               onNavigate={handleNavigateLoose}
             />
           )}
 
           {currentPage === "regular" && (
             <RegularOfficeHoursCalendar
-              officeHours={resolvedRegularOfficeHourList}
+              officeHours={scopedRegularOfficeHourList}
               agendas={agendaList}
               onSelectOfficeHour={handleSelectOfficeHour}
             />
@@ -2924,10 +3205,12 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
           {currentPage === "regular-wizard" && selectedOfficeHour && (
             <RegularApplicationWizard
               officeHour={selectedOfficeHour}
-              officeHours={resolvedRegularOfficeHourList}
+              officeHours={scopedRegularOfficeHourList}
               applications={resolvedApplications}
               consultants={consultants}
               agendas={agendaList}
+              remainingInternalTickets={ticketStats.remainingInternal}
+              remainingExternalTickets={ticketStats.remainingExternal}
               onBack={() => handleNavigate("regular-detail", selectedOfficeHour.id)}
               onSubmit={handleSubmitRegularApplication}
             />
@@ -2948,6 +3231,8 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
           {currentPage === "irregular-wizard" && (
             <IrregularApplicationWizard
               agendas={agendaList}
+              remainingInternalTickets={ticketStats.remainingInternal}
+              remainingExternalTickets={ticketStats.remainingExternal}
               onBack={() => handleNavigate("irregular")}
               onSubmit={handleSubmitIrregularApplication}
             />
@@ -3316,8 +3601,10 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
                 programs={programList}
                 applications={resolvedApplications}
                 agendas={agendaList}
+                companies={companyDirectory}
                 onAddProgram={handleAddProgram}
                 onUpdateProgram={handleUpdateProgram}
+                onUpdateProgramCompanies={handleUpdateProgramCompanies}
                 viewMode="list"
                 onNavigate={handleNavigateLoose}
               />
@@ -3330,8 +3617,10 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
                 programs={programList}
                 applications={resolvedApplications}
                 agendas={agendaList}
+                companies={companyDirectory}
                 onAddProgram={handleAddProgram}
                 onUpdateProgram={handleUpdateProgram}
+                onUpdateProgramCompanies={handleUpdateProgramCompanies}
                 viewMode="management"
                 onNavigate={handleNavigateLoose}
               />

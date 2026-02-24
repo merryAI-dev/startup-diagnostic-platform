@@ -30,10 +30,11 @@ export interface Program {
   usedApplications: number;
   internalTicketLimit?: number;
   externalTicketLimit?: number;
+  companyLimit?: number;
+  companyIds?: string[];
   periodStart?: string; // YYYY-MM-DD
   periodEnd?: string; // YYYY-MM-DD
   weekdays?: ProgramWeekday[];
-  agendaIds?: string[];
 }
 
 // 스타트업 실적 데이터

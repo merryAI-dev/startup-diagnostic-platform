@@ -43,11 +43,11 @@ const adminNavItems: NavItem[] = [
   { id: "admin-applications", label: "신청 관리", icon: ClipboardList },
   { id: "admin-programs", label: "사업별 프로그램", icon: Target },
   { id: "admin-program-list", label: "사업 관리", icon: FileText },
+  { id: "startup-diagnostic", label: "기업 관리", icon: FileText },
   { id: "admin-agendas", label: "아젠다 관리", icon: FileText },
   { id: "admin-consultants", label: "컨설턴트 관리", icon: UserCog },
   { id: "admin-users", label: "사용자 관리", icon: Users },
   { id: "admin-communication", label: "커뮤니케이션 센터", icon: MessageSquareText },
-  { id: "startup-diagnostic", label: "스타트업 진단시트", icon: FileText },
   { id: "pending-reports", label: "미작성 보고서", icon: AlertCircle }, // 추가
 ];
 
