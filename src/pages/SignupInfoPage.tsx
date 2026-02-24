@@ -1118,8 +1118,9 @@ function CompanySignupInfo({
                     </div>
                   </div>
                 </div>
-                <label className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800">
-                  파일 선택
+                <label className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white hover:bg-slate-800">
+                  <UploadCloud className="h-4 w-4" />
+                  파일 업로드
                   <input
                     type="file"
                     multiple
