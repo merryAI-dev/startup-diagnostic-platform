@@ -39,6 +39,19 @@ interface PendingReportItem {
   programColor: string;
 }
 
+type ReportRow = {
+  type: "pending" | "submitted";
+  application: Application;
+  programName: string;
+  programColor: string;
+  programId: string;
+  consultantName: string;
+  statusLabel: "작성" | "미작성";
+  report: OfficeHourReport | null;
+  dueLabel: string;
+  dueOverdue: boolean;
+};
+
 export function PendingReportsDashboard({
   applications,
   reports,
@@ -290,9 +303,8 @@ export function PendingReportsDashboard({
     return Array.from(new Set([...pendingNames, ...submittedNames])).filter(Boolean);
   }, [pendingReports, submittedReports]);
 
-  const reportRows = useMemo(() => {
-    const submittedMap = new Map(submittedReports.map((item) => [item.report.applicationId, item]));
-    const rows = pendingReports.map((item) => ({
+  const reportRows = useMemo<ReportRow[]>(() => {
+    const rows: ReportRow[] = pendingReports.map((item) => ({
       type: "pending" as const,
       application: item.application,
       programName: item.programName,

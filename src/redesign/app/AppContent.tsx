@@ -133,6 +133,7 @@ type RawProfileApprovalDoc = {
   companyId?: string | null;
   createdAt?: unknown;
   activatedAt?: unknown;
+  approvedAt?: unknown;
 };
 
 const APPROVAL_ROLE_VALUES: PendingProfileApproval["role"][] = [
@@ -140,6 +141,16 @@ const APPROVAL_ROLE_VALUES: PendingProfileApproval["role"][] = [
   "company",
   "consultant",
 ];
+
+const USER_ROLE_VALUES: UserRole[] = ["admin", "user", "consultant", "staff"];
+
+function toUserRole(value: unknown, fallback: UserRole = "user"): UserRole {
+  if (typeof value !== "string") return fallback;
+  if (USER_ROLE_VALUES.includes(value as UserRole)) {
+    return value as UserRole;
+  }
+  return fallback;
+}
 
 function toApprovalRole(
   value: unknown,
@@ -474,6 +485,10 @@ function normalizeApplicationDoc(
 }
 
 function normalizeReportDoc(report: OfficeHourReport): OfficeHourReport {
+  const toDateValue = (value: unknown): Date => {
+    const normalized = normalizeDateValue(value);
+    return normalized instanceof Date ? normalized : new Date(normalized);
+  };
   return {
     ...report,
     consultantName: report.consultantName ?? "컨설턴트",
@@ -487,9 +502,9 @@ function normalizeReportDoc(report: OfficeHourReport): OfficeHourReport {
     duration: report.duration ?? 0,
     satisfaction: report.satisfaction ?? 0,
     programId: report.programId ?? "",
-    createdAt: report.createdAt ? normalizeDateValue(report.createdAt) : new Date(),
-    updatedAt: report.updatedAt ? normalizeDateValue(report.updatedAt) : new Date(),
-    completedAt: report.completedAt ? normalizeDateValue(report.completedAt) : undefined,
+    createdAt: report.createdAt ? toDateValue(report.createdAt) : new Date(),
+    updatedAt: report.updatedAt ? toDateValue(report.updatedAt) : new Date(),
+    completedAt: report.completedAt ? toDateValue(report.completedAt) : undefined,
   };
 }
 
@@ -1342,8 +1357,10 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       profileList
         .filter((doc) => doc.active === true || !!doc.approvedAt)
         .map((doc) => {
-          const resolvedRole =
-            doc.role === "company" ? "user" : (doc.role ?? "user");
+          const resolvedRole = toUserRole(
+            doc.role === "company" ? "user" : doc.role,
+            "user"
+          );
           const companyName =
             doc.companyId
               ? companyNameById.get(doc.companyId) ?? "회사명 미입력"
@@ -1357,13 +1374,16 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
             programs: [],
             role: resolvedRole,
             permissions: {
+              canApplyRegular: resolvedRole === "user",
+              canApplyIrregular: resolvedRole === "user",
+              canViewAll: resolvedRole !== "user",
               canViewAllApplications: resolvedRole === "admin" || resolvedRole === "staff",
               canManageConsultants: resolvedRole === "admin",
               canManagePrograms: resolvedRole === "admin",
             },
             status,
-            createdAt: doc.createdAt ?? new Date(),
-            lastLoginAt: doc.activatedAt ?? undefined,
+            createdAt: doc.createdAt ? normalizeDateValue(doc.createdAt) : new Date(),
+            lastLoginAt: doc.activatedAt ? normalizeDateValue(doc.activatedAt) : undefined,
           } satisfies UserWithPermissions;
         })
     );

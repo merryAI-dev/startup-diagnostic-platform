@@ -71,8 +71,7 @@ export function AdminApplications({
   const filteredApplications = applications.filter((app) => {
     const matchesConsultantAgenda = !isConsultantUser
       || (currentConsultantAgendaIds.length > 0
-        && Boolean(app.agendaId)
-        && currentConsultantAgendaIds.includes(app.agendaId));
+        && (app.agendaId ? currentConsultantAgendaIds.includes(app.agendaId) : false));
 
     const normalizedQuery = searchQuery.trim().toLowerCase();
     const matchesSearch = normalizedQuery.length === 0

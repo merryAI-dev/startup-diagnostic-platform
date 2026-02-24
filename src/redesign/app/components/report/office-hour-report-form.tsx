@@ -155,7 +155,7 @@ export function OfficeHourReportForm({
           const uploadBase = `reports/${application.id}/${Date.now()}`;
           uploadedPhotoUrls = await Promise.all(
             pendingPhotos.map(async (item, index) => {
-              const fileRef = ref(storage, `${uploadBase}-${index}-${item.file.name}`);
+              const fileRef = ref(storage!, `${uploadBase}-${index}-${item.file.name}`);
               await uploadBytes(fileRef, item.file);
               return getDownloadURL(fileRef);
             })
