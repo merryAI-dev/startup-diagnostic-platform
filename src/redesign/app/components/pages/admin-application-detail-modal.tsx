@@ -36,6 +36,7 @@ interface AdminApplicationDetailModalProps {
   onClose: () => void;
   onUpdateStatus: (id: string, status: ApplicationStatus) => void;
   onUpdateApplication: (id: string, data: Partial<Application>) => void;
+  readOnly?: boolean;
 }
 
 export function AdminApplicationDetailModal({
@@ -43,6 +44,7 @@ export function AdminApplicationDetailModal({
   onClose,
   onUpdateStatus,
   onUpdateApplication,
+  readOnly = false,
 }: AdminApplicationDetailModalProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editedConsultant, setEditedConsultant] = useState(application.consultant);
@@ -295,58 +297,64 @@ export function AdminApplicationDetailModal({
         <div className="grid flex-1 min-h-0 gap-8 py-4 lg:grid-cols-[560px_minmax(0,1fr)]">
           <div className="min-h-0 overflow-y-auto lg:pr-4 space-y-6">
             {/* Status Management */}
-            <div className="space-y-3">
-              <Label>상태 관리</Label>
-              <div className="flex gap-2 flex-wrap">
-                {application.status !== "confirmed" && application.status !== "completed" && (
-                  <Button
-                    size="sm"
-                    variant="default"
-                    onClick={() => handleStatusChange("confirmed")}
-                    className="transition-colors hover:bg-primary/80 hover:text-primary-foreground"
-                    disabled={application.status === "cancelled"}
-                  >
-                    <CheckCircle2 className="w-4 h-4 mr-2" />
-                    확정
-                  </Button>
-                )}
-                {application.status === "confirmed" && (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => handleStatusChange("review")}
-                  >
-                    <XCircle className="w-4 h-4 mr-2" />
-                    확정 취소
-                  </Button>
-                )}
-              </div>
-            </div>
+            {!readOnly && (
+              <>
+                <div className="space-y-3">
+                  <Label>상태 관리</Label>
+                  <div className="flex gap-2 flex-wrap">
+                    {application.status !== "confirmed" && application.status !== "completed" && (
+                      <Button
+                        size="sm"
+                        variant="default"
+                        onClick={() => handleStatusChange("confirmed")}
+                        className="transition-colors hover:bg-primary/80 hover:text-primary-foreground"
+                        disabled={application.status === "cancelled"}
+                      >
+                        <CheckCircle2 className="w-4 h-4 mr-2" />
+                        확정
+                      </Button>
+                    )}
+                    {application.status === "confirmed" && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handleStatusChange("review")}
+                      >
+                        <XCircle className="w-4 h-4 mr-2" />
+                        확정 취소
+                      </Button>
+                    )}
+                  </div>
+                </div>
 
-            <Separator />
+                <Separator />
+              </>
+            )}
 
             {/* Edit Mode Toggle */}
             <div className="flex items-center justify-between">
               <h3 className="font-semibold">신청 정보</h3>
-              {!isEditing ? (
-                <Button variant="outline" size="sm" onClick={() => setIsEditing(true)}>
-                  수정
-                </Button>
-              ) : (
-                <div className="flex gap-2">
-                  <Button variant="outline" size="sm" onClick={() => setIsEditing(false)}>
-                    취소
+              {!readOnly && (
+                !isEditing ? (
+                  <Button variant="outline" size="sm" onClick={() => setIsEditing(true)}>
+                    수정
                   </Button>
-                  <Button size="sm" onClick={handleSaveEdit}>
-                    저장
-                  </Button>
-                </div>
+                ) : (
+                  <div className="flex gap-2">
+                    <Button variant="outline" size="sm" onClick={() => setIsEditing(false)}>
+                      취소
+                    </Button>
+                    <Button size="sm" onClick={handleSaveEdit}>
+                      저장
+                    </Button>
+                  </div>
+                )
               )}
             </div>
 
             {/* Application Details */}
             <div className="space-y-4">
-              {isEditing ? (
+              {isEditing && !readOnly ? (
                 <>
                   <div className="space-y-2">
                     <Label htmlFor="consultant">담당 컨설턴트</Label>
