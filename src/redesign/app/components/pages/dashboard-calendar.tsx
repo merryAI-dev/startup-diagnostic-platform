@@ -204,11 +204,6 @@ export function DashboardCalendar({
             >
               정기 오피스아워 신청
             </Button>
-            <Button
-              onClick={() => onNavigate("irregular")}
-            >
-              비정기 오피스아워 신청
-            </Button>
           </div>
         </div>
       </div>

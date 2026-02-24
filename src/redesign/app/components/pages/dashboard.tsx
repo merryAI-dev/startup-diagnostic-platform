@@ -1,4 +1,4 @@
-import { Calendar, Clock, ArrowRight, AlertCircle, CalendarClock } from "lucide-react";
+import { Calendar, Clock, ArrowRight, AlertCircle } from "lucide-react";
 import { Button } from "@/redesign/app/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/redesign/app/components/ui/card";
 import { StatusChip } from "@/redesign/app/components/status-chip";
@@ -209,22 +209,13 @@ export function Dashboard({ applications, user, programs, onNavigate }: Dashboar
       {/* Quick actions */}
       <div>
         <h2 className="mb-4">빠른 신청</h2>
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 gap-4">
           <Card className="cursor-pointer hover:border-primary transition-colors" onClick={() => onNavigate("regular")}>
             <CardContent className="p-6">
               <Calendar className="w-8 h-8 text-primary mb-3" />
               <h3 className="mb-1">정기 오피스아워</h3>
               <p className="text-sm text-muted-foreground">
                 월별 정기 일정 신청
-              </p>
-            </CardContent>
-          </Card>
-          <Card className="cursor-pointer hover:border-primary transition-colors" onClick={() => onNavigate("irregular")}>
-            <CardContent className="p-6">
-              <CalendarClock className="w-8 h-8 text-primary mb-3" />
-              <h3 className="mb-1">비정기 오피스아워</h3>
-              <p className="text-sm text-muted-foreground">
-                맞춤형 일정 요청
               </p>
             </CardContent>
           </Card>
