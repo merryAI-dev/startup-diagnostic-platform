@@ -4,10 +4,12 @@ import {
   doc,
   getDoc,
   getDocs,
+  updateDoc,
 } from "firebase/firestore"
 import { getDownloadURL, ref as storageRef } from "firebase/storage"
 import { useEffect, useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
+import { toast } from "sonner"
 import { SELF_ASSESSMENT_SECTIONS } from "@/data/selfAssessment"
 import { db, storage } from "@/firebase/client"
 import type { CompanyInfoRecord } from "@/types/company"
@@ -22,6 +24,14 @@ type CompanySummary = {
   id: string
   name: string | null
   ownerUid: string
+}
+
+type ProgramSummary = {
+  id: string
+  name: string
+  internalTicketLimit?: number
+  externalTicketLimit?: number
+  companyIds?: string[]
 }
 
 export function AdminDashboard({
@@ -41,9 +51,13 @@ export function AdminDashboard({
   const [loadingCompanies, setLoadingCompanies] = useState(true)
   const [loadingDetails, setLoadingDetails] = useState(false)
   const [companyQuery, setCompanyQuery] = useState("")
-  const [activeTab, setActiveTab] = useState<"info" | "assessment" | "report">(
+  const [activeTab, setActiveTab] = useState<"info" | "assessment" | "report" | "officeHours">(
     "info"
   )
+  const [programs, setPrograms] = useState<ProgramSummary[]>([])
+  const [loadingPrograms, setLoadingPrograms] = useState(false)
+  const [ticketDrafts, setTicketDrafts] = useState<Record<string, { internal: string; external: string }>>({})
+  const [savingTickets, setSavingTickets] = useState(false)
   const [activeSectionFilter, setActiveSectionFilter] = useState<string>("문제")
   const [reportForm, setReportForm] = useState({
     companyName: "",
@@ -97,21 +111,58 @@ export function AdminDashboard({
 
   useEffect(() => {
     let mounted = true
+    async function loadPrograms() {
+      setLoadingPrograms(true)
+      try {
+        const snapshot = await getDocs(collection(db, "programs"))
+        if (!mounted) return
+        const list = snapshot.docs.map((docSnap) => {
+          const data = docSnap.data() as {
+            name?: string
+            internalTicketLimit?: number
+            externalTicketLimit?: number
+            companyIds?: string[]
+          }
+          return {
+            id: docSnap.id,
+            name: data.name ?? "사업명 미정",
+            internalTicketLimit: data.internalTicketLimit ?? 0,
+            externalTicketLimit: data.externalTicketLimit ?? 0,
+            companyIds: data.companyIds ?? [],
+          }
+        })
+        setPrograms(list)
+      } finally {
+        if (mounted) {
+          setLoadingPrograms(false)
+        }
+      }
+    }
+    loadPrograms()
+    return () => {
+      mounted = false
+    }
+  }, [])
+
+  useEffect(() => {
+    let mounted = true
     async function loadDetails() {
       if (!selectedCompanyId) {
         setCompanyInfo(null)
         setSelfAssessment({})
         setCompanyFiles([])
+        setTicketDrafts({})
         return
       }
       setLoadingDetails(true)
       try {
-        const [infoSnap, assessmentSnap, filesSnap] = await Promise.all([
+        const [infoSnap, assessmentSnap, filesSnap, companySnap] = await Promise.all([
           getDoc(doc(db, "companies", selectedCompanyId, "companyInfo", "info")),
           getDoc(
             doc(db, "companies", selectedCompanyId, "selfAssessment", "info")
           ),
           getDocs(collection(db, "companies", selectedCompanyId, "files")),
+          getDoc(doc(db, "companies", selectedCompanyId)),
         ])
         if (!mounted) return
         setCompanyInfo(
@@ -145,6 +196,30 @@ export function AdminDashboard({
           })
         )
         setCompanyFiles(files)
+        const overrideData = companySnap.exists()
+          ? (companySnap.data() as { programTicketOverrides?: Record<string, { internal?: number; external?: number }> })
+          : {}
+        const overrides = overrideData.programTicketOverrides ?? {}
+        const participating = programs.filter((program) =>
+          program.companyIds?.includes(selectedCompanyId)
+        )
+        const nextDrafts: Record<string, { internal: string; external: string }> = {}
+        participating.forEach((program) => {
+          const override = overrides[program.id]
+          const internalValue =
+            typeof override?.internal === "number"
+              ? override.internal
+              : (program.internalTicketLimit ?? 0)
+          const externalValue =
+            typeof override?.external === "number"
+              ? override.external
+              : (program.externalTicketLimit ?? 0)
+          nextDrafts[program.id] = {
+            internal: String(internalValue),
+            external: String(externalValue),
+          }
+        })
+        setTicketDrafts(nextDrafts)
       } finally {
         if (mounted) {
           setLoadingDetails(false)
@@ -155,7 +230,7 @@ export function AdminDashboard({
     return () => {
       mounted = false
     }
-  }, [selectedCompanyId])
+  }, [programs, selectedCompanyId])
 
   useEffect(() => {
     const nextCompanyName = companyInfo?.basic?.companyInfo ?? ""
@@ -180,6 +255,47 @@ export function AdminDashboard({
   const investmentRows = useMemo(() => {
     return companyInfo?.investments ?? []
   }, [companyInfo])
+
+  const participatingPrograms = useMemo(() => {
+    if (!selectedCompanyId) return []
+    return programs.filter((program) => program.companyIds?.includes(selectedCompanyId))
+  }, [programs, selectedCompanyId])
+
+  const handleTicketChange = (programId: string, field: "internal" | "external", value: string) => {
+    setTicketDrafts((prev) => ({
+      ...prev,
+      [programId]: {
+        internal: prev[programId]?.internal ?? "0",
+        external: prev[programId]?.external ?? "0",
+        [field]: value.replace(/[^\d]/g, ""),
+      },
+    }))
+  }
+
+  const handleSaveTickets = async () => {
+    if (!selectedCompanyId) return
+    setSavingTickets(true)
+    try {
+      const overrides: Record<string, { internal?: number; external?: number }> = {}
+      participatingPrograms.forEach((program) => {
+        const draft = ticketDrafts[program.id]
+        if (!draft) return
+        const internal = Number(draft.internal || 0)
+        const external = Number(draft.external || 0)
+        const baseInternal = program.internalTicketLimit ?? 0
+        const baseExternal = program.externalTicketLimit ?? 0
+        if (internal !== baseInternal || external !== baseExternal) {
+          overrides[program.id] = { internal, external }
+        }
+      })
+      await updateDoc(doc(db, "companies", selectedCompanyId), {
+        programTicketOverrides: overrides,
+      })
+      toast.success("티켓 수가 변경되었습니다")
+    } finally {
+      setSavingTickets(false)
+    }
+  }
 
   const filteredCompanies = useMemo(() => {
     const query = companyQuery.trim().toLowerCase()
@@ -331,7 +447,9 @@ export function AdminDashboard({
                   ? "기업 정보"
                   : activeTab === "assessment"
                     ? "현황 진단 (자가진단)"
-                    : "기업진단분석보고서"}
+                    : activeTab === "officeHours"
+                      ? "오피스아워"
+                      : "기업진단분석보고서"}
               </div>
               {loadingDetails ? (
                 <span className="text-xs text-slate-400">불러오는 중...</span>
@@ -367,6 +485,16 @@ export function AdminDashboard({
                   }`}
               >
                 분석 보고서
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab("officeHours")}
+                className={`-mb-px border-b-2 px-3 py-2 text-sm font-semibold transition-colors ${activeTab === "officeHours"
+                  ? "border-slate-900 text-slate-900"
+                  : "border-transparent text-slate-500 hover:text-slate-700"
+                  }`}
+              >
+                오피스아워
               </button>
             </div>
             <div className="flex-1 min-h-0 px-4 py-4 flex flex-col">
@@ -732,6 +860,78 @@ export function AdminDashboard({
                       </div>
                     )
                   })()}
+                </div>
+              ) : activeTab === "officeHours" ? (
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-semibold text-slate-800">참여 사업 및 티켓</div>
+                      <div className="text-xs text-slate-500">
+                        기본 티켓은 사업 설정값이며, 기업별로 내부/외부 티켓을 조정할 수 있습니다.
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleSaveTickets}
+                      disabled={savingTickets || loadingPrograms}
+                      className="rounded-lg bg-slate-900 px-4 py-2 text-xs font-semibold text-white disabled:bg-slate-300"
+                    >
+                      {savingTickets ? "저장 중..." : "저장"}
+                    </button>
+                  </div>
+
+                  {loadingPrograms ? (
+                    <div className="rounded-xl border border-slate-100 bg-slate-50 p-4 text-xs text-slate-500">
+                      사업 정보를 불러오는 중입니다.
+                    </div>
+                  ) : participatingPrograms.length === 0 ? (
+                    <div className="rounded-xl border border-slate-100 bg-slate-50 p-4 text-xs text-slate-500">
+                      참여 중인 사업이 없습니다.
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {participatingPrograms.map((program) => {
+                        const draft = ticketDrafts[program.id] ?? {
+                          internal: String(program.internalTicketLimit ?? 0),
+                          external: String(program.externalTicketLimit ?? 0),
+                        }
+                        return (
+                          <div key={program.id} className="rounded-xl border border-slate-200 bg-white p-4">
+                            <div className="flex items-center justify-between gap-4">
+                              <div>
+                                <div className="text-sm font-semibold text-slate-800">
+                                  {program.name}
+                                </div>
+                                <div className="text-xs text-slate-500 mt-1">
+                                  기본 내부 {program.internalTicketLimit ?? 0} · 기본 외부 {program.externalTicketLimit ?? 0}
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-3">
+                                <div className="text-xs text-slate-500">내부</div>
+                                <input
+                                  inputMode="numeric"
+                                  value={draft.internal}
+                                  onChange={(event) =>
+                                    handleTicketChange(program.id, "internal", event.target.value)
+                                  }
+                                  className="w-20 rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-700"
+                                />
+                                <div className="text-xs text-slate-500">외부</div>
+                                <input
+                                  inputMode="numeric"
+                                  value={draft.external}
+                                  onChange={(event) =>
+                                    handleTicketChange(program.id, "external", event.target.value)
+                                  }
+                                  className="w-20 rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-700"
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div className="min-h-0 flex-1 overflow-y-auto space-y-6">

@@ -236,7 +236,7 @@ export function ApplicationDetail({
                 </p>
               </div>
 
-              {application.status === "rejected" && (
+              {(application.status === "rejected" || Boolean(application.rejectionReason)) && (
                 <div>
                   <h3 className="mb-2">거절 사유</h3>
                   <p className="text-sm whitespace-pre-wrap text-muted-foreground">

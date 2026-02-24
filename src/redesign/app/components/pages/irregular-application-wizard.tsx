@@ -1,6 +1,15 @@
 import { useState } from "react";
 import { ArrowLeft, Calendar as CalendarIcon, Check, AlertCircle } from "lucide-react";
 import { Button } from "@/redesign/app/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/redesign/app/components/ui/alert-dialog";
 import { Card, CardContent } from "@/redesign/app/components/ui/card";
 import { Stepper } from "@/redesign/app/components/stepper";
 import { RadioGroup, RadioGroupItem } from "@/redesign/app/components/ui/radio-group";
@@ -16,6 +25,8 @@ import { cn } from "@/redesign/app/components/ui/utils";
 
 interface IrregularApplicationWizardProps {
   agendas: Agenda[];
+  remainingInternalTickets: number;
+  remainingExternalTickets: number;
   onBack: () => void;
   onSubmit: (data: IrregularApplicationFormData) => void;
 }
@@ -41,6 +52,8 @@ const steps = [
 
 export function IrregularApplicationWizard({
   agendas,
+  remainingInternalTickets,
+  remainingExternalTickets,
   onBack,
   onSubmit,
 }: IrregularApplicationWizardProps) {
@@ -53,15 +66,18 @@ export function IrregularApplicationWizard({
   const [sessionFormat, setSessionFormat] = useState<SessionFormat>("online");
   const [requestContent, setRequestContent] = useState("");
   const [files, setFiles] = useState<FileItem[]>([]);
+  const [ticketAlertOpen, setTicketAlertOpen] = useState(false);
+  const [ticketAlertMessage, setTicketAlertMessage] = useState("");
 
-  const remainingInternalSessions = 3; // Mock data
+  const remainingInternalSessions = remainingInternalTickets;
+  const remainingExternalSessions = remainingExternalTickets;
 
   const isStepValid = () => {
     switch (currentStep) {
       case 1:
         return projectName.trim().length > 0;
       case 2:
-        return true;
+        return isInternal ? remainingInternalSessions > 0 : remainingExternalSessions > 0;
       case 3:
         return selectedAgendaId.length > 0;
       case 4:
@@ -72,6 +88,18 @@ export function IrregularApplicationWizard({
   };
 
   const handleNext = () => {
+    if (currentStep === 2) {
+      const remaining = isInternal ? remainingInternalSessions : remainingExternalSessions;
+      if (remaining <= 0) {
+        setTicketAlertMessage(
+          isInternal
+            ? "내부 티켓이 모두 소진되어 내부 오피스아워를 신청할 수 없습니다."
+            : "외부 티켓이 모두 소진되어 외부 오피스아워를 신청할 수 없습니다."
+        );
+        setTicketAlertOpen(true);
+        return;
+      }
+    }
     if (currentStep < 5) {
       setCurrentStep(currentStep + 1);
     }
@@ -98,10 +126,24 @@ export function IrregularApplicationWizard({
     });
   };
 
-  const selectedAgenda = agendas.find((a) => a.id === selectedAgendaId);
+  const activeAgendas = agendas.filter((agenda) => agenda.active !== false);
+  const selectedAgenda = activeAgendas.find((a) => a.id === selectedAgendaId);
 
   return (
     <div className="p-8 space-y-6">
+      <AlertDialog open={ticketAlertOpen} onOpenChange={setTicketAlertOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>티켓이 부족합니다</AlertDialogTitle>
+            <AlertDialogDescription>
+              {ticketAlertMessage}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogAction>확인</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       <div>
         <Button variant="ghost" onClick={onBack} className="mb-4">
           <ArrowLeft className="w-4 h-4 mr-2" />
@@ -156,10 +198,15 @@ export function IrregularApplicationWizard({
                     <div
                       className={cn(
                         "flex items-start space-x-3 p-4 rounded-lg border cursor-pointer transition-colors",
-                        isInternal && "border-primary bg-primary/5"
+                        isInternal && "border-primary bg-primary/5",
+                        remainingInternalSessions <= 0 && "opacity-60 cursor-not-allowed"
                       )}
                     >
-                      <RadioGroupItem value="internal" id="internal" />
+                      <RadioGroupItem
+                        value="internal"
+                        id="internal"
+                        disabled={remainingInternalSessions <= 0}
+                      />
                       <div className="flex-1">
                         <Label htmlFor="internal" className="cursor-pointer">
                           내부 컨설팅
@@ -170,15 +217,25 @@ export function IrregularApplicationWizard({
                         <p className="text-xs text-primary mt-2">
                           잔여 횟수: {remainingInternalSessions}회
                         </p>
+                        {remainingInternalSessions <= 0 && (
+                          <p className="text-xs text-rose-600 mt-1">
+                            내부 티켓이 모두 소진되었습니다.
+                          </p>
+                        )}
                       </div>
                     </div>
                     <div
                       className={cn(
                         "flex items-start space-x-3 p-4 rounded-lg border cursor-pointer transition-colors",
-                        !isInternal && "border-primary bg-primary/5"
+                        !isInternal && "border-primary bg-primary/5",
+                        remainingExternalSessions <= 0 && "opacity-60 cursor-not-allowed"
                       )}
                     >
-                      <RadioGroupItem value="external" id="external" />
+                      <RadioGroupItem
+                        value="external"
+                        id="external"
+                        disabled={remainingExternalSessions <= 0}
+                      />
                       <div className="flex-1">
                         <Label htmlFor="external" className="cursor-pointer">
                           외부 컨설팅
@@ -186,6 +243,14 @@ export function IrregularApplicationWizard({
                         <p className="text-sm text-muted-foreground mt-1">
                           별도 비용 발생 (견적 협의)
                         </p>
+                        <p className="text-xs text-primary mt-2">
+                          잔여 횟수: {remainingExternalSessions}회
+                        </p>
+                        {remainingExternalSessions <= 0 && (
+                          <p className="text-xs text-rose-600 mt-1">
+                            외부 티켓이 모두 소진되었습니다.
+                          </p>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -200,7 +265,7 @@ export function IrregularApplicationWizard({
               <div>
                 <h3 className="mb-4">논의하실 아젠다를 선택하세요</h3>
                 <div className="grid grid-cols-2 gap-3">
-                  {agendas.map((agenda) => (
+                  {activeAgendas.map((agenda) => (
                     <button
                       key={agenda.id}
                       onClick={() => setSelectedAgendaId(agenda.id)}

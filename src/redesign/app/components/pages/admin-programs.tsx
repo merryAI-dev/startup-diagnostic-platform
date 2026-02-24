@@ -27,13 +27,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/redesign/app/components/ui/dialog"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/redesign/app/components/ui/select"
 import { Input } from "@/redesign/app/components/ui/input"
 import { Label } from "@/redesign/app/components/ui/label"
 import { Progress } from "@/redesign/app/components/ui/progress"
@@ -51,8 +44,10 @@ interface AdminProgramsProps {
   programs: Program[]
   applications: Application[]
   agendas: Agenda[]
+  companies: { id: string; name: string; programs?: string[] }[]
   onAddProgram: (data: Omit<Program, "id">) => void
   onUpdateProgram: (id: string, data: Partial<Program>) => void
+  onUpdateProgramCompanies: (id: string, companyIds: string[]) => void
   viewMode?: "management" | "list"
   onNavigate?: (page: string) => void
 }
@@ -62,10 +57,10 @@ type ProgramFormState = {
   description: string
   internalTicketLimit: string
   externalTicketLimit: string
+  companyLimit: string
   targetHours: string
   periodStart: string
   periodEnd: string
-  agendaIds: string[]
 }
 
 type ProgramStats = {
@@ -85,10 +80,10 @@ function createDefaultProgramForm(): ProgramFormState {
     description: "",
     internalTicketLimit: "0",
     externalTicketLimit: "0",
+    companyLimit: "0",
     targetHours: "0",
     periodStart: "",
     periodEnd: "",
-    agendaIds: [],
   }
 }
 
@@ -136,10 +131,10 @@ function toProgramForm(program: Program | null): ProgramFormState {
     description: program.description,
     internalTicketLimit: String(program.internalTicketLimit ?? 0),
     externalTicketLimit: String(program.externalTicketLimit ?? 0),
+    companyLimit: String(program.companyLimit ?? 0),
     targetHours: String(program.targetHours),
     periodStart: program.periodStart ?? "",
     periodEnd: program.periodEnd ?? "",
-    agendaIds: [...(program.agendaIds ?? [])],
   }
 }
 
@@ -147,8 +142,10 @@ export function AdminPrograms({
   programs,
   applications,
   agendas,
+  companies,
   onAddProgram,
   onUpdateProgram,
+  onUpdateProgramCompanies,
   viewMode = "management",
   onNavigate,
 }: AdminProgramsProps) {
@@ -162,8 +159,9 @@ export function AdminPrograms({
   )
   const [selectedProgramId, setSelectedProgramId] = useState<string | null>(null)
   const [editingProgramId, setEditingProgramId] = useState<string | null>(null)
-  const [agendaSelectValue, setAgendaSelectValue] = useState("")
-  const [detailAgendaSelectValue, setDetailAgendaSelectValue] = useState("")
+  const [companySearch, setCompanySearch] = useState("")
+  const [selectedAvailableIds, setSelectedAvailableIds] = useState<string[]>([])
+  const [selectedCompanyIds, setSelectedCompanyIds] = useState<string[]>([])
 
   const applicationsByProgram = useMemo(() => {
     const grouped = new Map<string, Application[]>()
@@ -198,6 +196,10 @@ export function AdminPrograms({
         (app) => app.status === "cancelled"
       ).length
 
+      const mappedCompanies =
+        (program.companyIds && program.companyIds.length > 0)
+          ? program.companyIds.length
+          : companySet.size
       return {
         program,
         totalSessions: programApplications.length,
@@ -205,7 +207,7 @@ export function AdminPrograms({
         pendingSessions,
         confirmedSessions,
         cancelledSessions,
-        uniqueCompanies: companySet.size,
+        uniqueCompanies: mappedCompanies,
         achievementRate: getProgressRate(program.completedHours, program.targetHours),
       }
     })
@@ -251,6 +253,29 @@ export function AdminPrograms({
     () => programs.find((program) => program.id === editingProgramId) ?? null,
     [editingProgramId, programs]
   )
+  const sortedCompanies = useMemo(
+    () => [...companies].sort((a, b) => a.name.localeCompare(b.name)),
+    [companies]
+  )
+  const companyById = useMemo(
+    () => new Map(sortedCompanies.map((company) => [company.id, company])),
+    [sortedCompanies]
+  )
+  const companySearchQuery = companySearch.trim().toLowerCase()
+  const selectedCompanies = useMemo(() => {
+    if (!editingProgram) return []
+    return (editingProgram.companyIds ?? [])
+      .map((id) => companyById.get(id) || { id, name: "회사명 미입력" })
+  }, [companyById, editingProgram])
+  const availableCompanies = useMemo(() => {
+    if (!editingProgram) return []
+    const currentIds = new Set(editingProgram.companyIds ?? [])
+    return sortedCompanies.filter((company) => {
+      if (currentIds.has(company.id)) return false
+      if (!companySearchQuery) return true
+      return company.name.toLowerCase().includes(companySearchQuery)
+    })
+  }, [companySearchQuery, editingProgram, sortedCompanies])
 
   useEffect(() => {
     if (programs.length === 0) {
@@ -270,10 +295,14 @@ export function AdminPrograms({
   useEffect(() => {
     if (!editingProgram) {
       setDetailForm(createDefaultProgramForm())
+      setSelectedAvailableIds([])
+      setSelectedCompanyIds([])
       return
     }
     const nextForm = toProgramForm(editingProgram)
     setDetailForm(nextForm)
+    setSelectedAvailableIds([])
+    setSelectedCompanyIds([])
   }, [editingProgram])
 
   function handleSubmitProgram(event: FormEvent<HTMLFormElement>) {
@@ -284,6 +313,7 @@ export function AdminPrograms({
     const targetHours = numberFromInput(form.targetHours)
     const internalTicketLimit = numberFromInput(form.internalTicketLimit)
     const externalTicketLimit = numberFromInput(form.externalTicketLimit)
+    const companyLimit = numberFromInput(form.companyLimit)
     const randomHue = Math.floor(Math.random() * 360)
 
     onAddProgram({
@@ -296,14 +326,14 @@ export function AdminPrograms({
       usedApplications: 0,
       internalTicketLimit,
       externalTicketLimit,
+      companyLimit,
+      companyIds: [],
       periodStart: form.periodStart || undefined,
       periodEnd: form.periodEnd || undefined,
       weekdays: ["TUE", "THU"],
-      agendaIds: form.agendaIds,
     })
 
     setForm(createDefaultProgramForm())
-    setAgendaSelectValue("")
     setIsAddDialogOpen(false)
   }
 
@@ -316,6 +346,7 @@ export function AdminPrograms({
     const targetHours = numberFromInput(detailForm.targetHours)
     const internalTicketLimit = numberFromInput(detailForm.internalTicketLimit)
     const externalTicketLimit = numberFromInput(detailForm.externalTicketLimit)
+    const companyLimit = numberFromInput(detailForm.companyLimit)
     const maxApplications = internalTicketLimit + externalTicketLimit
 
     onUpdateProgram(editingProgram.id, {
@@ -326,62 +357,53 @@ export function AdminPrograms({
       externalTicketLimit,
       maxApplications,
       usedApplications: Math.min(editingProgram.usedApplications, maxApplications),
+      companyLimit,
       periodStart: detailForm.periodStart || undefined,
       periodEnd: detailForm.periodEnd || undefined,
-      agendaIds: detailForm.agendaIds,
     })
 
     setIsEditDialogOpen(false)
     setEditingProgramId(null)
-    setDetailAgendaSelectValue("")
   }
 
   function openEditDialog(programId: string) {
     setEditingProgramId(programId)
     setIsEditDialogOpen(true)
-    setDetailAgendaSelectValue("")
   }
 
-  function addAgendaToForm(agendaId: string) {
-    if (!agendaId) return
-    setForm((prev) => {
-      if (prev.agendaIds.includes(agendaId)) return prev
-      return {
-        ...prev,
-        agendaIds: [...prev.agendaIds, agendaId],
-      }
-    })
-    setAgendaSelectValue("")
+
+  function addCompanyToProgram(companyId: string) {
+    if (!editingProgram) return
+    const currentIds = editingProgram.companyIds ?? []
+    if (currentIds.includes(companyId)) return
+    const nextCompanyIds = [...currentIds, companyId]
+    onUpdateProgramCompanies(editingProgram.id, nextCompanyIds)
   }
 
-  function removeAgendaFromForm(agendaId: string) {
-    setForm((prev) => {
-      return {
-        ...prev,
-        agendaIds: prev.agendaIds.filter((id) => id !== agendaId),
-      }
-    })
+  function removeCompanyFromProgram(companyId: string) {
+    if (!editingProgram) return
+    const currentIds = editingProgram.companyIds ?? []
+    const nextCompanyIds = currentIds.filter((id) => id !== companyId)
+    onUpdateProgramCompanies(editingProgram.id, nextCompanyIds)
   }
 
-  function addAgendaToDetailForm(agendaId: string) {
-    if (!agendaId) return
-    setDetailForm((prev) => {
-      if (prev.agendaIds.includes(agendaId)) return prev
-      return {
-        ...prev,
-        agendaIds: [...prev.agendaIds, agendaId],
-      }
-    })
-    setDetailAgendaSelectValue("")
+  function addSelectedCompanies() {
+    if (!editingProgram) return
+    if (selectedAvailableIds.length === 0) return
+    const currentIds = editingProgram.companyIds ?? []
+    const nextCompanyIds = Array.from(new Set([...currentIds, ...selectedAvailableIds]))
+    onUpdateProgramCompanies(editingProgram.id, nextCompanyIds)
+    setSelectedAvailableIds([])
   }
 
-  function removeAgendaFromDetailForm(agendaId: string) {
-    setDetailForm((prev) => {
-      return {
-        ...prev,
-        agendaIds: prev.agendaIds.filter((id) => id !== agendaId),
-      }
-    })
+  function removeSelectedCompanies() {
+    if (!editingProgram) return
+    if (selectedCompanyIds.length === 0) return
+    const currentIds = editingProgram.companyIds ?? []
+    const removalSet = new Set(selectedCompanyIds)
+    const nextCompanyIds = currentIds.filter((id) => !removalSet.has(id))
+    onUpdateProgramCompanies(editingProgram.id, nextCompanyIds)
+    setSelectedCompanyIds([])
   }
 
   const pageTitle = isManagementMode ? "사업 관리" : "사업별 프로그램"
@@ -659,7 +681,12 @@ export function AdminPrograms({
                         <Users className="w-3 h-3" />
                         참여 기업
                       </div>
-                      <div className="text-lg font-semibold mt-1">{selectedStats.uniqueCompanies}개사</div>
+                      <div className="text-lg font-semibold mt-1">
+                        {selectedStats.uniqueCompanies}개사
+                        {selectedProgram.companyLimit && selectedProgram.companyLimit > 0
+                          ? ` / ${selectedProgram.companyLimit}개`
+                          : ""}
+                      </div>
                     </div>
                   </div>
 
@@ -679,24 +706,21 @@ export function AdminPrograms({
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
-                      <div className="text-sm font-medium mb-2">연결 아젠다</div>
+                      <div className="text-sm font-medium mb-2">적용 아젠다 (활성)</div>
                       <div className="flex flex-wrap gap-1.5">
-                        {(selectedProgram.agendaIds ?? []).length > 0 ? (
-                          (selectedProgram.agendaIds ?? []).map((agendaId) => {
-                            const agenda = agendas.find((item) => item.id === agendaId)
-                            if (!agenda) return null
-                            return (
-                              <Badge key={agendaId} variant="outline">
+                        {agendas.filter((agenda) => agenda.active !== false).length > 0 ? (
+                          agendas
+                            .filter((agenda) => agenda.active !== false)
+                            .map((agenda) => (
+                              <Badge key={agenda.id} variant="outline">
                                 {agenda.name}
                               </Badge>
-                            )
-                          })
+                            ))
                         ) : (
-                          <span className="text-xs text-muted-foreground">선택된 아젠다가 없습니다.</span>
+                          <span className="text-xs text-muted-foreground">활성 아젠다가 없습니다.</span>
                         )}
                       </div>
                     </div>
-
                   </div>
                 </CardContent>
               </Card>
@@ -835,7 +859,7 @@ export function AdminPrograms({
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
               <div className="space-y-2">
                 <Label>내부 티켓 수</Label>
                 <Input
@@ -865,6 +889,20 @@ export function AdminPrograms({
               </div>
 
               <div className="space-y-2">
+                <Label>참여 기업 수</Label>
+                <Input
+                  inputMode="numeric"
+                  value={form.companyLimit}
+                  onChange={(event) =>
+                    setForm((prev) => ({
+                      ...prev,
+                      companyLimit: event.target.value.replace(/[^\d]/g, ""),
+                    }))
+                  }
+                />
+              </div>
+
+              <div className="space-y-2">
                 <Label>목표 시수(h)</Label>
                 <Input
                   inputMode="numeric"
@@ -877,60 +915,6 @@ export function AdminPrograms({
                   }
                 />
               </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="space-y-2">
-                <Label>연결 아젠다 (다중)</Label>
-                <div className="flex items-center gap-2">
-                  <Select value={agendaSelectValue} onValueChange={setAgendaSelectValue}>
-                    <SelectTrigger className="flex-1">
-                      <SelectValue placeholder="아젠다 선택" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {agendas.map((agenda) => (
-                        <SelectItem key={agenda.id} value={agenda.id}>
-                          {agenda.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    disabled={!agendaSelectValue}
-                    onClick={() => addAgendaToForm(agendaSelectValue)}
-                  >
-                    추가
-                  </Button>
-                </div>
-                <div className="flex flex-wrap gap-1.5">
-                  {form.agendaIds.length > 0 ? (
-                    form.agendaIds.map((agendaId) => {
-                      const agenda = agendas.find((item) => item.id === agendaId)
-                      if (!agenda) return null
-                      return (
-                        <Badge key={agendaId} variant="outline" className="gap-1">
-                          <span>{agenda.name}</span>
-                          <button
-                            type="button"
-                            onClick={() => removeAgendaFromForm(agendaId)}
-                            className="rounded hover:bg-slate-200/70"
-                            aria-label={`${agenda.name} 제거`}
-                          >
-                            <X className="w-3 h-3" />
-                          </button>
-                        </Badge>
-                      )
-                    })
-                  ) : (
-                    <span className="text-xs text-muted-foreground">
-                      선택된 아젠다가 없습니다.
-                    </span>
-                  )}
-                </div>
-              </div>
-
             </div>
 
             <div className="flex justify-end gap-2 pt-2">
@@ -1018,7 +1002,7 @@ export function AdminPrograms({
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
                 <div className="space-y-2">
                   <Label>내부 티켓 수</Label>
                   <Input
@@ -1048,6 +1032,20 @@ export function AdminPrograms({
                 </div>
 
                 <div className="space-y-2">
+                  <Label>참여 기업 수</Label>
+                  <Input
+                    inputMode="numeric"
+                    value={detailForm.companyLimit}
+                    onChange={(event) =>
+                      setDetailForm((prev) => ({
+                        ...prev,
+                        companyLimit: event.target.value.replace(/[^\d]/g, ""),
+                      }))
+                    }
+                  />
+                </div>
+
+                <div className="space-y-2">
                   <Label>목표 시수(h)</Label>
                   <Input
                     inputMode="numeric"
@@ -1062,61 +1060,136 @@ export function AdminPrograms({
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="space-y-2">
-                  <Label>연결 아젠다 (다중)</Label>
-                  <div className="flex items-center gap-2">
-                    <Select
-                      value={detailAgendaSelectValue}
-                      onValueChange={setDetailAgendaSelectValue}
-                    >
-                      <SelectTrigger className="flex-1">
-                        <SelectValue placeholder="아젠다 선택" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {agendas.map((agenda) => (
-                          <SelectItem key={agenda.id} value={agenda.id}>
-                            {agenda.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      disabled={!detailAgendaSelectValue}
-                      onClick={() => addAgendaToDetailForm(detailAgendaSelectValue)}
-                    >
-                      추가
-                    </Button>
+              <div className="rounded-lg border p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="text-sm font-medium flex items-center gap-2">
+                    <Users className="w-4 h-4" />
+                    참여 기업 관리
                   </div>
-                  <div className="flex flex-wrap gap-1.5">
-                    {detailForm.agendaIds.length > 0 ? (
-                      detailForm.agendaIds.map((agendaId) => {
-                        const agenda = agendas.find((item) => item.id === agendaId)
-                        if (!agenda) return null
-                        return (
-                          <Badge key={agendaId} variant="outline" className="gap-1">
-                            <span>{agenda.name}</span>
-                            <button
-                              type="button"
-                              onClick={() => removeAgendaFromDetailForm(agendaId)}
-                              className="rounded hover:bg-slate-200/70"
-                              aria-label={`${agenda.name} 제거`}
-                            >
-                              <X className="w-3 h-3" />
-                            </button>
-                          </Badge>
-                        )
-                      })
-                    ) : (
-                      <span className="text-xs text-muted-foreground">
-                        선택된 아젠다가 없습니다.
-                      </span>
-                    )}
+                  <div className="text-xs text-muted-foreground">
+                    {editingProgram.companyLimit && editingProgram.companyLimit > 0
+                      ? `${selectedCompanies.length} / ${editingProgram.companyLimit}개`
+                      : `${selectedCompanies.length}개`}
                   </div>
                 </div>
 
+                <div className="space-y-2">
+                  <Label>참여 기업 검색</Label>
+                  <Input
+                    value={companySearch}
+                    onChange={(event) => setCompanySearch(event.target.value)}
+                    placeholder="회사명을 입력하세요"
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-[1fr_auto_1fr] gap-4">
+                  <div className="space-y-2">
+                    <div className="text-xs text-muted-foreground">선택 전 기업</div>
+                    <div className="h-52 overflow-y-auto rounded-lg border border-slate-200 bg-white">
+                      {availableCompanies.length === 0 ? (
+                        <div className="p-3 text-xs text-muted-foreground">
+                          추가 가능한 기업이 없습니다.
+                        </div>
+                      ) : (
+                        availableCompanies.map((company) => {
+                          const checked = selectedAvailableIds.includes(company.id)
+                          return (
+                            <label
+                              key={company.id}
+                              className="flex items-center gap-2 px-3 py-2 border-b border-slate-200/70 last:border-b-0 text-sm text-slate-600 cursor-pointer hover:bg-slate-50/60"
+                            >
+                              <input
+                                type="checkbox"
+                                className="h-4 w-4 rounded border-slate-200 text-slate-500 focus:ring-slate-300"
+                                checked={checked}
+                                onChange={(event) => {
+                                  setSelectedAvailableIds((prev) => {
+                                    if (event.target.checked) {
+                                      return [...prev, company.id]
+                                    }
+                                    return prev.filter((id) => id !== company.id)
+                                  })
+                                }}
+                              />
+                              <span>{company.name}</span>
+                            </label>
+                          )
+                        })
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col items-center justify-center gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
+                      disabled={
+                        selectedAvailableIds.length === 0
+                        || ((editingProgram.companyLimit ?? 0) > 0
+                          && selectedCompanies.length >= (editingProgram.companyLimit ?? 0))
+                      }
+                      onClick={addSelectedCompanies}
+                    >
+                      →
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
+                      disabled={selectedCompanyIds.length === 0}
+                      onClick={removeSelectedCompanies}
+                    >
+                      ←
+                    </Button>
+                  </div>
+
+                  <div className="space-y-2">
+                    <div className="text-xs text-muted-foreground">선택된 기업</div>
+                    <div className="h-52 overflow-y-auto rounded-lg border border-slate-200 bg-white">
+                      {selectedCompanies.length === 0 ? (
+                        <div className="p-3 text-xs text-muted-foreground">
+                          아직 참여 기업이 없습니다.
+                        </div>
+                      ) : (
+                        selectedCompanies.map((company) => {
+                          const checked = selectedCompanyIds.includes(company.id)
+                          return (
+                            <label
+                              key={company.id}
+                              className="flex items-center gap-2 px-3 py-2 border-b border-slate-200/70 last:border-b-0 text-sm text-slate-600 cursor-pointer hover:bg-slate-50/60"
+                            >
+                              <input
+                                type="checkbox"
+                                className="h-4 w-4 rounded border-slate-200 text-slate-500 focus:ring-slate-300"
+                                checked={checked}
+                                onChange={(event) => {
+                                  setSelectedCompanyIds((prev) => {
+                                    if (event.target.checked) {
+                                      return [...prev, company.id]
+                                    }
+                                    return prev.filter((id) => id !== company.id)
+                                  })
+                                }}
+                              />
+                              <span className="flex-1">{company.name}</span>
+                              <button
+                                type="button"
+                                onClick={() => removeCompanyFromProgram(company.id)}
+                                className="rounded hover:bg-slate-200/70"
+                                aria-label={`${company.name} 제거`}
+                              >
+                                <X className="w-3 h-3" />
+                              </button>
+                            </label>
+                          )
+                        })
+                      )}
+                    </div>
+                  </div>
+                </div>
               </div>
 
               <div className="flex justify-end items-center gap-2 pt-2">

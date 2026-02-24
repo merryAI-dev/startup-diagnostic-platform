@@ -33,14 +33,7 @@ export function RegularOfficeHoursCalendar({
   const calendarDays = eachDayOfInterval({ start: calendarStart, end: calendarEnd });
 
   // 필터링된 오피스아워
-  const filteredOfficeHours = officeHours.filter((oh) => {
-    const agendaMatch =
-      selectedAgendaIds.length === 0
-      || (oh.agendaIds ?? []).some((agendaId) =>
-        selectedAgendaIds.includes(agendaId)
-      );
-    return agendaMatch;
-  });
+  const filteredOfficeHours = officeHours;
   const hasSessions = filteredOfficeHours.length > 0;
 
   // 날짜별로 오피스아워를 펼쳐서 배열로 만들기
