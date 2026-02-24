@@ -97,7 +97,6 @@ export function AdminAgendas({
       description: detailDescription.trim(),
       category: scopeLabel(detailScope),
     })
-    setIsEditingDetail(false)
   }
 
   return (
