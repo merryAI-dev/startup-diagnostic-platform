@@ -532,6 +532,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     "admin-programs",
     "pending-reports",
   ]);
+  const needsUsers = isPage(["admin-users"]);
   const needsRegularOfficeHours = isPage([
     "regular",
     "regular-detail",
@@ -547,7 +548,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     || isPage(["admin-agendas", "admin-consultants", "admin-programs"]);
   const needsConsultants =
     resolvedRole === "consultant"
-    || isPage(["consultants", "regular-wizard", "admin-consultants"]);
+    || isPage(["consultants", "regular-wizard", "admin-consultants", "admin-users"]);
   const needsOfficeHourSlots = needsApplications || needsRegularOfficeHours;
   const needsCompanyLookup = isAdminLikeRole && needsApplications;
   const needsCompanyDirectory = isPage(["admin-programs", "admin-program-list"]);
@@ -562,7 +563,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       enabled:
         isFirebaseConfigured
         && !isCompanyInfoRoute
-        && (needsCompanyLookup || needsCompanyDirectory),
+        && (needsCompanyLookup || needsCompanyDirectory || needsUsers),
     }
   );
   const { data: ownedCompanyDocs } = useFirestoreCollection<{ id: string; ownerUid?: string | null }>(
@@ -809,6 +810,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
   const [reportPopupDismissed, setReportPopupDismissed] = useState<Record<string, number>>({});
   const reportPopupOpenedRef = useRef(false);
   const reportPopupSessionKey = "office-hour-report-popup-shown";
+  const [profileList, setProfileList] = useState<RawProfileApprovalDoc[]>([]);
 
   // 새로운 기능을 위한 상태
   const [notifications, setNotifications] = useState<Notification[]>(mockNotifications);
@@ -861,6 +863,16 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
         && resolvedRole === "admin"
         && !isCompanyInfoRoute
         && isPage(["admin-users"]),
+    }
+  );
+  const { data: profileDocs } = useFirestoreCollection<RawProfileApprovalDoc>(
+    "profiles",
+    {
+      enabled:
+        isFirebaseConfigured
+        && resolvedRole === "admin"
+        && !isCompanyInfoRoute
+        && needsUsers,
     }
   );
 
@@ -1235,8 +1247,8 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     if (!isFirebaseConfigured || resolvedRole !== "admin") {
       return [];
     }
-    return profileApprovalDocs
-      .filter((doc) => doc.active === false)
+    return profileList
+      .filter((doc) => doc.active !== true && !doc.approvedAt)
       .map((doc) => ({
         id: doc.id,
         email: doc.email ?? "",
@@ -1253,7 +1265,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
           : undefined,
       }))
       .sort((a, b) => getTimeValue(b.createdAt) - getTimeValue(a.createdAt));
-  }, [profileApprovalDocs, resolvedRole]);
+  }, [isFirebaseConfigured, profileList, resolvedRole]);
 
   useEffect(() => {
     if (!isFirebaseConfigured) return;
@@ -1278,6 +1290,52 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       }))
     );
   }, [agendaDocs]);
+
+  useEffect(() => {
+    if (!isFirebaseConfigured) return;
+    if (!needsUsers) return;
+    if (profileDocs.length > 0) {
+      setProfileList(profileDocs);
+      return;
+    }
+    if (profileApprovalDocs.length > 0) {
+      setProfileList(profileApprovalDocs);
+    }
+  }, [isFirebaseConfigured, needsUsers, profileApprovalDocs, profileDocs]);
+
+  useEffect(() => {
+    if (!isFirebaseConfigured) return;
+    if (!needsUsers) return;
+    setUsers(
+      profileList
+        .filter((doc) => doc.active === true || !!doc.approvedAt)
+        .map((doc) => {
+          const resolvedRole =
+            doc.role === "company" ? "user" : (doc.role ?? "user");
+          const companyName =
+            doc.companyId
+              ? companyNameById.get(doc.companyId) ?? "회사명 미입력"
+              : "회사명 미입력";
+          const status = doc.active ? "active" : "inactive";
+          return {
+            id: doc.id,
+            email: doc.email ?? "",
+            companyName,
+            programName: "MYSC",
+            programs: [],
+            role: resolvedRole,
+            permissions: {
+              canViewAllApplications: resolvedRole === "admin" || resolvedRole === "staff",
+              canManageConsultants: resolvedRole === "admin",
+              canManagePrograms: resolvedRole === "admin",
+            },
+            status,
+            createdAt: doc.createdAt ?? new Date(),
+            lastLoginAt: doc.activatedAt ?? undefined,
+          } satisfies UserWithPermissions;
+        })
+    );
+  }, [companyNameById, isFirebaseConfigured, needsUsers, profileList]);
 
   useEffect(() => {
     if (!isFirebaseConfigured) return;
@@ -3040,6 +3098,26 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     setUsers(
       users.map((u) => (u.id === id ? { ...u, ...data } : u))
     );
+    if (isFirebaseConfigured) {
+      const nextStatus = data.status ?? "active";
+      profileCrud.update(id, {
+        active: nextStatus === "active",
+      }).then((ok) => {
+        if (!ok) {
+          toast.error("사용자 정보 저장에 실패했습니다");
+          return;
+        }
+        setProfileList((prev) =>
+          prev.map((item) =>
+            item.id === id
+              ? { ...item, active: nextStatus === "active" }
+              : item
+          )
+        );
+        toast.success("사용자 정보가 업데이트되었습니다");
+      });
+      return;
+    }
     toast.success("사용자 정보가 업데이트되었습니다");
   };
 
@@ -3081,6 +3159,20 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     }
 
     toast.success("계정 승인이 완료되었습니다");
+    setProfileList((prev) =>
+      prev.map((item) =>
+        item.id === pendingProfile.id
+          ? {
+              ...item,
+              role: approvedRole,
+              requestedRole: approvedRole,
+              active: true,
+              activatedAt: new Date(),
+              approvedAt: new Date(),
+            }
+          : item
+      )
+    );
   };
 
   const handleAddTemplate = (data: Omit<MessageTemplate, "id" | "createdAt" | "updatedAt">) => {
@@ -3573,6 +3665,11 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
             <ProtectedRoute requiredRole="admin">
               <AdminUsers
                 users={users}
+                consultants={consultants.map((consultant) => ({
+                  id: consultant.id,
+                  name: consultant.name,
+                  email: consultant.email,
+                }))}
                 onUpdateUser={handleUpdateUser}
                 onAddUser={handleAddUser}
                 pendingApprovals={pendingProfileApprovals}

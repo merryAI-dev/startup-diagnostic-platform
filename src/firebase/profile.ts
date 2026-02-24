@@ -198,30 +198,31 @@ export async function createUserProfile(
     )
   }
   const ref = doc(db, collectionName, uid)
-  await setDoc(ref, {
+  const profileData: Record<string, any> = {
     role,
     requestedRole,
     active: options?.active ?? false,
     email: email ?? null,
     companyId,
     createdAt: serverTimestamp(),
-    consents: options?.consents
-      ? {
-          privacy: options.consents.privacy
-            ? {
-                ...options.consents.privacy,
-                consentedAt: serverTimestamp(),
-              }
-            : undefined,
-          marketing: options.consents.marketing
-            ? {
-                ...options.consents.marketing,
-                consentedAt: serverTimestamp(),
-              }
-            : undefined,
-        }
-      : undefined,
-  })
+  }
+  if (options?.consents) {
+    profileData.consents = {
+      privacy: options.consents.privacy
+        ? {
+            ...options.consents.privacy,
+            consentedAt: serverTimestamp(),
+          }
+        : undefined,
+      marketing: options.consents.marketing
+        ? {
+            ...options.consents.marketing,
+            consentedAt: serverTimestamp(),
+          }
+        : undefined,
+    }
+  }
+  await setDoc(ref, profileData)
 
   if (options?.consents) {
     const consentEntries = ([
