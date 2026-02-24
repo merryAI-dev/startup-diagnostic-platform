@@ -96,8 +96,11 @@ export function FileUpload({
             className="hidden"
             accept=".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.jpg,.jpeg,.png"
           />
-          <Button type="button" variant="outline" size="sm" asChild>
-            <span>파일 선택</span>
+          <Button type="button" variant="outline" asChild>
+            <span className="inline-flex items-center gap-2 px-6 py-3 text-sm font-semibold">
+              <Upload className="w-4 h-4" />
+              파일 업로드
+            </span>
           </Button>
         </label>
       </div>
