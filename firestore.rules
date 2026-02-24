@@ -6,20 +6,23 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    function isAdmin() {
+    function isActiveUser() {
       return isSignedIn()
-        && get(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.role == "admin"
         && get(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.active == true;
+    }
+
+    function isAdmin() {
+      return isActiveUser()
+        && get(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.role == "admin"
     }
 
     function isConsultant() {
-      return isSignedIn()
+      return isActiveUser()
         && get(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.role == "consultant"
-        && get(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.active == true;
     }
 
     function isCompanyOwner(companyId) {
-      return isSignedIn()
+      return isActiveUser()
         && get(/databases/$(database)/documents/companies/$(companyId)).data.ownerUid == request.auth.uid;
     }
 
@@ -53,48 +56,48 @@ service cloud.firestore {
     }
 
     match /companies/{companyId} {
-      allow read: if isSignedIn()
+      allow read: if isActiveUser()
         && (isCompanyOwner(companyId) || isAdmin());
-      allow create: if isSignedIn()
+      allow create: if isActiveUser()
         && request.resource.data.ownerUid == request.auth.uid;
-      allow update: if isSignedIn()
+      allow update: if isActiveUser()
         && isCompanyOwner(companyId)
         && request.resource.data.ownerUid == resource.data.ownerUid;
       allow delete: if false;
     }
 
     match /companies/{companyId}/companyInfo/{docId} {
-      allow read: if isSignedIn()
+      allow read: if isActiveUser()
         && (isCompanyOwner(companyId) || isAdmin());
-      allow create, update: if isSignedIn()
+      allow create, update: if isActiveUser()
         && isCompanyOwner(companyId);
       allow delete: if false;
     }
 
     match /companies/{companyId}/selfAssessment/{docId} {
-      allow read: if isSignedIn()
+      allow read: if isActiveUser()
         && (isCompanyOwner(companyId) || isAdmin());
-      allow create, update: if isSignedIn()
+      allow create, update: if isActiveUser()
         && isCompanyOwner(companyId);
       allow delete: if false;
     }
 
     match /companies/{companyId}/files/{fileId} {
-      allow read: if isSignedIn()
+      allow read: if isActiveUser()
         && (isCompanyOwner(companyId) || isAdmin());
-      allow create: if isSignedIn()
+      allow create: if isActiveUser()
         && isCompanyOwner(companyId)
         && request.resource.data.createdByUid == request.auth.uid
         && request.resource.data.storagePath is string
         && request.resource.data.name is string
         && request.resource.data.size is int;
-      allow delete: if isSignedIn()
+      allow delete: if isActiveUser()
         && (isCompanyOwner(companyId) || isAdmin());
       allow update: if false;
     }
 
     match /consultants/{consultantId} {
-      allow read: if isSignedIn();
+      allow read: if isActiveUser();
       allow create: if isAdmin()
         || (
           isConsultant()
@@ -122,28 +125,28 @@ service cloud.firestore {
     }
 
     match /agendas/{agendaId} {
-      allow read: if isSignedIn();
+      allow read: if isActiveUser();
       allow create, update, delete: if isAdmin();
     }
 
     match /programs/{programId} {
-      allow read: if isSignedIn();
+      allow read: if isActiveUser();
       allow create, update, delete: if isAdmin();
     }
 
     match /officeHourSlots/{slotId} {
-      allow read: if isSignedIn();
+      allow read: if isActiveUser();
       allow create, update, delete: if isAdmin() || isConsultant();
     }
 
     match /officeHourApplications/{applicationId} {
-      allow read: if isSignedIn();
-      allow create: if isSignedIn()
+      allow read: if isActiveUser();
+      allow create: if isActiveUser()
         && request.resource.data.createdByUid == request.auth.uid;
       allow update: if isAdmin()
         || isConsultant()
         || (
-          isSignedIn()
+          isActiveUser()
           && resource.data.createdByUid == request.auth.uid
           && request.resource.data.createdByUid == resource.data.createdByUid
           && request.resource.data.status == "cancelled"
@@ -152,9 +155,9 @@ service cloud.firestore {
     }
 
     match /consents/{consentId} {
-      allow read: if isSignedIn()
+      allow read: if isActiveUser()
         && (request.auth.uid == resource.data.userId || isAdmin());
-      allow create: if isSignedIn()
+      allow create: if isActiveUser()
         && request.resource.data.userId == request.auth.uid
         && request.resource.data.type in ["privacy", "marketing"]
         && request.resource.data.consented is bool

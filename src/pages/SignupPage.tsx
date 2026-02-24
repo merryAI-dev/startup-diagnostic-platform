@@ -22,7 +22,9 @@ function getSignupErrorMessage(error: any) {
   if (code === "auth/weak-password") {
     return "비밀번호가 너무 약합니다. 더 강한 비밀번호를 입력해주세요."
   }
-  return "회원가입에 실패했습니다. 입력값을 확인하세요."
+  return code
+    ? `회원가입에 실패했습니다. (${code})`
+    : "회원가입에 실패했습니다. 입력값을 확인하세요."
 }
 
 const PENDING_SIGNUP_KEY = "pending-signup";
@@ -61,11 +63,13 @@ export function SignupPage() {
         await createUserProfile(
           result.user.uid,
           "admin",
-          null,
+          "admin",
           result.user.email,
-          { active: true }
+          { active: false }
         )
-        navigate("/admin")
+        await signOutUser()
+        toast.success("관리자 승인 대기 중입니다. 승인 후 로그인해주세요.")
+        navigate("/login")
         return
       }
       sessionStorage.setItem(
@@ -103,11 +107,13 @@ export function SignupPage() {
         await createUserProfile(
           result.user.uid,
           "admin",
-          null,
+          "admin",
           result.user.email,
-          { active: true }
+          { active: false }
         )
-        navigate("/admin")
+        await signOutUser()
+        toast.success("관리자 승인 대기 중입니다. 승인 후 로그인해주세요.")
+        navigate("/login")
         return
       }
       navigate(`/signup-info?role=${role}`)
