@@ -972,6 +972,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       const uid = firebaseUser?.uid ?? user.id;
       const email = firebaseUser?.email ?? user.email;
       return resolvedApplications.filter((application) => {
+        if (application.status === "cancelled") return false;
         if (application.createdByUid && uid) {
           return application.createdByUid === uid;
         }
@@ -1142,34 +1143,8 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
   useEffect(() => {
     if (!needsApplications) return;
     if (cancelledMigrationRan.current) return;
-    if (applications.length === 0) return;
-    const cancelledApps = applications.filter((app) => app.status === "cancelled");
-    if (cancelledApps.length === 0) {
-      cancelledMigrationRan.current = true;
-      return;
-    }
-
     cancelledMigrationRan.current = true;
-    const updatedAt = new Date();
-    setApplications((prev) =>
-      prev.map((app) =>
-        app.status === "cancelled" ? { ...app, status: "review", updatedAt } : app
-      )
-    );
-
-    if (!isFirebaseConfigured) return;
-
-    Promise.all(
-      cancelledApps.map((app) =>
-        officeHourApplicationCrud.update(app.id, {
-          status: "review",
-          updatedAt,
-        })
-      )
-    ).catch(() => {
-      toast.error("취소 상태 복구에 실패했습니다");
-    });
-  }, [applications, isFirebaseConfigured, officeHourApplicationCrud, needsApplications]);
+  }, [needsApplications]);
 
   useEffect(() => {
     if (!needsApplications) return;
@@ -1516,6 +1491,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
         app.id !== applicationId
         && app.officeHourSlotId === slotId
         && app.status !== "cancelled"
+        && app.status !== "rejected"
     );
   };
 
@@ -1787,7 +1763,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     const targetApplication = applications.find((app) => app.id === id);
     if (!targetApplication) return;
 
-    const nextStatus = status === "cancelled" ? "review" : status;
+    const nextStatus = status;
     const updatedAt = new Date();
     const fallbackConsultantName =
       currentConsultant?.name
@@ -1804,14 +1780,23 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       consultant: fallbackConsultantName,
       consultantId: fallbackConsultantId,
     } : {};
-    const shouldClearConsultant = nextStatus === "review";
+    const shouldClearConsultant =
+      nextStatus === "review" || nextStatus === "cancelled" || nextStatus === "rejected";
     const clearAssignmentPatch = shouldClearConsultant ? {
       consultant: "담당자 배정 중",
       consultantId: "",
     } : {};
+    const rejectionPatch = nextStatus === "rejected" ? {} : { rejectionReason: undefined };
     const nextApplications = applications.map((app) =>
       app.id === id
-        ? { ...app, status: nextStatus, updatedAt, ...assignmentPatch, ...clearAssignmentPatch }
+        ? {
+          ...app,
+          status: nextStatus,
+          updatedAt,
+          ...assignmentPatch,
+          ...clearAssignmentPatch,
+          ...rejectionPatch,
+        }
         : app
     );
 
@@ -1821,6 +1806,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
         updatedAt,
         ...assignmentPatch,
         ...clearAssignmentPatch,
+        ...rejectionPatch,
       };
       if (nextStatus === "completed") {
         payload.completedAt = new Date();
@@ -1837,7 +1823,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     const slotId = targetApplication.officeHourSlotId;
     if (!slotId) return;
 
-    if (status === "cancelled") {
+    if (status === "cancelled" || status === "rejected") {
       const shouldOpen = !hasOtherActiveApplicationsForSlot(slotId, id, nextApplications);
       if (!shouldOpen) return;
       if (isFirebaseConfigured) {
@@ -1948,6 +1934,80 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     toast.success("수락이 완료되어 확정되었습니다.");
   };
 
+  const handleRejectApplication = async (id: string, reason: string) => {
+    if (resolvedRole !== "consultant") return;
+    if (!currentConsultant) {
+      toast.error("컨설턴트 정보를 확인할 수 없습니다");
+      return;
+    }
+
+    const targetApplication = applications.find((app) => app.id === id);
+    if (!targetApplication) return;
+
+    const isAcceptableStatus =
+      targetApplication.status === "pending" || targetApplication.status === "review";
+    const isUnassigned =
+      !targetApplication.consultantId
+      && (!targetApplication.consultant || targetApplication.consultant === "담당자 배정 중");
+    const isAssignedToCurrent =
+      targetApplication.consultantId === currentConsultant.id
+      || normalizeConsultantDisplayName(targetApplication.consultant)
+        === normalizeConsultantDisplayName(currentConsultant.name);
+
+    if (!isAcceptableStatus || !(isUnassigned || isAssignedToCurrent)) {
+      toast.error("거절할 수 있는 상태가 아닙니다");
+      return;
+    }
+
+    const updatedAt = new Date();
+    const rejectionReason = reason.trim();
+    if (!rejectionReason) {
+      toast.error("거절 사유를 입력해주세요");
+      return;
+    }
+
+    const nextApplication = {
+      ...targetApplication,
+      status: "rejected" as const,
+      consultant: currentConsultant.name,
+      consultantId: currentConsultant.id,
+      rejectionReason,
+      updatedAt,
+    };
+    const nextApplications = applications.map((app) =>
+      app.id === id ? nextApplication : app
+    );
+
+    setApplications(nextApplications);
+    if (isFirebaseConfigured) {
+      const updated = await officeHourApplicationCrud.update(id, {
+        status: "rejected",
+        consultant: currentConsultant.name,
+        consultantId: currentConsultant.id,
+        rejectionReason,
+        updatedAt,
+      });
+      if (!updated) {
+        toast.error("거절 처리에 실패했습니다");
+        return;
+      }
+    }
+
+    const slotId = targetApplication.officeHourSlotId;
+    if (slotId && !hasOtherActiveApplicationsForSlot(slotId, id, nextApplications)) {
+      if (isFirebaseConfigured) {
+        const slotUpdated = await officeHourSlotCrud.update(slotId, { status: "open" });
+        if (!slotUpdated) {
+          toast.error("슬롯 상태 업데이트에 실패했습니다");
+        }
+      } else {
+        applyLocalSlotStatus(slotId, "open");
+      }
+    }
+
+    toast.success("거절 처리되었습니다.");
+  };
+
   const handleConfirmApplication = async (id: string) => {
     if (resolvedRole !== "consultant") return;
     if (!currentConsultant) {
@@ -2041,6 +2101,52 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     }
 
     toast.success("일정이 확정되었습니다.");
+  };
+
+  const handleUpdateRejectionReason = async (id: string, reason: string) => {
+    if (resolvedRole !== "consultant") return;
+    if (!currentConsultant) {
+      toast.error("컨설턴트 정보를 확인할 수 없습니다");
+      return;
+    }
+
+    const targetApplication = applications.find((app) => app.id === id);
+    if (!targetApplication) return;
+
+    const isRejected = targetApplication.status === "rejected";
+    const isAssignedToCurrent =
+      targetApplication.consultantId === currentConsultant.id
+      || normalizeConsultantDisplayName(targetApplication.consultant)
+        === normalizeConsultantDisplayName(currentConsultant.name);
+    if (!isRejected || !isAssignedToCurrent) {
+      toast.error("거절 사유를 수정할 수 없습니다");
+      return;
+    }
+
+    const nextReason = reason.trim();
+    if (!nextReason) {
+      toast.error("거절 사유를 입력해주세요");
+      return;
+    }
+
+    const updatedAt = new Date();
+    const nextApplications = applications.map((app) =>
+      app.id === id ? { ...app, rejectionReason: nextReason, updatedAt } : app
+    );
+
+    setApplications(nextApplications);
+    if (isFirebaseConfigured) {
+      const updated = await officeHourApplicationCrud.update(id, {
+        rejectionReason: nextReason,
+        updatedAt,
+      });
+      if (!updated) {
+        toast.error("거절 사유 수정에 실패했습니다");
+        return;
+      }
+    }
+
+    toast.success("거절 사유가 수정되었습니다");
   };
 
   const handleUpdateApplication = async (id: string, data: Partial<Application>) => {
@@ -2869,6 +2975,12 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
               onCancelApplication={() =>
                 handleCancelApplication(selectedApplication.id)
               }
+              onRejectApplication={(reason) =>
+                handleRejectApplication(selectedApplication.id, reason)
+              }
+              onUpdateRejectionReason={(reason) =>
+                handleUpdateRejectionReason(selectedApplication.id, reason)
+              }
               currentUserRole={resolvedRole}
               currentConsultantId={currentConsultant?.id ?? null}
               currentConsultantName={currentConsultant?.name ?? null}
@@ -3002,6 +3114,8 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
               onNavigateToApplication={(id) => {
                 handleNavigate("application", id);
               }}
+              onRequestApplication={handleRequestApplication}
+              onRejectApplication={handleRejectApplication}
             />
           )}
 
@@ -3083,6 +3197,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
                   handleNavigate("application", id);
                 }}
                 onRequestApplication={handleRequestApplication}
+                onRejectApplication={handleRejectApplication}
                 onConfirmApplication={handleConfirmApplication}
                 currentConsultantId={currentConsultant?.id ?? null}
                 currentConsultantName={currentConsultant?.name ?? null}

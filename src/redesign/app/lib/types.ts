@@ -2,6 +2,7 @@ export type ApplicationStatus =
   | "pending"
   | "review"
   | "confirmed"
+  | "rejected"
   | "cancelled"
   | "completed";
 
@@ -178,6 +179,7 @@ export interface Application {
   sessionFormat: SessionFormat;
   agenda: string;
   requestContent: string;
+  rejectionReason?: string;
   attachments?: string[];
   applicantName?: string;
   applicantEmail?: string;

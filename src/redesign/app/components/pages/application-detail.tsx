@@ -3,6 +3,7 @@ import { Button } from "@/redesign/app/components/ui/button";
 import { Card, CardContent } from "@/redesign/app/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/redesign/app/components/ui/tabs";
 import { Textarea } from "@/redesign/app/components/ui/textarea";
+import { Label } from "@/redesign/app/components/ui/label";
 import { StatusChip } from "@/redesign/app/components/status-chip";
 import { Application, Message } from "@/redesign/app/lib/types";
 import { format } from "date-fns";
@@ -27,6 +28,8 @@ interface ApplicationDetailProps {
   onBack: () => void;
   onSendMessage: (content: string, files: FileItem[]) => void;
   onCancelApplication: () => void;
+  onRejectApplication?: (reason: string) => void;
+  onUpdateRejectionReason?: (reason: string) => void;
   currentUserRole?: string;
   currentConsultantId?: string | null;
   currentConsultantName?: string | null;
@@ -38,6 +41,8 @@ export function ApplicationDetail({
   onBack,
   onSendMessage,
   onCancelApplication,
+  onRejectApplication,
+  onUpdateRejectionReason,
   currentUserRole,
   currentConsultantId,
   currentConsultantName,
@@ -45,6 +50,12 @@ export function ApplicationDetail({
   const [messageContent, setMessageContent] = useState("");
   const [messageFiles, setMessageFiles] = useState<FileItem[]>([]);
   const [showCancelDialog, setShowCancelDialog] = useState(false);
+  const [showRejectDialog, setShowRejectDialog] = useState(false);
+  const [rejectReason, setRejectReason] = useState("");
+  const [showEditRejectDialog, setShowEditRejectDialog] = useState(false);
+  const [editRejectReason, setEditRejectReason] = useState(
+    application.rejectionReason ?? ""
+  );
 
   const handleSendMessage = () => {
     if (messageContent.trim()) {
@@ -60,10 +71,12 @@ export function ApplicationDetail({
     { label: "사전 질문", content: "미팅 전 사전 질문 드립니다.\n\n질문 내용:" },
   ];
 
-  const canCancel = application.status === "pending" || application.status === "review";
+  const isConsultantUser = currentUserRole === "consultant";
+  const isCompanyUser = currentUserRole === "user" || currentUserRole === "company";
+  const canCancel =
+    isCompanyUser && (application.status === "pending" || application.status === "review");
   const shouldShowConsultant = (consultant?: string) =>
     Boolean(consultant && consultant !== "담당자 배정 중");
-  const isConsultantUser = currentUserRole === "consultant";
   const normalizeConsultantName = (value?: string | null) =>
     (value ?? "").replace(/\s*컨설턴트\s*$/u, "").trim().toLowerCase();
   const isAssignedToCurrentConsultant = () => {
@@ -75,6 +88,19 @@ export function ApplicationDetail({
     const currentName = normalizeConsultantName(currentConsultantName);
     return appName !== "" && currentName !== "" && appName === currentName;
   };
+  const isUnassigned =
+    !application.consultantId
+    && (!application.consultant || application.consultant === "담당자 배정 중");
+  const canReject =
+    isConsultantUser
+    && (application.status === "pending" || application.status === "review")
+    && (isUnassigned || isAssignedToCurrentConsultant())
+    && Boolean(onRejectApplication);
+  const canEditRejectReason =
+    isConsultantUser
+    && application.status === "rejected"
+    && isAssignedToCurrentConsultant()
+    && Boolean(onUpdateRejectionReason);
 
   return (
     <div className="p-8 space-y-6">
@@ -102,15 +128,38 @@ export function ApplicationDetail({
               </div>
             )}
           </div>
-          {canCancel && (
-            <Button
-              variant="outline"
-              onClick={() => setShowCancelDialog(true)}
-            >
-              <XCircle className="w-4 h-4 mr-2" />
-              신청 취소
-            </Button>
-          )}
+          <div className="flex items-center gap-2">
+            {canReject && (
+              <Button
+                variant="outline"
+                onClick={() => setShowRejectDialog(true)}
+              >
+                <XCircle className="w-4 h-4 mr-2" />
+                거절
+              </Button>
+            )}
+            {canEditRejectReason && (
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setEditRejectReason(application.rejectionReason ?? "");
+                  setShowEditRejectDialog(true);
+                }}
+              >
+                <Edit className="w-4 h-4 mr-2" />
+                거절 사유 수정
+              </Button>
+            )}
+            {canCancel && (
+              <Button
+                variant="outline"
+                onClick={() => setShowCancelDialog(true)}
+              >
+                <XCircle className="w-4 h-4 mr-2" />
+                신청 취소
+              </Button>
+            )}
+          </div>
         </div>
       </div>
 
@@ -186,6 +235,15 @@ export function ApplicationDetail({
                   {application.requestContent}
                 </p>
               </div>
+
+              {application.status === "rejected" && (
+                <div>
+                  <h3 className="mb-2">거절 사유</h3>
+                  <p className="text-sm whitespace-pre-wrap text-muted-foreground">
+                    {application.rejectionReason?.trim() || "거절 사유가 등록되지 않았습니다."}
+                  </p>
+                </div>
+              )}
 
               {/* Attachments */}
               {(application.attachments ?? []).length > 0 && (
@@ -339,6 +397,77 @@ export function ApplicationDetail({
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
               취소하기
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Reject confirmation dialog */}
+      <AlertDialog open={showRejectDialog} onOpenChange={setShowRejectDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>신청을 거절하시겠습니까?</AlertDialogTitle>
+            <AlertDialogDescription>
+              거절된 신청은 기업에 '거절됨' 상태로 표시됩니다.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="reject-reason">거절 사유</Label>
+            <Textarea
+              id="reject-reason"
+              value={rejectReason}
+              onChange={(e) => setRejectReason(e.target.value)}
+              placeholder="거절 사유를 입력해주세요"
+              className="min-h-[90px]"
+            />
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel>돌아가기</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (rejectReason.trim().length === 0) return;
+                onRejectApplication?.(rejectReason);
+                setShowRejectDialog(false);
+                setRejectReason("");
+              }}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              거절하기
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Edit rejection reason dialog */}
+      <AlertDialog open={showEditRejectDialog} onOpenChange={setShowEditRejectDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>거절 사유 수정</AlertDialogTitle>
+            <AlertDialogDescription>
+              기업에게 표시될 거절 사유를 수정합니다.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="edit-reject-reason">거절 사유</Label>
+            <Textarea
+              id="edit-reject-reason"
+              value={editRejectReason}
+              onChange={(e) => setEditRejectReason(e.target.value)}
+              placeholder="거절 사유를 입력해주세요"
+              className="min-h-[90px]"
+            />
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel>돌아가기</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (editRejectReason.trim().length === 0) return;
+                onUpdateRejectionReason?.(editRejectReason);
+                setShowEditRejectDialog(false);
+              }}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              수정하기
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

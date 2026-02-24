@@ -105,10 +105,12 @@ export function AdminApplications({
         actions.push({ label: "확정", status: "confirmed" });
         break;
       case "confirmed":
-        actions.push({ label: "완료 처리", status: "completed" });
         actions.push({ label: "확정 취소", status: "review" });
         break;
       case "cancelled":
+        actions.push({ label: "재검토", status: "review" });
+        break;
+      case "rejected":
         actions.push({ label: "재검토", status: "review" });
         break;
       case "completed":
@@ -169,6 +171,7 @@ export function AdminApplications({
                 <SelectItem value="pending">진행중</SelectItem>
                 <SelectItem value="review">진행중</SelectItem>
                 <SelectItem value="confirmed">확정</SelectItem>
+                <SelectItem value="rejected">거절됨</SelectItem>
                 <SelectItem value="cancelled">취소</SelectItem>
                 <SelectItem value="completed">완료</SelectItem>
               </SelectContent>

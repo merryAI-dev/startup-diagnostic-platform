@@ -62,6 +62,11 @@ export function ApplicationHistory({
                         </p>
                       ) : null;
                     })()}
+                    {app.status === "rejected" && app.rejectionReason && (
+                      <p className="text-xs text-rose-600 mt-1">
+                        거절 사유: {app.rejectionReason}
+                      </p>
+                    )}
                   </div>
                   <div className="flex items-center gap-4 text-xs text-muted-foreground">
                     {app.scheduledDate ? (
@@ -132,6 +137,9 @@ export function ApplicationHistory({
           <TabsTrigger value="confirmed">
             확정 ({filterByStatus("confirmed").length})
           </TabsTrigger>
+          <TabsTrigger value="rejected">
+            거절됨 ({filterByStatus("rejected").length})
+          </TabsTrigger>
           <TabsTrigger value="completed">
             완료 ({filterByStatus("completed").length})
           </TabsTrigger>
@@ -151,6 +159,10 @@ export function ApplicationHistory({
 
         <TabsContent value="confirmed" className="space-y-4">
           <ApplicationList apps={filterByStatus("confirmed")} />
+        </TabsContent>
+
+        <TabsContent value="rejected" className="space-y-4">
+          <ApplicationList apps={filterByStatus("rejected")} />
         </TabsContent>
 
         <TabsContent value="completed" className="space-y-4">

@@ -4,6 +4,7 @@ export type ApplicationStatus =
   | "pending" 
   | "review" 
   | "confirmed" 
+  | "rejected"
   | "cancelled" 
   | "completed";
 
@@ -25,6 +26,10 @@ const statusConfig = {
   confirmed: {
     label: "확정",
     className: "bg-green-50 text-green-700 border-green-200",
+  },
+  rejected: {
+    label: "거절됨",
+    className: "bg-rose-50 text-rose-700 border-rose-200",
   },
   cancelled: {
     label: "취소",
