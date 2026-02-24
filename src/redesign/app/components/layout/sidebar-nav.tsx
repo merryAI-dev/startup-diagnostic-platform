@@ -84,9 +84,7 @@ const userNavItems: NavItem[] = [
 
 const companyCoreNavIds = new Set([
   "dashboard",
-  "consultants",
   "regular",
-  "irregular",
   "company-info",
 ]);
 
@@ -106,9 +104,6 @@ export function SidebarNav({
       : userNavItems;
   const companyCoreNavItems = userNavItems.filter((item) =>
     companyCoreNavIds.has(item.id)
-  );
-  const companyLabsNavItems = userNavItems.filter(
-    (item) => !companyCoreNavIds.has(item.id)
   );
 
   const renderNavButton = (item: NavItem) => {
@@ -151,12 +146,6 @@ export function SidebarNav({
         ) : (
           <>
             {companyCoreNavItems.map((item) => renderNavButton(item))}
-            <div className="pt-3">
-              <p className="px-3 text-xs font-semibold uppercase tracking-wider text-slate-400">
-                Labs
-              </p>
-            </div>
-            {companyLabsNavItems.map((item) => renderNavButton(item))}
           </>
         )}
       </nav>
