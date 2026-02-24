@@ -19,6 +19,8 @@ interface PendingReportsDashboardProps {
   reports: OfficeHourReport[];
   programs: Program[];
   currentUser: User;
+  currentConsultantId?: string | null;
+  currentConsultantName?: string | null;
   onCreateReport: (applicationId: string) => void;
   onEditReport: (report: OfficeHourReport) => void;
   onDeleteReport: (report: OfficeHourReport) => void;
@@ -39,10 +41,29 @@ export function PendingReportsDashboard({
   reports,
   programs,
   currentUser,
+  currentConsultantId,
+  currentConsultantName,
   onCreateReport,
   onEditReport,
   onDeleteReport,
 }: PendingReportsDashboardProps) {
+  const isConsultantUser = currentUser.role === "consultant";
+
+  const normalizeConsultantName = (value?: string | null) =>
+    (value ?? "").replace(/\s*컨설턴트\s*$/u, "").trim().toLowerCase();
+
+  const isForCurrentConsultant = (application?: Application | null, report?: OfficeHourReport | null) => {
+    if (!isConsultantUser) return true;
+    if (currentConsultantId) {
+      if (report?.consultantId) return report.consultantId === currentConsultantId;
+      if (application?.consultantId) return application.consultantId === currentConsultantId;
+    }
+    const appName = normalizeConsultantName(application?.consultant);
+    const reportName = normalizeConsultantName(report?.consultantName);
+    const currentName = normalizeConsultantName(currentConsultantName);
+    return Boolean(currentName) && (appName === currentName || reportName === currentName);
+  };
+
   const getSessionEndTime = (app: Application) => {
     const durationHours = app.duration ?? 2;
 
@@ -79,6 +100,7 @@ export function PendingReportsDashboard({
 
     const pending: PendingReportItem[] = eligibleApps
       .filter((app) => !reportedAppIds.has(app.id))
+      .filter((app) => isForCurrentConsultant(app, null))
       .map((app) => {
         const sessionEnd = getSessionEndTime(app);
         const effectiveEnd = sessionEnd ?? parseLocalDate(app.scheduledDate!) ?? new Date();
@@ -106,6 +128,10 @@ export function PendingReportsDashboard({
       .sort((a, b) => b.daysSinceSession - a.daysSinceSession);
 
     // 권한에 따른 필터링
+    if (isConsultantUser) {
+      return pending;
+    }
+
     if (currentUser.role !== "admin") {
       return pending.filter((p) =>
         currentUser.programs?.includes(p.application.programId || "")
@@ -113,7 +139,11 @@ export function PendingReportsDashboard({
     }
 
     return pending;
-  }, [applications, reports, programs, currentUser]);
+  }, [applications, reports, programs, currentUser, isConsultantUser, currentConsultantId, currentConsultantName]);
+
+  const irregularPendingReports = useMemo(() => {
+    return pendingReports.filter((item) => item.application.type === "irregular");
+  }, [pendingReports]);
 
   // 사업별 통계
   const statsByProgram = useMemo(() => {
@@ -141,33 +171,39 @@ export function PendingReportsDashboard({
     return Object.entries(stats).map(([id, data]) => ({ id, ...data }));
   }, [pendingReports]);
 
-  // 컨설턴트별 통계
-  const statsByConsultant = useMemo(() => {
-    const stats: Record<string, { name: string; pending: number; overdue: number }> = {};
-
-    pendingReports.forEach((item) => {
-      const consultantName = item.application.consultant;
-      if (!stats[consultantName]) {
-        stats[consultantName] = { name: consultantName, pending: 0, overdue: 0 };
-      }
-      stats[consultantName].pending++;
-      if (item.isOverdue) {
-        stats[consultantName].overdue++;
-      }
-    });
-
-    return Object.entries(stats)
-      .map(([name, data]) => data)
-      .sort((a, b) => b.overdue - a.overdue);
-  }, [pendingReports]);
-
   const overdueCount = pendingReports.filter((p) => p.isOverdue).length;
   const submittedReports = useMemo(() => {
     const appMap = new Map(applications.map((app) => [app.id, app]));
     return reports
       .map((report) => {
         const application = appMap.get(report.applicationId);
+        if (!application && report.applicationId.startsWith("manual-")) {
+          const syntheticApp: Application = {
+            id: report.applicationId,
+            type: "irregular",
+            status: "completed",
+            officeHourTitle: report.topic?.trim() || "비정기 오피스아워 (수동)",
+            consultant: report.consultantName || "컨설턴트",
+            consultantId: report.consultantId,
+            sessionFormat: "online",
+            agenda: report.topic?.trim() || "비정기 오피스아워",
+            requestContent: "",
+            scheduledDate: report.date,
+            programId: report.programId,
+            createdAt: report.createdAt,
+            updatedAt: report.updatedAt,
+          };
+          if (!isForCurrentConsultant(syntheticApp, report)) return null;
+          const program = programs.find((p) => p.id === report.programId);
+          return {
+            report,
+            application: syntheticApp,
+            programName: program?.name || "비정기",
+            programColor: program?.color || "#94a3b8",
+          };
+        }
         if (!application) return null;
+        if (!isForCurrentConsultant(application, report)) return null;
         const program = programs.find((p) => p.id === (report.programId || application.programId));
         return {
           report,
@@ -182,7 +218,7 @@ export function PendingReportsDashboard({
         const timeB = new Date(b.report.updatedAt ?? b.report.createdAt).getTime();
         return timeB - timeA;
       });
-  }, [applications, programs, reports]);
+  }, [applications, programs, reports, isConsultantUser, currentConsultantId, currentConsultantName]);
 
   return (
     <div className="h-full flex flex-col bg-gray-50">
@@ -239,7 +275,7 @@ export function PendingReportsDashboard({
       <div className="flex-1 overflow-y-auto px-8 py-6">
         <div className="grid grid-cols-3 gap-6 mb-6">
           {/* 사업별 통계 */}
-          <div className="col-span-2 bg-white rounded-lg border p-6">
+          <div className="col-span-3 bg-white rounded-lg border p-6">
             <h3 className="font-semibold text-gray-900 mb-4">사업별 미작성 현황</h3>
             <div className="space-y-3">
               {statsByProgram.map((program) => (
@@ -267,34 +303,6 @@ export function PendingReportsDashboard({
             </div>
           </div>
 
-          {/* 컨설턴트별 통계 */}
-          <div className="bg-white rounded-lg border p-6">
-            <h3 className="font-semibold text-gray-900 mb-4">
-              컨설턴트별 미작성
-            </h3>
-            <div className="space-y-3">
-              {statsByConsultant.map((consultant) => (
-                <div
-                  key={consultant.name}
-                  className="flex items-center justify-between p-3 rounded-lg border"
-                >
-                  <span className="text-sm font-medium text-gray-900">
-                    {consultant.name}
-                  </span>
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm text-muted-foreground">
-                      {consultant.pending}건
-                    </span>
-                    {consultant.overdue > 0 && (
-                      <span className="text-xs text-red-600 font-medium">
-                        ({consultant.overdue})
-                      </span>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
         </div>
 
         {/* 미작성 보고서 목록 */}
@@ -375,6 +383,90 @@ export function PendingReportsDashboard({
                 </div>
               ))
             )}
+          </div>
+        </div>
+
+        {/* 비정기 오피스아워 일지 작성 */}
+        <div className="bg-white rounded-lg border mt-6">
+          <div className="p-6 border-b flex items-start justify-between gap-4">
+            <div>
+              <h3 className="font-semibold text-gray-900">비정기 오피스아워 일지 작성</h3>
+              <p className="text-sm text-muted-foreground mt-1">
+                비정기 오피스아워 세션에 대해 일지를 작성해주세요.
+              </p>
+            </div>
+            <Button
+              size="lg"
+              className="bg-slate-900 text-white hover:bg-slate-800"
+              onClick={() => onCreateReport("irregular-manual")}
+            >
+              새 일지 작성
+            </Button>
+          </div>
+          <div className="divide-y">
+            {irregularPendingReports.map((item) => (
+              <div
+                key={item.application.id}
+                className={`p-4 hover:bg-gray-50 transition-colors ${
+                  item.isOverdue ? "bg-red-50/50" : ""
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex-1">
+                    <div className="flex items-center gap-3 mb-2">
+                      <div
+                        className="w-2 h-2 rounded-full"
+                        style={{ backgroundColor: item.programColor }}
+                      />
+                      <span className="text-xs text-muted-foreground">
+                        {item.programName}
+                      </span>
+                      {item.isOverdue && (
+                        <Badge variant="destructive" className="text-xs">
+                          기한 초과
+                        </Badge>
+                      )}
+                    </div>
+                    <h4 className="font-medium text-gray-900 mb-1">
+                      {item.application.officeHourTitle}
+                    </h4>
+                    <div className="flex items-center gap-4 text-sm text-muted-foreground">
+                      <div className="flex items-center gap-1.5">
+                        <Calendar className="w-3.5 h-3.5" />
+                        <span>
+                          {format(
+                            parseLocalDate(item.application.scheduledDate!)
+                              ?? new Date(item.application.scheduledDate!),
+                            "yyyy년 M월 d일",
+                            { locale: ko }
+                          )}
+                        </span>
+                      </div>
+                      <span>•</span>
+                      <span>{item.application.consultant}</span>
+                      <span>•</span>
+                      <div className="flex items-center gap-1.5">
+                        <Clock className="w-3.5 h-3.5" />
+                        <span
+                          className={`whitespace-nowrap ${item.isOverdue ? "text-red-600 font-medium" : ""}`}
+                        >
+                          {item.isOverdue
+                            ? `기한 초과 ${item.overdueDays}일`
+                            : `D-${item.daysLeft}`}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                  <Button
+                    size="sm"
+                    onClick={() => onCreateReport(item.application.id)}
+                    variant={item.isOverdue ? "destructive" : "default"}
+                  >
+                    보고서 작성
+                  </Button>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
 

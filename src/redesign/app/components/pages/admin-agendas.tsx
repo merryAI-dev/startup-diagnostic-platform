@@ -15,6 +15,7 @@ import {
 import { Input } from "@/redesign/app/components/ui/input"
 import { Label } from "@/redesign/app/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/redesign/app/components/ui/select"
+import { Switch } from "@/redesign/app/components/ui/switch"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/redesign/app/components/ui/table"
 import { Textarea } from "@/redesign/app/components/ui/textarea"
 
@@ -40,7 +41,7 @@ export function AdminAgendas({
   const [description, setDescription] = useState("")
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
   const [selectedAgendaId, setSelectedAgendaId] = useState<string | null>(null)
-  const [isEditingDetail, setIsEditingDetail] = useState(false)
+  const [isDetailOpen, setIsDetailOpen] = useState(false)
   const [detailName, setDetailName] = useState("")
   const [detailScope, setDetailScope] = useState<Agenda["scope"]>("internal")
   const [detailDescription, setDetailDescription] = useState("")
@@ -56,14 +57,12 @@ export function AdminAgendas({
 
   useEffect(() => {
     if (!selectedAgenda) {
-      setIsEditingDetail(false)
       return
     }
 
     setDetailName(selectedAgenda.name)
     setDetailScope(selectedAgenda.scope)
     setDetailDescription(selectedAgenda.description ?? "")
-    setIsEditingDetail(false)
   }, [selectedAgenda])
 
   const activeCount = agendas.filter((agenda) => agenda.active !== false).length
@@ -228,30 +227,34 @@ export function AdminAgendas({
                     </TableCell>
                     <TableCell className="font-medium">{agenda.name}</TableCell>
                     <TableCell>
-                      <Badge
-                        variant={active ? "secondary" : "outline"}
-                        className={
-                          active ? "bg-emerald-50 text-emerald-700 border-emerald-200" : ""
-                        }
-                      >
-                        {active ? "활성" : "비활성"}
-                      </Badge>
+                      <div className="flex items-center gap-3">
+                        <Switch
+                          checked={active}
+                          onCheckedChange={(checked) => onToggleActive(agenda.id, checked)}
+                        />
+                        <Badge
+                          variant="secondary"
+                          className={
+                            active
+                              ? "bg-emerald-100 text-emerald-700"
+                              : "bg-slate-100 text-slate-600"
+                          }
+                        >
+                          {active ? "활성" : "비활성"}
+                        </Badge>
+                      </div>
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex items-center justify-end gap-2">
                         <Button
                           size="sm"
                           variant="outline"
-                          onClick={() => setSelectedAgendaId(agenda.id)}
+                          onClick={() => {
+                            setSelectedAgendaId(agenda.id)
+                            setIsDetailOpen(true)
+                          }}
                         >
-                          상세보기
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant={active ? "outline" : "secondary"}
-                          onClick={() => onToggleActive(agenda.id, !active)}
-                        >
-                          {active ? "비활성화" : "활성화"}
+                          편집
                         </Button>
                       </div>
                     </TableCell>
@@ -264,109 +267,54 @@ export function AdminAgendas({
       </Card>
 
       <Dialog
-        open={selectedAgenda !== null}
+        open={isDetailOpen}
         onOpenChange={(open) => {
+          setIsDetailOpen(open)
           if (!open) {
             setSelectedAgendaId(null)
-            setIsEditingDetail(false)
           }
         }}
       >
         <DialogContent className="max-w-lg">
           <DialogHeader>
-            <div className="flex items-start justify-between gap-2">
-              <div>
-                <DialogTitle>아젠다 상세</DialogTitle>
-                <DialogDescription>아젠다 세부 정보와 활성 상태를 확인합니다.</DialogDescription>
-              </div>
-              {selectedAgenda && (
-                <div className="flex items-center gap-2">
-                  {isEditingDetail ? (
-                    <>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        onClick={() => {
-                          setDetailName(selectedAgenda.name)
-                          setDetailScope(selectedAgenda.scope)
-                          setDetailDescription(selectedAgenda.description ?? "")
-                          setIsEditingDetail(false)
-                        }}
-                      >
-                        취소
-                      </Button>
-                      <Button type="button" size="sm" onClick={handleSaveAgendaDetail}>
-                        저장
-                      </Button>
-                    </>
-                  ) : (
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      onClick={() => setIsEditingDetail(true)}
-                    >
-                      편집
-                    </Button>
-                  )}
-                </div>
-              )}
-            </div>
+            <DialogTitle>아젠다 상세</DialogTitle>
+            <DialogDescription>아젠다 세부 정보와 활성 상태를 확인합니다.</DialogDescription>
           </DialogHeader>
 
           {selectedAgenda && (
             <div className="space-y-4">
               <div className="rounded-lg border p-4 space-y-3">
-                {isEditingDetail ? (
-                  <>
-                    <div>
-                      <Label className="mb-2 block">구분</Label>
-                      <Select
-                        value={detailScope}
-                        onValueChange={(value) => setDetailScope(value as Agenda["scope"])}
-                      >
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="internal">내부</SelectItem>
-                          <SelectItem value="external">외부</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div>
-                      <Label className="mb-2 block">아젠다 명</Label>
-                      <Input
-                        value={detailName}
-                        onChange={(event) => setDetailName(event.target.value)}
-                        required
-                      />
-                    </div>
-                    <div>
-                      <Label className="mb-2 block">설명</Label>
-                      <Textarea
-                        rows={3}
-                        value={detailDescription}
-                        onChange={(event) => setDetailDescription(event.target.value)}
-                      />
-                    </div>
-                  </>
-                ) : (
-                  <>
-                    <div className="flex items-center justify-between">
-                      <div className="text-lg font-semibold">{selectedAgenda.name}</div>
-                      <Badge
-                        variant={selectedAgenda.scope === "internal" ? "secondary" : "outline"}
-                      >
-                        {scopeLabel(selectedAgenda.scope)}
-                      </Badge>
-                    </div>
-                    <div className="text-sm text-muted-foreground whitespace-pre-wrap">
-                      {selectedAgenda.description?.trim() || "설명이 없습니다."}
-                    </div>
-                  </>
-                )}
+                <div>
+                  <Label className="mb-2 block">구분</Label>
+                  <Select
+                    value={detailScope}
+                    onValueChange={(value) => setDetailScope(value as Agenda["scope"])}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="internal">내부</SelectItem>
+                      <SelectItem value="external">외부</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label className="mb-2 block">아젠다 명</Label>
+                  <Input
+                    value={detailName}
+                    onChange={(event) => setDetailName(event.target.value)}
+                    required
+                  />
+                </div>
+                <div>
+                  <Label className="mb-2 block">설명</Label>
+                  <Textarea
+                    rows={3}
+                    value={detailDescription}
+                    onChange={(event) => setDetailDescription(event.target.value)}
+                  />
+                </div>
                 <div>
                   <Badge
                     variant={selectedAgenda.active !== false ? "secondary" : "outline"}
@@ -380,14 +328,18 @@ export function AdminAgendas({
                   </Badge>
                 </div>
               </div>
-
-              <div className="flex justify-end">
+              <div className="flex justify-end gap-2">
                 <Button
-                  variant={selectedAgenda.active !== false ? "outline" : "default"}
-                  disabled={isEditingDetail}
-                  onClick={() => onToggleActive(selectedAgenda.id, selectedAgenda.active === false)}
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setIsDetailOpen(false)
+                  }}
                 >
-                  {selectedAgenda.active !== false ? "비활성화" : "활성화"}
+                  취소
+                </Button>
+                <Button type="button" onClick={handleSaveAgendaDetail}>
+                  저장
                 </Button>
               </div>
             </div>

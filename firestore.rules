@@ -154,6 +154,11 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    match /reports/{reportId} {
+      allow read: if isActiveUser();
+      allow create, update, delete: if isAdmin() || isConsultant();
+    }
+
     match /consents/{consentId} {
       allow read: if isActiveUser()
         && (request.auth.uid == resource.data.userId || isAdmin());

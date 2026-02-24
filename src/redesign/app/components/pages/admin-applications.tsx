@@ -26,6 +26,7 @@ interface AdminApplicationsProps {
   currentUserRole?: string;
   currentConsultantId?: string | null;
   currentConsultantName?: string | null;
+  currentConsultantAgendaIds?: string[];
 }
 
 export function AdminApplications({
@@ -35,6 +36,7 @@ export function AdminApplications({
   currentUserRole,
   currentConsultantId,
   currentConsultantName,
+  currentConsultantAgendaIds = [],
 }: AdminApplicationsProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
@@ -66,6 +68,11 @@ export function AdminApplications({
 
   // Filter applications
   const filteredApplications = applications.filter((app) => {
+    const matchesConsultantAgenda = !isConsultantUser
+      || (currentConsultantAgendaIds.length > 0
+        && Boolean(app.agendaId)
+        && currentConsultantAgendaIds.includes(app.agendaId));
+
     const normalizedQuery = searchQuery.trim().toLowerCase();
     const matchesSearch = normalizedQuery.length === 0
       ? true
@@ -79,7 +86,7 @@ export function AdminApplications({
     const matchesCompany =
       companyFilter === "all" || app.companyName === companyFilter;
 
-    return matchesSearch && matchesStatus && matchesType && matchesCompany;
+    return matchesConsultantAgenda && matchesSearch && matchesStatus && matchesType && matchesCompany;
   });
 
   // Sort by most recent
@@ -143,7 +150,7 @@ export function AdminApplications({
             <div className="flex-1 relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
               <Input
-                placeholder="기업, 제목, 안건으로 검색..."
+                placeholder="기업, 제목, 아젠다로 검색..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="pl-9"
@@ -207,7 +214,7 @@ export function AdminApplications({
                 <TableHead>유형</TableHead>
                 <TableHead>신청 기업</TableHead>
                 <TableHead>오피스아워</TableHead>
-                <TableHead>안건</TableHead>
+                <TableHead>아젠다</TableHead>
                 <TableHead>일정</TableHead>
                 <TableHead className="text-right">작업</TableHead>
               </TableRow>

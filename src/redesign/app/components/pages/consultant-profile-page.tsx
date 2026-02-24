@@ -1,6 +1,7 @@
 import { type FormEvent, useEffect, useMemo, useState } from "react";
-import { Consultant } from "@/redesign/app/lib/types";
+import { Agenda, Consultant } from "@/redesign/app/lib/types";
 import { Button } from "@/redesign/app/components/ui/button";
+import { Badge } from "@/redesign/app/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/redesign/app/components/ui/card";
 import { Input } from "@/redesign/app/components/ui/input";
 import { Label } from "@/redesign/app/components/ui/label";
@@ -20,6 +21,7 @@ export type ConsultantProfileFormValues = {
 
 interface ConsultantProfilePageProps {
   consultant: Consultant | null;
+  agendas?: Agenda[];
   defaultEmail?: string | null;
   saving?: boolean;
   submitLabel?: string;
@@ -50,6 +52,7 @@ function buildInitialValues(
 
 export function ConsultantProfilePage({
   consultant,
+  agendas = [],
   defaultEmail,
   saving = false,
   submitLabel,
@@ -68,6 +71,13 @@ export function ConsultantProfilePage({
     () => buildInitialValues(consultant, defaultEmail),
     [consultant, defaultEmail]
   );
+
+  const consultantAgendaLabels = useMemo(() => {
+    if (!consultant?.agendaIds?.length) return [];
+    return consultant.agendaIds
+      .map((agendaId) => agendas.find((agenda) => agenda.id === agendaId)?.name)
+      .filter(Boolean) as string[];
+  }, [consultant, agendas]);
 
   useEffect(() => {
     setFormValues(initialValues);
@@ -219,6 +229,27 @@ export function ConsultantProfilePage({
                 onChange={(event) => updateField("expertise", event.target.value)}
                 placeholder="예: 투자유치, 임팩트측정, BM"
               />
+            </div>
+
+            <div className="col-span-2">
+              <Label className="mb-2 block">담당 아젠다</Label>
+              {consultantAgendaLabels.length > 0 ? (
+                <div className="flex flex-wrap gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3">
+                  {consultantAgendaLabels.map((label) => (
+                    <Badge
+                      key={label}
+                      variant="outline"
+                      className="border-slate-200 bg-white text-slate-900 font-medium"
+                    >
+                      {label}
+                    </Badge>
+                  ))}
+                </div>
+              ) : (
+                <div className="rounded-lg border border-dashed border-slate-200 bg-white px-3 py-3 text-sm text-muted-foreground">
+                  매핑된 아젠다가 없습니다. 관리자에게 요청해주세요.
+                </div>
+              )}
             </div>
 
             <div className="col-span-2">

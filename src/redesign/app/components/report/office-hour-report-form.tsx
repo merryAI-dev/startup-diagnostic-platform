@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
+import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/redesign/app/components/ui/dialog";
 import { Button } from "@/redesign/app/components/ui/button";
 import { Label } from "@/redesign/app/components/ui/label";
 import { Input } from "@/redesign/app/components/ui/input";
 import { Textarea } from "@/redesign/app/components/ui/textarea";
 import { Application, OfficeHourReport } from "@/redesign/app/lib/types";
+import { isFirebaseConfigured, storage } from "@/redesign/app/lib/firebase";
 import { X, Upload, Star, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
 
@@ -62,26 +64,48 @@ export function OfficeHourReportForm({
 
   const [formData, setFormData] = useState(buildFormState);
   const [photos, setPhotos] = useState<string[]>(initialReport?.photos ?? []);
+  const [pendingPhotos, setPendingPhotos] = useState<Array<{ file: File; previewUrl: string }>>([]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      setPendingPhotos((prev) => {
+        prev.forEach((item) => URL.revokeObjectURL(item.previewUrl));
+        return [];
+      });
+      return;
+    }
     setFormData(buildFormState());
     setPhotos(initialReport?.photos ?? []);
+    setPendingPhotos([]);
   }, [open, initialReport, application]);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handlePhotoUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files;
     if (files) {
-      // Mock upload - in real app would upload to Firebase Storage
-      const newPhotos = Array.from(files).map(file => URL.createObjectURL(file));
-      setPhotos([...photos, ...newPhotos]);
-      toast.success(`${files.length}개의 사진이 업로드되었습니다`);
+      const newItems = Array.from(files).map((file) => ({
+        file,
+        previewUrl: URL.createObjectURL(file),
+      }));
+      setPendingPhotos((prev) => [...prev, ...newItems]);
+      setPhotos((prev) => [...prev, ...newItems.map((item) => item.previewUrl)]);
+      toast.success(`${files.length}개의 사진이 추가되었습니다`);
+      event.target.value = "";
     }
   };
 
   const handleRemovePhoto = (index: number) => {
+    const targetUrl = photos[index];
+    if (!targetUrl) return;
     setPhotos(photos.filter((_, i) => i !== index));
+    setPendingPhotos((prev) => {
+      const next = prev.filter((item) => item.previewUrl !== targetUrl);
+      const removed = prev.find((item) => item.previewUrl === targetUrl);
+      if (removed) {
+        URL.revokeObjectURL(removed.previewUrl);
+      }
+      return next;
+    });
   };
 
   const handleAddParticipant = () => {
@@ -125,6 +149,26 @@ export function OfficeHourReportForm({
     setIsSubmitting(true);
 
     try {
+      let uploadedPhotoUrls: string[] = [];
+      if (pendingPhotos.length > 0) {
+        if (isFirebaseConfigured && storage) {
+          const uploadBase = `reports/${application.id}/${Date.now()}`;
+          uploadedPhotoUrls = await Promise.all(
+            pendingPhotos.map(async (item, index) => {
+              const fileRef = ref(storage, `${uploadBase}-${index}-${item.file.name}`);
+              await uploadBytes(fileRef, item.file);
+              return getDownloadURL(fileRef);
+            })
+          );
+        } else {
+          uploadedPhotoUrls = pendingPhotos.map((item) => item.previewUrl);
+        }
+      }
+
+      const pendingPreviewUrls = new Set(pendingPhotos.map((item) => item.previewUrl));
+      const retainedPhotos = photos.filter((url) => !pendingPreviewUrls.has(url));
+      const finalPhotos = [...retainedPhotos, ...uploadedPhotoUrls];
+
       const report: Omit<OfficeHourReport, "id" | "createdAt" | "updatedAt" | "completedAt"> = {
         applicationId: application.id,
         consultantId: initialReport?.consultantId || application.consultantId || "",
@@ -135,7 +179,7 @@ export function OfficeHourReportForm({
         participants: formData.participants.filter(p => p.trim() !== ""),
         content: formData.content,
         followUp: formData.followUp,
-        photos: photos,
+        photos: finalPhotos,
         duration: formData.duration,
         satisfaction: formData.satisfaction,
         programId: application.programId || "",

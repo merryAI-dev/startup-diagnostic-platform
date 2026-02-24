@@ -72,7 +72,6 @@ export function AdminDashboard({
     milestone78: "",
     milestone910: "",
   })
-  const email = user.email ?? user.providerData?.[0]?.email ?? "사용자"
 
   useEffect(() => {
     let mounted = true
@@ -387,17 +386,6 @@ export function AdminDashboard({
           <h1 className="text-2xl font-semibold text-slate-900">
             Admin Dashboard
           </h1>
-          <div className="flex items-center gap-3">
-            <button
-              className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
-              onClick={() => navigate("/admin/consultants")}
-            >
-              컨설턴트 관리
-            </button>
-            <div className="hidden text-xs text-slate-400 md:block">
-              {email}
-            </div>
-          </div>
         </div>
         <div className="flex-1 min-h-0 grid gap-6 lg:grid-cols-[280px_1fr] px-8 py-5">
           <div className="rounded-2xl border border-slate-200 bg-white p-4 h-full overflow-y-auto">
