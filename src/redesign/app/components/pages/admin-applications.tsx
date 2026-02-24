@@ -44,6 +44,7 @@ export function AdminApplications({
   const [companyFilter, setCompanyFilter] = useState<string>("all");
   const [selectedApplication, setSelectedApplication] = useState<Application | null>(null);
   const isConsultantUser = currentUserRole === "consultant";
+  const isAdminUser = currentUserRole === "admin";
 
   const normalizeConsultantName = (value?: string | null) =>
     (value ?? "").replace(/\s*컨설턴트\s*$/u, "").trim().toLowerCase();
@@ -269,31 +270,41 @@ export function AdminApplications({
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex items-center justify-end gap-2">
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="sm">
-                              <MoreVertical className="w-4 h-4" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuItem onClick={() => setSelectedApplication(app)}>
-                              <Eye className="w-4 h-4 mr-2" />
-                              상세 보기
-                            </DropdownMenuItem>
-                            <DropdownMenuSeparator />
-                            {getStatusActions(app).map((action, idx) => (
-                              <DropdownMenuItem
-                                key={idx}
-                                onClick={() => handleStatusChange(app.id, action.status)}
-                                className={action.variant === "destructive" ? "text-destructive" : ""}
-                              >
-                                {action.status === "confirmed" && <CheckCircle2 className="w-4 h-4 mr-2" />}
-                                {action.status === "cancelled" && <XCircle className="w-4 h-4 mr-2" />}
-                                {action.label}
+                        {isAdminUser ? (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setSelectedApplication(app)}
+                          >
+                            상세보기
+                          </Button>
+                        ) : (
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button variant="ghost" size="sm">
+                                <MoreVertical className="w-4 h-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              <DropdownMenuItem onClick={() => setSelectedApplication(app)}>
+                                <Eye className="w-4 h-4 mr-2" />
+                                상세 보기
                               </DropdownMenuItem>
-                            ))}
-                          </DropdownMenuContent>
-                        </DropdownMenu>
+                              <DropdownMenuSeparator />
+                              {getStatusActions(app).map((action, idx) => (
+                                <DropdownMenuItem
+                                  key={idx}
+                                  onClick={() => handleStatusChange(app.id, action.status)}
+                                  className={action.variant === "destructive" ? "text-destructive" : ""}
+                                >
+                                  {action.status === "confirmed" && <CheckCircle2 className="w-4 h-4 mr-2" />}
+                                  {action.status === "cancelled" && <XCircle className="w-4 h-4 mr-2" />}
+                                  {action.label}
+                                </DropdownMenuItem>
+                              ))}
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        )}
                       </div>
                     </TableCell>
                   </TableRow>
@@ -324,6 +335,7 @@ export function AdminApplications({
           onClose={() => setSelectedApplication(null)}
           onUpdateStatus={handleStatusChange}
           onUpdateApplication={onUpdateApplication}
+          readOnly={isAdminUser}
         />
       )}
     </div>
