@@ -31,10 +31,6 @@ import {
   ConsultantProfileFormValues,
   ConsultantProfilePage,
 } from "@/redesign/app/components/pages/consultant-profile-page";
-import {
-  buildDefaultAvailability,
-  ConsultantScheduleSettingsPage,
-} from "@/redesign/app/components/pages/consultant-schedule-settings-page";
 import { PendingReportsDashboard } from "@/redesign/app/components/pages/pending-reports-dashboard";
 import { OfficeHourReportForm } from "@/redesign/app/components/report/office-hour-report-form";
 import { CompanyMetricsPage } from "@/redesign/app/components/pages/company-metrics-page";
@@ -114,7 +110,6 @@ type AppPage =
   | "startup-diagnostic"
   | "company-info"
   | "consultant-profile"
-  | "consultant-schedule-settings"
   | "consultant-calendar";
 
 type SaveTypeMeta = {
@@ -207,6 +202,29 @@ function normalizeDateValue(value: unknown): Date | string {
     }
   }
   return new Date();
+}
+
+function buildDefaultConsultantAvailability(): Consultant["availability"] {
+  const scheduleDays = [
+    { value: 2, label: "화" },
+    { value: 4, label: "목" },
+  ] as const;
+  const timeSlots = Array.from({ length: 9 }, (_, index) => {
+    const startHour = 9 + index;
+    const endHour = startHour + 1;
+    return {
+      start: `${String(startHour).padStart(2, "0")}:00`,
+      end: `${String(endHour).padStart(2, "0")}:00`,
+    };
+  });
+  return scheduleDays.map((day) => ({
+    dayOfWeek: day.value,
+    slots: timeSlots.map((slot) => ({
+      start: slot.start,
+      end: slot.end,
+      available: false,
+    })),
+  }));
 }
 
 function formatDateKey(date: Date): string {
@@ -783,7 +801,6 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
         "pending-reports",
         "application",
         "consultant-calendar",
-        "consultant-schedule-settings",
         "consultant-profile",
       ]),
     []
@@ -1105,7 +1122,18 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       });
     }
     if (resolvedRole !== "consultant") return resolvedApplications;
-    return resolvedApplications;
+    if (consultantAgendaIds.size === 0 && consultantAgendaNames.size === 0) {
+      return [];
+    }
+    return resolvedApplications.filter((application) => {
+      if (application.agendaId && consultantAgendaIds.has(application.agendaId)) {
+        return true;
+      }
+      if (application.agenda && consultantAgendaNames.has(application.agenda)) {
+        return true;
+      }
+      return false;
+    });
   }, [
     firebaseUser?.email,
     firebaseUser?.uid,
@@ -1114,6 +1142,8 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     user.companyName,
     user.email,
     user.id,
+    consultantAgendaIds,
+    consultantAgendaNames,
   ]);
 
   const agendaScopeById = useMemo(
@@ -2192,6 +2222,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       consultantId: "",
     } : {};
     const rejectionPatch = nextStatus === "rejected" ? {} : { rejectionReason: undefined };
+    const rejectionPatchRemote = nextStatus === "rejected" ? {} : { rejectionReason: deleteField() };
     const nextApplications = applications.map((app) =>
       app.id === id
         ? {
@@ -2206,12 +2237,12 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     );
 
     if (isFirebaseConfigured) {
-      const payload: Partial<Omit<Application, "id">> = {
+      const payload: Record<string, any> = {
         status: nextStatus,
         updatedAt,
         ...assignmentPatch,
         ...clearAssignmentPatch,
-        ...rejectionPatch,
+        ...rejectionPatchRemote,
       };
       if (nextStatus === "completed") {
         payload.completedAt = new Date();
@@ -2228,7 +2259,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     const slotId = targetApplication.officeHourSlotId;
     if (!slotId) return;
 
-    if (status === "cancelled" || status === "rejected") {
+    if (status === "cancelled" || status === "rejected" || status === "review") {
       const shouldOpen = !hasOtherActiveApplicationsForSlot(slotId, id, nextApplications);
       if (!shouldOpen) return;
       if (isFirebaseConfigured) {
@@ -2657,7 +2688,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       expertise: parseExpertiseInput(values.expertise),
       bio: values.bio.trim() || `${name} 컨설턴트`,
       status: currentConsultant?.status ?? "active",
-      availability: currentConsultant?.availability ?? buildDefaultAvailability(),
+      availability: currentConsultant?.availability ?? buildDefaultConsultantAvailability(),
     };
 
     const ok = await persistConsultant(nextConsultant, currentConsultant?.id);
@@ -3548,6 +3579,8 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
               currentUser={user}
               applications={resolvedApplications}
               programs={programList}
+              agendas={agendaList}
+              currentConsultantAgendaIds={currentConsultant?.agendaIds ?? []}
               onNavigateToApplication={(id) => {
                 handleNavigate("application", id);
               }}
@@ -3630,13 +3663,14 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
                 currentUser={scopedUser}
                 applications={scopedApplications}
                 programs={scopedProgramList}
+                agendas={agendaList}
+                currentConsultantAgendaIds={currentConsultant?.agendaIds ?? []}
                 onNavigateToApplication={(id) => {
                   handleNavigate("application", id);
                 }}
                 onRequestApplication={handleRequestApplication}
                 onRejectApplication={handleRejectApplication}
                 onConfirmApplication={handleConfirmApplication}
-                currentConsultantId={currentConsultant?.id ?? null}
                 currentConsultantName={currentConsultant?.name ?? null}
               />
             </ProtectedRoute>
@@ -3649,21 +3683,13 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
                 agendas={agendaList}
                 defaultEmail={firebaseUser?.email}
                 saving={consultantCrud.saving}
+                scheduleSaving={consultantCrud.saving}
+                onSaveSchedule={handleSaveConsultantSchedule}
                 onSubmit={handleSaveConsultantProfile}
               />
             </ProtectedRoute>
           )}
 
-          {currentPage === "consultant-schedule-settings" && (
-            <ProtectedRoute allowedRoles={["consultant"]}>
-              <ConsultantScheduleSettingsPage
-                consultantName={currentConsultant?.name}
-                availability={currentConsultant?.availability}
-                saving={consultantCrud.saving}
-                onSave={handleSaveConsultantSchedule}
-              />
-            </ProtectedRoute>
-          )}
 
           {/* Admin Pages with Protection */}
           {currentPage === "startup-diagnostic" && firebaseUser && (
@@ -3702,10 +3728,13 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
             <ProtectedRoute allowedRoles={["admin", "consultant", "staff"]}>
               <AdminApplications
                 applications={scopedApplications}
+                agendas={agendaList}
                 onUpdateStatus={handleUpdateApplicationStatus}
                 onUpdateApplication={handleUpdateApplication}
+                onConfirmApplication={handleConfirmApplication}
+                onRejectApplication={handleRejectApplication}
+                onRequestApplication={handleRequestApplication}
                 currentUserRole={resolvedRole}
-                currentConsultantId={currentConsultant?.id ?? null}
                 currentConsultantName={currentConsultant?.name ?? null}
                 currentConsultantAgendaIds={currentConsultant?.agendaIds ?? []}
               />
@@ -3804,7 +3833,6 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
                 reports={reports}
                 programs={scopedProgramList}
                 currentUser={scopedUser}
-                currentConsultantId={currentConsultant?.id ?? null}
                 currentConsultantName={currentConsultant?.name ?? null}
                 onCreateReport={(applicationId) => {
                   if (applicationId === "irregular-manual") {

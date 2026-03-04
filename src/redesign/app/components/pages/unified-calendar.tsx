@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { Application, User, Program } from "@/redesign/app/lib/types";
+import { Agenda, Application, User, Program } from "@/redesign/app/lib/types";
 import { Card } from "@/redesign/app/components/ui/card";
 import { Button } from "@/redesign/app/components/ui/button";
 import { Badge } from "@/redesign/app/components/ui/badge";
@@ -30,6 +30,8 @@ interface UnifiedCalendarProps {
   currentUser: User;
   applications: Application[];
   programs: Program[];
+  agendas?: Agenda[];
+  currentConsultantAgendaIds?: string[];
   onNavigateToApplication?: (id: string) => void;
   onRequestApplication?: (id: string) => void;
   onRejectApplication?: (id: string, reason: string) => void;
@@ -82,6 +84,8 @@ export function UnifiedCalendar({
   currentUser,
   applications,
   programs,
+  agendas = [],
+  currentConsultantAgendaIds = [],
   onNavigateToApplication,
   onRequestApplication,
   onRejectApplication,
@@ -201,6 +205,29 @@ export function UnifiedCalendar({
     if (currentConsultantName && event.consultant === currentConsultantName) return true;
     return false;
   };
+  const consultantAgendaNameSet = useMemo(() => {
+    if (!isConsultant) return new Set<string>();
+    const names = new Set<string>();
+    const agendaById = new Map(agendas.map((agenda) => [agenda.id, agenda.name]));
+    currentConsultantAgendaIds.forEach((value) => {
+      const agendaName = agendaById.get(value);
+      if (agendaName) {
+        names.add(agendaName);
+      } else if (value) {
+        names.add(value);
+      }
+    });
+    return names;
+  }, [agendas, currentConsultantAgendaIds, isConsultant]);
+  const matchesConsultantAgenda = (app: Application) => {
+    if (!isConsultant) return true;
+    if (currentConsultantAgendaIds.length === 0 && consultantAgendaNameSet.size === 0) {
+      return false;
+    }
+    const agendaIdOk = app.agendaId ? currentConsultantAgendaIds.includes(app.agendaId) : false;
+    const agendaNameOk = app.agenda ? consultantAgendaNameSet.has(app.agenda) : false;
+    return agendaIdOk || agendaNameOk;
+  };
   const pendingRequests = useMemo(() => {
     if (!isConsultant) return [];
     return applications
@@ -208,21 +235,35 @@ export function UnifiedCalendar({
         (app.status === "pending" || app.status === "review")
         && !app.consultantId
         && (!app.consultant || app.consultant === "담당자 배정 중")
+        && matchesConsultantAgenda(app)
       )
       .sort((a, b) => {
         const dateA = new Date(a.createdAt).getTime();
         const dateB = new Date(b.createdAt).getTime();
         return dateB - dateA;
       });
-  }, [applications, isConsultant]);
+  }, [applications, isConsultant, matchesConsultantAgenda]);
 
   const agendaOptions = useMemo(() => {
+    if (agendas.length > 0) {
+      const agendaNames = agendas
+        .filter((agenda) => (isConsultant
+          ? (currentConsultantAgendaIds.length === 0
+            ? false
+            : currentConsultantAgendaIds.includes(agenda.id))
+          : true))
+        .map((agenda) => agenda.name)
+        .filter(Boolean);
+      return agendaNames.sort((a, b) => a.localeCompare(b));
+    }
     const names = new Set<string>();
     applications.forEach((app) => {
-      if (app.agenda) names.add(app.agenda);
+      if (app.agenda && (!isConsultant || matchesConsultantAgenda(app))) {
+        names.add(app.agenda);
+      }
     });
     return Array.from(names).sort((a, b) => a.localeCompare(b));
-  }, [applications]);
+  }, [agendas, applications, currentConsultantAgendaIds, isConsultant, matchesConsultantAgenda]);
 
   const filteredPendingRequests = useMemo(() => {
     return pendingRequests.filter((app) => {
@@ -239,9 +280,9 @@ export function UnifiedCalendar({
   }, [pendingRequests, programs]);
 
   const renderPendingFilters = () => (
-    <div className="flex flex-wrap gap-2">
+    <div className="flex items-center gap-2 flex-nowrap overflow-x-auto">
       <Select value={pendingProgramFilter} onValueChange={setPendingProgramFilter}>
-        <SelectTrigger className="w-44">
+        <SelectTrigger className="w-36 shrink-0">
           <SelectValue placeholder="사업 전체" />
         </SelectTrigger>
         <SelectContent>
@@ -255,7 +296,7 @@ export function UnifiedCalendar({
       </Select>
 
       <Select value={pendingAgendaFilter} onValueChange={setPendingAgendaFilter}>
-        <SelectTrigger className="w-44">
+        <SelectTrigger className="w-36 shrink-0">
           <SelectValue placeholder="아젠다 전체" />
         </SelectTrigger>
         <SelectContent>
@@ -360,15 +401,14 @@ export function UnifiedCalendar({
   return (
     <div className="h-full flex flex-col bg-slate-50">
       {/* 헤더 */}
-      <div className="bg-white border-b p-6">
-        <div className="max-w-7xl mx-auto">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h1 className="text-2xl font-bold text-[#0A2540] mb-1">통합 캘린더</h1>
-              <p className="text-slate-600">모든 오피스아워 일정을 한눈에 확인하세요</p>
-            </div>
+      <div className="bg-white border-b px-8 py-6">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h1 className="text-2xl font-bold text-[#0A2540] mb-1">통합 캘린더</h1>
+            <p className="text-slate-600">모든 오피스아워 일정을 한눈에 확인하세요</p>
+          </div>
 
-            <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2">
               <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
                 <DialogTrigger asChild>
                   <Button className="gap-2 bg-[#0A2540] hover:bg-[#0A2540]/90">
@@ -562,7 +602,6 @@ export function UnifiedCalendar({
               </div>
 
 
-            </div>
           </div>
         </div>
       </div>
@@ -570,7 +609,7 @@ export function UnifiedCalendar({
       <div className="flex-1 overflow-auto">
         <div className="max-w-7xl mx-auto p-6">
           {viewMode === "month" ? (
-            <div className="grid md:grid-cols-3 gap-6">
+            <div className="grid md:grid-cols-3 gap-4">
               {/* 캘린더 */}
               <div className="md:col-span-2">
                 <Card className="p-6">
@@ -624,41 +663,116 @@ export function UnifiedCalendar({
                     </div>
                   </div>
 
-                  <Calendar
-                    key={`${calendarMonth.getFullYear()}-${calendarMonth.getMonth()}`}
-                    mode="single"
-                    selected={selectedDate}
-                    month={calendarMonth}
-                    onSelect={(date) => {
-                      if (!date) return;
-                      setSelectedDate(date);
-                      const monthStart = new Date(date.getFullYear(), date.getMonth(), 1);
-                      setCurrentMonth(monthStart);
-                    }}
-                    onMonthChange={(month) => {
-                      const monthStart = new Date(month.getFullYear(), month.getMonth(), 1);
-                      setCurrentMonth(monthStart);
-                      setSelectedDate((prev) => clampDateToMonth(prev, monthStart));
-                    }}
-                    className="rounded-md"
-                    modifiers={{
-                      hasEvent: (date) => hasEvents(date),
-                    }}
-                    modifiersClassNames={{
-                      hasEvent:
-                        "font-semibold text-[#0A2540]",
-                    }}
-                    components={{ DayContent: renderDayContent }}
-                  />
+                  <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
+                    <Calendar
+                      key={`${calendarMonth.getFullYear()}-${calendarMonth.getMonth()}`}
+                      mode="single"
+                      selected={selectedDate}
+                      month={calendarMonth}
+                      onSelect={(date) => {
+                        if (!date) return;
+                        setSelectedDate(date);
+                        const monthStart = new Date(date.getFullYear(), date.getMonth(), 1);
+                        setCurrentMonth(monthStart);
+                      }}
+                      onMonthChange={(month) => {
+                        const monthStart = new Date(month.getFullYear(), month.getMonth(), 1);
+                        setCurrentMonth(monthStart);
+                        setSelectedDate((prev) => clampDateToMonth(prev, monthStart));
+                      }}
+                      className="rounded-md"
+                      modifiers={{
+                        hasEvent: (date) => hasEvents(date),
+                      }}
+                      modifiersClassNames={{
+                        hasEvent:
+                          "font-semibold text-[#0A2540]",
+                      }}
+                      components={{ DayContent: renderDayContent }}
+                    />
+
+                    <div className="rounded-lg border border-slate-200 bg-slate-50/60 p-4">
+                      <h3 className="font-semibold text-[#0A2540] mb-3">
+                        {selectedDate.toLocaleDateString("ko-KR", { month: "long", day: "numeric" })}
+                      </h3>
+
+                      {selectedDateEvents.length === 0 ? (
+                        <div className="text-center py-8">
+                          <CalendarIcon className="size-10 text-slate-300 mx-auto mb-2" />
+                          <p className="text-slate-500 text-sm">일정이 없습니다</p>
+                        </div>
+                      ) : (
+                        <div className="space-y-3">
+                          {selectedDateEvents.map((event: Application) => (
+                            <motion.div
+                              key={event.id}
+                              initial={{ opacity: 0, x: -20 }}
+                              animate={{ opacity: 1, x: 0 }}
+                              className={`p-3 rounded-lg border-l-4 cursor-pointer transition-colors ${
+                                isConsultant && isMyEvent(event) ? "bg-blue-50/70 hover:bg-blue-50" : "bg-white hover:bg-slate-100"
+                              }`}
+                              style={{
+                                borderLeftColor:
+                                  isConsultant && isMyEvent(event)
+                                    ? "#3b82f6"
+                                    : getProgramColor(event.programId),
+                              }}
+                              onClick={() => onNavigateToApplication?.(event.id)}
+                            >
+                              <div className="flex items-start justify-between mb-2">
+                                <h4 className="font-medium text-sm text-[#0A2540] flex-1">
+                                  {event.officeHourTitle}
+                                </h4>
+                                <Badge variant="outline" className="text-xs">
+                                  {event.status === "completed" ? "완료" : "예정"}
+                                </Badge>
+                              </div>
+
+                              <div className="space-y-1 text-xs text-slate-600">
+                                <div className="flex items-center gap-2">
+                                  <Clock className="size-3" />
+                                  <span>{formatTime(event.scheduledTime)}</span>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <Users className="size-3" />
+                                  <span>{event.consultant}</span>
+                                  {isConsultant && (
+                                    <Badge
+                                      className={`text-[10px] ${
+                                        isMyEvent(event)
+                                          ? "bg-blue-100 text-blue-700 border-blue-200"
+                                          : "bg-slate-100 text-slate-600 border-slate-200"
+                                      }`}
+                                      variant="outline"
+                                    >
+                                      {isMyEvent(event) ? "내 일정" : "다른 컨설턴트"}
+                                    </Badge>
+                                  )}
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  {event.sessionFormat === "online" ? (
+                                    <Video className="size-3" />
+                                  ) : (
+                                    <MapPin className="size-3" />
+                                  )}
+                                  <span>{event.sessionFormat === "online" ? "온라인" : "오프라인"}</span>
+                                </div>
+                              </div>
+                            </motion.div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
 
 
                 </Card>
               </div>
 
               {/* 선택된 날짜의 일정 */}
-              <div>
+              <div className="flex flex-col gap-4 md:col-span-1">
                 {isConsultant && (
-                  <Card className="p-6 mb-6">
+                  <Card className="p-6">
                     <div className="flex items-center justify-between mb-4">
                       <div>
                         <h3 className="font-semibold text-[#0A2540]">수락 대기 요청</h3>
@@ -748,126 +862,6 @@ export function UnifiedCalendar({
                   </Card>
                 )}
 
-                <Card className="p-6">
-                  <h3 className="font-semibold text-[#0A2540] mb-4">
-                    {selectedDate.toLocaleDateString("ko-KR", { month: "long", day: "numeric" })}
-                  </h3>
-
-                  {selectedDateEvents.length === 0 ? (
-                    <div className="text-center py-12">
-                      <CalendarIcon className="size-12 text-slate-300 mx-auto mb-3" />
-                      <p className="text-slate-500 text-sm">일정이 없습니다</p>
-                    </div>
-                  ) : (
-                    <div className="space-y-3">
-                      {selectedDateEvents.map((event: Application) => (
-                          <motion.div
-                            key={event.id}
-                            initial={{ opacity: 0, x: -20 }}
-                            animate={{ opacity: 1, x: 0 }}
-                            className={`p-3 rounded-lg border-l-4 cursor-pointer transition-colors ${
-                              isConsultant && isMyEvent(event) ? "bg-blue-50/70 hover:bg-blue-50" : "bg-slate-50 hover:bg-slate-100"
-                            }`}
-                            style={{
-                              borderLeftColor:
-                                isConsultant && isMyEvent(event)
-                                  ? "#3b82f6"
-                                  : getProgramColor(event.programId),
-                            }}
-                            onClick={() => onNavigateToApplication?.(event.id)}
-                          >
-                          <div className="flex items-start justify-between mb-2">
-                            <h4 className="font-medium text-sm text-[#0A2540] flex-1">
-                              {event.officeHourTitle}
-                            </h4>
-                            <Badge variant="outline" className="text-xs">
-                              {event.status === "completed" ? "완료" : "예정"}
-                            </Badge>
-                          </div>
-
-                          <div className="space-y-1 text-xs text-slate-600">
-                            <div className="flex items-center gap-2">
-                              <Clock className="size-3" />
-                              <span>{formatTime(event.scheduledTime)}</span>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <Users className="size-3" />
-                              <span>{event.consultant}</span>
-                              {isConsultant && (
-                                <Badge
-                                  className={`text-[10px] ${
-                                    isMyEvent(event)
-                                      ? "bg-blue-100 text-blue-700 border-blue-200"
-                                      : "bg-slate-100 text-slate-600 border-slate-200"
-                                  }`}
-                                  variant="outline"
-                                >
-                                  {isMyEvent(event) ? "내 일정" : "다른 컨설턴트"}
-                                </Badge>
-                              )}
-                            </div>
-                            <div className="flex items-center gap-2">
-                              {event.sessionFormat === "online" ? (
-                                <Video className="size-3" />
-                              ) : (
-                                <MapPin className="size-3" />
-                              )}
-                              <span>{event.sessionFormat === "online" ? "온라인" : "오프라인"}</span>
-                            </div>
-                          </div>
-                        </motion.div>
-                      ))}
-                    </div>
-                  )}
-                </Card>
-
-                {/* 이번 주 요약 */}
-                <Card className="p-6 mt-6">
-                  <h3 className="font-semibold text-[#0A2540] mb-4 flex items-center gap-2">
-                    <CalendarIcon className="size-4" />
-                    이번 주 일정
-                  </h3>
-
-                  {thisWeekEvents.length === 0 ? (
-                    <p className="text-sm text-slate-500 text-center py-4">
-                      이번 주 일정이 없습니다
-                    </p>
-                  ) : (
-                    <div className="space-y-2">
-                      {thisWeekEvents.slice(0, 5).map((event: Application) => (
-                        <div
-                          key={event.id}
-                          className="flex items-center gap-3 p-2 rounded-lg hover:bg-slate-50 cursor-pointer"
-                          onClick={() => onNavigateToApplication?.(event.id)}
-                        >
-                          <div
-                            className="w-1.5 h-8 rounded-full flex-shrink-0"
-                            style={{ backgroundColor: getProgramColor(event.programId) }}
-                          />
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium text-[#0A2540] truncate">
-                              {event.officeHourTitle}
-                            </p>
-                            <p className="text-xs text-slate-500">
-                              {(parseLocalDateKey(event.scheduledDate ?? "")
-                                ?? new Date(event.scheduledDate ?? "")
-                              ).toLocaleDateString("ko-KR", {
-                                month: "short",
-                                day: "numeric",
-                              })}{" "}
-                              {formatTime(event.scheduledTime)}
-                            </p>
-                          </div>
-                        </div>
-                      ))}
-                      {thisWeekEvents.length > 5 && (
-                        <p className="text-xs text-slate-500 text-center pt-2">
-                          외 {thisWeekEvents.length - 5}개
-                        </p>
-                      )}
-                    </div>
-                  )}
-                </Card>
               </div>
             </div>
           ) : (

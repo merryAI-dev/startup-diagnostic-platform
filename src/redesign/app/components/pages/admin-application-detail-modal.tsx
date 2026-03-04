@@ -30,13 +30,19 @@ import {
 import { Input } from "@/redesign/app/components/ui/input";
 import { Label } from "@/redesign/app/components/ui/label";
 import { Separator } from "@/redesign/app/components/ui/separator";
+import { Textarea } from "@/redesign/app/components/ui/textarea";
 
 interface AdminApplicationDetailModalProps {
   application: Application;
   onClose: () => void;
   onUpdateStatus: (id: string, status: ApplicationStatus) => void;
   onUpdateApplication: (id: string, data: Partial<Application>) => void;
+  onConfirmApplication?: (id: string) => void;
+  onRejectApplication?: (id: string, reason: string) => void;
+  onRequestApplication?: (id: string) => void;
   readOnly?: boolean;
+  allowStatusActions?: boolean;
+  currentConsultantName?: string | null;
 }
 
 export function AdminApplicationDetailModal({
@@ -44,12 +50,20 @@ export function AdminApplicationDetailModal({
   onClose,
   onUpdateStatus,
   onUpdateApplication,
+  onConfirmApplication,
+  onRejectApplication,
+  onRequestApplication,
   readOnly = false,
+  allowStatusActions = false,
+  currentConsultantName,
 }: AdminApplicationDetailModalProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [editedConsultant, setEditedConsultant] = useState(application.consultant);
   const [editedDate, setEditedDate] = useState(application.scheduledDate || "");
   const [editedTime, setEditedTime] = useState(application.scheduledTime || "");
+  const [actionDialogOpen, setActionDialogOpen] = useState(false);
+  const [actionType, setActionType] = useState<"confirm" | "reject">("confirm");
+  const [rejectReason, setRejectReason] = useState("");
   const [activeCompanyTab, setActiveCompanyTab] = useState<"info" | "assessment" | "report">(
     "info"
   );
@@ -85,6 +99,50 @@ export function AdminApplicationDetailModal({
   const handleStatusChange = (newStatus: ApplicationStatus) => {
     onUpdateStatus(application.id, newStatus);
     toast.success(`상태가 '${getStatusLabel(newStatus)}'로 변경되었습니다`);
+  };
+
+  const handleOpenAction = (type: "confirm" | "reject") => {
+    setActionType(type);
+    setRejectReason("");
+    setActionDialogOpen(true);
+  };
+
+  const handleConfirmAction = async () => {
+    try {
+      if (actionType === "reject") {
+        const trimmed = rejectReason.trim();
+        if (!trimmed) {
+          toast.error("거절 사유를 입력해주세요");
+          return;
+        }
+        if (onRejectApplication) {
+          await onRejectApplication(application.id, trimmed);
+        } else {
+          onUpdateApplication(application.id, { rejectionReason: trimmed });
+          onUpdateStatus(application.id, "rejected");
+          toast.success("거절 처리되었습니다");
+        }
+      } else {
+        const isUnassigned = !application.consultantId
+          && (!application.consultant || application.consultant === "담당자 배정 중");
+        if ((application.status === "pending" || application.status === "review")
+          && isUnassigned
+          && onRequestApplication) {
+          await onRequestApplication(application.id);
+        } else {
+          if (onConfirmApplication) {
+            await onConfirmApplication(application.id);
+          } else {
+            onUpdateStatus(application.id, "confirmed");
+          }
+        }
+        toast.success("확정 처리되었습니다");
+      }
+      setActionDialogOpen(false);
+      setRejectReason("");
+    } catch (error) {
+      console.error("Failed to update application status:", error);
+    }
   };
 
   const getStatusLabel = (status: ApplicationStatus) => {
@@ -280,38 +338,57 @@ export function AdminApplicationDetailModal({
   }, [assessmentSummary]);
 
   return (
-    <Dialog open={true} onOpenChange={onClose}>
-      <DialogContent className="w-[90vw] !max-w-none sm:!max-w-none max-h-[92vh] overflow-hidden flex flex-col">
-        <DialogHeader>
-          <div className="space-y-2">
-            <DialogTitle>{application.officeHourTitle}</DialogTitle>
-            <div className="flex items-center gap-2">
-              <StatusChip status={application.status} />
-              <Badge variant="outline">
-                {application.type === "regular" ? "정기" : "비정기"}
-              </Badge>
+    <>
+      <Dialog open={true} onOpenChange={onClose}>
+        <DialogContent className="w-[90vw] !max-w-none sm:!max-w-none max-h-[92vh] overflow-hidden flex flex-col">
+          <DialogHeader>
+            <div className="space-y-2">
+              <DialogTitle>{application.officeHourTitle}</DialogTitle>
+              <div className="flex items-center gap-2">
+                <StatusChip status={application.status} />
+                <Badge variant="outline">
+                  {application.type === "regular" ? "정기" : "비정기"}
+                </Badge>
+              </div>
             </div>
-          </div>
-        </DialogHeader>
+          </DialogHeader>
 
         <div className="grid flex-1 min-h-0 gap-8 py-4 lg:grid-cols-[560px_minmax(0,1fr)]">
           <div className="min-h-0 overflow-y-auto lg:pr-4 space-y-6">
             {/* Status Management */}
-            {!readOnly && (
+            {(allowStatusActions || !readOnly) && (
               <>
                 <div className="space-y-3">
                   <Label>상태 관리</Label>
                   <div className="flex gap-2 flex-wrap">
-                    {application.status !== "confirmed" && application.status !== "completed" && (
+                    {(application.status === "pending" || application.status === "review") && (
                       <Button
                         size="sm"
                         variant="default"
-                        onClick={() => handleStatusChange("confirmed")}
+                        onClick={() => handleOpenAction("confirm")}
                         className="transition-colors hover:bg-primary/80 hover:text-primary-foreground"
-                        disabled={application.status === "cancelled"}
                       >
                         <CheckCircle2 className="w-4 h-4 mr-2" />
-                        확정
+                        {application.status === "pending" ? "수락" : "확정"}
+                      </Button>
+                    )}
+                    {(application.status === "pending" || application.status === "review") && (
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        onClick={() => handleOpenAction("reject")}
+                      >
+                        <XCircle className="w-4 h-4 mr-2" />
+                        거절
+                      </Button>
+                    )}
+                    {application.status === "rejected" && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handleStatusChange("review")}
+                      >
+                        재검토
                       </Button>
                     )}
                     {application.status === "confirmed" && (
@@ -1109,12 +1186,59 @@ export function AdminApplicationDetailModal({
           </div>
         </div>
 
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose}>
-            닫기
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+          <DialogFooter>
+            <Button variant="outline" onClick={onClose}>
+              닫기
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={actionDialogOpen} onOpenChange={setActionDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{actionType === "confirm" ? "확정 확인" : "거절 사유 입력"}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            {actionType === "confirm" ? (
+              <div className="text-sm text-slate-600 space-y-2">
+                <p>이 요청을 확정하면 아래 컨설턴트로 배정됩니다.</p>
+                <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-slate-700">
+                  {currentConsultantName ?? application.consultant ?? "현재 로그인한 컨설턴트"}
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <Label htmlFor="reject-reason">거절 사유</Label>
+                <Textarea
+                  id="reject-reason"
+                  value={rejectReason}
+                  onChange={(e) => setRejectReason(e.target.value)}
+                  placeholder="거절 사유를 입력해주세요"
+                  className="min-h-[120px]"
+                />
+              </div>
+            )}
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setActionDialogOpen(false);
+                setRejectReason("");
+              }}
+            >
+              취소
+            </Button>
+            <Button
+              onClick={handleConfirmAction}
+              disabled={actionType === "reject" && rejectReason.trim().length === 0}
+            >
+              확인
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }

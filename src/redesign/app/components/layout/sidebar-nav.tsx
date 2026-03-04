@@ -54,11 +54,6 @@ const adminNavItems: NavItem[] = [
 const consultantNavItems: NavItem[] = [
   { id: "admin-dashboard", label: "담당 사업 현황", icon: LayoutDashboard },
   { id: "consultant-calendar", label: "내 일정 캘린더", icon: CalendarRange },
-  {
-    id: "consultant-schedule-settings",
-    label: "내 스케줄 설정",
-    icon: CalendarClock,
-  },
   { id: "consultant-profile", label: "내 정보 입력", icon: UserCog },
   { id: "pending-reports", label: "오피스아워 일지", icon: FileText },
   { id: "admin-applications", label: "신청 관리", icon: ClipboardList },
