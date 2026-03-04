@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Calendar, Clock, Search, Filter, Eye, CheckCircle2, XCircle, MoreVertical } from "lucide-react";
+import { useMemo, useState } from "react";
+import { Calendar, Clock, Search } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/redesign/app/components/ui/card";
 import { Button } from "@/redesign/app/components/ui/button";
 import { Input } from "@/redesign/app/components/ui/input";
@@ -7,34 +7,33 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/redesign/app/components/ui/table";
 import { Badge } from "@/redesign/app/components/ui/badge";
 import { StatusChip } from "@/redesign/app/components/status-chip";
-import { Application, ApplicationStatus } from "@/redesign/app/lib/types";
+import { Agenda, Application, ApplicationStatus } from "@/redesign/app/lib/types";
 import { format } from "date-fns";
 import { ko } from "date-fns/locale";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/redesign/app/components/ui/dropdown-menu";
 import { AdminApplicationDetailModal } from "@/redesign/app/components/pages/admin-application-detail-modal";
 
 interface AdminApplicationsProps {
   applications: Application[];
+  agendas?: Agenda[];
   onUpdateStatus: (id: string, status: ApplicationStatus) => void;
   onUpdateApplication: (id: string, data: Partial<Application>) => void;
+  onConfirmApplication?: (id: string) => void;
+  onRejectApplication?: (id: string, reason: string) => void;
+  onRequestApplication?: (id: string) => void;
   currentUserRole?: string;
-  currentConsultantId?: string | null;
   currentConsultantName?: string | null;
   currentConsultantAgendaIds?: string[];
 }
 
 export function AdminApplications({
   applications,
+  agendas = [],
   onUpdateStatus,
   onUpdateApplication,
+  onConfirmApplication,
+  onRejectApplication,
+  onRequestApplication,
   currentUserRole,
-  currentConsultantId,
   currentConsultantName,
   currentConsultantAgendaIds = [],
 }: AdminApplicationsProps) {
@@ -44,20 +43,21 @@ export function AdminApplications({
   const [companyFilter, setCompanyFilter] = useState<string>("all");
   const [selectedApplication, setSelectedApplication] = useState<Application | null>(null);
   const isConsultantUser = currentUserRole === "consultant";
-  const isAdminUser = currentUserRole === "admin";
 
-  const normalizeConsultantName = (value?: string | null) =>
-    (value ?? "").replace(/\s*컨설턴트\s*$/u, "").trim().toLowerCase();
-
-  const isAssignedToCurrentConsultant = (app: Application) => {
-    if (!isConsultantUser) return false;
-    if (currentConsultantId && app.consultantId) {
-      return currentConsultantId === app.consultantId;
-    }
-    const appName = normalizeConsultantName(app.consultant);
-    const currentName = normalizeConsultantName(currentConsultantName);
-    return appName !== "" && currentName !== "" && appName === currentName;
-  };
+  const consultantAgendaNames = useMemo(() => {
+    if (currentConsultantAgendaIds.length === 0) return new Set<string>();
+    const names = new Set<string>();
+    const agendaById = new Map(agendas.map((agenda) => [agenda.id, agenda.name]));
+    currentConsultantAgendaIds.forEach((value) => {
+      const agendaName = agendaById.get(value);
+      if (agendaName) {
+        names.add(agendaName);
+      } else if (value) {
+        names.add(value);
+      }
+    });
+    return names;
+  }, [agendas, currentConsultantAgendaIds]);
 
   const companyOptions = Array.from(
     new Set(
@@ -70,8 +70,9 @@ export function AdminApplications({
   // Filter applications
   const filteredApplications = applications.filter((app) => {
     const matchesConsultantAgenda = !isConsultantUser
-      || (currentConsultantAgendaIds.length > 0
-        && (app.agendaId ? currentConsultantAgendaIds.includes(app.agendaId) : false));
+      || ((currentConsultantAgendaIds.length > 0 || consultantAgendaNames.size > 0)
+        && ((app.agendaId && currentConsultantAgendaIds.includes(app.agendaId))
+          || (app.agenda && consultantAgendaNames.has(app.agenda))));
 
     const normalizedQuery = searchQuery.trim().toLowerCase();
     const matchesSearch = normalizedQuery.length === 0
@@ -101,53 +102,20 @@ export function AdminApplications({
     }
   };
 
-  const getStatusActions = (app: Application) => {
-    const actions: { label: string; status: ApplicationStatus; variant?: "default" | "destructive" }[] = [];
-
-    switch (app.status) {
-      case "pending":
-        actions.push({ label: "확정", status: "confirmed" });
-        break;
-      case "review":
-        actions.push({ label: "확정", status: "confirmed" });
-        break;
-      case "confirmed":
-        actions.push({ label: "확정 취소", status: "review" });
-        break;
-      case "cancelled":
-        actions.push({ label: "재검토", status: "review" });
-        break;
-      case "rejected":
-        actions.push({ label: "재검토", status: "review" });
-        break;
-      case "completed":
-        // No status changes for completed
-        break;
-    }
-
-    return actions;
-  };
-
   return (
-    <div className="p-8 space-y-6">
-      <div>
-        <h1 className="mb-2">신청 관리</h1>
+    <div className="min-h-screen bg-slate-50">
+      <div className="bg-white border-b px-8 py-6">
+        <h1 className="text-2xl font-bold text-gray-900 mb-1">신청 관리</h1>
         <p className="text-sm text-muted-foreground">
           전체 오피스아워 신청을 관리하고 상태를 변경할 수 있습니다
         </p>
       </div>
+      <div className="p-8 space-y-6">
 
-      {/* Filters */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Filter className="w-5 h-5" />
-            필터 및 검색
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="flex gap-4">
-            <div className="flex-1 relative">
+      <Card className="overflow-hidden bg-white">
+        <CardContent className="p-4 border-b bg-white">
+          <div className="flex flex-wrap gap-4">
+            <div className="flex-1 min-w-[220px] relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
               <Input
                 placeholder="기업, 제목, 아젠다로 검색..."
@@ -195,20 +163,14 @@ export function AdminApplications({
             </Select>
           </div>
         </CardContent>
-      </Card>
-
-      {/* Results count */}
-      <div className="flex items-center justify-between">
-        <p className="text-sm text-muted-foreground">
-          총 <span className="font-semibold text-foreground">{sortedApplications.length}</span>개의 신청
-        </p>
-      </div>
-
-      {/* Applications Table */}
-      <Card>
-        <CardContent className="p-0">
+        <CardContent className="p-4 border-b flex items-center justify-between">
+          <p className="text-sm text-muted-foreground">
+            총 <span className="font-semibold text-foreground">{sortedApplications.length}</span>개의 신청
+          </p>
+        </CardContent>
+        <div className="max-h-[70vh] overflow-y-auto">
           <Table>
-            <TableHeader>
+            <TableHeader className="sticky top-0 bg-white z-10">
               <TableRow>
                 <TableHead>상태</TableHead>
                 <TableHead>유형</TableHead>
@@ -269,46 +231,18 @@ export function AdminApplications({
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex items-center justify-end gap-2">
-                        {isAdminUser ? (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => setSelectedApplication(app)}
-                          >
-                            상세보기
-                          </Button>
-                        ) : (
-                          <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                              <Button variant="ghost" size="sm">
-                                <MoreVertical className="w-4 h-4" />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                              <DropdownMenuItem onClick={() => setSelectedApplication(app)}>
-                                <Eye className="w-4 h-4 mr-2" />
-                                상세 보기
-                              </DropdownMenuItem>
-                              <DropdownMenuSeparator />
-                              {getStatusActions(app).map((action, idx) => (
-                                <DropdownMenuItem
-                                  key={idx}
-                                  onClick={() => handleStatusChange(app.id, action.status)}
-                                  className={action.variant === "destructive" ? "text-destructive" : ""}
-                                >
-                                  {action.status === "confirmed" && <CheckCircle2 className="w-4 h-4 mr-2" />}
-                                  {action.status === "cancelled" && <XCircle className="w-4 h-4 mr-2" />}
-                                  {action.label}
-                                </DropdownMenuItem>
-                              ))}
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                        )}
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setSelectedApplication(app)}
+                        >
+                          상세보기
+                        </Button>
                       </div>
                     </TableCell>
-                  </TableRow>
-                ))
-              ) : (
+                </TableRow>
+              ))
+            ) : (
                 <TableRow>
                   <TableCell colSpan={7} className="text-center py-12">
                     <div className="flex flex-col items-center gap-2">
@@ -324,8 +258,9 @@ export function AdminApplications({
               )}
             </TableBody>
           </Table>
-        </CardContent>
+        </div>
       </Card>
+      </div>
 
       {/* Detail Modal */}
       {selectedApplication && (
@@ -334,7 +269,12 @@ export function AdminApplications({
           onClose={() => setSelectedApplication(null)}
           onUpdateStatus={handleStatusChange}
           onUpdateApplication={onUpdateApplication}
-          readOnly={isAdminUser}
+          onConfirmApplication={onConfirmApplication}
+          onRejectApplication={onRejectApplication}
+          onRequestApplication={onRequestApplication}
+          readOnly={true}
+          allowStatusActions={isConsultantUser}
+          currentConsultantName={currentConsultantName}
         />
       )}
     </div>
