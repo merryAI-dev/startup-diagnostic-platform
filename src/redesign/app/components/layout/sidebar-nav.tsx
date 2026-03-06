@@ -10,7 +10,6 @@ import {
   KanbanSquare,
   LayoutDashboard,
   MessageSquare,
-  MessageSquareText,
   Newspaper,
   Settings,
   Shield,
@@ -47,7 +46,6 @@ const adminNavItems: NavItem[] = [
   { id: "admin-agendas", label: "아젠다 관리", icon: FileText },
   { id: "admin-consultants", label: "컨설턴트 관리", icon: UserCog },
   { id: "admin-users", label: "사용자 관리", icon: Users },
-  { id: "admin-communication", label: "커뮤니케이션 센터", icon: MessageSquareText },
   { id: "pending-reports", label: "미작성 보고서", icon: AlertCircle }, // 추가
 ];
 
@@ -97,6 +95,7 @@ export function SidebarNav({
     : isConsultantUser
       ? consultantNavItems
       : userNavItems;
+  const visibleNavItems = navItems.filter((item) => item.id !== "admin-communication");
   const companyCoreNavItems = userNavItems.filter((item) =>
     companyCoreNavIds.has(item.id)
   );
@@ -137,7 +136,7 @@ export function SidebarNav({
     <div className="w-64 border-r bg-white h-full flex flex-col">
       <nav className="flex-1 p-4 space-y-1">
         {isAdminUser || isConsultantUser ? (
-          navItems.map((item) => renderNavButton(item))
+          visibleNavItems.map((item) => renderNavButton(item))
         ) : (
           <>
             {companyCoreNavItems.map((item) => renderNavButton(item))}

@@ -6,19 +6,25 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    function isActiveUser() {
+    function hasProfile() {
       return isSignedIn()
+        && exists(/databases/$(database)/documents/profiles/$(request.auth.uid));
+    }
+
+    function isActiveUser() {
+      return hasProfile()
+        && get(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.active is bool
         && get(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.active == true;
     }
 
     function isAdmin() {
       return isActiveUser()
-        && get(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.role == "admin"
+        && get(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.role == "admin";
     }
 
     function isConsultant() {
       return isActiveUser()
-        && get(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.role == "consultant"
+        && get(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.role == "consultant";
     }
 
     function isCompanyOwner(companyId) {
@@ -38,7 +44,8 @@ service cloud.firestore {
         && request.resource.data.active == false;
 
       allow read: if isSignedIn()
-        && (request.auth.uid == userId || isAdmin());
+        && request.auth.uid == userId;
+      allow read: if isAdmin();
 
       allow update: if isAdmin()
         && request.resource.data.role in ["admin", "company", "consultant"]
@@ -49,6 +56,16 @@ service cloud.firestore {
         && request.resource.data.active is bool;
 
       allow delete: if false;
+    }
+
+    match /users/{userId} {
+      allow read: if isSignedIn()
+        && (request.auth.uid == userId || isAdmin());
+      allow create: if isSignedIn()
+        && request.auth.uid == userId;
+      allow update: if isSignedIn()
+        && (request.auth.uid == userId || isAdmin());
+      allow delete: if isAdmin();
     }
 
     match /adminRoleRequests/{requestId} {

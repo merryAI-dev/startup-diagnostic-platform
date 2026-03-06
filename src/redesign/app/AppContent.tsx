@@ -2758,26 +2758,6 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     toast.success("컨설턴트 정보가 업데이트되었습니다");
   };
 
-  const handleAddConsultant = async (data: Omit<Consultant, "id">) => {
-    if (isFirebaseConfigured) {
-      const createdId = await consultantCrud.create(data);
-      if (!createdId) {
-        toast.error("컨설턴트 추가에 실패했습니다");
-        return;
-      }
-      setConsultants((prev) => [...prev, { ...data, id: createdId }]);
-      toast.success("컨설턴트 계정이 추가되었습니다");
-      return;
-    }
-
-    const newConsultant: Consultant = {
-      ...data,
-      id: `c${Date.now()}`,
-    };
-    setConsultants((prev) => [...prev, newConsultant]);
-    toast.success("컨설턴트가 추가되었습니다");
-  };
-
   const handleAddAgenda = async (data: Omit<Agenda, "id">) => {
     if (isFirebaseConfigured) {
       const createdId = await agendaCrud.create(data);
@@ -3747,7 +3727,6 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
                 consultants={consultants}
                 agendas={agendaList}
                 onUpdateConsultant={handleUpdateConsultant}
-                onAddConsultant={handleAddConsultant}
               />
             </ProtectedRoute>
           )}
