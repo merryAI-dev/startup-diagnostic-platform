@@ -9,7 +9,6 @@ import {
   KanbanSquare,
   LayoutDashboard,
   MessageSquare,
-  MessageSquareText,
   Newspaper,
   Settings,
   Shield,
@@ -36,7 +35,6 @@ const adminNavItems: NavItem[] = [
   { id: "admin-programs", label: "사업별 프로그램", icon: Target },
   { id: "admin-consultants", label: "컨설턴트 관리", icon: UserCog },
   { id: "admin-users", label: "사용자 관리", icon: Users },
-  { id: "admin-communication", label: "커뮤니케이션 센터", icon: MessageSquareText },
   { id: "startup-diagnostic", label: "스타트업 진단시트", icon: FileText },
   { id: "pending-reports", label: "미작성 보고서", icon: AlertCircle },
 ]

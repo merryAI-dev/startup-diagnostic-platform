@@ -1,23 +1,20 @@
 import { useMemo, useState } from "react";
-import { Clock3, Mail, Phone, Plus, UserCog } from "lucide-react";
+import { Clock3, Mail, Phone, UserCog } from "lucide-react";
 import { Agenda, Consultant, ConsultantAvailability } from "@/redesign/app/lib/types";
 import { Badge } from "@/redesign/app/components/ui/badge";
 import { Button } from "@/redesign/app/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/redesign/app/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/redesign/app/components/ui/dialog";
 import { Input } from "@/redesign/app/components/ui/input";
-import { Label } from "@/redesign/app/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/redesign/app/components/ui/select";
 import { Switch } from "@/redesign/app/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/redesign/app/components/ui/table";
-import { Textarea } from "@/redesign/app/components/ui/textarea";
 import { cn } from "@/redesign/app/components/ui/utils";
 
 interface AdminConsultantsProps {
   consultants: Consultant[];
   agendas: Agenda[];
   onUpdateConsultant: (id: string, data: Partial<Consultant>) => void;
-  onAddConsultant: (data: Omit<Consultant, "id">) => void;
 }
 
 const SCHEDULE_DAYS = [
@@ -69,14 +66,16 @@ export function AdminConsultants({
   consultants,
   agendas,
   onUpdateConsultant,
-  onAddConsultant,
 }: AdminConsultantsProps) {
-  const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [selectedConsultantId, setSelectedConsultantId] = useState<string | null>(
     null
   );
   const [isScheduleDialogOpen, setIsScheduleDialogOpen] = useState(false);
   const [isAgendaMapDialogOpen, setIsAgendaMapDialogOpen] = useState(false);
+  const [draftAgendaIds, setDraftAgendaIds] = useState<string[] | null>(null);
+  const [draftScheduleAvailability, setDraftScheduleAvailability] = useState<
+    ConsultantAvailability[] | null
+  >(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [agendaFilter, setAgendaFilter] = useState("all");
 
@@ -109,72 +108,67 @@ export function AdminConsultants({
     });
   }, [consultants, searchQuery, agendaFilter]);
 
-  function toggleSlot(dayOfWeek: number, slotStart: string) {
-    if (!selectedConsultant) return;
-    const normalized = normalizeAvailability(selectedConsultant.availability);
-    const nextAvailability = normalized.map((day) => {
-      if (day.dayOfWeek !== dayOfWeek) return day;
-      return {
-        ...day,
-        slots: day.slots.map((slot) =>
-          slot.start === slotStart
-            ? { ...slot, available: !slot.available }
-            : slot
-        ),
-      };
-    });
+  const normalizedSelectedAvailability = useMemo(
+    () => normalizeAvailability(selectedConsultant?.availability),
+    [selectedConsultant?.availability]
+  );
+  const normalizedSelectedAgendaIds = useMemo(
+    () =>
+      Array.from(new Set(selectedConsultant?.agendaIds ?? [])).sort(),
+    [selectedConsultant?.agendaIds]
+  );
+  const agendaIdsForDialog = draftAgendaIds ?? normalizedSelectedAgendaIds;
+  const isAgendaDirty =
+    JSON.stringify(Array.from(new Set(agendaIdsForDialog)).sort()) !==
+    JSON.stringify(normalizedSelectedAgendaIds);
+  const scheduleAvailability =
+    draftScheduleAvailability ?? normalizedSelectedAvailability;
+  const isScheduleDirty =
+    JSON.stringify(scheduleAvailability) !==
+    JSON.stringify(normalizedSelectedAvailability);
 
-    onUpdateConsultant(selectedConsultant.id, { availability: nextAvailability });
+  function toggleSlot(dayOfWeek: number, slotStart: string) {
+    setDraftScheduleAvailability((prev) => {
+      const base = prev ?? normalizedSelectedAvailability;
+      return base.map((day) => {
+        if (day.dayOfWeek !== dayOfWeek) return day;
+        return {
+          ...day,
+          slots: day.slots.map((slot) =>
+            slot.start === slotStart
+              ? { ...slot, available: !slot.available }
+              : slot
+          ),
+        };
+      });
+    });
   }
 
-  function handleAddConsultant(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    const formData = new FormData(event.currentTarget);
-
-    const name = String(formData.get("name") ?? "").trim();
-    const email = String(formData.get("email") ?? "").trim();
-    if (!name || !email) return;
-
-    const phone = String(formData.get("phone") ?? "").trim();
-    const organization = String(formData.get("organization") ?? "").trim();
-    const secondaryEmail = String(formData.get("secondaryEmail") ?? "").trim();
-    const secondaryPhone = String(formData.get("secondaryPhone") ?? "").trim();
-    const fixedMeetingLink = String(formData.get("fixedMeetingLink") ?? "").trim();
-    const bio = String(formData.get("bio") ?? "").trim();
-    const expertiseRaw = String(formData.get("expertise") ?? "").trim();
-
-    onAddConsultant({
-      name,
-      email,
-      phone: phone || undefined,
-      organization: organization || undefined,
-      secondaryEmail: secondaryEmail || undefined,
-      secondaryPhone: secondaryPhone || undefined,
-      fixedMeetingLink: fixedMeetingLink || undefined,
-      title: "컨설턴트",
-      expertise: expertiseRaw
-        ? expertiseRaw.split(",").map((item) => item.trim()).filter(Boolean)
-        : [],
-      bio: bio || `${name} 컨설턴트`,
-      status: "active",
-      agendaIds: [],
-      availability: buildDefaultAvailability(),
+  function handleSaveSchedule() {
+    if (!selectedConsultant) return;
+    onUpdateConsultant(selectedConsultant.id, {
+      availability: scheduleAvailability,
     });
-
-    event.currentTarget.reset();
-    setIsAddDialogOpen(false);
+    setIsScheduleDialogOpen(false);
+    setDraftScheduleAvailability(null);
   }
 
   function toggleConsultantAgenda(agendaId: string, checked: boolean) {
-    if (!selectedConsultant) return;
-    const currentAgendaIds = selectedConsultant.agendaIds ?? [];
-    const nextAgendaIds = checked
-      ? [...new Set([...currentAgendaIds, agendaId])]
-      : currentAgendaIds.filter((id) => id !== agendaId);
-
-    onUpdateConsultant(selectedConsultant.id, {
-      agendaIds: nextAgendaIds,
+    setDraftAgendaIds((prev) => {
+      const base = prev ?? normalizedSelectedAgendaIds;
+      return checked
+        ? [...new Set([...base, agendaId])]
+        : base.filter((id) => id !== agendaId);
     });
+  }
+
+  function handleSaveAgendaMapping() {
+    if (!selectedConsultant) return;
+    onUpdateConsultant(selectedConsultant.id, {
+      agendaIds: Array.from(new Set(agendaIdsForDialog)).sort(),
+    });
+    setIsAgendaMapDialogOpen(false);
+    setDraftAgendaIds(null);
   }
 
   return (
@@ -186,96 +180,6 @@ export function AdminConsultants({
             컨설턴트 프로필과 정기 오피스아워(화/목, 09:00~18:00) 가능 시간을 관리합니다
           </p>
         </div>
-        <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
-          <DialogTrigger asChild>
-            <Button>
-              <Plus className="w-4 h-4 mr-2" />
-              컨설턴트 계정 추가
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="max-w-2xl">
-            <DialogHeader>
-              <DialogTitle>컨설턴트 계정 등록</DialogTitle>
-              <DialogDescription>
-                필수 정보 입력 후 등록하면 관리자 목록에 즉시 반영됩니다.
-              </DialogDescription>
-            </DialogHeader>
-            <form onSubmit={handleAddConsultant} className="grid grid-cols-2 gap-4">
-              <div>
-                <Label className="mb-2 block" htmlFor="name">
-                  컨설턴트명
-                </Label>
-                <Input id="name" name="name" placeholder="홍길동" required />
-              </div>
-              <div>
-                <Label className="mb-2 block" htmlFor="organization">
-                  소속
-                </Label>
-                <Input id="organization" name="organization" placeholder="MYSC" />
-              </div>
-              <div>
-                <Label className="mb-2 block" htmlFor="email">
-                  이메일
-                </Label>
-                <Input id="email" name="email" type="email" required />
-              </div>
-              <div>
-                <Label className="mb-2 block" htmlFor="phone">
-                  전화번호
-                </Label>
-                <Input id="phone" name="phone" placeholder="010-0000-0000" />
-              </div>
-              <div>
-                <Label className="mb-2 block" htmlFor="secondaryEmail">
-                  보조 이메일
-                </Label>
-                <Input id="secondaryEmail" name="secondaryEmail" type="email" />
-              </div>
-              <div>
-                <Label className="mb-2 block" htmlFor="secondaryPhone">
-                  보조 전화번호
-                </Label>
-                <Input id="secondaryPhone" name="secondaryPhone" placeholder="010-0000-0000" />
-              </div>
-              <div className="col-span-2">
-                <Label className="mb-2 block" htmlFor="fixedMeetingLink">
-                  고정 화상회의 링크
-                </Label>
-                <Input
-                  id="fixedMeetingLink"
-                  name="fixedMeetingLink"
-                  placeholder="https://zoom.us/j/..."
-                />
-              </div>
-              <div className="col-span-2">
-                <Label className="mb-2 block" htmlFor="expertise">
-                  전문 분야 (쉼표 구분)
-                </Label>
-                <Input
-                  id="expertise"
-                  name="expertise"
-                  placeholder="예: 투자유치, 임팩트측정, BM"
-                />
-              </div>
-              <div className="col-span-2">
-                <Label className="mb-2 block" htmlFor="bio">
-                  메모
-                </Label>
-                <Textarea id="bio" name="bio" rows={3} placeholder="관리 메모" />
-              </div>
-              <div className="col-span-2 flex justify-end gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => setIsAddDialogOpen(false)}
-                >
-                  취소
-                </Button>
-                <Button type="submit">등록</Button>
-              </div>
-            </form>
-          </DialogContent>
-        </Dialog>
       </div>
 
       <Card>
@@ -348,8 +252,8 @@ export function AdminConsultants({
 
       <Card>
         <CardContent className="p-0">
-          <div className="max-h-[60vh] overflow-y-auto">
-            <Table>
+          <div className="max-h-[60vh] overflow-auto">
+            <Table className="min-w-[900px]">
               <TableHeader className="sticky top-0 bg-white z-10">
                 <TableRow>
                   <TableHead>컨설턴트</TableHead>
@@ -450,6 +354,11 @@ export function AdminConsultants({
                               setIsAgendaMapDialogOpen(open);
                               if (open) {
                                 setSelectedConsultantId(consultant.id);
+                                setDraftAgendaIds(
+                                  Array.from(new Set(consultant.agendaIds ?? [])).sort()
+                                );
+                              } else {
+                                setDraftAgendaIds(null);
                               }
                             }}
                           >
@@ -457,7 +366,12 @@ export function AdminConsultants({
                               <Button
                                 variant="outline"
                                 size="sm"
-                                onClick={() => setSelectedConsultantId(consultant.id)}
+                                onClick={() => {
+                                  setSelectedConsultantId(consultant.id);
+                                  setDraftAgendaIds(
+                                    Array.from(new Set(consultant.agendaIds ?? [])).sort()
+                                  );
+                                }}
                               >
                                 아젠다 매핑
                               </Button>
@@ -477,7 +391,7 @@ export function AdminConsultants({
                                   </p>
                                 ) : (
                                   agendas.map((agenda) => {
-                                    const checked = (selectedConsultant?.agendaIds ?? []).includes(
+                                    const checked = agendaIdsForDialog.includes(
                                       agenda.id
                                     );
                                     return (
@@ -503,6 +417,25 @@ export function AdminConsultants({
                                   })
                                 )}
                               </div>
+                              <div className="mt-4 flex justify-end gap-2">
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  onClick={() => {
+                                    setIsAgendaMapDialogOpen(false);
+                                    setDraftAgendaIds(null);
+                                  }}
+                                >
+                                  취소
+                                </Button>
+                                <Button
+                                  type="button"
+                                  onClick={handleSaveAgendaMapping}
+                                  disabled={!isAgendaDirty}
+                                >
+                                  저장
+                                </Button>
+                              </div>
                             </DialogContent>
                           </Dialog>
 
@@ -512,6 +445,11 @@ export function AdminConsultants({
                               setIsScheduleDialogOpen(open);
                               if (open) {
                                 setSelectedConsultantId(consultant.id);
+                                setDraftScheduleAvailability(
+                                  normalizeAvailability(consultant.availability)
+                                );
+                              } else {
+                                setDraftScheduleAvailability(null);
                               }
                             }}
                           >
@@ -519,7 +457,12 @@ export function AdminConsultants({
                               <Button
                                 variant="outline"
                                 size="sm"
-                                onClick={() => setSelectedConsultantId(consultant.id)}
+                                onClick={() => {
+                                  setSelectedConsultantId(consultant.id);
+                                  setDraftScheduleAvailability(
+                                    normalizeAvailability(consultant.availability)
+                                  );
+                                }}
                               >
                                 <Clock3 className="w-4 h-4 mr-2" />
                                 가능 시간 관리
@@ -537,7 +480,7 @@ export function AdminConsultants({
                               </DialogHeader>
 
                               <div className="space-y-4 max-h-[65vh] overflow-y-auto pr-1">
-                                {normalizeAvailability(selectedConsultant?.availability).map((day) => {
+                                {scheduleAvailability.map((day) => {
                                   const dayInfo = SCHEDULE_DAYS.find((item) => item.value === day.dayOfWeek);
                                   return (
                                     <div key={day.dayOfWeek} className="border rounded-lg p-4">
@@ -564,6 +507,25 @@ export function AdminConsultants({
                                     </div>
                                   );
                                 })}
+                              </div>
+                              <div className="mt-4 flex justify-end gap-2">
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  onClick={() => {
+                                    setIsScheduleDialogOpen(false);
+                                    setDraftScheduleAvailability(null);
+                                  }}
+                                >
+                                  취소
+                                </Button>
+                                <Button
+                                  type="button"
+                                  onClick={handleSaveSchedule}
+                                  disabled={!isScheduleDirty}
+                                >
+                                  저장
+                                </Button>
                               </div>
                             </DialogContent>
                           </Dialog>
