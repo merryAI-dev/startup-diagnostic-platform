@@ -3893,6 +3893,9 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
               }}
               onRequestApplication={handleRequestApplication}
               onRejectApplication={handleRejectApplication}
+              onConfirmApplication={handleConfirmApplication}
+              onUpdateStatus={handleUpdateApplicationStatus}
+              onUpdateApplication={handleUpdateApplication}
             />
           )}
 
@@ -3978,6 +3981,8 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
                 onRequestApplication={handleRequestApplication}
                 onRejectApplication={handleRejectApplication}
                 onConfirmApplication={handleConfirmApplication}
+                onUpdateStatus={handleUpdateApplicationStatus}
+                onUpdateApplication={handleUpdateApplication}
                 currentConsultantName={currentConsultant?.name ?? null}
               />
             </ProtectedRoute>

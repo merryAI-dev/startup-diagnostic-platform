@@ -73,7 +73,7 @@ export function ApplicationDetail({
 
   const isConsultantUser = currentUserRole === "consultant";
   const isCompanyUser = currentUserRole === "user" || currentUserRole === "company";
-  const canViewMessageTab = !isCompanyUser;
+  const canViewMessageTab = !isCompanyUser && !isConsultantUser;
   const getSessionEndTime = () => {
     const durationHours = application.duration ?? 2;
     if (application.scheduledDate && application.scheduledTime) {
