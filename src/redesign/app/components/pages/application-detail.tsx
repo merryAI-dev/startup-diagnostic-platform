@@ -127,7 +127,7 @@ export function ApplicationDetail({
   const attachmentItems = useMemo(() => {
     const names = application.attachments ?? [];
     const urls = application.attachmentUrls ?? [];
-    const items = urls.map((url, idx) => ({
+    const items: Array<{ id: string; name: string; url?: string }> = urls.map((url, idx) => ({
       id: `url-${idx}`,
       name: names[idx] || `첨부 파일 ${idx + 1}`,
       url,
