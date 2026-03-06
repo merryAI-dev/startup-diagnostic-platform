@@ -12,6 +12,12 @@ service firebase.storage {
         && get(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.active == true;
     }
 
+    function isConsultant() {
+      return isSignedIn()
+        && get(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.role == "consultant"
+        && get(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.active == true;
+    }
+
     function isCompanyOwner(companyId) {
       return isSignedIn()
         && get(/databases/$(database)/documents/companies/$(companyId)).data.ownerUid == request.auth.uid;
@@ -25,6 +31,19 @@ service firebase.storage {
 
       allow read: if isAdmin() || isCompanyOwner(companyId);
       allow write: if isCompanyOwner(companyId) && isAllowedFile();
+    }
+
+    match /office-hour-applications/{category}/{userId}/{filePath=**} {
+      function isAllowedOfficeHourFile() {
+        return request.resource.size <= 10 * 1024 * 1024
+          && request.resource.name.matches(
+            ".*\\.(pdf|PDF|doc|DOC|docx|DOCX|ppt|PPT|pptx|PPTX|xls|XLS|xlsx|XLSX|jpg|JPG|jpeg|JPEG|png|PNG)$"
+          );
+      }
+
+      allow read: if isAdmin() || isConsultant() || (isSignedIn() && request.auth.uid == userId);
+      allow write: if isSignedIn() && request.auth.uid == userId && isAllowedOfficeHourFile();
+      allow delete: if isAdmin() || (isSignedIn() && request.auth.uid == userId);
     }
   }
 }

@@ -33,7 +33,7 @@ interface RegularApplicationWizardProps {
   remainingInternalTickets: number;
   remainingExternalTickets: number;
   onBack: () => void;
-  onSubmit: (data: ApplicationFormData) => void;
+  onSubmit: (data: ApplicationFormData) => Promise<void> | void;
 }
 
 export interface ApplicationFormData {
@@ -46,6 +46,32 @@ export interface ApplicationFormData {
   requestContent: string;
   files: FileItem[];
 }
+
+type RequestSectionKey =
+  | "currentSituation"
+  | "keyChallenges"
+  | "requestedSupport";
+
+type RequestSections = Record<RequestSectionKey, string>;
+
+const REQUEST_SECTION_MIN_LENGTH = 20;
+const REQUEST_SECTION_META: Array<{ key: RequestSectionKey; label: string; placeholder: string }> = [
+  {
+    key: "currentSituation",
+    label: "1. 현재 상황 및 배경",
+    placeholder: "예: 지금까지의 진행 과정과 주요 이슈 발생 배경",
+  },
+  {
+    key: "keyChallenges",
+    label: "2. 당면한 문제/과제",
+    placeholder: "예: 현재 가장 해결이 필요한 문제와 영향",
+  },
+  {
+    key: "requestedSupport",
+    label: "3. 요청 사항",
+    placeholder: "예: 오피스아워에서 얻고 싶은 구체적인 도움/산출물",
+  },
+];
 
 const steps = [
   "아젠다 선택",
@@ -72,8 +98,13 @@ export function RegularApplicationWizard({
   const [selectedSlotId, setSelectedSlotId] = useState<string | undefined>();
   const [sessionFormat, setSessionFormat] = useState<SessionFormat>("online");
   const [selectedAgendaId, setSelectedAgendaId] = useState("");
-  const [requestContent, setRequestContent] = useState("");
+  const [requestSections, setRequestSections] = useState<RequestSections>({
+    currentSituation: "",
+    keyChallenges: "",
+    requestedSupport: "",
+  });
   const [files, setFiles] = useState<FileItem[]>([]);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [ticketAlertOpen, setTicketAlertOpen] = useState(false);
   const [ticketAlertMessage, setTicketAlertMessage] = useState("");
 
@@ -101,6 +132,20 @@ export function RegularApplicationWizard({
     : [officeHour];
   const selectedAgenda = agendas.find((agenda) => agenda.id === selectedAgendaId);
   const agendaName = selectedAgenda?.name;
+  const requestSectionValidations = REQUEST_SECTION_META.map(({ key, label }) => {
+    const value = requestSections[key].trim();
+    return {
+      key,
+      label,
+      value,
+      length: value.length,
+      isValid: value.length >= REQUEST_SECTION_MIN_LENGTH,
+    };
+  });
+  const isRequestSectionStepValid = requestSectionValidations.every((item) => item.isValid);
+  const requestContent = requestSectionValidations
+    .map(({ label, value }) => `${label}\n${value}`)
+    .join("\n\n");
   const todayStart = startOfDay(new Date());
   const availableDateKeys = new Set(
     programOfficeHours
@@ -227,7 +272,7 @@ export function RegularApplicationWizard({
       case 3:
         return sessionFormat;
       case 4:
-        return requestContent.trim().length > 0;
+        return isRequestSectionStepValid;
       default:
         return true;
     }
@@ -256,19 +301,25 @@ export function RegularApplicationWizard({
     }
   };
 
-  const handleSubmit = () => {
-    if (!selectedDate) return;
-    
-    onSubmit({
-      officeHourId: officeHour.id,
-      slotId: selectedSlotId,
-      date: selectedDate,
-      time: selectedTime,
-      sessionFormat,
-      agendaId: selectedAgendaId,
-      requestContent,
-      files,
-    });
+  const handleSubmit = async () => {
+    if (!selectedDate || isSubmitting) return;
+    setIsSubmitting(true);
+    try {
+      await Promise.resolve(
+        onSubmit({
+          officeHourId: officeHour.id,
+          slotId: selectedSlotId,
+          date: selectedDate,
+          time: selectedTime,
+          sessionFormat,
+          agendaId: selectedAgendaId,
+          requestContent,
+          files,
+        })
+      );
+    } finally {
+      setIsSubmitting(false);
+    }
   };
   const activeAgendas = agendas.filter((agenda) => agenda.active !== false);
 
@@ -462,14 +513,33 @@ export function RegularApplicationWizard({
               <div>
                 <h3 className="mb-2">요청 내용을 작성하세요</h3>
                 <p className="text-sm text-muted-foreground mb-4">
-                  요청 내용을 구체적으로 작성해 주세요.
+                  항목별로 최소 20자 이상 입력해야 다음 단계로 진행할 수 있습니다.
                 </p>
-                <Textarea
-                  value={requestContent}
-                  onChange={(e) => setRequestContent(e.target.value)}
-                  placeholder="예시:&#10;&#10;1. 기업/프로젝트 기본 정보&#10;2. 현재 상황 및 배경&#10;3. 당면한 문제/과제&#10;4. 요청 사항"
-                  className="min-h-[200px]"
-                />
+                <div className="space-y-4">
+                  {requestSectionValidations.map(({ key, label, length, isValid }) => (
+                    <div key={key} className="space-y-2">
+                      <Label>{label}</Label>
+                      <Textarea
+                        value={requestSections[key]}
+                        onChange={(e) =>
+                          setRequestSections((prev) => ({ ...prev, [key]: e.target.value }))
+                        }
+                        placeholder={
+                          REQUEST_SECTION_META.find((item) => item.key === key)?.placeholder ?? ""
+                        }
+                        className="min-h-[96px]"
+                      />
+                      <p
+                        className={cn(
+                          "text-xs",
+                          isValid ? "text-emerald-600" : "text-rose-600"
+                        )}
+                      >
+                        {length}/{REQUEST_SECTION_MIN_LENGTH}자
+                      </p>
+                    </div>
+                  ))}
+                </div>
               </div>
               <div>
                 <h3 className="mb-2">파일 첨부 (선택)</h3>
@@ -536,9 +606,15 @@ export function RegularApplicationWizard({
                   </div>
                   <div className="flex-1">
                     <Label className="text-muted-foreground">요청 내용</Label>
-                    <p className="text-sm whitespace-pre-wrap">
-                      {requestContent}
-                    </p>
+                    <div className="text-sm whitespace-pre-wrap space-y-2">
+                      {requestSectionValidations.map(({ key, label, value }) => (
+                        <p key={key}>
+                          <span className="font-medium">{label}</span>
+                          {"\n"}
+                          {value}
+                        </p>
+                      ))}
+                    </div>
                   </div>
                 </div>
 
@@ -571,7 +647,9 @@ export function RegularApplicationWizard({
                 다음
               </Button>
             ) : (
-              <Button onClick={handleSubmit}>신청 제출</Button>
+              <Button onClick={handleSubmit} disabled={isSubmitting}>
+                {isSubmitting ? "제출 중..." : "신청 제출"}
+              </Button>
             )}
           </div>
         </CardContent>

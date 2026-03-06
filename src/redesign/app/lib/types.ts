@@ -182,6 +182,7 @@ export interface Application {
   requestContent: string;
   rejectionReason?: string;
   attachments?: string[];
+  attachmentUrls?: string[];
   applicantName?: string;
   applicantEmail?: string;
   details?: string;
@@ -203,6 +204,7 @@ export interface FileItem {
   id: string;
   name: string;
   size: number;
+  file?: File;
 }
 
 export interface Consultant {
