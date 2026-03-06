@@ -228,6 +228,26 @@ export function UnifiedCalendar({
     const agendaNameOk = app.agenda ? consultantAgendaNameSet.has(app.agenda) : false;
     return agendaIdOk || agendaNameOk;
   };
+  const getSessionEndTime = (app: Application) => {
+    const durationHours = app.duration ?? 2;
+    if (app.scheduledDate && app.scheduledTime) {
+      const start = new Date(`${app.scheduledDate}T${app.scheduledTime}`);
+      if (!Number.isNaN(start.getTime())) {
+        return new Date(start.getTime() + durationHours * 60 * 60 * 1000);
+      }
+    }
+    if (app.scheduledDate) {
+      const fallback = new Date(`${app.scheduledDate}T23:59`);
+      if (!Number.isNaN(fallback.getTime())) {
+        return fallback;
+      }
+    }
+    return null;
+  };
+  const hasSessionEnded = (app: Application) => {
+    const endTime = getSessionEndTime(app);
+    return Boolean(endTime && new Date() >= endTime);
+  };
   const pendingRequests = useMemo(() => {
     if (!isConsultant) return [];
     return applications
@@ -235,6 +255,7 @@ export function UnifiedCalendar({
         (app.status === "pending" || app.status === "review")
         && !app.consultantId
         && (!app.consultant || app.consultant === "담당자 배정 중")
+        && !hasSessionEnded(app)
         && matchesConsultantAgenda(app)
       )
       .sort((a, b) => {

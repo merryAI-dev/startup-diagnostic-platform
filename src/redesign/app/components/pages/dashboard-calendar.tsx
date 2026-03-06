@@ -2,8 +2,17 @@ import { useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight, Calendar as CalendarIcon, Clock } from "lucide-react";
 import { Application, User, Program, Agenda } from "@/redesign/app/lib/types";
 import { Button } from "@/redesign/app/components/ui/button";
-import { Badge } from "@/redesign/app/components/ui/badge";
 import { StatusChip } from "@/redesign/app/components/status-chip";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/redesign/app/components/ui/alert-dialog";
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameMonth, isSameDay, addMonths, subMonths, startOfWeek, endOfWeek, isToday } from "date-fns";
 import { ko } from "date-fns/locale";
 
@@ -14,6 +23,7 @@ interface DashboardCalendarProps {
   agendas: Agenda[];
   ticketOverrides?: Record<string, { internal?: number; external?: number }>;
   onNavigate: (page: string, id?: string) => void;
+  onCancelApplication: (id: string) => Promise<void> | void;
 }
 
 export function DashboardCalendar({
@@ -23,9 +33,11 @@ export function DashboardCalendar({
   agendas,
   ticketOverrides,
   onNavigate,
+  onCancelApplication,
 }: DashboardCalendarProps) {
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState<Date | null>(new Date());
+  const [cancelTarget, setCancelTarget] = useState<Application | null>(null);
 
   const userPrograms = programs;
   const agendaScopeById = useMemo(
@@ -56,12 +68,41 @@ export function DashboardCalendar({
     (app) => app.status === "confirmed" && app.scheduledDate
   );
 
+  const getSessionEndTime = (app: Application) => {
+    const durationHours = app.duration ?? 2;
+    if (app.scheduledDate && app.scheduledTime) {
+      const start = new Date(`${app.scheduledDate}T${app.scheduledTime}`);
+      if (!Number.isNaN(start.getTime())) {
+        return new Date(start.getTime() + durationHours * 60 * 60 * 1000);
+      }
+    }
+    if (app.scheduledDate) {
+      const fallback = new Date(`${app.scheduledDate}T23:59`);
+      if (!Number.isNaN(fallback.getTime())) {
+        return fallback;
+      }
+    }
+    return null;
+  };
+
+  const hasSessionEnded = (app: Application) => {
+    const endTime = getSessionEndTime(app);
+    return Boolean(endTime && new Date() >= endTime);
+  };
+
   // 대기중인 신청
   const pendingApplications = userApplications.filter(
-    (app) => app.status === "pending" || app.status === "review"
+    (app) =>
+      (app.status === "pending" || app.status === "review")
+      && !hasSessionEnded(app)
   );
   const rejectedApplications = userApplications.filter(
-    (app) => app.status === "rejected"
+    (app) =>
+      app.status === "rejected"
+      || (
+        (app.status === "pending" || app.status === "review")
+        && hasSessionEnded(app)
+      )
   );
 
   const getApplicationScope = (app: Application) => {
@@ -211,58 +252,63 @@ export function DashboardCalendar({
       <div className="flex-1 flex overflow-hidden">
         {/* Left Sidebar - Ticket Summary */}
         <div className="w-80 bg-white border-r p-6 overflow-y-auto">
-          <h2 className="font-semibold text-gray-900 mb-4">티켓 현황</h2>
-          <div className="space-y-4">
-            <div className="border rounded-lg p-4">
-              <div className="text-sm font-semibold text-gray-900 mb-2">내부 티켓</div>
-              <div className="text-2xl font-bold text-gray-900">
-                {ticketStats.remainingInternal}
-                <span className="text-sm font-normal text-muted-foreground">
-                  {" "}
-                  / {ticketStats.totalInternal}
-                </span>
-              </div>
-              <p className="text-xs text-muted-foreground mt-1">
-                예약 {ticketStats.reservedInternal} · 완료 {ticketStats.completedInternal}
-              </p>
-            </div>
-            <div className="border rounded-lg p-4">
-              <div className="text-sm font-semibold text-gray-900 mb-2">외부 티켓</div>
-              <div className="text-2xl font-bold text-gray-900">
-                {ticketStats.remainingExternal}
-                <span className="text-sm font-normal text-muted-foreground">
-                  {" "}
-                  / {ticketStats.totalExternal}
-                </span>
-              </div>
-              <p className="text-xs text-muted-foreground mt-1">
-                예약 {ticketStats.reservedExternal} · 완료 {ticketStats.completedExternal}
-              </p>
-            </div>
-            <div className="border rounded-lg p-4">
-              <div className="text-sm font-semibold text-gray-900 mb-2">참여 사업</div>
-              {userPrograms.length > 0 ? (
-                <div className="flex flex-wrap gap-1.5">
-                  {userPrograms.map((program) => (
-                    <Badge key={program.id} variant="outline">
-                      {program.name}
-                    </Badge>
-                  ))}
+          <h2 className="text-sm font-semibold text-gray-900 mb-4">티켓 현황</h2>
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="border rounded-lg p-3">
+                <div className="text-xs font-semibold text-gray-900 mb-1">내부 티켓</div>
+                <div className="text-xl font-bold text-gray-900 leading-none">
+                  {ticketStats.remainingInternal}
+                  <span className="text-xs font-normal text-muted-foreground">
+                    {" "}
+                    / {ticketStats.totalInternal}
+                  </span>
                 </div>
-              ) : (
-                <p className="text-xs text-muted-foreground">
-                  참여 중인 사업이 없습니다.
+                <p className="text-[11px] text-muted-foreground mt-1">
+                  예약 {ticketStats.reservedInternal} · 완료 {ticketStats.completedInternal}
                 </p>
-              )}
+              </div>
+              <div className="border rounded-lg p-3">
+                <div className="text-xs font-semibold text-gray-900 mb-1">외부 티켓</div>
+                <div className="text-xl font-bold text-gray-900 leading-none">
+                  {ticketStats.remainingExternal}
+                  <span className="text-xs font-normal text-muted-foreground">
+                    {" "}
+                    / {ticketStats.totalExternal}
+                  </span>
+                </div>
+                <p className="text-[11px] text-muted-foreground mt-1">
+                  예약 {ticketStats.reservedExternal} · 완료 {ticketStats.completedExternal}
+                </p>
+              </div>
             </div>
+          </div>
+
+          <div className="mt-8">
+            <h2 className="text-sm font-semibold text-gray-900 mb-4">참여 사업</h2>
+            {userPrograms.length > 0 ? (
+              <div className="max-h-48 overflow-y-auto pr-1">
+                <ul className="space-y-2">
+                  {userPrograms.map((program) => (
+                    <li key={program.id} className="text-sm border rounded-lg px-3 py-2 bg-gray-50">
+                      {program.name}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                참여 중인 사업이 없습니다.
+              </p>
+            )}
           </div>
 
           {/* Pending Applications */}
           {pendingApplications.length > 0 && (
             <div className="mt-8">
-              <h2 className="font-semibold text-gray-900 mb-4">대기중인 신청</h2>
-              <div className="space-y-2">
-                {pendingApplications.slice(0, 5).map((app) => (
+              <h2 className="text-sm font-semibold text-gray-900 mb-4">대기중인 신청</h2>
+              <div className="max-h-72 overflow-y-auto pr-1 space-y-2">
+                {pendingApplications.map((app) => (
                   <div
                     key={app.id}
                     onClick={() => onNavigate("application", app.id)}
@@ -284,6 +330,19 @@ export function DashboardCalendar({
                         </p>
                       ) : null;
                     })()}
+                    <div className="mt-2 flex justify-end">
+                      <Button
+                        size="sm"
+                        variant="default"
+                        className="bg-rose-600 border-rose-600 text-white font-semibold shadow-md hover:bg-rose-700 hover:border-rose-700"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setCancelTarget(app);
+                        }}
+                      >
+                        신청 삭제
+                      </Button>
+                    </div>
                     {app.rejectionReason && (
                       <p className="text-xs text-rose-600 mt-1">
                         거절 사유: {app.rejectionReason}
@@ -291,16 +350,6 @@ export function DashboardCalendar({
                     )}
                   </div>
                 ))}
-                {pendingApplications.length > 5 && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="w-full"
-                    onClick={() => onNavigate("history")}
-                  >
-                    전체 보기 ({pendingApplications.length})
-                  </Button>
-                )}
               </div>
             </div>
           )}
@@ -308,9 +357,9 @@ export function DashboardCalendar({
           {/* Rejected Applications */}
           {rejectedApplications.length > 0 && (
             <div className="mt-8">
-              <h2 className="font-semibold text-gray-900 mb-4">거절된 신청</h2>
-              <div className="space-y-2">
-                {rejectedApplications.slice(0, 5).map((app) => (
+              <h2 className="text-sm font-semibold text-gray-900 mb-4">거절된 신청</h2>
+              <div className="max-h-72 overflow-y-auto pr-1 space-y-2">
+                {rejectedApplications.map((app) => (
                   <div
                     key={app.id}
                     onClick={() => onNavigate("application", app.id)}
@@ -337,16 +386,6 @@ export function DashboardCalendar({
                     </p>
                   </div>
                 ))}
-                {rejectedApplications.length > 5 && (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="w-full"
-                    onClick={() => onNavigate("history")}
-                  >
-                    전체 보기 ({rejectedApplications.length})
-                  </Button>
-                )}
               </div>
             </div>
           )}
@@ -537,7 +576,7 @@ export function DashboardCalendar({
           {/* Upcoming Events */}
           {upcomingEvents.length > 0 && (
             <div>
-              <h2 className="font-semibold text-gray-900 mb-4">다가오는 일정</h2>
+              <h2 className="text-sm font-semibold text-gray-900 mb-4">다가오는 일정</h2>
               <div className="space-y-3">
                 {upcomingEvents.slice(0, 5).map((event) => (
                   <div
@@ -568,6 +607,35 @@ export function DashboardCalendar({
           )}
         </div>
       </div>
+
+      <AlertDialog
+        open={Boolean(cancelTarget)}
+        onOpenChange={(open) => {
+          if (!open) setCancelTarget(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>신청을 삭제하시겠습니까?</AlertDialogTitle>
+            <AlertDialogDescription>
+              신청을 삭제하면 신청 내역은 사라집니다.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>취소</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={async () => {
+                if (!cancelTarget) return;
+                await Promise.resolve(onCancelApplication(cancelTarget.id));
+                setCancelTarget(null);
+              }}
+            >
+              삭제
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

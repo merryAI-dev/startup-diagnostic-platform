@@ -1,15 +1,13 @@
-import { useMemo, useState } from "react";
-import { ChevronLeft, ChevronRight, Calendar, List, Filter } from "lucide-react";
-import { Agenda, RegularOfficeHour } from "@/redesign/app/lib/types";
+import { useState } from "react";
+import { ChevronLeft, ChevronRight, Calendar, List } from "lucide-react";
+import { RegularOfficeHour } from "@/redesign/app/lib/types";
 import { Button } from "@/redesign/app/components/ui/button";
 import { Badge } from "@/redesign/app/components/ui/badge";
-import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameMonth, isSameDay, addMonths, subMonths, startOfWeek, endOfWeek, isToday, parseISO } from "date-fns";
+import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameMonth, isSameDay, addMonths, subMonths, startOfWeek, endOfWeek, isToday, parseISO, addDays, isBefore, startOfDay } from "date-fns";
 import { ko } from "date-fns/locale";
-import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuTrigger } from "@/redesign/app/components/ui/dropdown-menu";
 
 interface RegularOfficeHoursCalendarProps {
   officeHours: RegularOfficeHour[];
-  agendas: Agenda[];
   onSelectOfficeHour: (id: string) => void;
 }
 
@@ -17,24 +15,38 @@ type ViewMode = "calendar" | "list";
 
 export function RegularOfficeHoursCalendar({
   officeHours,
-  agendas,
   onSelectOfficeHour,
 }: RegularOfficeHoursCalendarProps) {
   const [currentMonth, setCurrentMonth] = useState(new Date());
-  const [selectedDate, setSelectedDate] = useState<Date | null>(null);
+  const [selectedDate, setSelectedDate] = useState<Date | null>(new Date());
   const [viewMode, setViewMode] = useState<ViewMode>("calendar");
-  const [selectedAgendaIds, setSelectedAgendaIds] = useState<string[]>([]);
 
   // 캘린더 날짜 생성
   const monthStart = startOfMonth(currentMonth);
   const monthEnd = endOfMonth(currentMonth);
   const calendarStart = startOfWeek(monthStart, { weekStartsOn: 0 });
   const calendarEnd = endOfWeek(monthEnd, { weekStartsOn: 0 });
-  const calendarDays = eachDayOfInterval({ start: calendarStart, end: calendarEnd });
+  const baseCalendarDays = eachDayOfInterval({ start: calendarStart, end: calendarEnd });
+  const lastBaseDay = baseCalendarDays[baseCalendarDays.length - 1] ?? calendarEnd;
+  const calendarDays = baseCalendarDays.length >= 42
+    ? baseCalendarDays.slice(0, 42)
+    : [
+      ...baseCalendarDays,
+      ...Array.from({ length: 42 - baseCalendarDays.length }, (_, index) =>
+        addDays(lastBaseDay, index + 1)
+      ),
+    ];
 
-  // 필터링된 오피스아워
-  const filteredOfficeHours = officeHours;
-  const hasSessions = filteredOfficeHours.length > 0;
+  const todayStart = startOfDay(new Date());
+  // 오늘 이전 날짜는 캘린더 진입 단계에서 제외
+  const filteredOfficeHours = officeHours
+    .map((officeHour) => ({
+      ...officeHour,
+      availableDates: (officeHour.availableDates ?? []).filter(
+        (date) => !isBefore(parseISO(date), todayStart)
+      ),
+    }))
+    .filter((officeHour) => officeHour.availableDates.length > 0);
 
   // 날짜별로 오피스아워를 펼쳐서 배열로 만들기
   const expandedSessions = filteredOfficeHours.flatMap(oh => 
@@ -43,6 +55,7 @@ export function RegularOfficeHoursCalendar({
       date: date,
     }))
   );
+  const hasSessions = expandedSessions.length > 0;
 
   // 특정 날짜의 오피스아워
   const getOfficeHoursForDate = (date: Date) => {
@@ -61,24 +74,6 @@ export function RegularOfficeHoursCalendar({
     acc[dayOfWeek].push(session);
     return acc;
   }, {} as Record<string, typeof expandedSessions>);
-
-  const selectedAgendaLabel = useMemo(() => {
-    if (selectedAgendaIds.length === 0) return "아젠다 전체";
-    const names = agendas
-      .filter((agenda) => selectedAgendaIds.includes(agenda.id))
-      .map((agenda) => agenda.name);
-    if (names.length <= 2) return names.join(", ");
-    return `${names.slice(0, 2).join(", ")} 외 ${names.length - 2}개`;
-  }, [agendas, selectedAgendaIds]);
-
-  function toggleAgendaFilter(agendaId: string, checked: boolean) {
-    setSelectedAgendaIds((prev) => {
-      if (checked) {
-        return [...new Set([...prev, agendaId])];
-      }
-      return prev.filter((id) => id !== agendaId);
-    });
-  }
 
   return (
     <div className="h-full flex flex-col bg-gray-50">
@@ -114,38 +109,6 @@ export function RegularOfficeHoursCalendar({
           </div>
         </div>
 
-        {/* Filters */}
-        <div className="flex items-center gap-3 flex-wrap">
-          <Filter className="w-4 h-4 text-muted-foreground" />
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm">
-                {selectedAgendaLabel}
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent className="w-72">
-              {agendas.map((agenda) => (
-                <DropdownMenuCheckboxItem
-                  key={agenda.id}
-                  checked={selectedAgendaIds.includes(agenda.id)}
-                  onCheckedChange={(checked) =>
-                    toggleAgendaFilter(agenda.id, Boolean(checked))
-                  }
-                >
-                  <div className="flex items-center gap-2">
-                    <Badge
-                      variant={agenda.scope === "internal" ? "secondary" : "outline"}
-                      className="text-[10px]"
-                    >
-                      {agenda.scope === "internal" ? "내부" : "외부"}
-                    </Badge>
-                    <span>{agenda.name}</span>
-                  </div>
-                </DropdownMenuCheckboxItem>
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
       </div>
 
       {!hasSessions ? (
@@ -154,20 +117,20 @@ export function RegularOfficeHoursCalendar({
             <h2 className="text-lg font-semibold text-gray-900">표시할 정기 오피스아워가 없습니다</h2>
             <p className="mt-2 text-sm text-muted-foreground">
               사업 기간 형식(YYYY-MM-DD 또는 25.12.22)을 확인하고, 기간이 오늘(2026-02-11) 기준 유효한지 확인해주세요.
-              요일은 화/목 고정이며, 아젠다 필터가 선택된 경우 해당 아젠다에 연결된 사업만 표시됩니다.
+              요일은 화/목 고정으로 운영됩니다.
             </p>
           </div>
         </div>
       ) : viewMode === "calendar" ? (
         <div className="flex-1 flex overflow-hidden">
           {/* Main Calendar */}
-          <div className="flex-1 p-6 overflow-y-auto">
+          <div className="flex-1 px-4 pt-4 pb-6 overflow-hidden">
             <div className="bg-white rounded-lg border">
               {/* Calendar Header */}
-              <div className="border-b px-6 py-4">
+              <div className="border-b px-5 py-3">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-4">
-                    <h2 className="text-lg font-semibold text-gray-900">
+                    <h2 className="text-base font-semibold text-gray-900">
                       {format(currentMonth, "yyyy년 M월", { locale: ko })}
                     </h2>
                     <div className="flex gap-1">
@@ -201,13 +164,13 @@ export function RegularOfficeHoursCalendar({
               </div>
 
               {/* Calendar Grid */}
-              <div className="p-4">
+              <div className="p-3">
                 <div className="grid grid-cols-7 gap-px bg-gray-200 rounded-lg overflow-hidden">
                   {/* Week days header */}
                   {weekDays.map((day) => (
                     <div
                       key={day}
-                      className="bg-gray-50 text-center py-3 text-sm font-semibold text-gray-700"
+                      className="bg-gray-50 text-center py-2 text-xs font-semibold text-gray-700"
                     >
                       {day}
                     </div>
@@ -225,7 +188,7 @@ export function RegularOfficeHoursCalendar({
                         key={idx}
                         onClick={() => setSelectedDate(day)}
                         className={`
-                          bg-white min-h-[120px] p-2 cursor-pointer transition-all
+                          bg-white h-[104px] p-1.5 cursor-pointer transition-all
                           ${!isCurrentMonth ? "bg-gray-50 text-gray-400" : "text-gray-900"}
                           ${isSelected ? "ring-2 ring-primary ring-inset" : ""}
                           ${isTodayDate && !isSelected ? "bg-blue-50" : ""}
@@ -234,37 +197,37 @@ export function RegularOfficeHoursCalendar({
                       >
                         <div className="flex items-center justify-between mb-2">
                           <span
-                            className={`text-sm font-medium ${
-                              isTodayDate ? "bg-primary text-white rounded-full w-6 h-6 flex items-center justify-center text-xs" : ""
+                            className={`text-xs font-medium ${
+                              isTodayDate ? "bg-primary text-white rounded-full w-5 h-5 flex items-center justify-center text-[10px]" : ""
                             }`}
                           >
                             {format(day, "d")}
                           </span>
                           {sessions.length > 0 && (
-                            <Badge variant="secondary" className="text-xs h-5 px-1.5">
+                            <Badge variant="secondary" className="text-[10px] h-4 px-1">
                               {sessions.length}
                             </Badge>
                           )}
                         </div>
-                        <div className="space-y-1">
-                          {sessions.slice(0, 3).map((session, sessionIdx) => (
+                        <div className="h-[70px] grid grid-rows-3 gap-1">
+                          {sessions.slice(0, 2).map((session, sessionIdx) => (
                             <div
                               key={session.id + sessionIdx}
                               onClick={(e) => {
                                 e.stopPropagation();
                                 onSelectOfficeHour(session.id);
                               }}
-                              className="text-xs p-1.5 rounded bg-primary/10 hover:bg-primary/20 transition-colors border-l-2 border-primary"
+                              className="h-full text-[10px] leading-4 px-1 rounded bg-primary/10 hover:bg-primary/20 transition-colors border-l-2 border-primary truncate"
                             >
-                            <div className="font-medium truncate">{session.title}</div>
-                            <div className="text-gray-600 truncate">{session.description}</div>
+                              {session.title}
                             </div>
                           ))}
-                          {sessions.length > 3 && (
-                            <div className="text-xs text-gray-500 pl-1.5">
-                              +{sessions.length - 3}개
-                            </div>
-                          )}
+                          {Array.from({ length: Math.max(0, 2 - sessions.slice(0, 2).length) }).map((_, emptyIdx) => (
+                            <div key={`empty-${idx}-${emptyIdx}`} className="h-full" />
+                          ))}
+                          <div className="h-full text-[10px] leading-4 text-gray-500 pl-1 truncate">
+                            {sessions.length > 2 ? `+${sessions.length - 2}개` : ""}
+                          </div>
                         </div>
                       </div>
                     );
@@ -276,28 +239,31 @@ export function RegularOfficeHoursCalendar({
 
           {/* Right Sidebar - Selected Date Details */}
           {selectedDate && (
-            <div className="w-96 bg-white border-l p-6 overflow-y-auto">
-              <div className="mb-6">
-                <h2 className="text-lg font-semibold text-gray-900 mb-1">
+            <div className="w-96 bg-white border-l p-5 overflow-y-auto">
+              <div className="mb-4">
+                <h2 className="text-base font-semibold text-gray-900 mb-1">
                   {format(selectedDate, "M월 d일 (E)", { locale: ko })}
                 </h2>
-                <p className="text-sm text-muted-foreground">
+                <p className="text-xs text-muted-foreground">
                   {getOfficeHoursForDate(selectedDate).length > 0
                     ? `${getOfficeHoursForDate(selectedDate).length}개의 세션`
                     : "예정된 세션이 없습니다"}
                 </p>
               </div>
 
-              <div className="space-y-3">
+              <div className="space-y-2">
                 {getOfficeHoursForDate(selectedDate).map((session) => (
                   <div
                     key={session.id + session.date}
                     onClick={() => onSelectOfficeHour(session.id)}
-                    className="border rounded-lg p-4 hover:shadow-md cursor-pointer transition-all group"
+                    className="group relative overflow-hidden rounded-md border border-slate-200 bg-slate-50/60 px-3 py-2.5 hover:border-primary/40 hover:bg-white hover:shadow-sm cursor-pointer transition-all"
                   >
-                    <div className="space-y-2">
-                      <h3 className="font-medium text-gray-900">{session.title}</h3>
-                      <p className="text-sm text-muted-foreground line-clamp-2">
+                    <div className="absolute left-0 top-0 h-full w-1 bg-primary/20 group-hover:bg-primary/50 transition-colors" />
+                    <div className="pl-1 space-y-1">
+                      <h3 className="text-[13px] font-semibold tracking-tight text-gray-900 line-clamp-1">
+                        {session.title}
+                      </h3>
+                      <p className="text-[11px] leading-4 text-muted-foreground line-clamp-1">
                         {session.description}
                       </p>
                     </div>

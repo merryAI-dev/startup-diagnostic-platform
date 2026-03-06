@@ -2,12 +2,7 @@ import { useState } from "react";
 import { Upload, X, File } from "lucide-react";
 import { Button } from "@/redesign/app/components/ui/button";
 import { cn } from "@/redesign/app/components/ui/utils";
-
-interface FileItem {
-  id: string;
-  name: string;
-  size: number;
-}
+import { FileItem } from "@/redesign/app/lib/types";
 
 interface FileUploadProps {
   files: FileItem[];
@@ -47,6 +42,7 @@ export function FileUpload({
       id: Math.random().toString(36).substring(7),
       name: file.name,
       size: file.size,
+      file,
     }));
 
     onFilesChange([...files, ...fileItems]);

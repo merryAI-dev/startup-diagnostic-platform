@@ -168,7 +168,18 @@ service cloud.firestore {
           && request.resource.data.createdByUid == resource.data.createdByUid
           && request.resource.data.status == "cancelled"
         );
-      allow delete: if false;
+      allow delete: if isAdmin()
+        || isConsultant()
+        || (
+          isActiveUser()
+          && (
+            resource.data.createdByUid == request.auth.uid
+            || (
+              request.auth.token.email is string
+              && resource.data.applicantEmail == request.auth.token.email
+            )
+          )
+        );
     }
 
     match /reports/{reportId} {

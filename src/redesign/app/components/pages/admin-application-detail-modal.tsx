@@ -85,6 +85,46 @@ export function AdminApplicationDetailModal({
     milestone78: "",
     milestone910: "",
   });
+  const sessionEndTime = useMemo(() => {
+    const durationHours = application.duration ?? 2;
+    if (application.scheduledDate && application.scheduledTime) {
+      const start = new Date(`${application.scheduledDate}T${application.scheduledTime}`);
+      if (!Number.isNaN(start.getTime())) {
+        return new Date(start.getTime() + durationHours * 60 * 60 * 1000);
+      }
+    }
+    if (application.scheduledDate) {
+      const fallback = new Date(`${application.scheduledDate}T23:59`);
+      if (!Number.isNaN(fallback.getTime())) {
+        return fallback;
+      }
+    }
+    return null;
+  }, [
+    application.duration,
+    application.scheduledDate,
+    application.scheduledTime,
+  ]);
+  const isSessionEnded = Boolean(sessionEndTime && new Date() >= sessionEndTime);
+  const attachmentItems = useMemo(() => {
+    const names = application.attachments ?? [];
+    const urls = application.attachmentUrls ?? [];
+    const items = urls.map((url, idx) => ({
+      id: `url-${idx}`,
+      name: names[idx] || `첨부 파일 ${idx + 1}`,
+      url,
+    }));
+    if (names.length > urls.length) {
+      names.slice(urls.length).forEach((name, idx) => {
+        items.push({
+          id: `name-${idx}`,
+          name,
+          url: undefined,
+        });
+      });
+    }
+    return items;
+  }, [application.attachments, application.attachmentUrls]);
 
   const handleSaveEdit = () => {
     onUpdateApplication(application.id, {
@@ -97,6 +137,13 @@ export function AdminApplicationDetailModal({
   };
 
   const handleStatusChange = (newStatus: ApplicationStatus) => {
+    if (
+      isSessionEnded
+      && newStatus !== "rejected"
+    ) {
+      toast.error("진행 시간이 지난 신청은 거절됨 외 상태로 변경할 수 없습니다");
+      return;
+    }
     onUpdateStatus(application.id, newStatus);
     toast.success(`상태가 '${getStatusLabel(newStatus)}'로 변경되었습니다`);
   };
@@ -123,6 +170,10 @@ export function AdminApplicationDetailModal({
           toast.success("거절 처리되었습니다");
         }
       } else {
+        if (isSessionEnded) {
+          toast.error("진행 시간이 지나 수락/확정할 수 없습니다");
+          return;
+        }
         const isUnassigned = !application.consultantId
           && (!application.consultant || application.consultant === "담당자 배정 중");
         if ((application.status === "pending" || application.status === "review")
@@ -361,7 +412,7 @@ export function AdminApplicationDetailModal({
                 <div className="space-y-3">
                   <Label>상태 관리</Label>
                   <div className="flex gap-2 flex-wrap">
-                    {(application.status === "pending" || application.status === "review") && (
+                    {(application.status === "pending" || application.status === "review") && !isSessionEnded && (
                       <Button
                         size="sm"
                         variant="default"
@@ -382,7 +433,7 @@ export function AdminApplicationDetailModal({
                         거절
                       </Button>
                     )}
-                    {application.status === "rejected" && (
+                    {application.status === "rejected" && !isSessionEnded && (
                       <Button
                         size="sm"
                         variant="outline"
@@ -391,7 +442,7 @@ export function AdminApplicationDetailModal({
                         재검토
                       </Button>
                     )}
-                    {application.status === "confirmed" && (
+                    {application.status === "confirmed" && !isSessionEnded && (
                       <Button
                         size="sm"
                         variant="outline"
@@ -402,6 +453,11 @@ export function AdminApplicationDetailModal({
                       </Button>
                     )}
                   </div>
+                  {isSessionEnded && (
+                    <p className="text-xs text-rose-600">
+                      진행 시간이 지난 신청은 거절 처리만 가능합니다.
+                    </p>
+                  )}
                 </div>
 
                 <Separator />
@@ -554,17 +610,29 @@ export function AdminApplicationDetailModal({
                 </div>
               </div>
 
-              {(application.attachments ?? []).length > 0 && (
+              {attachmentItems.length > 0 && (
                 <div className="space-y-2">
                   <Label>첨부 파일</Label>
                   <div className="space-y-2">
-                    {(application.attachments ?? []).map((file, idx) => (
+                    {attachmentItems.map((item) => (
                       <div
-                        key={idx}
+                        key={item.id}
                         className="flex items-center gap-2 p-2 bg-accent rounded-lg"
                       >
                         <FileText className="w-4 h-4 text-muted-foreground" />
-                        <span className="text-sm">{file}</span>
+                        {item.url ? (
+                          <a
+                            href={item.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            download
+                            className="text-sm text-primary underline underline-offset-2 break-all"
+                          >
+                            {item.name}
+                          </a>
+                        ) : (
+                          <span className="text-sm">{item.name}</span>
+                        )}
                       </div>
                     ))}
                   </div>

@@ -22,6 +22,9 @@ export function RegularOfficeHourDetail({
   onStartApplication,
   onViewApplication,
 }: RegularOfficeHourDetailProps) {
+  const hasFutureAvailableDate = officeHour.availableDates.some(
+    (date) => !isBefore(parseISO(date), startOfDay(new Date()))
+  );
   const myApplications = applications.filter(
     (app) => app.officeHourId === officeHour.id
   );
@@ -92,9 +95,14 @@ export function RegularOfficeHourDetail({
                     아래 버튼을 클릭하여 오피스아워 신청을 시작하세요. 날짜/시간,
                     진행 형태, 요청 내용 입력 순서로 진행됩니다.
                   </p>
-                  <Button onClick={onStartApplication}>
+                  <Button onClick={onStartApplication} disabled={!hasFutureAvailableDate}>
                     신청 시작하기
                   </Button>
+                  {!hasFutureAvailableDate && (
+                    <p className="text-xs text-rose-600 mt-2">
+                      오늘 이전 일정만 남아 있어 신청할 수 없습니다.
+                    </p>
+                  )}
                 </div>
               </div>
             </CardContent>

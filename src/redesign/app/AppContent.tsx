@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { addDays, differenceInDays } from "date-fns";
+import { addDays, differenceInDays, isBefore, startOfDay } from "date-fns";
 import { deleteField, where } from "firebase/firestore";
+import { deleteObject, getDownloadURL, ref, uploadBytes } from "firebase/storage";
 import { useAuth as useAppAuth } from "@/context/AuthContext";
 import { signOutUser } from "@/firebase/auth";
 import { AdminDashboard } from "@/components/dashboard/AdminDashboard";
@@ -75,6 +76,7 @@ import {
   useFirestoreDocumentOnce,
 } from "@/redesign/app/hooks/use-firestore";
 import { firestoreService } from "@/redesign/app/lib/firestore-service";
+import { storage as firebaseStorage } from "@/redesign/app/lib/firebase";
 import { mockNotifications, mockChatRooms, mockChatMessages, mockAIRecommendations, mockGoals, mockTeamMembers } from "@/redesign/app/lib/advanced-mock-data";
 import type { CompanyInfoRecord } from "@/types/company";
 
@@ -138,6 +140,8 @@ const APPROVAL_ROLE_VALUES: PendingProfileApproval["role"][] = [
 ];
 
 const USER_ROLE_VALUES: UserRole[] = ["admin", "user", "consultant", "staff"];
+const AUTO_REJECT_REASON = "진행 예정 시간이 지나 자동 거절되었습니다.";
+const AUTO_STATUS_TRANSITION_INTERVAL_MS = 60 * 60 * 1000;
 
 function toUserRole(value: unknown, fallback: UserRole = "user"): UserRole {
   if (typeof value !== "string") return fallback;
@@ -864,6 +868,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
   const reportPopupOpenedRef = useRef(false);
   const reportPopupSessionKey = "office-hour-report-popup-shown";
   const [profileList, setProfileList] = useState<RawProfileApprovalDoc[]>([]);
+  const submissionLocksRef = useRef<Set<string>>(new Set());
 
   // 새로운 기능을 위한 상태
   const [notifications, setNotifications] = useState<Notification[]>(mockNotifications);
@@ -1478,6 +1483,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     if (!isFirebaseConfigured || !needsApplications) return;
     const normalized = officeHourApplicationDocs
       .map((application) => normalizeApplicationDoc(application, resolveCompanyName))
+      .filter((application) => application.status !== "cancelled")
       .sort((a, b) => getTimeValue(b.createdAt) - getTimeValue(a.createdAt));
     setApplications(normalized);
   }, [officeHourApplicationDocs, resolveCompanyName, needsApplications]);
@@ -1625,6 +1631,75 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     return null;
   };
 
+  const hasSessionEnded = (app: Application, now = new Date()) => {
+    const endTime = getSessionEndTime(app);
+    return Boolean(endTime && now >= endTime);
+  };
+
+  const rejectApplicationsAsExpired = async (
+    targets: Application[],
+    updatedAt = new Date()
+  ) => {
+    const eligible = targets.filter(
+      (app) => app.status === "pending" || app.status === "review"
+    );
+    if (eligible.length === 0) return false;
+
+    const rejectionById = new Map(
+      eligible.map((app) => [
+        app.id,
+        {
+          updatedAt,
+          rejectionReason: app.rejectionReason?.trim() || AUTO_REJECT_REASON,
+        },
+      ])
+    );
+
+    const nextApplications = applications.map((app) => {
+      const meta = rejectionById.get(app.id);
+      if (!meta) return app;
+      return {
+        ...app,
+        status: "rejected" as const,
+        rejectionReason: meta.rejectionReason,
+        updatedAt: meta.updatedAt,
+      };
+    });
+    setApplications(nextApplications);
+
+    const slotIdsToOpen = collectReleasableSlotIds(eligible, nextApplications);
+
+    if (isFirebaseConfigured) {
+      const applicationOps = eligible.map((app) => {
+        const meta = rejectionById.get(app.id)!;
+        return {
+          type: "update" as const,
+          collection: COLLECTIONS.OFFICE_HOUR_APPLICATIONS,
+          docId: app.id,
+          data: {
+            status: "rejected",
+            rejectionReason: meta.rejectionReason,
+            updatedAt: meta.updatedAt,
+          },
+        };
+      });
+
+      const applicationsUpdated = await officeHourApplicationCrud.batchUpdate(
+        applicationOps
+      );
+      if (!applicationsUpdated) {
+        toast.error("만료 신청 자동 거절 저장에 실패했습니다");
+        return false;
+      }
+
+      await releaseSlots(slotIdsToOpen);
+      return true;
+    }
+
+    await releaseSlots(slotIdsToOpen);
+    return true;
+  };
+
   const getReportDeadlineInfo = (app: Application) => {
     const endTime = getSessionEndTime(app);
     if (!endTime) return null;
@@ -1645,23 +1720,36 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     return getReportDeadlineInfo(reportFormApplication);
   }, [reportFormApplication, reportFormIsManual, officeHourSlotList]);
 
-  // 자동 완료 처리 (세션 종료 시간이 지난 확정 건): 3분 주기로 점검
+  // 자동 상태 전환:
+  // 1) 진행 시간이 지난 pending/review는 rejected로 자동 전환
+  // 2) 진행 시간이 지난 confirmed는 completed로 자동 전환
   useEffect(() => {
+    if (!needsApplications) return;
     let isRunning = false;
-    const runAutoComplete = async () => {
+    const runAutoStatusTransitions = async () => {
       if (isRunning) return;
       isRunning = true;
       try {
         const now = new Date();
-        const candidates = applications
+        const expiredPending = applications.filter(
+          (app) =>
+            (app.status === "pending" || app.status === "review")
+            && hasSessionEnded(app, now)
+        );
+
+        if (expiredPending.length > 0) {
+          await rejectApplicationsAsExpired(expiredPending, now);
+        }
+
+        const completedCandidates = applications
           .filter((app) => app.status === "confirmed")
           .map((app) => ({ app, endTime: getSessionEndTime(app) }))
           .filter((item) => item.endTime && now >= item.endTime);
 
-        if (candidates.length === 0) return;
+        if (completedCandidates.length === 0) return;
 
         const updatesById = new Map<string, { completedAt: Date; updatedAt: Date }>();
-        candidates.forEach(({ app, endTime }) => {
+        completedCandidates.forEach(({ app, endTime }) => {
           const completedAt = endTime ?? now;
           updatesById.set(app.id, { completedAt, updatedAt: now });
         });
@@ -1697,12 +1785,22 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       }
     };
 
-    runAutoComplete();
-    const intervalId = window.setInterval(runAutoComplete, 180000);
+    runAutoStatusTransitions();
+    const intervalId = window.setInterval(
+      runAutoStatusTransitions,
+      AUTO_STATUS_TRANSITION_INTERVAL_MS
+    );
     return () => {
       window.clearInterval(intervalId);
     };
-  }, [applications, officeHourSlotList, isFirebaseConfigured, officeHourApplicationCrud]);
+  }, [
+    applications,
+    needsApplications,
+    isFirebaseConfigured,
+    officeHourApplicationCrud,
+    officeHourSlotList,
+    officeHourSlotCrud,
+  ]);
 
   const dismissReportPopup = (applicationId: string, dismissForMs: number) => {
     const until = Date.now() + dismissForMs;
@@ -1904,6 +2002,63 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     );
   };
 
+  const getRelatedSlotIdsForApplication = (application: Application) => {
+    const slotId = application.officeHourSlotId;
+    if (!slotId) return [];
+    const baseSlot = officeHourSlotList.find((slot) => slot.id === slotId);
+    if (!baseSlot) return [slotId];
+    if (!baseSlot.programId || !baseSlot.date || !baseSlot.startTime) {
+      return [slotId];
+    }
+
+    const matchedSlotIds = officeHourSlotList
+      .filter(
+        (slot) =>
+          slot.type === "regular"
+          && slot.programId === baseSlot.programId
+          && slot.date === baseSlot.date
+          && slot.startTime === baseSlot.startTime
+      )
+      .map((slot) => slot.id);
+
+    return matchedSlotIds.length > 0 ? matchedSlotIds : [slotId];
+  };
+
+  const collectReleasableSlotIds = (
+    changedApplications: Application[],
+    appList: Application[]
+  ) => {
+    const releasable = new Set<string>();
+
+    changedApplications.forEach((application) => {
+      getRelatedSlotIdsForApplication(application).forEach((slotId) => {
+        if (!hasOtherActiveApplicationsForSlot(slotId, application.id, appList)) {
+          releasable.add(slotId);
+        }
+      });
+    });
+
+    return releasable;
+  };
+
+  const releaseSlots = async (slotIds: Set<string>) => {
+    if (slotIds.size === 0) return;
+    if (isFirebaseConfigured) {
+      const operations = Array.from(slotIds).map((slotId) => ({
+        type: "update" as const,
+        collection: COLLECTIONS.OFFICE_HOUR_SLOTS,
+        docId: slotId,
+        data: { status: "open" },
+      }));
+      const updated = await officeHourSlotCrud.batchUpdate(operations);
+      if (!updated) {
+        toast.error("슬롯 상태 업데이트에 실패했습니다");
+      }
+      return;
+    }
+    slotIds.forEach((slotId) => applyLocalSlotStatus(slotId, "open"));
+  };
+
   const applyLocalSlotStatus = (slotId: string, status: OfficeHourSlotStatus) => {
     setOfficeHourSlotList((prev) =>
       prev.map((slot) => (slot.id === slotId ? { ...slot, status } : slot))
@@ -1923,11 +2078,101 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     );
   };
 
+  const acquireSubmissionLock = (key: string) => {
+    if (submissionLocksRef.current.has(key)) return false;
+    submissionLocksRef.current.add(key);
+    return true;
+  };
+
+  const releaseSubmissionLock = (key: string) => {
+    submissionLocksRef.current.delete(key);
+  };
+
+  const sanitizeStorageFileName = (name: string) =>
+    name.replace(/[^\w.-]/g, "_");
+
+  const uploadApplicationAttachments = async (
+    files: FileItem[],
+    folder: string
+  ) => {
+    if (files.length === 0) {
+      return [];
+    }
+    if (!isFirebaseConfigured) {
+      return [];
+    }
+    if (!firebaseStorage) {
+      throw new Error("Firebase Storage가 설정되지 않았습니다.");
+    }
+    const baseKey = `${folder}/${Date.now()}`;
+    return Promise.all(
+      files.map(async (item, index) => {
+        if (!item.file) {
+          throw new Error("첨부 파일 원본을 찾을 수 없습니다.");
+        }
+        const fileName = sanitizeStorageFileName(item.name);
+        const fileRef = ref(
+          firebaseStorage,
+          `office-hour-applications/${baseKey}-${index}-${fileName}`
+        );
+        await uploadBytes(fileRef, item.file);
+        return getDownloadURL(fileRef);
+      })
+    );
+  };
+
+  const removeApplicationAttachmentsFromStorage = async (
+    attachments?: string[]
+  ) => {
+    if (!isFirebaseConfigured || !firebaseStorage || !attachments?.length) {
+      return 0;
+    }
+    const targets = attachments.filter(
+      (item) =>
+        typeof item === "string"
+        && (item.startsWith("http://")
+          || item.startsWith("https://")
+          || item.startsWith("gs://"))
+    );
+    if (targets.length === 0) return 0;
+
+    const results = await Promise.all(
+      targets.map(async (fileUrl) => {
+        try {
+          await deleteObject(ref(firebaseStorage, fileUrl));
+          return true;
+        } catch {
+          return false;
+        }
+      })
+    );
+    return results.filter((ok) => !ok).length;
+  };
+
   const handleSubmitRegularApplication = async (data: ApplicationFormData) => {
     const officeHour = resolvedRegularOfficeHourList.find((oh) => oh.id === data.officeHourId);
     if (!officeHour) return;
+    if (isBefore(startOfDay(data.date), startOfDay(new Date()))) {
+      toast.error("오늘 이전 날짜는 신청할 수 없습니다");
+      return;
+    }
 
     const scheduledDate = formatDateKey(data.date);
+    const requesterId = firebaseUser?.uid ?? user.id;
+    const submissionKey = [
+      "regular",
+      requesterId,
+      data.officeHourId,
+      scheduledDate,
+      data.time,
+      data.agendaId,
+    ].join(":");
+    if (!acquireSubmissionLock(submissionKey)) {
+      toast.error("동일 신청을 처리 중입니다. 잠시만 기다려주세요.");
+      return;
+    }
+
+    try {
     const selectedSlot = data.slotId
       ? officeHourSlotList.find((slot) => slot.id === data.slotId)
       : officeHour.slots?.find(
@@ -1987,6 +2232,24 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
         return;
       }
     }
+
+    const attachmentNames = data.files.map((f) => f.name);
+    let uploadedAttachmentUrls: string[] = [];
+    if (isFirebaseConfigured && !firebaseUser?.uid) {
+      toast.error("로그인 정보를 확인한 뒤 다시 시도해주세요");
+      return;
+    }
+    if (isFirebaseConfigured && data.files.length > 0) {
+      try {
+        uploadedAttachmentUrls = await uploadApplicationAttachments(
+          data.files,
+          `regular/${firebaseUser?.uid ?? user.id}`
+        );
+      } catch {
+        toast.error("첨부 파일 업로드에 실패했습니다");
+        return;
+      }
+    }
     
     const newApplication: Application = {
       id: `app${Date.now()}`,
@@ -2002,10 +2265,11 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       sessionFormat: data.sessionFormat,
       agenda: agenda.name,
       requestContent: data.requestContent,
-      attachments: data.files.map((f) => f.name),
+      attachments: attachmentNames,
+      attachmentUrls: uploadedAttachmentUrls.length > 0 ? uploadedAttachmentUrls : undefined,
       applicantName: user.companyName,
       applicantEmail: user.email,
-      createdByUid: firebaseUser?.uid ?? user.id,
+      createdByUid: requesterId,
       scheduledDate,
       scheduledTime: data.time,
       createdAt: new Date(),
@@ -2020,6 +2284,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       const payload = omitId(newApplication);
       const createdId = await officeHourApplicationCrud.create(payload);
       if (!createdId) {
+        await removeApplicationAttachmentsFromStorage(uploadedAttachmentUrls);
         toast.error("신청 저장에 실패했습니다");
         return;
       }
@@ -2067,6 +2332,9 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       description: "검토 후 일정이 확정되면 알림을 보내드립니다.",
     });
     handleNavigate("dashboard");
+    } finally {
+      releaseSubmissionLock(submissionKey);
+    }
   };
 
   const handleStartIrregularApplication = () => {
@@ -2076,6 +2344,24 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
   const handleSubmitIrregularApplication = async (
     data: IrregularApplicationFormData
   ) => {
+    const requesterId = firebaseUser?.uid ?? user.id;
+    const periodFromKey = formatDateKey(data.periodFrom);
+    const periodToKey = formatDateKey(data.periodTo);
+    const submissionKey = [
+      "irregular",
+      requesterId,
+      data.agendaId,
+      periodFromKey,
+      periodToKey,
+      data.isInternal ? "internal" : "external",
+      data.projectName.trim(),
+    ].join(":");
+    if (!acquireSubmissionLock(submissionKey)) {
+      toast.error("동일 신청을 처리 중입니다. 잠시만 기다려주세요.");
+      return;
+    }
+
+    try {
     const agenda = agendaList.find((a) => a.id === data.agendaId);
     if (resolvedRole === "user") {
       const remaining = data.isInternal
@@ -2087,6 +2373,24 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
             ? "내부 티켓이 모두 소진되어 신청할 수 없습니다"
             : "외부 티켓이 모두 소진되어 신청할 수 없습니다"
         );
+        return;
+      }
+    }
+
+    const attachmentNames = data.files.map((f) => f.name);
+    let uploadedAttachmentUrls: string[] = [];
+    if (isFirebaseConfigured && !firebaseUser?.uid) {
+      toast.error("로그인 정보를 확인한 뒤 다시 시도해주세요");
+      return;
+    }
+    if (isFirebaseConfigured && data.files.length > 0) {
+      try {
+        uploadedAttachmentUrls = await uploadApplicationAttachments(
+          data.files,
+          `irregular/${firebaseUser?.uid ?? user.id}`
+        );
+      } catch {
+        toast.error("첨부 파일 업로드에 실패했습니다");
         return;
       }
     }
@@ -2102,12 +2406,13 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       sessionFormat: data.sessionFormat,
       agenda: agenda?.name || "",
       requestContent: data.requestContent,
-      attachments: data.files.map((f) => f.name),
+      attachments: attachmentNames,
+      attachmentUrls: uploadedAttachmentUrls.length > 0 ? uploadedAttachmentUrls : undefined,
       applicantName: user.companyName,
       applicantEmail: user.email,
-      createdByUid: firebaseUser?.uid ?? user.id,
-      periodFrom: formatDateKey(data.periodFrom),
-      periodTo: formatDateKey(data.periodTo),
+      createdByUid: requesterId,
+      periodFrom: periodFromKey,
+      periodTo: periodToKey,
       projectName: data.projectName,
       isInternal: data.isInternal,
       createdAt: new Date(),
@@ -2122,6 +2427,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       const payload = omitId(newApplication);
       const createdId = await officeHourApplicationCrud.create(payload);
       if (!createdId) {
+        await removeApplicationAttachmentsFromStorage(uploadedAttachmentUrls);
         toast.error("신청 저장에 실패했습니다");
         return;
       }
@@ -2133,6 +2439,9 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       description: "담당 컨설턴트 배정 후 일정을 조율하겠습니다.",
     });
     handleNavigate("irregular");
+    } finally {
+      releaseSubmissionLock(submissionKey);
+    }
   };
 
   const handleViewApplication = (id: string) => {
@@ -2156,38 +2465,41 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
   const handleCancelApplication = async (id: string) => {
     const targetApplication = applications.find((app) => app.id === id);
     if (!targetApplication) return;
+    if (
+      (targetApplication.status === "pending" || targetApplication.status === "review")
+      && hasSessionEnded(targetApplication)
+    ) {
+      await rejectApplicationsAsExpired([targetApplication]);
+      toast.error("진행 시간이 지나 취소할 수 없어 자동 거절 처리되었습니다");
+      return;
+    }
 
-    const nextApplications = applications.map((app) =>
-      app.id === id
-        ? { ...app, status: "cancelled" as const, updatedAt: new Date() }
-        : app
-    );
+    const nextApplications = applications.filter((app) => app.id !== id);
 
     if (isFirebaseConfigured) {
-      const updated = await officeHourApplicationCrud.update(id, {
-        status: "cancelled",
-      });
-      if (!updated) {
-        toast.error("신청 취소 저장에 실패했습니다");
+      const removed = await officeHourApplicationCrud.remove(id);
+      if (!removed) {
+        toast.error("신청 삭제에 실패했습니다");
         return;
       }
-    } else {
-      setApplications(nextApplications);
-    }
-
-    const slotId = targetApplication.officeHourSlotId;
-    if (slotId && !hasOtherActiveApplicationsForSlot(slotId, id, nextApplications)) {
-      if (isFirebaseConfigured) {
-        const slotUpdated = await officeHourSlotCrud.update(slotId, { status: "open" });
-        if (!slotUpdated) {
-          toast.error("신청은 취소됐지만 슬롯 상태 복구에 실패했습니다");
-        }
-      } else {
-        applyLocalSlotStatus(slotId, "open");
+      const failedAttachmentDeletes = await removeApplicationAttachmentsFromStorage(
+        targetApplication.attachmentUrls?.length
+          ? targetApplication.attachmentUrls
+          : targetApplication.attachments
+      );
+      if (failedAttachmentDeletes > 0) {
+        toast.error("첨부 파일 일부 삭제에 실패했습니다");
       }
     }
+    setApplications(nextApplications);
 
-    toast.success("신청이 취소되었습니다");
+    const releasableSlotIds = collectReleasableSlotIds(
+      [targetApplication],
+      nextApplications
+    );
+    await releaseSlots(releasableSlotIds);
+
+    toast.success("신청이 삭제되었습니다");
     handleNavigate("dashboard");
   };
 
@@ -2197,9 +2509,25 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
   ) => {
     const targetApplication = applications.find((app) => app.id === id);
     if (!targetApplication) return;
+    const now = new Date();
+    const expired = hasSessionEnded(targetApplication, now);
+
+    if (expired) {
+      const isPendingLike =
+        targetApplication.status === "pending" || targetApplication.status === "review";
+      if (isPendingLike && status !== "rejected") {
+        await rejectApplicationsAsExpired([targetApplication], now);
+        toast.error("진행 시간이 지나 자동으로 거절 처리되었습니다");
+        return;
+      }
+      if (status === "review") {
+        toast.error("진행 시간이 지난 신청은 재검토로 변경할 수 없습니다");
+        return;
+      }
+    }
 
     const nextStatus = status;
-    const updatedAt = new Date();
+    const updatedAt = now;
     const fallbackConsultantName =
       currentConsultant?.name
       ?? firebaseUser?.displayName?.trim()
@@ -2260,16 +2588,11 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     if (!slotId) return;
 
     if (status === "cancelled" || status === "rejected" || status === "review") {
-      const shouldOpen = !hasOtherActiveApplicationsForSlot(slotId, id, nextApplications);
-      if (!shouldOpen) return;
-      if (isFirebaseConfigured) {
-        const slotUpdated = await officeHourSlotCrud.update(slotId, { status: "open" });
-        if (!slotUpdated) {
-          toast.error("슬롯 상태 업데이트에 실패했습니다");
-        }
-      } else {
-        applyLocalSlotStatus(slotId, "open");
-      }
+      const releasableSlotIds = collectReleasableSlotIds(
+        [targetApplication],
+        nextApplications
+      );
+      await releaseSlots(releasableSlotIds);
       return;
     }
 
@@ -2292,6 +2615,11 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
 
     const targetApplication = applications.find((app) => app.id === id);
     if (!targetApplication) return;
+    if (hasSessionEnded(targetApplication)) {
+      await rejectApplicationsAsExpired([targetApplication]);
+      toast.error("진행 시간이 지나 수락할 수 없어 자동 거절 처리되었습니다");
+      return;
+    }
 
     const isAcceptableStatus =
       targetApplication.status === "pending" || targetApplication.status === "review";
@@ -2429,17 +2757,11 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       }
     }
 
-    const slotId = targetApplication.officeHourSlotId;
-    if (slotId && !hasOtherActiveApplicationsForSlot(slotId, id, nextApplications)) {
-      if (isFirebaseConfigured) {
-        const slotUpdated = await officeHourSlotCrud.update(slotId, { status: "open" });
-        if (!slotUpdated) {
-          toast.error("슬롯 상태 업데이트에 실패했습니다");
-        }
-      } else {
-        applyLocalSlotStatus(slotId, "open");
-      }
-    }
+    const releasableSlotIds = collectReleasableSlotIds(
+      [targetApplication],
+      nextApplications
+    );
+    await releaseSlots(releasableSlotIds);
 
     toast.success("거절 처리되었습니다.");
   };
@@ -2453,6 +2775,11 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
 
     const targetApplication = applications.find((app) => app.id === id);
     if (!targetApplication) return;
+    if (hasSessionEnded(targetApplication)) {
+      await rejectApplicationsAsExpired([targetApplication]);
+      toast.error("진행 시간이 지나 확정할 수 없어 자동 거절 처리되었습니다");
+      return;
+    }
 
     const isReview = targetApplication.status === "review";
     const isRequester =
@@ -3343,6 +3670,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
               programs={scopedProgramList}
               agendas={agendaList}
               ticketOverrides={companyMetaDoc?.programTicketOverrides}
+              onCancelApplication={handleCancelApplication}
               onNavigate={handleNavigateLoose}
             />
           )}
@@ -3350,7 +3678,6 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
           {currentPage === "regular" && (
             <RegularOfficeHoursCalendar
               officeHours={scopedRegularOfficeHourList}
-              agendas={agendaList}
               onSelectOfficeHour={handleSelectOfficeHour}
             />
           )}
