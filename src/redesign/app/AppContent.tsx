@@ -589,7 +589,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     "admin-programs",
     "pending-reports",
   ]);
-  const needsUsers = isPage(["admin-users"]);
+  const needsUsers = resolvedRole === "admin" && isPage(["admin-users"]);
   const needsRegularOfficeHours = isPage([
     "regular",
     "regular-detail",
@@ -607,8 +607,9 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     resolvedRole === "consultant"
     || isPage(["consultants", "regular-wizard", "admin-consultants", "admin-users"]);
   const needsOfficeHourSlots = needsApplications || needsRegularOfficeHours;
-  const needsCompanyLookup = isAdminLikeRole && needsApplications;
-  const needsCompanyDirectory = isPage(["admin-programs", "admin-program-list"]);
+  const needsCompanyLookup = resolvedRole === "admin" && needsApplications;
+  const needsCompanyDirectory =
+    resolvedRole === "admin" && isPage(["admin-programs", "admin-program-list"]);
   const needsCompanyOwnershipLookup =
     isFirebaseConfigured
     && resolvedRole === "user"

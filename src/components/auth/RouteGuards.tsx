@@ -21,7 +21,7 @@ export function RequireApproved({ children }: { children: JSX.Element }) {
   if (!profile) {
     return <Navigate to="/signup" replace />
   }
-  if (!profile.active) {
+  if (profile.active === false) {
     return <Navigate to="/pending" replace />
   }
   return children

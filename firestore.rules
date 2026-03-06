@@ -13,8 +13,10 @@ service cloud.firestore {
 
     function isActiveUser() {
       return hasProfile()
-        && get(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.active is bool
-        && get(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.active == true;
+        && (
+          !(get(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.active is bool)
+          || get(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.active == true
+        );
     }
 
     function isAdmin() {
@@ -28,7 +30,7 @@ service cloud.firestore {
     }
 
     function isCompanyOwner(companyId) {
-      return isActiveUser()
+      return isSignedIn()
         && get(/databases/$(database)/documents/companies/$(companyId)).data.ownerUid == request.auth.uid;
     }
 
@@ -54,6 +56,17 @@ service cloud.firestore {
           || request.resource.data.requestedRole in ["admin", "company", "consultant"]
         )
         && request.resource.data.active is bool;
+      allow update: if isSignedIn()
+        && request.auth.uid == userId
+        && resource.data.active is bool
+        && resource.data.active == false
+        && request.resource.data.role == "company"
+        && (
+          request.resource.data.requestedRole == null
+          || request.resource.data.requestedRole in ["admin", "company", "consultant"]
+        )
+        && request.resource.data.active is bool
+        && request.resource.data.active == false;
 
       allow delete: if false;
     }
@@ -73,58 +86,50 @@ service cloud.firestore {
     }
 
     match /companies/{companyId} {
-      allow read: if isActiveUser()
-        && (isCompanyOwner(companyId) || isAdmin());
-      allow create: if isActiveUser()
+      allow read: if isCompanyOwner(companyId) || isAdmin();
+      allow create: if isSignedIn()
         && request.resource.data.ownerUid == request.auth.uid;
-      allow update: if isActiveUser()
+      allow update: if isSignedIn()
         && isCompanyOwner(companyId)
         && request.resource.data.ownerUid == resource.data.ownerUid;
       allow delete: if false;
     }
 
     match /companies/{companyId}/companyInfo/{docId} {
-      allow read: if isActiveUser()
-        && (isCompanyOwner(companyId) || isAdmin());
-      allow create, update: if isActiveUser()
-        && isCompanyOwner(companyId);
+      allow read: if isCompanyOwner(companyId) || isAdmin();
+      allow create, update: if isCompanyOwner(companyId);
       allow delete: if false;
     }
 
     match /companies/{companyId}/selfAssessment/{docId} {
-      allow read: if isActiveUser()
-        && (isCompanyOwner(companyId) || isAdmin());
-      allow create, update: if isActiveUser()
-        && isCompanyOwner(companyId);
+      allow read: if isCompanyOwner(companyId) || isAdmin();
+      allow create, update: if isCompanyOwner(companyId);
       allow delete: if false;
     }
 
     match /companies/{companyId}/files/{fileId} {
-      allow read: if isActiveUser()
-        && (isCompanyOwner(companyId) || isAdmin());
-      allow create: if isActiveUser()
-        && isCompanyOwner(companyId)
+      allow read: if isCompanyOwner(companyId) || isAdmin();
+      allow create: if isCompanyOwner(companyId)
         && request.resource.data.createdByUid == request.auth.uid
         && request.resource.data.storagePath is string
         && request.resource.data.name is string
         && request.resource.data.size is int;
-      allow delete: if isActiveUser()
-        && (isCompanyOwner(companyId) || isAdmin());
+      allow delete: if isCompanyOwner(companyId) || isAdmin();
       allow update: if false;
     }
 
     match /consultants/{consultantId} {
-      allow read: if isActiveUser();
+      allow read: if isActiveUser() || (isSignedIn() && consultantId == request.auth.uid);
       allow create: if isAdmin()
         || (
-          isConsultant()
+          isSignedIn()
           && consultantId == request.auth.uid
           && request.resource.data.email is string
           && request.resource.data.email == request.auth.token.email
         );
       allow update: if isAdmin()
         || (
-          isConsultant()
+          isSignedIn()
           && (
             consultantId == request.auth.uid
             || (
@@ -190,7 +195,7 @@ service cloud.firestore {
     match /consents/{consentId} {
       allow read: if isActiveUser()
         && (request.auth.uid == resource.data.userId || isAdmin());
-      allow create: if isActiveUser()
+      allow create: if isSignedIn()
         && request.resource.data.userId == request.auth.uid
         && request.resource.data.type in ["privacy", "marketing"]
         && request.resource.data.consented is bool

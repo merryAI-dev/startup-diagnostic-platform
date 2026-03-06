@@ -175,12 +175,16 @@ export async function createUserProfile(
     }
   } else if (requestedRole === "consultant" && options?.consultantInfo) {
     const consultantName = options.consultantInfo.name.trim()
+    const consultantPrimaryEmail =
+      (email ?? "").trim()
+      || options.consultantInfo.email.trim()
+      || null
     await setDoc(
       doc(db, "consultants", uid),
       {
         name: consultantName,
         title: "컨설턴트",
-        email: options.consultantInfo.email.trim() || email || null,
+        email: consultantPrimaryEmail,
         phone: options.consultantInfo.phone.trim() || null,
         organization: options.consultantInfo.organization.trim() || null,
         secondaryEmail: options.consultantInfo.secondaryEmail.trim() || null,

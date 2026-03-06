@@ -23,16 +23,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setProfile(null)
       return
     }
-    const nextProfile = await getUserProfile(auth.currentUser.uid)
-    setProfile(nextProfile)
+    try {
+      const nextProfile = await getUserProfile(auth.currentUser.uid)
+      setProfile(nextProfile)
+    } catch {
+      setProfile(null)
+    }
   }
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (nextUser) => {
       setUser(nextUser)
       if (nextUser) {
-        const nextProfile = await getUserProfile(nextUser.uid)
-        setProfile(nextProfile)
+        try {
+          const nextProfile = await getUserProfile(nextUser.uid)
+          setProfile(nextProfile)
+        } catch {
+          setProfile(null)
+        }
       } else {
         setProfile(null)
       }

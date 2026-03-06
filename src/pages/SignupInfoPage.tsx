@@ -19,7 +19,7 @@ import {
   type UploadTask,
 } from "firebase/storage"
 import { useAuth } from "@/context/AuthContext"
-import { signOutUser, signUpWithEmail } from "@/firebase/auth"
+import { signInWithEmail, signOutUser, signUpWithEmail } from "@/firebase/auth"
 import { db, storage } from "@/firebase/client"
 import type { Role } from "@/types/auth"
 import { ConsultantProfilePage } from "@/redesign/app/components/pages/consultant-profile-page"
@@ -36,6 +36,8 @@ import { toast } from "sonner"
 import { createUserProfile } from "@/firebase/profile"
 import type { CompanyInfoForm, InvestmentInput } from "@/types/company"
 import { DEFAULT_FORM } from "@/types/company"
+
+const PENDING_SIGNUP_KEY = "pending-signup"
 function getSignupErrorMessage(error: any) {
   const code = error?.code ?? ""
   if (code === "auth/email-already-in-use") {
@@ -72,7 +74,7 @@ export function SignupInfoPage() {
   )
   const pendingSignup = useMemo(() => {
     try {
-      const raw = sessionStorage.getItem("pending-signup")
+      const raw = sessionStorage.getItem(PENDING_SIGNUP_KEY)
       if (!raw) return null
       return JSON.parse(raw) as { role: Role; email: string; password: string }
     } catch {
@@ -130,9 +132,23 @@ export function SignupInfoPage() {
         pendingSignup.email,
         pendingSignup.password
       )
-      sessionStorage.removeItem("pending-signup")
+      sessionStorage.removeItem(PENDING_SIGNUP_KEY)
       return credential.user
     } catch (error) {
+      const code = (error as { code?: string })?.code ?? ""
+      if (code === "auth/email-already-in-use") {
+        try {
+          const credential = await signInWithEmail(
+            pendingSignup.email,
+            pendingSignup.password
+          )
+          sessionStorage.removeItem(PENDING_SIGNUP_KEY)
+          return credential.user
+        } catch {
+          toast.error("이미 가입된 이메일입니다. 로그인 후 다시 시도해주세요.")
+          return null
+        }
+      }
       toast.error(getSignupErrorMessage(error))
       return null
     } finally {
