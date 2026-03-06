@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { Agenda, Application, User, Program } from "@/redesign/app/lib/types";
+import { Agenda, Application, ApplicationStatus, User, Program } from "@/redesign/app/lib/types";
 import { Card } from "@/redesign/app/components/ui/card";
 import { Button } from "@/redesign/app/components/ui/button";
 import { Badge } from "@/redesign/app/components/ui/badge";
@@ -23,6 +23,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Input } from "@/redesign/app/components/ui/input";
 import { Label } from "@/redesign/app/components/ui/label";
 import { Textarea } from "@/redesign/app/components/ui/textarea";
+import { AdminApplicationDetailModal } from "@/redesign/app/components/pages/admin-application-detail-modal";
 import { toast } from "sonner";
 import type { DayContentProps } from "react-day-picker";
 
@@ -36,6 +37,8 @@ interface UnifiedCalendarProps {
   onRequestApplication?: (id: string) => void;
   onRejectApplication?: (id: string, reason: string) => void;
   onConfirmApplication?: (id: string) => void;
+  onUpdateStatus?: (id: string, status: ApplicationStatus) => void;
+  onUpdateApplication?: (id: string, data: Partial<Application>) => void;
   currentConsultantId?: string | null;
   currentConsultantName?: string | null;
 }
@@ -89,7 +92,9 @@ export function UnifiedCalendar({
   onNavigateToApplication,
   onRequestApplication,
   onRejectApplication,
-  onConfirmApplication: _onConfirmApplication,
+  onConfirmApplication,
+  onUpdateStatus,
+  onUpdateApplication,
   currentConsultantId = null,
   currentConsultantName = null,
 }: UnifiedCalendarProps) {
@@ -106,6 +111,7 @@ export function UnifiedCalendar({
   const [actionTarget, setActionTarget] = useState<Application | null>(null);
   const [actionType, setActionType] = useState<"accept" | "reject">("accept");
   const [rejectReason, setRejectReason] = useState("");
+  const [selectedPendingApplicationId, setSelectedPendingApplicationId] = useState<string | null>(null);
   const [newEvent, setNewEvent] = useState({
     title: "",
     date: "",
@@ -293,6 +299,10 @@ export function UnifiedCalendar({
       return agendaOk && programOk;
     });
   }, [pendingRequests, pendingAgendaFilter, pendingProgramFilter]);
+  const selectedPendingApplication = useMemo(() => {
+    if (!selectedPendingApplicationId) return null;
+    return applications.find((app) => app.id === selectedPendingApplicationId) ?? null;
+  }, [applications, selectedPendingApplicationId]);
 
   const pendingProgramOptions = useMemo(() => {
     return programs.filter((program) =>
@@ -358,6 +368,9 @@ export function UnifiedCalendar({
     setActionDialogOpen(false);
     setActionTarget(null);
     setRejectReason("");
+  };
+  const openPendingDetailModal = (applicationId: string) => {
+    setSelectedPendingApplicationId(applicationId);
   };
 
   const renderDayContent = (props: DayContentProps) => {
@@ -828,7 +841,8 @@ export function UnifiedCalendar({
                               return (
                               <div
                                 key={event.id}
-                                className="rounded-lg border border-slate-200 bg-white p-3"
+                                className="rounded-lg border border-slate-200 bg-white p-3 transition-shadow hover:shadow-sm cursor-pointer"
+                                onClick={() => openPendingDetailModal(event.id)}
                               >
                                 <div className="flex items-start justify-between gap-3">
                                   <div className="min-w-0">
@@ -850,7 +864,8 @@ export function UnifiedCalendar({
                                     <Button
                                       size="sm"
                                       variant="outline"
-                                      onClick={() => {
+                                      onClick={(clickEvent) => {
+                                        clickEvent.stopPropagation();
                                         openRejectDialog(event);
                                       }}
                                     >
@@ -858,7 +873,8 @@ export function UnifiedCalendar({
                                     </Button>
                                     <Button
                                       size="sm"
-                                      onClick={() => {
+                                      onClick={(clickEvent) => {
+                                        clickEvent.stopPropagation();
                                         if (!actionHandler) return;
                                         openAcceptDialog(event);
                                       }}
@@ -924,7 +940,8 @@ export function UnifiedCalendar({
                             return (
                             <div
                               key={event.id}
-                              className="rounded-lg border border-slate-200 bg-white p-3"
+                              className="rounded-lg border border-slate-200 bg-white p-3 transition-shadow hover:shadow-sm cursor-pointer"
+                              onClick={() => openPendingDetailModal(event.id)}
                             >
                               <div className="flex items-start justify-between gap-3">
                                 <div className="min-w-0">
@@ -946,7 +963,8 @@ export function UnifiedCalendar({
                                   <Button
                                     size="sm"
                                     variant="outline"
-                                    onClick={() => {
+                                    onClick={(clickEvent) => {
+                                      clickEvent.stopPropagation();
                                       openRejectDialog(event);
                                     }}
                                   >
@@ -954,7 +972,8 @@ export function UnifiedCalendar({
                                   </Button>
                                   <Button
                                     size="sm"
-                                    onClick={() => {
+                                    onClick={(clickEvent) => {
+                                      clickEvent.stopPropagation();
                                       if (!actionHandler) return;
                                       openAcceptDialog(event);
                                     }}
@@ -1088,6 +1107,20 @@ export function UnifiedCalendar({
           )}
         </div>
       </div>
+      {selectedPendingApplication && onUpdateStatus && onUpdateApplication && (
+        <AdminApplicationDetailModal
+          application={selectedPendingApplication}
+          onClose={() => setSelectedPendingApplicationId(null)}
+          onUpdateStatus={onUpdateStatus}
+          onUpdateApplication={onUpdateApplication}
+          onConfirmApplication={onConfirmApplication}
+          onRejectApplication={onRejectApplication}
+          onRequestApplication={onRequestApplication}
+          readOnly={true}
+          allowStatusActions={isConsultant}
+          currentConsultantName={currentConsultantName}
+        />
+      )}
     </div>
   );
 }
