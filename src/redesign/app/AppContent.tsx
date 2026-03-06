@@ -2104,6 +2104,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     if (!firebaseStorage) {
       throw new Error("Firebase Storage가 설정되지 않았습니다.");
     }
+    const storageInstance = firebaseStorage;
     const baseKey = `${folder}/${Date.now()}`;
     return Promise.all(
       files.map(async (item, index) => {
@@ -2112,7 +2113,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
         }
         const fileName = sanitizeStorageFileName(item.name);
         const fileRef = ref(
-          firebaseStorage,
+          storageInstance,
           `office-hour-applications/${baseKey}-${index}-${fileName}`
         );
         await uploadBytes(fileRef, item.file);
@@ -2127,6 +2128,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     if (!isFirebaseConfigured || !firebaseStorage || !attachments?.length) {
       return 0;
     }
+    const storageInstance = firebaseStorage;
     const targets = attachments.filter(
       (item) =>
         typeof item === "string"
@@ -2139,7 +2141,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     const results = await Promise.all(
       targets.map(async (fileUrl) => {
         try {
-          await deleteObject(ref(firebaseStorage, fileUrl));
+          await deleteObject(ref(storageInstance, fileUrl));
           return true;
         } catch {
           return false;
