@@ -5,21 +5,17 @@ import { RoleSelector } from "@/components/auth/RoleSelector"
 type AuthCardProps = {
   title: string
   subtitle: string
-  onGoogle: () => void
   onSubmit: (role: Role, email: string, password: string) => void
   onSwap: () => void
   swapLabel: string
   role?: Role
   setRole?: (role: Role) => void
-  showGoogle?: boolean
   showRoleSelector?: boolean
   showEmailForm?: boolean
   showExtraStep?: boolean
   loadingEmail?: boolean
-  loadingGoogle?: boolean
   error?: string | null
   notice?: string | null
-  googleLabel?: string
 }
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
@@ -64,21 +60,17 @@ function Spinner({ className = "" }: { className?: string }) {
 export function AuthCard({
   title,
   subtitle,
-  onGoogle,
   onSubmit,
   onSwap,
   swapLabel,
   role,
   setRole,
-  showGoogle = true,
   showRoleSelector = true,
   showEmailForm = true,
   showExtraStep = false,
   loadingEmail = false,
-  loadingGoogle = false,
   error = null,
   notice = null,
-  googleLabel = "Google로 계속하기",
 }: AuthCardProps) {
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
@@ -89,7 +81,7 @@ export function AuthCard({
   const passwordError = getPasswordError(password)
   const showEmailError = touched.email && emailError
   const showPasswordError = touched.password && passwordError
-  const isBusy = loadingEmail || loadingGoogle
+  const isBusy = loadingEmail
   const selectedRole = role ?? "company"
   const shouldShowRoleSelector = showRoleSelector && !!role && !!setRole
 
@@ -240,22 +232,6 @@ export function AuthCard({
             </button>
           ) : null}
 
-          {showGoogle ? (
-            <button
-              className="flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
-              onClick={onGoogle}
-              disabled={isBusy}
-            >
-              {loadingGoogle ? (
-                <span className="inline-flex items-center justify-center gap-2">
-                  <Spinner className="text-slate-700" />
-                  <span className="sr-only">처리 중</span>
-                </span>
-              ) : (
-                googleLabel
-              )}
-            </button>
-          ) : null}
         </div>
 
         <div className="mt-6 text-center text-sm text-slate-500">
