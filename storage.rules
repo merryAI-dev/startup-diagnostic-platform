@@ -6,23 +6,36 @@ service firebase.storage {
       return request.auth != null;
     }
 
+    function hasProfile() {
+      return isSignedIn()
+        && firestore.exists(/databases/(default)/documents/profiles/$(request.auth.uid));
+    }
+
+    function hasCompany(companyId) {
+      return firestore.exists(/databases/(default)/documents/companies/$(companyId));
+    }
+
     function isAdmin() {
       return isSignedIn()
-        && get(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.role == "admin"
-        && get(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.active == true;
+        && hasProfile()
+        && firestore.get(/databases/(default)/documents/profiles/$(request.auth.uid)).data.role == "admin"
+        && firestore.get(/databases/(default)/documents/profiles/$(request.auth.uid)).data.active == true;
     }
 
     function isConsultant() {
       return isSignedIn()
-        && get(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.role == "consultant"
-        && get(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.active == true;
+        && hasProfile()
+        && firestore.get(/databases/(default)/documents/profiles/$(request.auth.uid)).data.role == "consultant"
+        && firestore.get(/databases/(default)/documents/profiles/$(request.auth.uid)).data.active == true;
     }
 
     function isCompanyOwner(companyId) {
       return isSignedIn()
-        && get(/databases/$(database)/documents/companies/$(companyId)).data.ownerUid == request.auth.uid;
+        && hasCompany(companyId)
+        && firestore.get(/databases/(default)/documents/companies/$(companyId)).data.ownerUid == request.auth.uid;
     }
 
+    // Legacy path compatibility (companyId/fileId/fileName)
     match /company-files/{companyId}/{fileId}/{fileName} {
       function isAllowedFile() {
         return request.resource.size <= 50 * 1024 * 1024
@@ -30,7 +43,8 @@ service firebase.storage {
       }
 
       allow read: if isAdmin() || isCompanyOwner(companyId);
-      allow write: if isCompanyOwner(companyId) && isAllowedFile();
+      allow create, update: if isAllowedFile() && (isAdmin() || isCompanyOwner(companyId));
+      allow delete: if isAdmin() || isCompanyOwner(companyId);
     }
 
     match /office-hour-applications/{category}/{userId}/{filePath=**} {
