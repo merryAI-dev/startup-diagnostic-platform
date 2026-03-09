@@ -171,7 +171,22 @@ service cloud.firestore {
           isActiveUser()
           && resource.data.createdByUid == request.auth.uid
           && request.resource.data.createdByUid == resource.data.createdByUid
-          && request.resource.data.status == "cancelled"
+          && (
+            (
+              request.resource.data.status == "cancelled"
+              && request.resource.data.diff(resource.data).affectedKeys()
+                .hasOnly(["status", "updatedAt"])
+            )
+            || (
+              resource.data.status in ["pending", "confirmed"]
+              && request.resource.data.status == resource.data.status
+              && request.resource.data.requestContent is string
+              && request.resource.data.attachments is list
+              && request.resource.data.attachmentUrls is list
+              && request.resource.data.diff(resource.data).affectedKeys()
+                .hasOnly(["requestContent", "attachments", "attachmentUrls", "updatedAt"])
+            )
+          )
         );
       allow delete: if isAdmin()
         || isConsultant()

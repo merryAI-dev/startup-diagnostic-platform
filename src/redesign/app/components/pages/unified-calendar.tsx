@@ -33,6 +33,7 @@ interface UnifiedCalendarProps {
   programs: Program[];
   agendas?: Agenda[];
   currentConsultantAgendaIds?: string[];
+  allowManualEventCreate?: boolean;
   onNavigateToApplication?: (id: string) => void;
   onRequestApplication?: (id: string) => void;
   onRejectApplication?: (id: string, reason: string) => void;
@@ -89,6 +90,7 @@ export function UnifiedCalendar({
   programs,
   agendas = [],
   currentConsultantAgendaIds = [],
+  allowManualEventCreate = true,
   onNavigateToApplication,
   onRequestApplication,
   onRejectApplication,
@@ -258,7 +260,7 @@ export function UnifiedCalendar({
     if (!isConsultant) return [];
     return applications
       .filter((app) =>
-        (app.status === "pending" || app.status === "review")
+        app.status === "pending"
         && !app.consultantId
         && (!app.consultant || app.consultant === "담당자 배정 중")
         && !hasSessionEnded(app)
@@ -443,7 +445,8 @@ export function UnifiedCalendar({
           </div>
 
           <div className="flex items-center gap-2">
-              <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
+              {allowManualEventCreate && (
+                <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
                 <DialogTrigger asChild>
                   <Button className="gap-2 bg-[#0A2540] hover:bg-[#0A2540]/90">
                     <Plus className="size-4" />
@@ -539,6 +542,7 @@ export function UnifiedCalendar({
                   </div>
                 </DialogContent>
               </Dialog>
+              )}
 
               <Dialog open={actionDialogOpen} onOpenChange={setActionDialogOpen}>
                 <DialogContent className="sm:max-w-md">
