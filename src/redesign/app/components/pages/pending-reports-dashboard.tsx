@@ -17,6 +17,31 @@ const parseLocalDate = (value?: string | null) => {
   return Number.isNaN(date.getTime()) ? null : date;
 };
 
+const parseReportContent = (raw?: string | null) => {
+  const text = (raw ?? "").trim();
+  if (!text) {
+    return {
+      companyStatus: "",
+      advisoryContent: "",
+    };
+  }
+
+  const companyStatusMatch = text.match(/\[기업의 현황\]\s*([\s\S]*?)(?:\n\s*\[자문내용\]|$)/u);
+  const advisoryContentMatch = text.match(/\[자문내용\]\s*([\s\S]*)$/u);
+
+  if (!companyStatusMatch && !advisoryContentMatch) {
+    return {
+      companyStatus: text,
+      advisoryContent: "",
+    };
+  }
+
+  return {
+    companyStatus: companyStatusMatch?.[1]?.trim() ?? "",
+    advisoryContent: advisoryContentMatch?.[1]?.trim() ?? "",
+  };
+};
+
 interface PendingReportsDashboardProps {
   applications: Application[];
   reports: OfficeHourReport[];
@@ -340,6 +365,10 @@ export function PendingReportsDashboard({
       return matchesProgram && matchesConsultant && matchesStatus;
     });
   }, [pendingReports, submittedReports, reportProgramFilter, reportConsultantFilter, reportStatusFilter]);
+  const selectedReportContent = useMemo(
+    () => parseReportContent(selectedReportItem?.report.content),
+    [selectedReportItem?.report.content]
+  );
 
   return (
     <div className="h-full flex flex-col bg-gray-50">
@@ -599,7 +628,7 @@ export function PendingReportsDashboard({
       <Dialog open={!!selectedReportItem} onOpenChange={(open) => {
         if (!open) setSelectedReportItem(null);
       }}>
-        <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
+        <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto overflow-x-hidden">
           {selectedReportItem && (
             <div className="space-y-6">
               <DialogHeader>
@@ -649,25 +678,31 @@ export function PendingReportsDashboard({
               </div>
               <div>
                 <div className="text-xs text-muted-foreground mb-1">주제</div>
-                <div className="rounded-lg border px-3 py-2 text-sm">
+                <div className="rounded-lg border px-3 py-2 text-sm break-all">
                   {selectedReportItem.report.topic || "-"}
                 </div>
               </div>
               <div>
                 <div className="text-xs text-muted-foreground mb-1">참여자</div>
-                <div className="rounded-lg border px-3 py-2 text-sm">
+                <div className="rounded-lg border px-3 py-2 text-sm break-all">
                   {(selectedReportItem.report.participants ?? []).join(", ") || "-"}
                 </div>
               </div>
               <div>
-                <div className="text-xs text-muted-foreground mb-1">세션 내용</div>
-                <div className="rounded-lg border px-3 py-2 text-sm whitespace-pre-wrap">
-                  {selectedReportItem.report.content || "-"}
+                <div className="text-xs text-muted-foreground mb-1">기업의 현황</div>
+                <div className="rounded-lg border px-3 py-2 text-sm whitespace-pre-wrap break-all">
+                  {selectedReportContent.companyStatus || "-"}
+                </div>
+              </div>
+              <div>
+                <div className="text-xs text-muted-foreground mb-1">자문내용</div>
+                <div className="rounded-lg border px-3 py-2 text-sm whitespace-pre-wrap break-all">
+                  {selectedReportContent.advisoryContent || "-"}
                 </div>
               </div>
               <div>
                 <div className="text-xs text-muted-foreground mb-1">팔로업</div>
-                <div className="rounded-lg border px-3 py-2 text-sm whitespace-pre-wrap">
+                <div className="rounded-lg border px-3 py-2 text-sm whitespace-pre-wrap break-all">
                   {selectedReportItem.report.followUp || "-"}
                 </div>
               </div>
@@ -686,7 +721,28 @@ export function PendingReportsDashboard({
                   </div>
                 </div>
               )}
-              <div className="flex justify-end">
+              <div className="flex justify-end gap-2">
+                <Button
+                  variant="destructive"
+                  onClick={() => {
+                    const confirmed = window.confirm(
+                      "보고서를 삭제하시겠습니까? 첨부 사진도 Storage에서 함께 삭제됩니다."
+                    );
+                    if (!confirmed) return;
+                    onDeleteReport(selectedReportItem.report);
+                    setSelectedReportItem(null);
+                  }}
+                >
+                  삭제
+                </Button>
+                <Button
+                  onClick={() => {
+                    onEditReport(selectedReportItem.report);
+                    setSelectedReportItem(null);
+                  }}
+                >
+                  수정
+                </Button>
                 <Button variant="outline" onClick={() => setSelectedReportItem(null)}>
                   닫기
                 </Button>

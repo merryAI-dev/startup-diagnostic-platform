@@ -4157,6 +4157,28 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
                 }}
                 onEditReport={(report) => {
                   const app = scopedApplications.find((a) => a.id === report.applicationId);
+                  if (!app && report.applicationId.startsWith("manual-")) {
+                    const syntheticApp: Application = {
+                      id: report.applicationId,
+                      type: "irregular",
+                      status: "completed",
+                      officeHourTitle: report.topic?.trim() || "비정기 오피스아워 (수동)",
+                      consultant: report.consultantName || currentConsultant?.name || "컨설턴트",
+                      consultantId: report.consultantId || currentConsultant?.id || "",
+                      sessionFormat: "online",
+                      agenda: report.topic?.trim() || "비정기 오피스아워",
+                      requestContent: "",
+                      scheduledDate: report.date || new Date().toISOString().slice(0, 10),
+                      programId: report.programId,
+                      createdAt: report.createdAt,
+                      updatedAt: report.updatedAt,
+                    };
+                    setReportFormApplication(syntheticApp);
+                    setReportFormOpen(true);
+                    setReportBeingEdited(report);
+                    setReportFormIsManual(true);
+                    return;
+                  }
                   if (!app) {
                     toast.error("보고서에 연결된 신청 정보를 찾을 수 없습니다");
                     return;
@@ -4166,7 +4188,20 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
                   setReportBeingEdited(report);
                   setReportFormIsManual(false);
                 }}
-                onDeleteReport={(report) => {
+                onDeleteReport={async (report) => {
+                  let removed = true;
+                  if (isFirebaseConfigured && report.id) {
+                    removed = await reportCrud.remove(report.id);
+                  }
+                  if (!removed) {
+                    toast.error("보고서 삭제에 실패했습니다");
+                    return;
+                  }
+
+                  const failedPhotoDeletes = await removeApplicationAttachmentsFromStorage(
+                    report.photos
+                  );
+
                   setReports((prev) => prev.filter((item) => item.id !== report.id));
                   if (reportBeingEdited?.id === report.id) {
                     setReportFormOpen(false);
@@ -4174,8 +4209,9 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
                     setReportBeingEdited(null);
                     setReportFormIsManual(false);
                   }
-                  if (isFirebaseConfigured && report.id) {
-                    void reportCrud.remove(report.id);
+                  if (failedPhotoDeletes > 0) {
+                    toast.error(`보고서는 삭제됐지만 사진 ${failedPhotoDeletes}개 삭제에 실패했습니다.`);
+                    return;
                   }
                   toast.success("보고서가 삭제되었습니다");
                 }}
