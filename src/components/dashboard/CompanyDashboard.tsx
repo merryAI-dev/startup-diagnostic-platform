@@ -604,13 +604,23 @@ export function CompanyDashboard({
     const certificationComplete = certificationFields.every(isFieldValid)
     const fundingComplete = fundingFields.every(isFieldValid)
 
-    const investmentComplete = investmentRows.every(
-      (row) =>
-        isFilled(row.stage)
-        && isFilled(row.date)
-        && hasNumber(row.postMoney)
-        && isFilled(row.majorShareholder)
-    )
+    const meaningfulInvestmentRows = investmentRows.filter((row) => {
+      return (
+        parseInvestmentStages(row.stage).length > 0
+        || isFilled(row.date)
+        || hasNumber(row.postMoney)
+        || isFilled(row.majorShareholder)
+      )
+    })
+    const investmentComplete =
+      meaningfulInvestmentRows.length > 0
+      && meaningfulInvestmentRows.every(
+        (row) =>
+          parseInvestmentStages(row.stage).length > 0
+          && isFilled(row.date)
+          && hasNumber(row.postMoney)
+          && isFilled(row.majorShareholder)
+      )
     const financeInvestmentComplete = financeComplete && investmentComplete
 
     return [
@@ -796,7 +806,15 @@ export function CompanyDashboard({
     }
   }
 
-  function parseInvestmentStages(value: string) {
+  function parseInvestmentStages(value: unknown) {
+    if (Array.isArray(value)) {
+      return value
+        .map((item) => (typeof item === "string" ? item.trim() : ""))
+        .filter(Boolean)
+    }
+    if (typeof value !== "string") {
+      return []
+    }
     return value
       .split(",")
       .map((item) => item.trim())
