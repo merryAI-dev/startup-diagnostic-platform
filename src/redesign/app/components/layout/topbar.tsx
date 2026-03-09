@@ -70,9 +70,13 @@ export function Topbar({
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
             <DropdownMenuItem
+              disabled={user.role === "user" ? companyInfoDisabled : false}
               onClick={() => {
                 if (user.role === "consultant") {
                   onNavigate?.("consultant-profile");
+                } else if (user.role === "user") {
+                  if (companyInfoDisabled) return;
+                  onNavigate?.("company-info");
                 } else {
                   onNavigate?.("settings");
                 }
