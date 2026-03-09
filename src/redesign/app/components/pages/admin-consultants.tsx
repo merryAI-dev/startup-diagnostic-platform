@@ -468,11 +468,11 @@ export function AdminConsultants({
                                 가능 시간 관리
                               </Button>
                             </DialogTrigger>
-                            <DialogContent className="max-w-3xl">
-                              <DialogHeader>
-                                <DialogTitle className="flex items-center gap-2">
-                                  <UserCog className="w-4 h-4" />
-                                  {consultant.name} 컨설턴트 가능 시간
+                              <DialogContent className="max-w-3xl">
+                                <DialogHeader>
+                                  <DialogTitle className="flex items-center gap-2">
+                                    <UserCog className="w-4 h-4" />
+                                    {consultant.name} 컨설턴트 가능 시간
                                 </DialogTitle>
                                 <DialogDescription>
                                   요일은 화/목 고정이며 09:00부터 18:00까지 1시간 단위로 설정합니다.
@@ -492,12 +492,14 @@ export function AdminConsultants({
                                           <button
                                             key={`${day.dayOfWeek}-${slot.start}`}
                                             type="button"
+                                            aria-pressed={slot.available}
+                                            title={slot.available ? "가능 일정" : "불가 일정"}
                                             onClick={() => toggleSlot(day.dayOfWeek, slot.start)}
                                             className={cn(
                                               "rounded-lg border px-2 py-2 text-xs transition",
                                               slot.available
                                                 ? "border-slate-900 bg-slate-900 text-white"
-                                                : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+                                                : "border-slate-300 bg-white text-slate-500 hover:bg-slate-50"
                                             )}
                                           >
                                             {slot.start}
@@ -507,6 +509,16 @@ export function AdminConsultants({
                                     </div>
                                   );
                                 })}
+                                <div className="flex flex-wrap items-center justify-end gap-4 text-xs text-slate-700">
+                                  <span className="inline-flex items-center gap-2">
+                                    <span className="h-3.5 w-3.5 rounded border border-slate-900 bg-slate-900" />
+                                    가능 일정
+                                  </span>
+                                  <span className="inline-flex items-center gap-2">
+                                    <span className="h-3.5 w-3.5 rounded border border-slate-300 bg-white" />
+                                    불가 일정
+                                  </span>
+                                </div>
                               </div>
                               <div className="mt-4 flex justify-end gap-2">
                                 <Button

@@ -176,7 +176,6 @@ export function ConsultantScheduleSettingsPage({
               </Button>
             </div>
           </div>
-
           <div className="space-y-4">
             {draftAvailability.map((day) => {
               const dayInfo = SCHEDULE_DAYS.find((item) => item.value === day.dayOfWeek);
@@ -195,12 +194,14 @@ export function ConsultantScheduleSettingsPage({
                       <button
                         key={`${day.dayOfWeek}-${slot.start}`}
                         type="button"
+                        aria-pressed={slot.available}
+                        title={slot.available ? "가능 일정" : "불가 일정"}
                         onClick={() => toggleSlot(day.dayOfWeek, slot.start)}
                         className={cn(
                           "rounded-lg border px-2 py-2 text-xs transition",
                           slot.available
                             ? "border-slate-900 bg-slate-900 text-white"
-                            : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+                            : "border-slate-300 bg-white text-slate-500 hover:bg-slate-50"
                         )}
                       >
                         {slot.start}
@@ -210,6 +211,16 @@ export function ConsultantScheduleSettingsPage({
                 </div>
               );
             })}
+          </div>
+          <div className="mt-3 flex flex-wrap items-center justify-end gap-4 text-xs text-slate-700">
+            <span className="inline-flex items-center gap-2">
+              <span className="h-3.5 w-3.5 rounded border border-slate-900 bg-slate-900" />
+              가능 일정
+            </span>
+            <span className="inline-flex items-center gap-2">
+              <span className="h-3.5 w-3.5 rounded border border-slate-300 bg-white" />
+              불가 일정
+            </span>
           </div>
 
           {!isDirty && totalAvailableCount !== initialAvailableCount ? (
