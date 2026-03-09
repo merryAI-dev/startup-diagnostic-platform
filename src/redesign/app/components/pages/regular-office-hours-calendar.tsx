@@ -55,7 +55,6 @@ export function RegularOfficeHoursCalendar({
       date: date,
     }))
   );
-  const hasSessions = expandedSessions.length > 0;
 
   // 특정 날짜의 오피스아워
   const getOfficeHoursForDate = (date: Date) => {
@@ -76,7 +75,7 @@ export function RegularOfficeHoursCalendar({
   }, {} as Record<string, typeof expandedSessions>);
 
   return (
-    <div className="h-full flex flex-col bg-gray-50">
+    <div className="min-h-full flex flex-col bg-gray-50">
       {/* Header */}
       <div className="bg-white border-b px-8 py-6">
         <div className="flex items-center justify-between mb-4">
@@ -111,20 +110,10 @@ export function RegularOfficeHoursCalendar({
 
       </div>
 
-      {!hasSessions ? (
-        <div className="flex-1 flex items-center justify-center p-8">
-          <div className="max-w-lg rounded-xl border bg-white p-8 text-center">
-            <h2 className="text-lg font-semibold text-gray-900">표시할 정기 오피스아워가 없습니다</h2>
-            <p className="mt-2 text-sm text-muted-foreground">
-              사업 기간 형식(YYYY-MM-DD 또는 25.12.22)을 확인하고, 기간이 오늘(2026-02-11) 기준 유효한지 확인해주세요.
-              요일은 화/목 고정으로 운영됩니다.
-            </p>
-          </div>
-        </div>
-      ) : viewMode === "calendar" ? (
-        <div className="flex-1 flex overflow-hidden">
+      {viewMode === "calendar" ? (
+        <div className="flex-1 flex min-h-0">
           {/* Main Calendar */}
-          <div className="flex-1 px-4 pt-4 pb-6 overflow-hidden">
+          <div className="flex-1 px-4 pt-4 pb-6 overflow-y-auto">
             <div className="bg-white rounded-lg border">
               {/* Calendar Header */}
               <div className="border-b px-5 py-3">
@@ -278,42 +267,48 @@ export function RegularOfficeHoursCalendar({
         <div className="flex-1 p-6 overflow-y-auto">
           <div className="max-w-5xl mx-auto">
             {/* Group by Day of Week */}
-            {Object.entries(sessionsByDay).map(([day, sessions]) => (
-              <div key={day} className="mb-8">
-                <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
-                  <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center text-primary font-semibold">
-                    {day}
-                  </div>
-                  {day}요일
-                  <Badge variant="secondary" className="ml-2">
-                    {sessions.length}
-                  </Badge>
-                </h2>
-                <div className="grid grid-cols-2 gap-4">
-                  {sessions.map((session) => (
-                    <div
-                      key={session.id + session.date}
-                      onClick={() => onSelectOfficeHour(session.id)}
-                      className="bg-white border rounded-lg p-5 hover:shadow-lg cursor-pointer transition-all group"
-                    >
-                      <div className="flex items-start justify-between mb-4">
-                        <div>
-                          <h3 className="font-semibold text-gray-900">{session.title}</h3>
-                          <p className="text-sm text-muted-foreground line-clamp-2">
-                            {session.description}
-                          </p>
-                        </div>
-                        <div className="text-right">
-                          <div className="text-xs text-muted-foreground mt-0.5">
-                            {format(parseISO(session.date), "M월 d일", { locale: ko })}
+            {Object.entries(sessionsByDay).length === 0 ? (
+              <div className="rounded-lg border bg-white p-6 text-sm text-muted-foreground">
+                표시할 정기 오피스아워가 없습니다.
+              </div>
+            ) : (
+              Object.entries(sessionsByDay).map(([day, sessions]) => (
+                <div key={day} className="mb-8">
+                  <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+                    <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center text-primary font-semibold">
+                      {day}
+                    </div>
+                    {day}요일
+                    <Badge variant="secondary" className="ml-2">
+                      {sessions.length}
+                    </Badge>
+                  </h2>
+                  <div className="grid grid-cols-2 gap-4">
+                    {sessions.map((session) => (
+                      <div
+                        key={session.id + session.date}
+                        onClick={() => onSelectOfficeHour(session.id)}
+                        className="bg-white border rounded-lg p-5 hover:shadow-lg cursor-pointer transition-all group"
+                      >
+                        <div className="flex items-start justify-between mb-4">
+                          <div>
+                            <h3 className="font-semibold text-gray-900">{session.title}</h3>
+                            <p className="text-sm text-muted-foreground line-clamp-2">
+                              {session.description}
+                            </p>
+                          </div>
+                          <div className="text-right">
+                            <div className="text-xs text-muted-foreground mt-0.5">
+                              {format(parseISO(session.date), "M월 d일", { locale: ko })}
+                            </div>
                           </div>
                         </div>
                       </div>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
                 </div>
-              </div>
-            ))}
+              ))
+            )}
           </div>
         </div>
       )}
