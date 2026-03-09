@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react"
+import { type ChangeEvent, useEffect, useMemo, useRef, useState } from "react"
 import { useLocation, useNavigate } from "react-router-dom"
 import {
   collection,
@@ -333,6 +333,7 @@ function CompanySignupInfo({
   const [touched, setTouched] = useState<Partial<Record<keyof CompanyInfoForm, boolean>>>({})
   const [saving, setSaving] = useState(false)
   const [activeInvestmentStageRow, setActiveInvestmentStageRow] = useState<number | null>(null)
+  const investmentStageDropdownRefs = useRef<Record<number, HTMLDivElement | null>>({})
   const [consentOpen, setConsentOpen] = useState(false)
   const [consentPrivacy, setConsentPrivacy] = useState(false)
   const [consentMarketing, setConsentMarketing] = useState(false)
@@ -356,6 +357,7 @@ function CompanySignupInfo({
     }[]
   >([])
   const uploadTasksRef = useRef<Map<string, UploadTask>>(new Map())
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
   const [companyFiles, setCompanyFiles] = useState<
     {
       id: string
@@ -477,7 +479,12 @@ function CompanySignupInfo({
     createdByUid: string
   ) {
     return new Promise<void>((resolve, reject) => {
-      const task = uploadBytesResumable(storageRef(storage, storagePath), file)
+      const task = uploadBytesResumable(storageRef(storage, storagePath), file, {
+        customMetadata: {
+          createdByUid,
+          companyId: companyIdValue,
+        },
+      })
       uploadTasksRef.current.set(docId, task)
       setUploads((prev) =>
         prev.map((item) =>
@@ -553,22 +560,27 @@ function CompanySignupInfo({
     })
   }
 
-  async function handleFileUpload(files: FileList | null) {
+  async function handleFileUpload(files: FileList | File[] | null) {
     if (!files || files.length === 0) return
     setUploadError(null)
     setUploadingFiles(true)
     try {
       const authUser = await ensureAuthUser()
-      if (!authUser) return
-      const entries = Array.from(files)
+      if (!authUser) {
+        setUploadError("로그인 정보를 확인할 수 없습니다. 다시 시도해주세요.")
+        return
+      }
+      const entries = Array.isArray(files) ? files : Array.from(files)
       const uploadJobs = entries.map(async (file) => {
         const extension = file.name.split(".").pop()?.toLowerCase() ?? ""
         if (!allowedExtensions.includes(extension)) {
           setUploadError("PDF, PNG, AI 파일만 업로드할 수 있습니다.")
+          toast.error("PDF, PNG, AI 파일만 업로드할 수 있습니다.")
           return
         }
         if (file.size > 50 * 1024 * 1024) {
           setUploadError("파일은 50MB 이하만 업로드할 수 있습니다.")
+          toast.error("파일은 50MB 이하만 업로드할 수 있습니다.")
           return
         }
         await setDoc(
@@ -598,10 +610,33 @@ function CompanySignupInfo({
       await Promise.all(uploadJobs)
     } catch (error) {
       console.warn("File upload failed:", error)
-      setUploadError("파일 업로드에 실패했습니다. 다시 시도해주세요.")
+      const code = (error as { code?: string })?.code ?? ""
+      if (code === "storage/unauthorized") {
+        const message =
+          "파일 업로드 권한이 없습니다. Storage Rules 배포 상태를 확인해주세요."
+        setUploadError(message)
+        toast.error(message)
+      } else {
+        setUploadError("파일 업로드에 실패했습니다. 다시 시도해주세요.")
+        toast.error("파일 업로드에 실패했습니다. 다시 시도해주세요.")
+      }
     } finally {
       setUploadingFiles(false)
     }
+  }
+
+  function openFilePicker() {
+    if (uploadingFiles) return
+    fileInputRef.current?.click()
+  }
+
+  function handleFileInputChange(event: ChangeEvent<HTMLInputElement>) {
+    const selectedFiles = event.target.files
+      ? Array.from(event.target.files)
+      : null
+    // Allow selecting the same file again after a failed upload.
+    event.target.value = ""
+    void handleFileUpload(selectedFiles)
   }
 
   function cancelUpload(targetId: string) {
@@ -750,16 +785,6 @@ function CompanySignupInfo({
     if (targetField === "headOffice") {
       markTouched("headOffice")
     }
-  }
-
-  function getFilteredInvestmentStageOptions(keyword: string) {
-    const normalizedKeyword = keyword.trim().toLowerCase()
-    if (!normalizedKeyword) {
-      return [...INVESTMENT_STAGE_OPTIONS]
-    }
-    return INVESTMENT_STAGE_OPTIONS.filter((option) =>
-      option.toLowerCase().includes(normalizedKeyword)
-    )
   }
 
   const requiredKeys: (keyof CompanyInfoForm)[] = [
@@ -921,7 +946,30 @@ function CompanySignupInfo({
       if (prev.length <= 1) return prev
       return prev.filter((_, index) => index !== target)
     })
+    setActiveInvestmentStageRow((prev) => {
+      if (prev === null) return prev
+      if (prev === target) return null
+      return prev > target ? prev - 1 : prev
+    })
   }
+
+  useEffect(() => {
+    const rowIndex = activeInvestmentStageRow
+    if (rowIndex === null) return
+    const currentIndex = rowIndex
+
+    function handleOutsideClick(event: MouseEvent) {
+      const current = investmentStageDropdownRefs.current[currentIndex]
+      if (!current) return
+      if (event.target instanceof Node && current.contains(event.target)) return
+      setActiveInvestmentStageRow(null)
+    }
+
+    document.addEventListener("mousedown", handleOutsideClick)
+    return () => {
+      document.removeEventListener("mousedown", handleOutsideClick)
+    }
+  }, [activeInvestmentStageRow])
 
   function updateInvestmentRow(
     index: number,
@@ -933,6 +981,34 @@ function CompanySignupInfo({
         rowIndex === index ? { ...row, [field]: value } : row
       )
     )
+  }
+
+  function parseInvestmentStages(value: string) {
+    return value
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean)
+  }
+
+  function serializeInvestmentStages(values: string[]) {
+    return values.join(", ")
+  }
+
+  function toggleInvestmentStage(index: number, stage: string) {
+    const normalized = stage.trim()
+    if (!normalized) return
+    const currentStages = parseInvestmentStages(investmentRows[index]?.stage ?? "")
+    const exists = currentStages.includes(normalized)
+    const nextStages = exists
+      ? currentStages.filter((item) => item !== normalized)
+      : [...currentStages, normalized]
+    updateInvestmentRow(index, "stage", serializeInvestmentStages(nextStages))
+  }
+
+  function removeInvestmentStage(index: number, stage: string) {
+    const currentStages = parseInvestmentStages(investmentRows[index]?.stage ?? "")
+    const nextStages = currentStages.filter((item) => item !== stage)
+    updateInvestmentRow(index, "stage", serializeInvestmentStages(nextStages))
   }
 
   async function handleSubmit() {
@@ -1145,18 +1221,24 @@ function CompanySignupInfo({
                     </div>
                   </div>
                 </div>
-                <label className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white hover:bg-slate-800">
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                  onClick={openFilePicker}
+                  disabled={uploadingFiles}
+                >
                   <UploadCloud className="h-4 w-4" />
-                  파일 업로드
-                  <input
-                    type="file"
-                    multiple
-                    accept=".pdf,.png,.ai"
-                    className="hidden"
-                    onChange={(event) => handleFileUpload(event.target.files)}
-                    disabled={uploadingFiles}
-                  />
-                </label>
+                  {uploadingFiles ? "업로드 중..." : "파일 업로드"}
+                </button>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  multiple
+                  accept=".pdf,.png,.ai"
+                  className="hidden"
+                  onChange={handleFileInputChange}
+                  disabled={uploadingFiles}
+                />
               </div>
               <div className="mt-3 flex items-center gap-3 text-[11px] text-slate-500">
                 <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-1">
@@ -1453,58 +1535,87 @@ function CompanySignupInfo({
               <div className="text-xs font-semibold text-slate-600">
                 투자이력 (순서별 작성)
               </div>
-              {investmentRows.map((row, idx) => (
+              {investmentRows.map((row, idx) => {
+                const selectedStages = parseInvestmentStages(row.stage)
+
+                return (
                 <div
                   key={`investment-${idx}`}
                   className="grid gap-3 rounded-xl border border-slate-100 bg-slate-50 p-3 sm:grid-cols-2 lg:grid-cols-4"
                 >
                   <label className="text-xs text-slate-500">
-                    <span className="block whitespace-nowrap">투자단계</span>
-                    <div className="relative">
-                      <input
-                        className={inputClass(false)}
-                        placeholder="목록에서 선택 또는 직접 입력"
-                        value={row.stage}
-                        autoComplete="off"
-                        onFocus={() => setActiveInvestmentStageRow(idx)}
-                        onBlur={() =>
-                          window.setTimeout(() => {
-                            setActiveInvestmentStageRow((prev) =>
-                              prev === idx ? null : prev
-                            )
-                          }, 120)
-                        }
-                        onChange={(event) => {
-                          setActiveInvestmentStageRow(idx)
-                          updateInvestmentRow(idx, "stage", event.target.value)
+                    <span className="block whitespace-nowrap">투자단계 (다중선택)</span>
+                    <div
+                      className="relative"
+                      ref={(element) => {
+                        investmentStageDropdownRefs.current[idx] = element
+                      }}
+                    >
+                      <div
+                        tabIndex={0}
+                        className={`${inputClass(false)} min-h-[40px] cursor-pointer pr-9`}
+                        onMouseDown={(event) => {
+                          event.preventDefault()
+                          event.stopPropagation()
+                          setActiveInvestmentStageRow((prev) =>
+                            prev === idx ? null : idx
+                          )
                         }}
-                      />
+                      >
+                        {selectedStages.length > 0 ? (
+                          <div className="flex items-center gap-1 overflow-x-auto whitespace-nowrap pr-1">
+                            {selectedStages.map((stage) => (
+                              <span
+                                key={`${stage}-${idx}`}
+                                className="inline-flex items-center gap-1 rounded-full border border-slate-700 bg-slate-700 px-1.5 py-0 text-[10px] font-semibold text-white"
+                              >
+                                <span>{stage}</span>
+                                <button
+                                  type="button"
+                                  className="text-white/80 hover:text-white"
+                                  onMouseDown={(event) => {
+                                    event.preventDefault()
+                                    event.stopPropagation()
+                                    removeInvestmentStage(idx, stage)
+                                  }}
+                                >
+                                  ×
+                                </button>
+                              </span>
+                            ))}
+                          </div>
+                        ) : (
+                          <span className="text-sm text-slate-400">
+                            투자단계를 선택하세요
+                          </span>
+                        )}
+                      </div>
                       <ChevronDown
                         className="pointer-events-none absolute right-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400"
                         aria-hidden="true"
                       />
                       {activeInvestmentStageRow === idx ? (
-                        <div className="absolute z-20 mt-1 w-full overflow-hidden rounded-lg border border-slate-200 bg-white shadow-lg">
-                          {getFilteredInvestmentStageOptions(row.stage).length > 0 ? (
-                            getFilteredInvestmentStageOptions(row.stage).map((option) => (
+                        <div className="absolute z-20 mt-1 max-h-44 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg">
+                          {INVESTMENT_STAGE_OPTIONS.map((option) => {
+                            const isSelected = selectedStages.includes(option)
+                            return (
                               <button
                                 key={option}
                                 type="button"
-                                className="w-full px-3 py-2 text-left text-xs text-slate-700 hover:bg-slate-50"
+                                className={`w-full px-3 py-2 text-left text-xs hover:bg-slate-50 ${
+                                  isSelected
+                                    ? "font-semibold text-slate-900"
+                                    : "text-slate-700"
+                                }`}
                                 onMouseDown={(event) => {
                                   event.preventDefault()
-                                  updateInvestmentRow(idx, "stage", option)
-                                  setActiveInvestmentStageRow(null)
+                                  toggleInvestmentStage(idx, option)
                                 }}
                               >
-                                {option}
+                                {isSelected ? `✓ ${option}` : option}
                               </button>
-                            ))
-                          ) : (
-                            <div className="px-3 py-2 text-xs text-slate-400">
-                              추천 항목이 없습니다.
-                            </div>
-                          )}
+                            )
+                          })}
                         </div>
                       ) : null}
                     </div>
@@ -1529,7 +1640,7 @@ function CompanySignupInfo({
                       }
                     />
                   </label>
-                  <div className="flex items-end gap-2">
+                  <div className="flex items-start gap-2">
                     <label className="min-w-0 flex-1 text-xs text-slate-500">
                       <span className="block whitespace-nowrap">주요주주명</span>
                       <input
@@ -1543,7 +1654,7 @@ function CompanySignupInfo({
                     </label>
                     <button
                       type="button"
-                      className="mb-0.5 rounded-md border border-rose-200 p-2 text-rose-600 hover:border-rose-300 hover:bg-rose-50 hover:text-rose-700 disabled:cursor-not-allowed disabled:opacity-60"
+                      className="mt-5 rounded-md border border-rose-200 p-2 text-rose-600 hover:border-rose-300 hover:bg-rose-50 hover:text-rose-700 disabled:cursor-not-allowed disabled:opacity-60"
                       onClick={() => removeInvestmentRow(idx)}
                       disabled={investmentRows.length <= 1}
                       aria-label="삭제"
@@ -1552,7 +1663,8 @@ function CompanySignupInfo({
                     </button>
                   </div>
                 </div>
-              ))}
+                )
+              })}
               <button
                 type="button"
                 className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50"
