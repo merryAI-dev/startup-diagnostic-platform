@@ -478,6 +478,11 @@ function normalizeSlotDoc(slot: OfficeHourSlot): OfficeHourSlot {
   };
 }
 
+function normalizeApplicationStatus(status?: ApplicationStatus): ApplicationStatus {
+  if (status === "review") return "pending";
+  return status ?? "pending";
+}
+
 function normalizeApplicationDoc(
   application: Application,
   resolveCompanyName?: (value?: string | null) => string | null | undefined
@@ -487,7 +492,7 @@ function normalizeApplicationDoc(
     ...application,
     companyName: resolvedCompanyName ?? application.companyName,
     type: application.type ?? "regular",
-    status: application.status ?? "pending",
+    status: normalizeApplicationStatus(application.status),
     consultant: application.consultant ?? "담당자 배정 중",
     officeHourTitle: application.officeHourTitle ?? "오피스아워 신청",
     sessionFormat: application.sessionFormat ?? "online",
@@ -807,10 +812,9 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
         : "dashboard";
   const [currentPage, setCurrentPage] = useState<AppPage>(initialPage);
   const [applications, setApplications] = useState<Application[]>(() =>
-    isFirebaseConfigured ? [] : initialApplications
+    isFirebaseConfigured ? [] : initialApplications.map((application) => normalizeApplicationDoc(application))
   );
   const cancelledMigrationRan = useRef(false);
-  const reviewMigrationRan = useRef(false);
   const programAgendaCleanupRan = useRef(false);
   const [regularOfficeHourList, setRegularOfficeHourList] = useState<RegularOfficeHour[]>(
     () => (isFirebaseConfigured ? [] : initialRegularOfficeHours)
@@ -1263,7 +1267,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       const scope = resolveScope(app);
       if (!scope) return;
       const isReserved =
-        app.status === "pending" || app.status === "review" || app.status === "confirmed";
+        app.status === "pending" || app.status === "confirmed";
       const isCompleted = app.status === "completed";
       if (!isReserved && !isCompleted) return;
       if (scope === "internal") {
@@ -1479,44 +1483,6 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     cancelledMigrationRan.current = true;
   }, [needsApplications]);
 
-  useEffect(() => {
-    if (!needsApplications) return;
-    if (reviewMigrationRan.current) return;
-    if (applications.length === 0) return;
-    const reviewApps = applications.filter((app) =>
-      app.status === "review"
-      && (Boolean(app.consultantId) || (app.consultant && app.consultant !== "담당자 배정 중"))
-    );
-    if (reviewApps.length === 0) {
-      reviewMigrationRan.current = true;
-      return;
-    }
-
-    reviewMigrationRan.current = true;
-    const updatedAt = new Date();
-    setApplications((prev) =>
-      prev.map((app) =>
-        app.status === "review"
-          && (Boolean(app.consultantId) || (app.consultant && app.consultant !== "담당자 배정 중"))
-          ? { ...app, status: "confirmed", updatedAt }
-          : app
-      )
-    );
-
-    if (!isFirebaseConfigured) return;
-
-    Promise.all(
-      reviewApps.map((app) =>
-        officeHourApplicationCrud.update(app.id, {
-          status: "confirmed",
-          updatedAt,
-        })
-      )
-    ).catch(() => {
-      toast.error("진행중 상태 확정 전환에 실패했습니다");
-    });
-  }, [applications, isFirebaseConfigured, officeHourApplicationCrud, needsApplications]);
-  
   // Set initial page based on role
   const disabledPages = useMemo(() => {
     const set = new Set<AppPage>();
@@ -1618,7 +1584,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     updatedAt = new Date()
   ) => {
     const eligible = targets.filter(
-      (app) => app.status === "pending" || app.status === "review"
+      (app) => app.status === "pending"
     );
     if (eligible.length === 0) return false;
 
@@ -1698,7 +1664,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
   }, [reportFormApplication, reportFormIsManual, officeHourSlotList]);
 
   // 자동 상태 전환:
-  // 1) 진행 시간이 지난 pending/review는 rejected로 자동 전환
+  // 1) 진행 시간이 지난 pending는 rejected로 자동 전환
   // 2) 진행 시간이 지난 confirmed는 completed로 자동 전환
   useEffect(() => {
     if (!needsApplications) return;
@@ -1710,7 +1676,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
         const now = new Date();
         const expiredPending = applications.filter(
           (app) =>
-            (app.status === "pending" || app.status === "review")
+            app.status === "pending"
             && hasSessionEnded(app, now)
         );
 
@@ -2377,7 +2343,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     const newApplication: Application = {
       id: `app${Date.now()}`,
       type: "irregular",
-      status: "review",
+      status: "pending",
       officeHourTitle: `비정기 오피스아워 - ${agenda?.name || ""}`,
       agendaId: data.agendaId,
       companyName: user.companyName,
@@ -2444,10 +2410,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
   const handleCancelApplication = async (id: string) => {
     const targetApplication = applications.find((app) => app.id === id);
     if (!targetApplication) return;
-    if (
-      (targetApplication.status === "pending" || targetApplication.status === "review")
-      && hasSessionEnded(targetApplication)
-    ) {
+    if (targetApplication.status === "pending" && hasSessionEnded(targetApplication)) {
       await rejectApplicationsAsExpired([targetApplication]);
       toast.error("진행 시간이 지나 취소할 수 없어 자동 거절 처리되었습니다");
       return;
@@ -2492,15 +2455,10 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     const expired = hasSessionEnded(targetApplication, now);
 
     if (expired) {
-      const isPendingLike =
-        targetApplication.status === "pending" || targetApplication.status === "review";
+      const isPendingLike = targetApplication.status === "pending";
       if (isPendingLike && status !== "rejected") {
         await rejectApplicationsAsExpired([targetApplication], now);
         toast.error("진행 시간이 지나 자동으로 거절 처리되었습니다");
-        return;
-      }
-      if (status === "review") {
-        toast.error("진행 시간이 지난 신청은 재검토로 변경할 수 없습니다");
         return;
       }
     }
@@ -2523,7 +2481,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       consultantId: fallbackConsultantId,
     } : {};
     const shouldClearConsultant =
-      nextStatus === "review" || nextStatus === "cancelled" || nextStatus === "rejected";
+      nextStatus === "pending" || nextStatus === "cancelled" || nextStatus === "rejected";
     const clearAssignmentPatch = shouldClearConsultant ? {
       consultant: "담당자 배정 중",
       consultantId: "",
@@ -2566,7 +2524,11 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     const slotId = targetApplication.officeHourSlotId;
     if (!slotId) return;
 
-    if (status === "cancelled" || status === "rejected" || status === "review") {
+    const shouldReleaseSlot =
+      status === "cancelled"
+      || status === "rejected"
+      || (status === "pending" && targetApplication.status !== "pending");
+    if (shouldReleaseSlot) {
       const releasableSlotIds = collectReleasableSlotIds(
         [targetApplication],
         nextApplications
@@ -2600,8 +2562,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       return;
     }
 
-    const isAcceptableStatus =
-      targetApplication.status === "pending" || targetApplication.status === "review";
+    const isAcceptableStatus = targetApplication.status === "pending";
     const isUnassigned =
       !targetApplication.consultantId
       && (!targetApplication.consultant || targetApplication.consultant === "담당자 배정 중");
@@ -2687,8 +2648,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     const targetApplication = applications.find((app) => app.id === id);
     if (!targetApplication) return;
 
-    const isAcceptableStatus =
-      targetApplication.status === "pending" || targetApplication.status === "review";
+    const isAcceptableStatus = targetApplication.status === "pending";
     const isUnassigned =
       !targetApplication.consultantId
       && (!targetApplication.consultant || targetApplication.consultant === "담당자 배정 중");
@@ -2760,12 +2720,12 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       return;
     }
 
-    const isReview = targetApplication.status === "review";
+    const isPending = targetApplication.status === "pending";
     const isRequester =
       targetApplication.consultantId === currentConsultant.id
       || normalizeConsultantDisplayName(targetApplication.consultant)
         === normalizeConsultantDisplayName(currentConsultant.name);
-    if (!isReview || !isRequester) {
+    if (!isPending || !isRequester) {
       toast.error("확정할 수 있는 상태가 아닙니다");
       return;
     }
@@ -2892,23 +2852,130 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
   };
 
   const handleUpdateApplication = async (id: string, data: Partial<Application>) => {
+    const updatedAt = new Date();
     if (isFirebaseConfigured) {
       const updated = await officeHourApplicationCrud.update(
         id,
-        data as Partial<Omit<Application, "id">>
+        {
+          ...data,
+          updatedAt,
+        } as Partial<Omit<Application, "id">>
       );
       if (!updated) {
         toast.error("신청 정보 저장에 실패했습니다");
-        return;
+        return false;
       }
-      return;
     }
 
     setApplications((prev) =>
       prev.map((app) =>
-        app.id === id ? { ...app, ...data, updatedAt: new Date() } : app
+        app.id === id ? { ...app, ...data, updatedAt } : app
       )
     );
+    return true;
+  };
+
+  const handleUpdateApplicationByCompany = async (
+    id: string,
+    payload: {
+      requestContent: string;
+      retainedAttachments: Array<{ name: string; url?: string }>;
+      newFiles: FileItem[];
+    }
+  ) => {
+    const targetApplication = applications.find((app) => app.id === id);
+    if (!targetApplication) {
+      toast.error("신청 정보를 찾을 수 없습니다");
+      return false;
+    }
+
+    const isCompanyRole = resolvedRole === "user";
+    if (!isCompanyRole) {
+      toast.error("기업 계정만 신청을 수정할 수 있습니다");
+      return false;
+    }
+
+    const uid = firebaseUser?.uid ?? user.id;
+    const email = firebaseUser?.email ?? user.email;
+    const isOwnerByUid = Boolean(targetApplication.createdByUid && uid)
+      && targetApplication.createdByUid === uid;
+    const isOwnerByEmail = Boolean(targetApplication.applicantEmail && email)
+      && targetApplication.applicantEmail === email;
+    const isOwnerByCompany = Boolean(user.companyName)
+      && targetApplication.companyName === user.companyName;
+    if (!(isOwnerByUid || isOwnerByEmail || isOwnerByCompany)) {
+      toast.error("본인이 신청한 건만 수정할 수 있습니다");
+      return false;
+    }
+
+    if (
+      (targetApplication.status !== "pending" && targetApplication.status !== "confirmed")
+      || hasSessionEnded(targetApplication)
+    ) {
+      toast.error("진행 시간이 지난 신청 또는 완료된 신청은 수정할 수 없습니다");
+      return false;
+    }
+
+    let uploadedUrls: string[] = [];
+    if (isFirebaseConfigured && payload.newFiles.length > 0) {
+      if (!firebaseUser?.uid) {
+        toast.error("로그인 정보를 확인한 뒤 다시 시도해주세요");
+        return false;
+      }
+      try {
+        uploadedUrls = await uploadApplicationAttachments(
+          payload.newFiles,
+          `edit/${firebaseUser.uid}/${id}`
+        );
+      } catch {
+        toast.error("첨부 파일 업로드에 실패했습니다");
+        return false;
+      }
+    }
+
+    const nextRequestContent = payload.requestContent.trim();
+    if (!nextRequestContent) {
+      toast.error("요청 내용을 입력해주세요");
+      if (uploadedUrls.length > 0) {
+        await removeApplicationAttachmentsFromStorage(uploadedUrls);
+      }
+      return false;
+    }
+
+    const retainedUrls = payload.retainedAttachments
+      .map((item) => item.url)
+      .filter((value): value is string => Boolean(value));
+    const retainedNames = payload.retainedAttachments.map((item) => item.name);
+    const nextAttachmentNames = [
+      ...retainedNames,
+      ...payload.newFiles.map((item) => item.name),
+    ];
+    const nextAttachmentUrls = [...retainedUrls, ...uploadedUrls];
+    const removedUrls = (targetApplication.attachmentUrls ?? []).filter(
+      (url) => !retainedUrls.includes(url)
+    );
+
+    const updated = await handleUpdateApplication(id, {
+      requestContent: nextRequestContent,
+      attachments: nextAttachmentNames,
+      attachmentUrls: nextAttachmentUrls,
+    });
+    if (!updated) {
+      if (uploadedUrls.length > 0) {
+        await removeApplicationAttachmentsFromStorage(uploadedUrls);
+      }
+      return false;
+    }
+
+    if (removedUrls.length > 0) {
+      const failedDeletes = await removeApplicationAttachmentsFromStorage(removedUrls);
+      if (failedDeletes > 0) {
+        toast.error("일부 기존 첨부 파일 삭제에 실패했습니다");
+      }
+    }
+
+    toast.success("신청 내용이 수정되었습니다");
+    return true;
   };
 
   const saveConsultantToState = (nextConsultant: Consultant) => {
@@ -3734,6 +3801,9 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
               onUpdateRejectionReason={(reason) =>
                 handleUpdateRejectionReason(selectedApplication.id, reason)
               }
+              onUpdateCompanyApplication={(payload) =>
+                handleUpdateApplicationByCompany(selectedApplication.id, payload)
+              }
               currentUserRole={resolvedRole}
               currentConsultantId={currentConsultant?.id ?? null}
               currentConsultantName={currentConsultant?.name ?? null}
@@ -3953,6 +4023,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
                 programs={scopedProgramList}
                 agendas={agendaList}
                 currentConsultantAgendaIds={currentConsultant?.agendaIds ?? []}
+                allowManualEventCreate={false}
                 onNavigateToApplication={(id) => {
                   handleNavigate("application", id);
                 }}

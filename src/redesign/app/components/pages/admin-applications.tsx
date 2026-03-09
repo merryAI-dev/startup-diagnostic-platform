@@ -39,7 +39,6 @@ export function AdminApplications({
 }: AdminApplicationsProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
-  const [typeFilter, setTypeFilter] = useState<string>("all");
   const [companyFilter, setCompanyFilter] = useState<string>("all");
   const [selectedApplication, setSelectedApplication] = useState<Application | null>(null);
   const isConsultantUser = currentUserRole === "consultant";
@@ -82,12 +81,12 @@ export function AdminApplications({
         || app.consultant?.toLowerCase().includes(normalizedQuery)
         || app.agenda?.toLowerCase().includes(normalizedQuery);
 
-    const matchesStatus = statusFilter === "all" || app.status === statusFilter;
-    const matchesType = typeFilter === "all" || app.type === typeFilter;
+    const normalizedStatus = app.status === "review" ? "pending" : app.status;
+    const matchesStatus = statusFilter === "all" || normalizedStatus === statusFilter;
     const matchesCompany =
       companyFilter === "all" || app.companyName === companyFilter;
 
-    return matchesConsultantAgenda && matchesSearch && matchesStatus && matchesType && matchesCompany;
+    return matchesConsultantAgenda && matchesSearch && matchesStatus && matchesCompany;
   });
 
   // Sort by most recent
@@ -143,22 +142,11 @@ export function AdminApplications({
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">전체 상태</SelectItem>
-                <SelectItem value="pending">진행중</SelectItem>
-                <SelectItem value="review">진행중</SelectItem>
+                <SelectItem value="pending">수락 대기</SelectItem>
                 <SelectItem value="confirmed">확정</SelectItem>
                 <SelectItem value="rejected">거절됨</SelectItem>
                 <SelectItem value="cancelled">취소</SelectItem>
                 <SelectItem value="completed">완료</SelectItem>
-              </SelectContent>
-            </Select>
-            <Select value={typeFilter} onValueChange={setTypeFilter}>
-              <SelectTrigger className="w-48">
-                <SelectValue placeholder="유형 필터" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">전체 유형</SelectItem>
-                <SelectItem value="regular">정기</SelectItem>
-                <SelectItem value="irregular">비정기</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -248,7 +236,7 @@ export function AdminApplications({
                     <div className="flex flex-col items-center gap-2">
                       <Search className="w-12 h-12 text-muted-foreground" />
                       <p className="text-sm text-muted-foreground">
-                        {searchQuery || statusFilter !== "all" || typeFilter !== "all" || companyFilter !== "all"
+                        {searchQuery || statusFilter !== "all" || companyFilter !== "all"
                           ? "검색 결과가 없습니다"
                           : "신청 내역이 없습니다"}
                       </p>

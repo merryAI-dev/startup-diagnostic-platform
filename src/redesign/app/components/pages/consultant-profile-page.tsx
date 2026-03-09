@@ -405,7 +405,9 @@ export function ConsultantProfilePage({
         <Card className="lg:col-span-6">
           <CardHeader>
             <CardTitle>내 스케줄 설정</CardTitle>
-            <CardDescription>화/목 기준으로 가능한 시간을 선택하세요.</CardDescription>
+            <CardDescription>
+              화/목 기준으로 가능한 시간을 선택하세요.
+            </CardDescription>
           </CardHeader>
           <CardContent className="p-6">
             <div className="flex flex-wrap items-center gap-2 justify-end mb-4">
@@ -458,12 +460,14 @@ export function ConsultantProfilePage({
                         <button
                           key={`${day.dayOfWeek}-${slot.start}`}
                           type="button"
+                          aria-pressed={slot.available}
+                          title={slot.available ? "가능 일정" : "불가 일정"}
                           onClick={() => toggleSlot(day.dayOfWeek, slot.start)}
                           className={cn(
                             "rounded-md border px-2 py-1 text-[11px] transition",
                             slot.available
                               ? "border-slate-900 bg-slate-900 text-white"
-                              : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50"
+                              : "border-slate-300 bg-white text-slate-500 hover:bg-slate-50"
                           )}
                         >
                           {slot.start}
@@ -473,6 +477,16 @@ export function ConsultantProfilePage({
                   </div>
                 );
               })}
+            </div>
+            <div className="mt-3 flex flex-wrap items-center justify-end gap-4 text-xs text-slate-700">
+              <span className="inline-flex items-center gap-2">
+                <span className="h-3.5 w-3.5 rounded border border-slate-900 bg-slate-900" />
+                가능 일정
+              </span>
+              <span className="inline-flex items-center gap-2">
+                <span className="h-3.5 w-3.5 rounded border border-slate-300 bg-white" />
+                불가 일정
+              </span>
             </div>
           </CardContent>
         </Card>

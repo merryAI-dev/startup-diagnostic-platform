@@ -8,7 +8,7 @@ import { StatusChip } from "@/redesign/app/components/status-chip";
 import { Application, Message } from "@/redesign/app/lib/types";
 import { format } from "date-fns";
 import { ko } from "date-fns/locale";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { FileUpload } from "@/redesign/app/components/file-upload";
 import { FileItem } from "@/redesign/app/lib/types";
 import {
@@ -30,6 +30,11 @@ interface ApplicationDetailProps {
   onCancelApplication: () => void;
   onRejectApplication?: (reason: string) => void;
   onUpdateRejectionReason?: (reason: string) => void;
+  onUpdateCompanyApplication?: (payload: {
+    requestContent: string;
+    retainedAttachments: Array<{ name: string; url?: string }>;
+    newFiles: FileItem[];
+  }) => Promise<boolean>;
   currentUserRole?: string;
   currentConsultantId?: string | null;
   currentConsultantName?: string | null;
@@ -43,6 +48,7 @@ export function ApplicationDetail({
   onCancelApplication,
   onRejectApplication,
   onUpdateRejectionReason,
+  onUpdateCompanyApplication,
   currentUserRole,
   currentConsultantId,
   currentConsultantName,
@@ -96,7 +102,7 @@ export function ApplicationDetail({
   })();
   const canCancel =
     isCompanyUser
-    && (application.status === "pending" || application.status === "review")
+    && application.status === "pending"
     && !isSessionEnded;
   const shouldShowConsultant = (consultant?: string) =>
     Boolean(consultant && consultant !== "담당자 배정 중");
@@ -116,7 +122,7 @@ export function ApplicationDetail({
     && (!application.consultant || application.consultant === "담당자 배정 중");
   const canReject =
     isConsultantUser
-    && (application.status === "pending" || application.status === "review")
+    && application.status === "pending"
     && (isUnassigned || isAssignedToCurrentConsultant())
     && Boolean(onRejectApplication);
   const canEditRejectReason =
@@ -143,6 +149,48 @@ export function ApplicationDetail({
     }
     return items;
   }, [application.attachments, application.attachmentUrls]);
+  const canEditCompanyApplication =
+    isCompanyUser
+    && !isSessionEnded
+    && (application.status === "pending" || application.status === "confirmed")
+    && Boolean(onUpdateCompanyApplication);
+  const [isEditingCompanyApplication, setIsEditingCompanyApplication] = useState(false);
+  const [editingRequestContent, setEditingRequestContent] = useState(
+    application.requestContent ?? ""
+  );
+  const [editingRetainedAttachments, setEditingRetainedAttachments] = useState(attachmentItems);
+  const [editingNewFiles, setEditingNewFiles] = useState<FileItem[]>([]);
+  const [savingCompanyEdit, setSavingCompanyEdit] = useState(false);
+
+  useEffect(() => {
+    setEditingRequestContent(application.requestContent ?? "");
+    setEditingRetainedAttachments(attachmentItems);
+    setEditingNewFiles([]);
+    setIsEditingCompanyApplication(false);
+  }, [application.id, application.requestContent, attachmentItems]);
+
+  const handleSaveCompanyApplication = async () => {
+    if (!onUpdateCompanyApplication || !canEditCompanyApplication) return;
+    const trimmedRequestContent = editingRequestContent.trim();
+    if (!trimmedRequestContent) {
+      return;
+    }
+
+    setSavingCompanyEdit(true);
+    const ok = await onUpdateCompanyApplication({
+      requestContent: trimmedRequestContent,
+      retainedAttachments: editingRetainedAttachments.map((item) => ({
+        name: item.name,
+        url: item.url,
+      })),
+      newFiles: editingNewFiles,
+    });
+    setSavingCompanyEdit(false);
+
+    if (!ok) return;
+    setIsEditingCompanyApplication(false);
+    setEditingNewFiles([]);
+  };
 
   return (
     <div className="p-8 space-y-6">
@@ -171,6 +219,20 @@ export function ApplicationDetail({
             )}
           </div>
           <div className="flex items-center gap-2">
+            {canEditCompanyApplication && (
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setEditingRequestContent(application.requestContent ?? "");
+                  setEditingRetainedAttachments(attachmentItems);
+                  setEditingNewFiles([]);
+                  setIsEditingCompanyApplication((prev) => !prev);
+                }}
+              >
+                <Edit className="w-4 h-4 mr-2" />
+                {isEditingCompanyApplication ? "수정 취소" : "신청 수정"}
+              </Button>
+            )}
             {canReject && (
               <Button
                 variant="outline"
@@ -241,7 +303,15 @@ export function ApplicationDetail({
 
           <div>
             <p className="text-xs text-muted-foreground mb-1">요청 내용</p>
-            <p className="text-sm whitespace-pre-wrap">{application.requestContent}</p>
+            {isEditingCompanyApplication ? (
+              <Textarea
+                value={editingRequestContent}
+                onChange={(e) => setEditingRequestContent(e.target.value)}
+                className="min-h-[140px]"
+              />
+            ) : (
+              <p className="text-sm whitespace-pre-wrap">{application.requestContent}</p>
+            )}
           </div>
 
           {(application.status === "rejected" || Boolean(application.rejectionReason)) && (
@@ -253,29 +323,100 @@ export function ApplicationDetail({
             </div>
           )}
 
-          {attachmentItems.length > 0 && (
-            <div>
+          {(attachmentItems.length > 0 || isEditingCompanyApplication) && (
+            <div className="space-y-3">
               <p className="text-xs text-muted-foreground mb-1">첨부 파일</p>
-              <div className="space-y-1">
-                {attachmentItems.map((item) =>
-                  item.url ? (
-                    <a
-                      key={item.id}
-                      href={item.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      download
-                      className="block text-sm text-primary underline underline-offset-2 break-all"
-                    >
-                      • {item.name}
-                    </a>
-                  ) : (
-                    <p key={item.id} className="text-sm text-muted-foreground break-all">
-                      • {item.name}
-                    </p>
-                  )
-                )}
-              </div>
+              {isEditingCompanyApplication ? (
+                <>
+                  {editingRetainedAttachments.length > 0 && (
+                    <div className="space-y-1">
+                      {editingRetainedAttachments.map((item) => (
+                        <div
+                          key={item.id}
+                          className="flex items-center justify-between rounded-md border px-2.5 py-2 text-sm"
+                        >
+                          {item.url ? (
+                            <a
+                              href={item.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              download
+                              className="text-primary underline underline-offset-2 break-all"
+                            >
+                              {item.name}
+                            </a>
+                          ) : (
+                            <span className="text-muted-foreground break-all">{item.name}</span>
+                          )}
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() =>
+                              setEditingRetainedAttachments((prev) =>
+                                prev.filter((target) => target.id !== item.id)
+                              )
+                            }
+                          >
+                            삭제
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <FileUpload
+                    files={editingNewFiles}
+                    onFilesChange={setEditingNewFiles}
+                    maxFiles={5}
+                  />
+                </>
+              ) : (
+                <div className="space-y-1">
+                  {attachmentItems.map((item) =>
+                    item.url ? (
+                      <a
+                        key={item.id}
+                        href={item.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        download
+                        className="block text-sm text-primary underline underline-offset-2 break-all"
+                      >
+                        • {item.name}
+                      </a>
+                    ) : (
+                      <p key={item.id} className="text-sm text-muted-foreground break-all">
+                        • {item.name}
+                      </p>
+                    )
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {isEditingCompanyApplication && (
+            <div className="flex justify-end gap-2 border-t pt-3">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setIsEditingCompanyApplication(false);
+                  setEditingRequestContent(application.requestContent ?? "");
+                  setEditingRetainedAttachments(attachmentItems);
+                  setEditingNewFiles([]);
+                }}
+                disabled={savingCompanyEdit}
+              >
+                취소
+              </Button>
+              <Button
+                type="button"
+                onClick={handleSaveCompanyApplication}
+                disabled={savingCompanyEdit || editingRequestContent.trim().length === 0}
+              >
+                {savingCompanyEdit ? "저장 중..." : "저장"}
+              </Button>
             </div>
           )}
 
