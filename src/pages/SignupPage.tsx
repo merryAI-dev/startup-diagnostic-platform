@@ -58,7 +58,7 @@ export function SignupPage() {
     <div className="flex min-h-[calc(100vh-5rem)] items-center justify-center">
       <AuthCard
         title="회원가입"
-        subtitle="회사, 관리자, 컨설턴트 중 역할을 선택해 계정을 생성하세요."
+        subtitle="스타트업, 관리자, 컨설턴트 중 역할을 선택해 계정을 생성하세요."
         onSubmit={handleEmailSignup}
         onSwap={() => navigate("/login")}
         swapLabel="로그인"
