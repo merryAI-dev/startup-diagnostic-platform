@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react"
+import { type ChangeEvent, useEffect, useMemo, useRef, useState } from "react"
 import { useLocation, useNavigate } from "react-router-dom"
 import {
   collection,
@@ -345,6 +345,7 @@ function CompanySignupInfo({
     }[]
   >([])
   const uploadTasksRef = useRef<Map<string, UploadTask>>(new Map())
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
   const [companyFiles, setCompanyFiles] = useState<
     {
       id: string
@@ -466,7 +467,12 @@ function CompanySignupInfo({
     createdByUid: string
   ) {
     return new Promise<void>((resolve, reject) => {
-      const task = uploadBytesResumable(storageRef(storage, storagePath), file)
+      const task = uploadBytesResumable(storageRef(storage, storagePath), file, {
+        customMetadata: {
+          createdByUid,
+          companyId: companyIdValue,
+        },
+      })
       uploadTasksRef.current.set(docId, task)
       setUploads((prev) =>
         prev.map((item) =>
@@ -542,22 +548,27 @@ function CompanySignupInfo({
     })
   }
 
-  async function handleFileUpload(files: FileList | null) {
+  async function handleFileUpload(files: FileList | File[] | null) {
     if (!files || files.length === 0) return
     setUploadError(null)
     setUploadingFiles(true)
     try {
       const authUser = await ensureAuthUser()
-      if (!authUser) return
-      const entries = Array.from(files)
+      if (!authUser) {
+        setUploadError("로그인 정보를 확인할 수 없습니다. 다시 시도해주세요.")
+        return
+      }
+      const entries = Array.isArray(files) ? files : Array.from(files)
       const uploadJobs = entries.map(async (file) => {
         const extension = file.name.split(".").pop()?.toLowerCase() ?? ""
         if (!allowedExtensions.includes(extension)) {
           setUploadError("PDF, PNG, AI 파일만 업로드할 수 있습니다.")
+          toast.error("PDF, PNG, AI 파일만 업로드할 수 있습니다.")
           return
         }
         if (file.size > 50 * 1024 * 1024) {
           setUploadError("파일은 50MB 이하만 업로드할 수 있습니다.")
+          toast.error("파일은 50MB 이하만 업로드할 수 있습니다.")
           return
         }
         await setDoc(
@@ -587,10 +598,33 @@ function CompanySignupInfo({
       await Promise.all(uploadJobs)
     } catch (error) {
       console.warn("File upload failed:", error)
-      setUploadError("파일 업로드에 실패했습니다. 다시 시도해주세요.")
+      const code = (error as { code?: string })?.code ?? ""
+      if (code === "storage/unauthorized") {
+        const message =
+          "파일 업로드 권한이 없습니다. Storage Rules 배포 상태를 확인해주세요."
+        setUploadError(message)
+        toast.error(message)
+      } else {
+        setUploadError("파일 업로드에 실패했습니다. 다시 시도해주세요.")
+        toast.error("파일 업로드에 실패했습니다. 다시 시도해주세요.")
+      }
     } finally {
       setUploadingFiles(false)
     }
+  }
+
+  function openFilePicker() {
+    if (uploadingFiles) return
+    fileInputRef.current?.click()
+  }
+
+  function handleFileInputChange(event: ChangeEvent<HTMLInputElement>) {
+    const selectedFiles = event.target.files
+      ? Array.from(event.target.files)
+      : null
+    // Allow selecting the same file again after a failed upload.
+    event.target.value = ""
+    void handleFileUpload(selectedFiles)
   }
 
   function cancelUpload(targetId: string) {
@@ -1134,18 +1168,24 @@ function CompanySignupInfo({
                     </div>
                   </div>
                 </div>
-                <label className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white hover:bg-slate-800">
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                  onClick={openFilePicker}
+                  disabled={uploadingFiles}
+                >
                   <UploadCloud className="h-4 w-4" />
-                  파일 업로드
-                  <input
-                    type="file"
-                    multiple
-                    accept=".pdf,.png,.ai"
-                    className="hidden"
-                    onChange={(event) => handleFileUpload(event.target.files)}
-                    disabled={uploadingFiles}
-                  />
-                </label>
+                  {uploadingFiles ? "업로드 중..." : "파일 업로드"}
+                </button>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  multiple
+                  accept=".pdf,.png,.ai"
+                  className="hidden"
+                  onChange={handleFileInputChange}
+                  disabled={uploadingFiles}
+                />
               </div>
               <div className="mt-3 flex items-center gap-3 text-[11px] text-slate-500">
                 <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-1">
