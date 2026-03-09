@@ -1,6 +1,8 @@
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { AuthCard } from "@/components/auth/AuthCard"
+import { useAuth } from "@/context/AuthContext"
+import { signOutUser } from "@/firebase/auth"
 import type { Role } from "@/types/auth"
 import { toast } from "sonner"
 
@@ -20,14 +22,43 @@ function getSignupErrorMessage(error: any) {
     : "회원가입에 실패했습니다. 입력값을 확인하세요."
 }
 
-const PENDING_SIGNUP_KEY = "pending-signup";
+type PendingSignupDraft = {
+  role: Role
+  email: string
+  password?: string
+  provider?: "email" | "google"
+}
+
+const PENDING_SIGNUP_KEY = "pending-signup"
 
 export function SignupPage() {
   const [role, setRole] = useState<Role>("company")
   const [loadingEmail, setLoadingEmail] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const navigate = useNavigate()
+  const { user, profile, loading } = useAuth()
   const isBusy = loadingEmail
+  const isOnboardingSignedInUser = !loading && Boolean(user) && !profile
+
+  useEffect(() => {
+    if (loading || !user || !profile) return
+    if (profile.active === false) {
+      navigate(`/pending?role=${profile.requestedRole ?? profile.role}`, {
+        replace: true,
+      })
+      return
+    }
+    navigate(
+      profile.role === "admin" || profile.role === "consultant"
+        ? "/admin"
+        : "/company",
+      { replace: true }
+    )
+  }, [loading, navigate, profile, user])
+
+  function savePendingSignup(payload: PendingSignupDraft) {
+    sessionStorage.setItem(PENDING_SIGNUP_KEY, JSON.stringify(payload))
+  }
 
   async function handleEmailSignup(
     nextRole: Role,
@@ -38,14 +69,12 @@ export function SignupPage() {
     setLoadingEmail(true)
     setError(null)
     try {
-      sessionStorage.setItem(
-        PENDING_SIGNUP_KEY,
-        JSON.stringify({
-          role: nextRole,
-          email: email.trim(),
-          password,
-        })
-      )
+      savePendingSignup({
+        role: nextRole,
+        email: email.trim(),
+        password,
+        provider: "email",
+      })
       navigate(`/signup-info?role=${nextRole}`)
     } catch (err) {
       toast.error(getSignupErrorMessage(err))
@@ -54,17 +83,52 @@ export function SignupPage() {
     }
   }
 
+  function handleSignedInContinue(nextRole: Role) {
+    if (!user) {
+      setError("로그인 상태를 확인할 수 없습니다. 다시 로그인해주세요.")
+      return
+    }
+    setError(null)
+    savePendingSignup({
+      role: nextRole,
+      email: user.email ?? "",
+      provider: "google",
+    })
+    navigate(`/signup-info?role=${nextRole}`)
+  }
+
+  async function handleSwapToLogin() {
+    if (user) {
+      await signOutUser()
+    }
+    navigate("/login")
+  }
+
+  if (loading) {
+    return (
+      <div className="flex h-full items-center justify-center text-sm text-slate-500">
+        불러오는 중...
+      </div>
+    )
+  }
+
   return (
     <div className="flex min-h-[calc(100vh-5rem)] items-center justify-center">
       <AuthCard
         title="회원가입"
-        subtitle="회사, 관리자, 컨설턴트 중 역할을 선택해 계정을 생성하세요."
+        subtitle={
+          isOnboardingSignedInUser
+            ? "역할 선택 후 필수 정보를 입력하면 승인 대기로 접수됩니다."
+            : "회사, 관리자, 컨설턴트 중 역할을 선택해 계정을 생성하세요."
+        }
         onSubmit={handleEmailSignup}
-        onSwap={() => navigate("/login")}
+        onContinue={handleSignedInContinue}
+        continueLabel="역할 선택 후 계속"
+        onSwap={handleSwapToLogin}
         swapLabel="로그인"
         role={role}
         setRole={setRole}
-        showEmailForm
+        showEmailForm={!isOnboardingSignedInUser}
         showExtraStep={false}
         loadingEmail={loadingEmail}
         error={error}
