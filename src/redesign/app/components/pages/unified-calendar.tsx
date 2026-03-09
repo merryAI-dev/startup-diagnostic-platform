@@ -815,7 +815,7 @@ export function UnifiedCalendar({
                       <div>
                         <h3 className="font-semibold text-[#0A2540]">수락 대기 요청</h3>
                         <p className="text-xs text-slate-500 mt-1">
-                          아젠다 매핑된 요청 중에서 수락할 항목을 선택하세요
+                          아젠다 매칭된 요청 중에서 수락할 항목을 선택하세요
                         </p>
                       </div>
                       <Badge variant="outline" className="text-xs">
@@ -914,7 +914,7 @@ export function UnifiedCalendar({
                     <div>
                       <h3 className="font-semibold text-[#0A2540]">수락 대기 요청</h3>
                       <p className="text-xs text-slate-500 mt-1">
-                        아젠다 매핑된 요청 중에서 수락할 항목을 선택하세요
+                        아젠다 매칭된 요청 중에서 수락할 항목을 선택하세요
                       </p>
                     </div>
                     <Badge variant="outline" className="text-xs">

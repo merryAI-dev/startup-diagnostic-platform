@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Clock3, Mail, Phone, UserCog } from "lucide-react";
+import { Check, Clock3, Mail, Phone, UserCog } from "lucide-react";
 import { Agenda, Consultant, ConsultantAvailability } from "@/redesign/app/lib/types";
 import { Badge } from "@/redesign/app/components/ui/badge";
 import { Button } from "@/redesign/app/components/ui/button";
@@ -242,7 +242,7 @@ export function AdminConsultants({
         </Card>
         <Card>
           <CardContent className="p-4">
-            <div className="text-sm text-muted-foreground">아젠다 매핑 완료</div>
+            <div className="text-sm text-muted-foreground">아젠다 매칭 완료</div>
             <div className="text-2xl font-bold mt-1 text-blue-600">
               {consultantStats.mapped}
             </div>
@@ -373,12 +373,12 @@ export function AdminConsultants({
                                   );
                                 }}
                               >
-                                아젠다 매핑
+                                아젠다 매칭
                               </Button>
                             </DialogTrigger>
                             <DialogContent className="max-w-2xl">
                               <DialogHeader>
-                                <DialogTitle>{consultant.name} 아젠다 매핑</DialogTitle>
+                                <DialogTitle>{consultant.name} 아젠다 매칭</DialogTitle>
                                 <DialogDescription>
                                   이 컨설턴트가 담당 가능한 아젠다를 선택하세요. 선택 결과는 사업 관리 화면의 컨설턴트 선택에 반영됩니다.
                                 </DialogDescription>
@@ -398,17 +398,37 @@ export function AdminConsultants({
                                       <button
                                         key={agenda.id}
                                         type="button"
+                                        aria-pressed={checked}
                                         onClick={() => toggleConsultantAgenda(agenda.id, !checked)}
                                         className={cn(
                                           "w-full rounded-lg border px-3 py-2 text-left text-sm transition",
                                           checked
-                                            ? "border-slate-900 bg-slate-900 text-white"
+                                            ? "border-emerald-300 bg-emerald-50 text-emerald-900"
                                             : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
                                         )}
                                       >
                                         <div className="flex items-center justify-between gap-3">
-                                          <span>{agenda.name}</span>
-                                          <span className="text-xs opacity-80">
+                                          <span className="inline-flex min-w-0 items-center gap-2">
+                                            <span
+                                              className={cn(
+                                                "inline-flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-[4px] border",
+                                                checked
+                                                  ? "border-emerald-500 bg-emerald-500"
+                                                  : "border-slate-300 bg-white"
+                                              )}
+                                            >
+                                              <Check
+                                                className={cn(
+                                                  "h-3 w-3 transition-opacity",
+                                                  checked
+                                                    ? "opacity-100 text-white"
+                                                    : "opacity-0 text-transparent"
+                                                )}
+                                              />
+                                            </span>
+                                            <span className="truncate">{agenda.name}</span>
+                                          </span>
+                                          <span className="text-xs opacity-90">
                                             {agenda.scope === "internal" ? "내부" : "외부"}
                                           </span>
                                         </div>

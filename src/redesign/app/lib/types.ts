@@ -230,7 +230,7 @@ export interface Consultant {
   rating?: number;
   avatarUrl?: string;
   joinedDate?: Date | string;
-  agendaIds?: string[]; // 관리자가 매핑한 아젠다 ID 목록
+  agendaIds?: string[]; // 관리자가 매칭한 아젠다 ID 목록
   availability: ConsultantAvailability[];
 }
 
