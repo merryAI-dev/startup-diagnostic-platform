@@ -44,45 +44,13 @@ export function RegularOfficeHourDetail({
         <p className="text-sm text-muted-foreground">{officeHour.description}</p>
       </div>
 
-      <Tabs defaultValue="info" className="w-full">
+      <Tabs defaultValue="apply" className="w-full">
         <TabsList>
-          <TabsTrigger value="info">기본 정보</TabsTrigger>
           <TabsTrigger value="apply">신청하기</TabsTrigger>
           <TabsTrigger value="confirmed">
             확정 일정 ({confirmedApplications.length})
           </TabsTrigger>
         </TabsList>
-
-        <TabsContent value="info" className="space-y-4">
-          <Card>
-            <CardContent className="p-6 space-y-4">
-              <div>
-                <h3 className="mb-2">프로그램 설명</h3>
-                <p className="text-sm text-muted-foreground">
-                  {officeHour.description}
-                </p>
-              </div>
-              <div>
-                <h3 className="mb-2">신청 가능 일정</h3>
-                <div className="flex flex-wrap gap-2">
-                  {officeHour.availableDates
-                    .filter((date) =>
-                      !isBefore(parseISO(date), startOfDay(new Date()))
-                    )
-                    .map((date) => (
-                      <div
-                        key={date}
-                        className="px-3 py-2 bg-muted rounded-lg text-sm"
-                      >
-                        <Calendar className="w-4 h-4 inline mr-2" />
-                        {format(parseISO(date), "M월 d일 (E)", { locale: ko })}
-                      </div>
-                    ))}
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
 
         <TabsContent value="apply" className="space-y-4">
           <Card className="border-primary bg-primary/5">
