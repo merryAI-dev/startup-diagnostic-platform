@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ArrowLeft, Calendar as CalendarIcon, Check, AlertCircle } from "lucide-react";
 import { Button } from "@/redesign/app/components/ui/button";
 import {
@@ -179,6 +179,13 @@ export function IrregularApplicationWizard({
 
   const activeAgendas = agendas.filter((agenda) => agenda.active !== false);
   const selectedAgenda = activeAgendas.find((a) => a.id === selectedAgendaId);
+  const isExternalAgendaSelected = selectedAgenda?.scope === "external";
+
+  useEffect(() => {
+    if (isExternalAgendaSelected && sessionFormat !== "online") {
+      setSessionFormat("online");
+    }
+  }, [isExternalAgendaSelected, sessionFormat]);
 
   return (
     <div className="p-8 space-y-6">
@@ -374,7 +381,11 @@ export function IrregularApplicationWizard({
                 <h3 className="mb-4">진행 형태를 선택하세요</h3>
                 <RadioGroup
                   value={sessionFormat}
-                  onValueChange={(v) => setSessionFormat(v as SessionFormat)}
+                  onValueChange={(v) => {
+                    const nextFormat = v as SessionFormat;
+                    if (isExternalAgendaSelected && nextFormat === "offline") return;
+                    setSessionFormat(nextFormat);
+                  }}
                 >
                   <div className="space-y-3">
                     <div
@@ -394,14 +405,30 @@ export function IrregularApplicationWizard({
                       className={cn(
                         "flex items-start space-x-3 p-4 rounded-lg border cursor-pointer transition-colors",
                         sessionFormat === "offline" &&
-                          "border-primary bg-primary/5"
+                          "border-primary bg-primary/5",
+                        isExternalAgendaSelected && "opacity-60 cursor-not-allowed"
                       )}
                     >
-                      <RadioGroupItem value="offline" id="offline" />
+                      <RadioGroupItem
+                        value="offline"
+                        id="offline"
+                        disabled={isExternalAgendaSelected}
+                      />
                       <div className="flex-1">
-                        <Label htmlFor="offline" className="cursor-pointer">
+                        <Label
+                          htmlFor="offline"
+                          className={cn(
+                            "cursor-pointer",
+                            isExternalAgendaSelected && "cursor-not-allowed"
+                          )}
+                        >
                           오프라인 (대면 미팅)
                         </Label>
+                        {isExternalAgendaSelected && (
+                          <p className="text-xs text-rose-600 mt-1">
+                            외부 아젠다는 온라인으로만 신청할 수 있습니다.
+                          </p>
+                        )}
                       </div>
                     </div>
                   </div>
