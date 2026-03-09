@@ -669,6 +669,7 @@ export function CompanyDashboard({
   const [activeInvestmentStageRow, setActiveInvestmentStageRow] = useState<
     number | null
   >(null)
+  const investmentStageDropdownRefs = useRef<Record<number, HTMLDivElement | null>>({})
   const [snackbarMessage, setSnackbarMessage] = useState<string | null>(null)
 
   useEffect(() => {
@@ -795,14 +796,32 @@ export function CompanyDashboard({
     }
   }
 
-  function getFilteredInvestmentStageOptions(keyword: string) {
-    const normalizedKeyword = keyword.trim().toLowerCase()
-    if (!normalizedKeyword) {
-      return [...INVESTMENT_STAGE_OPTIONS]
-    }
-    return INVESTMENT_STAGE_OPTIONS.filter((option) =>
-      option.toLowerCase().includes(normalizedKeyword)
-    )
+  function parseInvestmentStages(value: string) {
+    return value
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean)
+  }
+
+  function serializeInvestmentStages(values: string[]) {
+    return values.join(", ")
+  }
+
+  function toggleInvestmentStage(index: number, stage: string) {
+    const normalized = stage.trim()
+    if (!normalized) return
+    const currentStages = parseInvestmentStages(investmentRows[index]?.stage ?? "")
+    const exists = currentStages.includes(normalized)
+    const nextStages = exists
+      ? currentStages.filter((item) => item !== normalized)
+      : [...currentStages, normalized]
+    updateInvestmentRow(index, "stage", serializeInvestmentStages(nextStages))
+  }
+
+  function removeInvestmentStage(index: number, stage: string) {
+    const currentStages = parseInvestmentStages(investmentRows[index]?.stage ?? "")
+    const nextStages = currentStages.filter((item) => item !== stage)
+    updateInvestmentRow(index, "stage", serializeInvestmentStages(nextStages))
   }
 
   function handleRemoveInvestmentRow(index: number) {
@@ -813,6 +832,24 @@ export function CompanyDashboard({
       return prev > index ? prev - 1 : prev
     })
   }
+
+  useEffect(() => {
+    const rowIndex = activeInvestmentStageRow
+    if (rowIndex === null) return
+    const currentIndex = rowIndex
+
+    function handleOutsideClick(event: MouseEvent) {
+      const current = investmentStageDropdownRefs.current[currentIndex]
+      if (!current) return
+      if (event.target instanceof Node && current.contains(event.target)) return
+      setActiveInvestmentStageRow(null)
+    }
+
+    document.addEventListener("mousedown", handleOutsideClick)
+    return () => {
+      document.removeEventListener("mousedown", handleOutsideClick)
+    }
+  }, [activeInvestmentStageRow])
 
   return (
     <div className="w-full h-full bg-transparent">
@@ -1481,71 +1518,88 @@ export function CompanyDashboard({
                       <div className="text-xs font-semibold text-slate-600">
                         투자이력 (순서별 작성)
                       </div>
-                      {investmentRows.map((row, idx) => (
+                      {investmentRows.map((row, idx) => {
+                        const selectedStages = parseInvestmentStages(row.stage)
+                        return (
                         <div
                           key={`investment-${idx}`}
                           className="grid gap-3 rounded-xl border border-slate-100 bg-slate-50 p-3 sm:grid-cols-2 lg:grid-cols-4"
                         >
                           <label className="text-xs text-slate-500">
                             <span className="block whitespace-nowrap">
-                              투자단계
+                              투자단계 (다중선택)
                             </span>
-                            <div className="relative">
-                              <input
-                                className={inputClass(false, "rounded-lg pr-9")}
-                                placeholder="목록에서 선택 또는 직접 입력"
-                                value={row.stage}
-                                autoComplete="off"
-                                onFocus={() => setActiveInvestmentStageRow(idx)}
-                                onBlur={() =>
-                                  window.setTimeout(() => {
-                                    setActiveInvestmentStageRow((prev) =>
-                                      prev === idx ? null : prev
-                                    )
-                                  }, 120)
-                                }
-                                onChange={(event) => {
-                                  setActiveInvestmentStageRow(idx)
-                                  updateInvestmentRow(
-                                    idx,
-                                    "stage",
-                                    event.target.value
+                            <div
+                              className="relative"
+                              ref={(element) => {
+                                investmentStageDropdownRefs.current[idx] = element
+                              }}
+                            >
+                              <div
+                                tabIndex={0}
+                                className={inputClass(false, "min-h-[40px] cursor-pointer rounded-lg pr-9")}
+                                onMouseDown={(event) => {
+                                  event.preventDefault()
+                                  event.stopPropagation()
+                                  setActiveInvestmentStageRow((prev) =>
+                                    prev === idx ? null : idx
                                   )
                                 }}
-                              />
+                              >
+                                {selectedStages.length > 0 ? (
+                                  <div className="flex items-center gap-1 overflow-x-auto whitespace-nowrap pr-1">
+                                    {selectedStages.map((stage) => (
+                                      <span
+                                        key={`${stage}-${idx}`}
+                                        className="inline-flex items-center gap-1 rounded-full border border-slate-700 bg-slate-700 px-1.5 py-0 text-[10px] font-semibold text-white"
+                                      >
+                                        <span>{stage}</span>
+                                        <button
+                                          type="button"
+                                          className="text-white/80 hover:text-white"
+                                          onMouseDown={(event) => {
+                                            event.preventDefault()
+                                            event.stopPropagation()
+                                            removeInvestmentStage(idx, stage)
+                                          }}
+                                        >
+                                          ×
+                                        </button>
+                                      </span>
+                                    ))}
+                                  </div>
+                                ) : (
+                                  <span className="text-sm text-slate-400">
+                                    투자단계를 선택하세요
+                                  </span>
+                                )}
+                              </div>
                               <ChevronDown
                                 className="pointer-events-none absolute right-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400"
                                 aria-hidden="true"
                               />
                               {activeInvestmentStageRow === idx ? (
-                                <div className="absolute z-20 mt-1 w-full overflow-hidden rounded-lg border border-slate-200 bg-white shadow-lg">
-                                  {getFilteredInvestmentStageOptions(row.stage)
-                                    .length > 0 ? (
-                                    getFilteredInvestmentStageOptions(row.stage).map(
-                                      (option) => (
-                                        <button
-                                          key={option}
-                                          type="button"
-                                          className="w-full px-3 py-2 text-left text-xs text-slate-700 hover:bg-slate-50"
-                                          onMouseDown={(event) => {
-                                            event.preventDefault()
-                                            updateInvestmentRow(
-                                              idx,
-                                              "stage",
-                                              option
-                                            )
-                                            setActiveInvestmentStageRow(null)
-                                          }}
-                                        >
-                                          {option}
-                                        </button>
-                                      )
+                                <div className="absolute z-20 mt-1 max-h-44 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg">
+                                  {INVESTMENT_STAGE_OPTIONS.map((option) => {
+                                    const isSelected = selectedStages.includes(option)
+                                    return (
+                                      <button
+                                        key={option}
+                                        type="button"
+                                        className={`w-full px-3 py-2 text-left text-xs hover:bg-slate-50 ${
+                                          isSelected
+                                            ? "font-semibold text-slate-900"
+                                            : "text-slate-700"
+                                        }`}
+                                        onMouseDown={(event) => {
+                                          event.preventDefault()
+                                          toggleInvestmentStage(idx, option)
+                                        }}
+                                      >
+                                        {isSelected ? `✓ ${option}` : option}
+                                      </button>
                                     )
-                                  ) : (
-                                    <div className="px-3 py-2 text-xs text-slate-400">
-                                      추천 항목이 없습니다.
-                                    </div>
-                                  )}
+                                  })}
                                 </div>
                               ) : null}
                             </div>
@@ -1585,7 +1639,7 @@ export function CompanyDashboard({
                               }
                             />
                           </label>
-                          <div className="flex items-end gap-2">
+                          <div className="flex items-start gap-2">
                             <label className="min-w-0 flex-1 text-xs text-slate-500">
                               <span className="block whitespace-nowrap">
                                 주요주주명
@@ -1605,7 +1659,7 @@ export function CompanyDashboard({
                             </label>
                             <button
                               type="button"
-                              className="mb-0.5 rounded-md border border-rose-200 p-2 text-rose-600 hover:border-rose-300 hover:bg-rose-50 hover:text-rose-700 disabled:cursor-not-allowed disabled:opacity-60"
+                              className="mt-5 rounded-md border border-rose-200 p-2 text-rose-600 hover:border-rose-300 hover:bg-rose-50 hover:text-rose-700 disabled:cursor-not-allowed disabled:opacity-60"
                               onClick={() => handleRemoveInvestmentRow(idx)}
                               disabled={investmentRows.length <= 1}
                               aria-label="삭제"
@@ -1614,7 +1668,8 @@ export function CompanyDashboard({
                             </button>
                           </div>
                         </div>
-                      ))}
+                        )
+                      })}
                       <button
                         type="button"
                         className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50"
