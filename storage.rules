@@ -29,6 +29,13 @@ service firebase.storage {
         && firestore.get(/databases/(default)/documents/profiles/$(request.auth.uid)).data.active == true;
     }
 
+    function isStaff() {
+      return isSignedIn()
+        && hasProfile()
+        && firestore.get(/databases/(default)/documents/profiles/$(request.auth.uid)).data.role == "staff"
+        && firestore.get(/databases/(default)/documents/profiles/$(request.auth.uid)).data.active == true;
+    }
+
     function isCompanyOwner(companyId) {
       return isSignedIn()
         && hasCompany(companyId)
@@ -58,6 +65,19 @@ service firebase.storage {
       allow read: if isAdmin() || isConsultant() || (isSignedIn() && request.auth.uid == userId);
       allow write: if isSignedIn() && request.auth.uid == userId && isAllowedOfficeHourFile();
       allow delete: if isAdmin() || (isSignedIn() && request.auth.uid == userId);
+    }
+
+    match /reports/{applicationId}/{fileName} {
+      function isAllowedReportImage() {
+        return request.resource.size <= 10 * 1024 * 1024
+          && request.resource.name.matches(
+            ".*\\.(jpg|JPG|jpeg|JPEG|png|PNG|webp|WEBP|heic|HEIC|heif|HEIF)$"
+          );
+      }
+
+      allow read: if isAdmin() || isConsultant() || isStaff();
+      allow create, update: if isAllowedReportImage() && (isAdmin() || isConsultant() || isStaff());
+      allow delete: if isAdmin() || isConsultant() || isStaff();
     }
   }
 }

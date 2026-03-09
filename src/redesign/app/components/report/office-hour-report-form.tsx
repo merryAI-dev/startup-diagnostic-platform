@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
+import { deleteObject, getDownloadURL, ref, uploadBytes } from "firebase/storage";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/redesign/app/components/ui/dialog";
 import { Button } from "@/redesign/app/components/ui/button";
 import { Label } from "@/redesign/app/components/ui/label";
@@ -7,7 +7,7 @@ import { Input } from "@/redesign/app/components/ui/input";
 import { Textarea } from "@/redesign/app/components/ui/textarea";
 import { Application, OfficeHourReport } from "@/redesign/app/lib/types";
 import { isFirebaseConfigured, storage } from "@/redesign/app/lib/firebase";
-import { X, Upload, Star, AlertCircle } from "lucide-react";
+import { X, Upload, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
 
 interface OfficeHourReportFormProps {
@@ -25,6 +25,47 @@ interface OfficeHourReportFormProps {
   onSubmit: (report: Omit<OfficeHourReport, "id" | "createdAt" | "updatedAt" | "completedAt">) => void;
 }
 
+const MIN_REPORT_SECTION_LENGTH = 50;
+const COMPANY_STATUS_HEADER = "기업의 현황";
+const ADVISORY_CONTENT_HEADER = "자문내용";
+
+function buildReportContent(companyStatus: string, advisoryContent: string) {
+  return `[${COMPANY_STATUS_HEADER}]\n${companyStatus.trim()}\n\n[${ADVISORY_CONTENT_HEADER}]\n${advisoryContent.trim()}`;
+}
+
+function parseReportContent(raw: string) {
+  const text = raw.trim();
+  if (!text) {
+    return {
+      companyStatus: "",
+      advisoryContent: "",
+    };
+  }
+
+  const companyStatusMatch = text.match(/\[기업의 현황\]\s*([\s\S]*?)(?:\n\s*\[자문내용\]|$)/u);
+  const advisoryContentMatch = text.match(/\[자문내용\]\s*([\s\S]*)$/u);
+
+  if (!companyStatusMatch && !advisoryContentMatch) {
+    return {
+      companyStatus: text,
+      advisoryContent: "",
+    };
+  }
+
+  return {
+    companyStatus: companyStatusMatch?.[1]?.trim() ?? "",
+    advisoryContent: advisoryContentMatch?.[1]?.trim() ?? "",
+  };
+}
+
+function isStorageFileUrl(value: string) {
+  return (
+    value.startsWith("http://")
+    || value.startsWith("https://")
+    || value.startsWith("gs://")
+  );
+}
+
 export function OfficeHourReportForm({ 
   application, 
   open, 
@@ -35,6 +76,7 @@ export function OfficeHourReportForm({
   onSubmit 
 }: OfficeHourReportFormProps) {
   const buildFormState = () => {
+    const parsedContent = parseReportContent(initialReport?.content ?? "");
     if (initialReport) {
       return {
         date: initialReport.date || application.scheduledDate || "",
@@ -44,7 +86,8 @@ export function OfficeHourReportForm({
           initialReport.participants && initialReport.participants.length > 0
             ? initialReport.participants
             : [""],
-        content: initialReport.content || "",
+        content: parsedContent.companyStatus,
+        advisoryContent: parsedContent.advisoryContent,
         followUp: initialReport.followUp || "",
         duration: initialReport.duration || application.duration || 2,
         satisfaction: initialReport.satisfaction || 5,
@@ -56,6 +99,7 @@ export function OfficeHourReportForm({
       topic: application.agenda,
       participants: [""],
       content: "",
+      advisoryContent: "",
       followUp: "",
       duration: application.duration || 2,
       satisfaction: 5,
@@ -79,6 +123,33 @@ export function OfficeHourReportForm({
     setPendingPhotos([]);
   }, [open, initialReport, application]);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const contentLength = formData.content.trim().length;
+  const advisoryContentLength = formData.advisoryContent.trim().length;
+  const followUpLength = formData.followUp.trim().length;
+  const isContentValid = contentLength >= MIN_REPORT_SECTION_LENGTH;
+  const isAdvisoryContentValid = advisoryContentLength >= MIN_REPORT_SECTION_LENGTH;
+  const isFollowUpValid = followUpLength >= MIN_REPORT_SECTION_LENGTH;
+
+  const removeStoredPhotos = async (photoUrls: string[]) => {
+    if (!isFirebaseConfigured || !storage || photoUrls.length === 0) {
+      return 0;
+    }
+    const storageInstance = storage;
+    const targets = photoUrls.filter((url) => isStorageFileUrl(url));
+    if (targets.length === 0) return 0;
+
+    const results = await Promise.all(
+      targets.map(async (url) => {
+        try {
+          await deleteObject(ref(storageInstance, url));
+          return true;
+        } catch {
+          return false;
+        }
+      })
+    );
+    return results.filter((ok) => !ok).length;
+  };
 
   const handlePhotoUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files;
@@ -136,13 +207,18 @@ export function OfficeHourReportForm({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (!formData.content.trim()) {
-      toast.error("세션 내용을 입력해주세요");
+    if (!isContentValid) {
+      toast.error(`기업의 현황을 ${MIN_REPORT_SECTION_LENGTH}자 이상 입력해주세요`);
       return;
     }
 
-    if (!formData.followUp.trim()) {
-      toast.error("팔로업 계획을 입력해주세요");
+    if (!isAdvisoryContentValid) {
+      toast.error(`자문내용을 ${MIN_REPORT_SECTION_LENGTH}자 이상 입력해주세요`);
+      return;
+    }
+
+    if (!isFollowUpValid) {
+      toast.error(`팔로업 계획을 ${MIN_REPORT_SECTION_LENGTH}자 이상 입력해주세요`);
       return;
     }
 
@@ -152,10 +228,11 @@ export function OfficeHourReportForm({
       let uploadedPhotoUrls: string[] = [];
       if (pendingPhotos.length > 0) {
         if (isFirebaseConfigured && storage) {
+          const storageInstance = storage;
           const uploadBase = `reports/${application.id}/${Date.now()}`;
           uploadedPhotoUrls = await Promise.all(
             pendingPhotos.map(async (item, index) => {
-              const fileRef = ref(storage!, `${uploadBase}-${index}-${item.file.name}`);
+              const fileRef = ref(storageInstance, `${uploadBase}-${index}-${item.file.name}`);
               await uploadBytes(fileRef, item.file);
               return getDownloadURL(fileRef);
             })
@@ -168,6 +245,9 @@ export function OfficeHourReportForm({
       const pendingPreviewUrls = new Set(pendingPhotos.map((item) => item.previewUrl));
       const retainedPhotos = photos.filter((url) => !pendingPreviewUrls.has(url));
       const finalPhotos = [...retainedPhotos, ...uploadedPhotoUrls];
+      const removedExistingPhotos = (initialReport?.photos ?? []).filter(
+        (url) => !finalPhotos.includes(url)
+      );
 
       const report: Omit<OfficeHourReport, "id" | "createdAt" | "updatedAt" | "completedAt"> = {
         applicationId: application.id,
@@ -177,7 +257,7 @@ export function OfficeHourReportForm({
         location: formData.location,
         topic: formData.topic,
         participants: formData.participants.filter(p => p.trim() !== ""),
-        content: formData.content,
+        content: buildReportContent(formData.content, formData.advisoryContent),
         followUp: formData.followUp,
         photos: finalPhotos,
         duration: formData.duration,
@@ -186,6 +266,10 @@ export function OfficeHourReportForm({
       };
 
       await onSubmit(report);
+      const failedPhotoDeletes = await removeStoredPhotos(removedExistingPhotos);
+      if (failedPhotoDeletes > 0) {
+        toast.error(`사진 ${failedPhotoDeletes}개 삭제에 실패했습니다.`);
+      }
       toast.success("오피스아워 보고서가 작성되었습니다");
       onClose();
     } catch (error) {
@@ -199,7 +283,7 @@ export function OfficeHourReportForm({
     <Dialog open={open} onOpenChange={(nextOpen) => {
       if (!nextOpen) onClose();
     }}>
-      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto overflow-x-hidden">
         <DialogHeader>
           <div className="flex items-center justify-between gap-4">
           <div>
@@ -246,7 +330,7 @@ export function OfficeHourReportForm({
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="space-y-6 mt-4">
+        <form onSubmit={handleSubmit} className="space-y-6 mt-4 min-w-0">
           {/* 일시 */}
           <div className="space-y-2">
             <Label htmlFor="date">일시 *</Label>
@@ -331,62 +415,55 @@ export function OfficeHourReportForm({
             />
           </div>
 
-          {/* 내용 */}
+          {/* 기업의 현황 */}
           <div className="space-y-2">
-            <Label htmlFor="content">세션 내용 *</Label>
+            <Label htmlFor="content">기업의 현황 *</Label>
             <Textarea
               id="content"
               value={formData.content}
               onChange={(e) => setFormData({ ...formData, content: e.target.value })}
-              placeholder="논의된 주요 내용, 핵심 질문, 제공된 피드백 등을 상세히 작성해주세요"
+              placeholder="기업의 현재 상황, 진행 상태, 핵심 이슈를 구체적으로 작성해주세요"
               rows={6}
               required
-              className="resize-none"
+              className="resize-none min-w-0 w-full [field-sizing:fixed] overflow-x-hidden [overflow-wrap:anywhere]"
             />
-            <p className="text-xs text-muted-foreground">
-              최소 100자 이상 작성을 권장합니다
+            <p className={`text-xs ${isContentValid ? "text-emerald-600" : "text-rose-600"}`}>
+              {contentLength}/{MIN_REPORT_SECTION_LENGTH}자
             </p>
           </div>
 
-          {/* 팔로업 */}
+          {/* 자문내용 */}
+          <div className="space-y-2">
+            <Label htmlFor="advisoryContent">자문내용 *</Label>
+            <Textarea
+              id="advisoryContent"
+              value={formData.advisoryContent}
+              onChange={(e) => setFormData({ ...formData, advisoryContent: e.target.value })}
+              placeholder="자문 시 전달한 핵심 피드백, 제안, 실행 가이드를 작성해주세요"
+              rows={6}
+              required
+              className="resize-none min-w-0 w-full [field-sizing:fixed] overflow-x-hidden [overflow-wrap:anywhere]"
+            />
+            <p className={`text-xs ${isAdvisoryContentValid ? "text-emerald-600" : "text-rose-600"}`}>
+              {advisoryContentLength}/{MIN_REPORT_SECTION_LENGTH}자
+            </p>
+          </div>
+
+          {/* 팔로업 계획 */}
           <div className="space-y-2">
             <Label htmlFor="followUp">팔로업 계획 *</Label>
             <Textarea
               id="followUp"
               value={formData.followUp}
               onChange={(e) => setFormData({ ...formData, followUp: e.target.value })}
-              placeholder="후속 조치, 기업에서 해야 할 액션 아이템, 다음 세션 계획 등"
+              placeholder="후속 조치, 기업에서 해야 할 액션 아이템, 다음 세션 계획 등을 작성해주세요"
               rows={4}
               required
-              className="resize-none"
+              className="resize-none min-w-0 w-full [field-sizing:fixed] overflow-x-hidden [overflow-wrap:anywhere]"
             />
-          </div>
-
-          {/* 만족도 */}
-          <div className="space-y-2">
-            <Label>기업 만족도 *</Label>
-            <div className="flex items-center gap-2">
-              {[1, 2, 3, 4, 5].map((rating) => (
-                <button
-                  key={rating}
-                  type="button"
-                  onClick={() => setFormData({ ...formData, satisfaction: rating })}
-                  className={`p-2 transition-all ${
-                    rating <= formData.satisfaction
-                      ? "text-yellow-500"
-                      : "text-gray-300"
-                  }`}
-                >
-                  <Star
-                    className="w-8 h-8"
-                    fill={rating <= formData.satisfaction ? "currentColor" : "none"}
-                  />
-                </button>
-              ))}
-              <span className="ml-2 text-sm text-muted-foreground">
-                {formData.satisfaction}점
-              </span>
-            </div>
+            <p className={`text-xs ${isFollowUpValid ? "text-emerald-600" : "text-rose-600"}`}>
+              {followUpLength}/{MIN_REPORT_SECTION_LENGTH}자
+            </p>
           </div>
 
           {/* 사진 업로드 */}
@@ -438,7 +515,7 @@ export function OfficeHourReportForm({
           <div className="flex gap-3 pt-4 border-t">
             <Button
               type="submit"
-              disabled={isSubmitting}
+              disabled={isSubmitting || !isContentValid || !isAdvisoryContentValid || !isFollowUpValid}
               className="flex-1"
             >
               {isSubmitting ? "저장 중..." : (submitLabel ?? "보고서 제출")}
