@@ -138,6 +138,19 @@ function isBusinessNumber(value: string) {
   return /^\d{3}-\d{2}-\d{5}$/.test(value)
 }
 
+function normalizeInvestmentStageValue(value: unknown) {
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => (typeof item === "string" ? item.trim() : ""))
+      .filter(Boolean)
+      .join(", ")
+  }
+  if (typeof value === "string") {
+    return value.trim()
+  }
+  return ""
+}
+
 export function useCompanyInfoForm(companyId: string) {
   const [form, setForm] = useState<CompanyInfoForm>(DEFAULT_FORM)
   const [savedForm, setSavedForm] = useState<CompanyInfoForm>(DEFAULT_FORM)
@@ -243,7 +256,7 @@ export function useCompanyInfoForm(companyId: string) {
         setForm(nextForm)
         setSavedForm(nextForm)
         const nextInvestments = (data.investments ?? []).map((row) => ({
-          stage: row.stage ?? "",
+          stage: normalizeInvestmentStageValue(row.stage),
           date: row.date ?? "",
           postMoney: formatNumber(row.postMoney),
           majorShareholder: row.majorShareholder ?? "",
@@ -333,7 +346,7 @@ export function useCompanyInfoForm(companyId: string) {
         tipsLipsHistory: form.tipsLipsHistory,
       },
       investments: investmentRows.map((row) => ({
-        stage: row.stage,
+        stage: normalizeInvestmentStageValue(row.stage),
         date: row.date,
         postMoney: toNumber(row.postMoney),
         majorShareholder: row.majorShareholder,

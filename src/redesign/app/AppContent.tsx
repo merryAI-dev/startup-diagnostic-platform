@@ -73,7 +73,6 @@ import {
   useFirestoreCollection,
   useFirestoreCRUD,
   useFirestoreDocument,
-  useFirestoreDocumentOnce,
 } from "@/redesign/app/hooks/use-firestore";
 import { firestoreService } from "@/redesign/app/lib/firestore-service";
 import { storage as firebaseStorage } from "@/redesign/app/lib/firebase";
@@ -114,11 +113,6 @@ type AppPage =
   | "consultant-profile"
   | "consultant-calendar";
 
-type SaveTypeMeta = {
-  metadata?: {
-    saveType?: "draft" | "final";
-  };
-};
 type CompanyInfoDoc = Partial<CompanyInfoRecord>;
 
 type RawProfileApprovalDoc = {
@@ -708,7 +702,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     const ownedId = ownedCompanyDocs[0]?.id ?? null;
     return ownedId ?? profile?.companyId ?? firebaseUser?.uid ?? null;
   }, [firebaseUser?.uid, ownedCompanyDocs, profile?.companyId]);
-  const { data: companyInfoDoc } = useFirestoreDocumentOnce<CompanyInfoDoc>(
+  const { data: companyInfoDoc } = useFirestoreDocument<CompanyInfoDoc>(
     companyRecordId ? `companies/${companyRecordId}/companyInfo` : "",
     "info",
     {
@@ -720,13 +714,6 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
   }>("companies", companyRecordId ?? null, {
     enabled: isFirebaseConfigured && resolvedRole === "user" && !!companyRecordId,
   });
-  const { data: selfAssessmentDoc } = useFirestoreDocumentOnce<SaveTypeMeta>(
-    companyRecordId ? `companies/${companyRecordId}/selfAssessment` : "",
-    "info",
-    {
-      enabled: isFirebaseConfigured && resolvedRole === "user" && !!companyRecordId,
-    }
-  );
   const fallbackUser =
     initialUsers.find((u) => u.role === resolvedRole) ?? initialUsers[0]!;
   const user: User = useMemo(() => {
@@ -818,17 +805,6 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       : isAdminLikeRole
         ? "admin-dashboard"
         : "dashboard";
-  const companyInfoComplete = companyInfoDoc?.metadata?.saveType === "final";
-  const selfAssessmentComplete = selfAssessmentDoc?.metadata?.saveType === "final";
-  const needsCompanyInfoAttention =
-    resolvedRole === "user"
-    && isFirebaseConfigured
-    && !!companyRecordId
-    && (!companyInfoComplete || !selfAssessmentComplete);
-  const attentionPages = useMemo(
-    () => (needsCompanyInfoAttention ? new Set<AppPage>(["company-info"]) : undefined),
-    [needsCompanyInfoAttention]
-  );
   const [currentPage, setCurrentPage] = useState<AppPage>(initialPage);
   const [applications, setApplications] = useState<Application[]>(() =>
     isFirebaseConfigured ? [] : initialApplications
@@ -3663,7 +3639,6 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
           onNavigate={handleNavigateLoose}
           userRole={user.role}
           disabledPages={disabledPages}
-          attentionPages={attentionPages}
         />
         <main className="flex-1 overflow-y-auto bg-gray-50">
           {currentPage === "dashboard" && (
