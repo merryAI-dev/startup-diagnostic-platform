@@ -176,7 +176,7 @@ export function AdminApplicationDetailModal({
         }
         const isUnassigned = !application.consultantId
           && (!application.consultant || application.consultant === "담당자 배정 중");
-        if ((application.status === "pending" || application.status === "review")
+        if (application.status === "pending"
           && isUnassigned
           && onRequestApplication) {
           await onRequestApplication(application.id);
@@ -198,8 +198,8 @@ export function AdminApplicationDetailModal({
 
   const getStatusLabel = (status: ApplicationStatus) => {
     const labels = {
-      pending: "진행중",
-      review: "진행중",
+      pending: "수락 대기",
+      review: "수락 대기",
       confirmed: "확정",
       rejected: "거절됨",
       cancelled: "취소",
@@ -412,7 +412,7 @@ export function AdminApplicationDetailModal({
                 <div className="space-y-3">
                   <Label>상태 관리</Label>
                   <div className="flex gap-2 flex-wrap">
-                    {(application.status === "pending" || application.status === "review") && !isSessionEnded && (
+                    {application.status === "pending" && !isSessionEnded && (
                       <Button
                         size="sm"
                         variant="default"
@@ -420,10 +420,10 @@ export function AdminApplicationDetailModal({
                         className="transition-colors hover:bg-primary/80 hover:text-primary-foreground"
                       >
                         <CheckCircle2 className="w-4 h-4 mr-2" />
-                        {application.status === "pending" ? "수락" : "확정"}
+                        수락
                       </Button>
                     )}
-                    {(application.status === "pending" || application.status === "review") && (
+                    {application.status === "pending" && (
                       <Button
                         size="sm"
                         variant="destructive"
@@ -437,19 +437,19 @@ export function AdminApplicationDetailModal({
                       <Button
                         size="sm"
                         variant="outline"
-                        onClick={() => handleStatusChange("review")}
+                        onClick={() => handleStatusChange("pending")}
                       >
-                        재검토
+                        수락 대기로 변경
                       </Button>
                     )}
                     {application.status === "confirmed" && !isSessionEnded && (
                       <Button
                         size="sm"
                         variant="outline"
-                        onClick={() => handleStatusChange("review")}
+                        onClick={() => handleStatusChange("pending")}
                       >
                         <XCircle className="w-4 h-4 mr-2" />
-                        확정 취소
+                        수락 대기로 변경
                       </Button>
                     )}
                   </div>
