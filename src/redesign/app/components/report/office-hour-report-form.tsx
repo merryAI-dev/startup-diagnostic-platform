@@ -134,13 +134,14 @@ export function OfficeHourReportForm({
     if (!isFirebaseConfigured || !storage || photoUrls.length === 0) {
       return 0;
     }
+    const storageInstance = storage;
     const targets = photoUrls.filter((url) => isStorageFileUrl(url));
     if (targets.length === 0) return 0;
 
     const results = await Promise.all(
       targets.map(async (url) => {
         try {
-          await deleteObject(ref(storage, url));
+          await deleteObject(ref(storageInstance, url));
           return true;
         } catch {
           return false;
@@ -227,10 +228,11 @@ export function OfficeHourReportForm({
       let uploadedPhotoUrls: string[] = [];
       if (pendingPhotos.length > 0) {
         if (isFirebaseConfigured && storage) {
+          const storageInstance = storage;
           const uploadBase = `reports/${application.id}/${Date.now()}`;
           uploadedPhotoUrls = await Promise.all(
             pendingPhotos.map(async (item, index) => {
-              const fileRef = ref(storage!, `${uploadBase}-${index}-${item.file.name}`);
+              const fileRef = ref(storageInstance, `${uploadBase}-${index}-${item.file.name}`);
               await uploadBytes(fileRef, item.file);
               return getDownloadURL(fileRef);
             })
