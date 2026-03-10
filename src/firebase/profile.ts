@@ -38,6 +38,12 @@ function toDecimalNumber(value: string) {
   return Math.round(parsed * 10) / 10
 }
 
+function toIsoDate(value: string) {
+  const digits = value.replace(/[^\d]/g, "").slice(0, 8)
+  if (digits.length !== 8) return value.trim()
+  return `${digits.slice(0, 4)}-${digits.slice(4, 6)}-${digits.slice(6, 8)}`
+}
+
 function buildCompanyInfoRecord(
   form: CompanyInfoForm,
   investmentRows?: InvestmentInput[]
@@ -76,7 +82,7 @@ function buildCompanyInfoRecord(
     },
     investments: (investmentRows ?? []).map((row) => ({
       stage: row.stage,
-      date: row.date,
+      date: toIsoDate(row.date),
       postMoney: toDecimalNumber(row.postMoney),
       majorShareholder: row.majorShareholder,
     })),
