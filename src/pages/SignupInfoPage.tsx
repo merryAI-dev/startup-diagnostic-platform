@@ -878,6 +878,49 @@ function CompanySignupInfo({
     return `${formattedInteger || "0"}.${decimalDigits}`
   }
 
+  function sanitizeInvestmentDateDigits(value: string) {
+    const source = value.replace(/[^\d]/g, "").slice(0, 8)
+    if (!source) return ""
+
+    let digits = source.slice(0, 4)
+    if (source.length <= 4) return digits
+
+    const monthTens = source[4]
+    if (!monthTens || monthTens < "0" || monthTens > "1") return digits
+    digits += monthTens
+    if (source.length === 5) return digits
+
+    const monthOnes = source[5]
+    if (!monthOnes) return digits
+    const month = Number(`${monthTens}${monthOnes}`)
+    if (month < 1 || month > 12) return digits
+    digits += monthOnes
+    if (source.length === 6) return digits
+
+    const dayTens = source[6]
+    if (!dayTens || dayTens < "0" || dayTens > "3") return digits
+    digits += dayTens
+    if (source.length === 7) return digits
+
+    const dayOnes = source[7]
+    if (!dayOnes) return digits
+    const year = Number(source.slice(0, 4))
+    const maxDay = new Date(year, month, 0).getDate()
+    const day = Number(`${dayTens}${dayOnes}`)
+    if (day < 1 || day > maxDay) return digits
+    digits += dayOnes
+
+    return digits
+  }
+
+  function formatInvestmentDateInput(value: string) {
+    const digits = sanitizeInvestmentDateDigits(value)
+    if (!digits) return ""
+    if (digits.length <= 4) return digits
+    if (digits.length <= 6) return `${digits.slice(0, 4)}.${digits.slice(4)}`
+    return `${digits.slice(0, 4)}.${digits.slice(4, 6)}.${digits.slice(6, 8)}`
+  }
+
   function formatBusinessNumber(value: string) {
     const digits = value.replace(/[^\d]/g, "").slice(0, 10)
     const parts = [] as string[]
@@ -976,9 +1019,15 @@ function CompanySignupInfo({
     field: keyof InvestmentInput,
     value: string
   ) {
+    const nextValue =
+      field === "postMoney"
+        ? formatRevenueInput(value)
+        : field === "date"
+          ? formatInvestmentDateInput(value)
+          : value
     setInvestmentRows((prev) =>
       prev.map((row, rowIndex) =>
-        rowIndex === index ? { ...row, [field]: value } : row
+        rowIndex === index ? { ...row, [field]: nextValue } : row
       )
     )
   }
@@ -1623,10 +1672,22 @@ function CompanySignupInfo({
                   <label className="text-xs text-slate-500">
                     <span className="block whitespace-nowrap">투자일시</span>
                     <input
-                      type="date"
+                      type="text"
                       className={inputClass(false)}
+                      inputMode="numeric"
+                      maxLength={10}
+                      placeholder="YYYY.MM.DD"
                       value={row.date}
-                      onChange={(e) => updateInvestmentRow(idx, "date", e.target.value)}
+                      onInput={(e) => {
+                        const nextValue = formatInvestmentDateInput(e.currentTarget.value)
+                        e.currentTarget.value = nextValue
+                        updateInvestmentRow(idx, "date", nextValue)
+                      }}
+                      onBlur={(e) => {
+                        const nextValue = formatInvestmentDateInput(e.currentTarget.value)
+                        const digits = nextValue.replace(/[^\d]/g, "")
+                        updateInvestmentRow(idx, "date", digits.length === 8 ? nextValue : "")
+                      }}
                     />
                   </label>
                   <label className="text-xs text-slate-500">
@@ -1636,9 +1697,7 @@ function CompanySignupInfo({
                       placeholder="예: 25.5"
                       inputMode="decimal"
                       value={row.postMoney}
-                      onChange={(e) =>
-                        updateInvestmentRow(idx, "postMoney", formatRevenueInput(e.target.value))
-                      }
+                      onChange={(e) => updateInvestmentRow(idx, "postMoney", e.target.value)}
                     />
                   </label>
                   <div className="flex items-start gap-2">
