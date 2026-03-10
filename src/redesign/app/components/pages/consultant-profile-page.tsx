@@ -36,6 +36,27 @@ interface ConsultantProfilePageProps {
   onSubmit: (values: ConsultantProfileFormValues) => Promise<void> | void;
 }
 
+function formatPhoneNumber(value: string): string {
+  const digits = value.replace(/[^\d]/g, "").slice(0, 11);
+  if (!digits) return "";
+
+  if (digits.startsWith("02")) {
+    if (digits.length <= 2) return digits;
+    if (digits.length <= 5) return `${digits.slice(0, 2)}-${digits.slice(2)}`;
+    if (digits.length <= 9) {
+      return `${digits.slice(0, 2)}-${digits.slice(2, digits.length - 4)}-${digits.slice(-4)}`;
+    }
+    return `${digits.slice(0, 2)}-${digits.slice(2, 6)}-${digits.slice(6, 10)}`;
+  }
+
+  if (digits.length < 4) return digits;
+  if (digits.length < 7) return `${digits.slice(0, 3)}-${digits.slice(3)}`;
+  if (digits.length < 11) {
+    return `${digits.slice(0, 3)}-${digits.slice(3, 6)}-${digits.slice(6)}`;
+  }
+  return `${digits.slice(0, 3)}-${digits.slice(3, 7)}-${digits.slice(7, 11)}`;
+}
+
 function buildInitialValues(
   consultant: Consultant | null,
   defaultEmail?: string | null
@@ -44,9 +65,9 @@ function buildInitialValues(
     name: consultant?.name ?? "",
     organization: consultant?.organization ?? "",
     email: consultant?.email ?? defaultEmail ?? "",
-    phone: consultant?.phone ?? "",
+    phone: formatPhoneNumber(consultant?.phone ?? ""),
     secondaryEmail: consultant?.secondaryEmail ?? "",
-    secondaryPhone: consultant?.secondaryPhone ?? "",
+    secondaryPhone: formatPhoneNumber(consultant?.secondaryPhone ?? ""),
     fixedMeetingLink: consultant?.fixedMeetingLink ?? "",
     expertise: consultant?.expertise?.join(", ") ?? "",
     bio: consultant?.bio ?? "",
@@ -276,7 +297,10 @@ export function ConsultantProfilePage({
               <Input
                 id="consultant-phone"
                 value={formValues.phone}
-                onChange={(event) => updateField("phone", event.target.value)}
+                inputMode="numeric"
+                onChange={(event) =>
+                  updateField("phone", formatPhoneNumber(event.target.value))
+                }
                 placeholder="010-0000-0000"
               />
               </div>
@@ -300,7 +324,10 @@ export function ConsultantProfilePage({
               <Input
                 id="consultant-secondary-phone"
                 value={formValues.secondaryPhone}
-                onChange={(event) => updateField("secondaryPhone", event.target.value)}
+                inputMode="numeric"
+                onChange={(event) =>
+                  updateField("secondaryPhone", formatPhoneNumber(event.target.value))
+                }
                 placeholder="010-0000-0000"
               />
               </div>

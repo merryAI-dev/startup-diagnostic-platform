@@ -85,19 +85,41 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    match /signupRequests/{userId} {
+      allow create: if isSignedIn()
+        && request.auth.uid == userId;
+      allow read: if isSignedIn()
+        && (request.auth.uid == userId || isAdmin());
+      allow update: if isAdmin()
+        || (
+          isSignedIn()
+          && request.auth.uid == userId
+        );
+      allow delete: if isAdmin()
+        || (isSignedIn() && request.auth.uid == userId);
+    }
+
     match /companies/{companyId} {
       allow read: if isCompanyOwner(companyId) || isAdmin();
       allow create: if isSignedIn()
-        && request.resource.data.ownerUid == request.auth.uid;
+        && (
+          request.resource.data.ownerUid == request.auth.uid
+          || isAdmin()
+        );
       allow update: if isSignedIn()
-        && isCompanyOwner(companyId)
-        && request.resource.data.ownerUid == resource.data.ownerUid;
+        && (
+          (
+            isCompanyOwner(companyId)
+            && request.resource.data.ownerUid == resource.data.ownerUid
+          )
+          || isAdmin()
+        );
       allow delete: if false;
     }
 
     match /companies/{companyId}/companyInfo/{docId} {
       allow read: if isCompanyOwner(companyId) || isAdmin();
-      allow create, update: if isCompanyOwner(companyId);
+      allow create, update: if isCompanyOwner(companyId) || isAdmin();
       allow delete: if false;
     }
 

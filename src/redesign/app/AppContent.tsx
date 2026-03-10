@@ -77,7 +77,8 @@ import {
 import { firestoreService } from "@/redesign/app/lib/firestore-service";
 import { storage as firebaseStorage } from "@/redesign/app/lib/firebase";
 import { mockNotifications, mockChatRooms, mockChatMessages, mockAIRecommendations, mockGoals, mockTeamMembers } from "@/redesign/app/lib/advanced-mock-data";
-import type { CompanyInfoRecord } from "@/types/company";
+import { buildCompanyInfoRecord } from "@/firebase/profile";
+import { DEFAULT_FORM, type CompanyInfoForm, type CompanyInfoRecord, type InvestmentInput } from "@/types/company";
 
 type AppPage = 
   | "dashboard" 
@@ -125,6 +126,21 @@ type RawProfileApprovalDoc = {
   createdAt?: unknown;
   activatedAt?: unknown;
   approvedAt?: unknown;
+};
+
+type SignupRequestDoc = {
+  id: string;
+  uid?: string;
+  role?: string;
+  requestedRole?: string | null;
+  email?: string | null;
+  companyId?: string | null;
+  status?: string;
+  consultantInfo?: Partial<ConsultantProfileFormValues> | null;
+  companyInfo?: Partial<CompanyInfoForm> | null;
+  investmentRows?: InvestmentInput[] | null;
+  createdAt?: unknown;
+  updatedAt?: unknown;
 };
 
 const APPROVAL_ROLE_VALUES: PendingProfileApproval["role"][] = [
@@ -200,6 +216,51 @@ function normalizeDateValue(value: unknown): Date | string {
     }
   }
   return new Date();
+}
+
+function toTrimmedString(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function toPendingCompanyForm(value: unknown): CompanyInfoForm {
+  if (!value || typeof value !== "object") {
+    return DEFAULT_FORM;
+  }
+  const source = value as Partial<CompanyInfoForm>;
+  return {
+    companyInfo: toTrimmedString(source.companyInfo),
+    ceoName: toTrimmedString(source.ceoName),
+    ceoEmail: toTrimmedString(source.ceoEmail),
+    ceoPhone: toTrimmedString(source.ceoPhone),
+    foundedAt: toTrimmedString(source.foundedAt),
+    businessNumber: toTrimmedString(source.businessNumber),
+    primaryBusiness: toTrimmedString(source.primaryBusiness),
+    primaryIndustry: toTrimmedString(source.primaryIndustry),
+    headOffice: toTrimmedString(source.headOffice),
+    branchOffice: toTrimmedString(source.branchOffice),
+    workforceFullTime: toTrimmedString(source.workforceFullTime),
+    workforceContract: toTrimmedString(source.workforceContract),
+    revenue2025: toTrimmedString(source.revenue2025),
+    revenue2026: toTrimmedString(source.revenue2026),
+    capitalTotal: toTrimmedString(source.capitalTotal),
+    certification: toTrimmedString(source.certification),
+    tipsLipsHistory: toTrimmedString(source.tipsLipsHistory),
+    desiredInvestment2026: toTrimmedString(source.desiredInvestment2026),
+    desiredPreValue: toTrimmedString(source.desiredPreValue),
+  };
+}
+
+function toPendingInvestmentRows(value: unknown): InvestmentInput[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => {
+    const source = item as Partial<InvestmentInput>;
+    return {
+      stage: toTrimmedString(source.stage),
+      date: toTrimmedString(source.date),
+      postMoney: toTrimmedString(source.postMoney),
+      majorShareholder: toTrimmedString(source.majorShareholder),
+    };
+  });
 }
 
 function buildDefaultConsultantAvailability(): Consultant["availability"] {
@@ -3588,15 +3649,127 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     }
 
     const approvedRole = pendingProfile.requestedRole ?? pendingProfile.role;
-    if (approvedRole === "company" && !pendingProfile.companyId) {
-      toast.error("회사 계정 정보가 없어 승인할 수 없습니다");
-      return;
+    const profileSnapshot =
+      profileList.find((item) => item.id === pendingProfile.id) ?? null;
+    const signupRequest = await firestoreService.getDocument<SignupRequestDoc>(
+      "signupRequests",
+      pendingProfile.id
+    );
+    const fallbackEmail =
+      toTrimmedString(signupRequest?.email) || toTrimmedString(pendingProfile.email);
+
+    if (approvedRole === "consultant") {
+      const source =
+        signupRequest?.consultantInfo
+        ?? (profileSnapshot as { pendingConsultantInfo?: Partial<ConsultantProfileFormValues> | null } | null)
+          ?.pendingConsultantInfo
+        ?? null;
+      const phone = toTrimmedString(source?.phone);
+      const organization = toTrimmedString(source?.organization);
+      const secondaryEmail = toTrimmedString(source?.secondaryEmail);
+      const secondaryPhone = toTrimmedString(source?.secondaryPhone);
+      const fixedMeetingLink = toTrimmedString(source?.fixedMeetingLink);
+      const consultantName =
+        toTrimmedString(source?.name)
+        || fallbackEmail.split("@")[0]
+        || "컨설턴트";
+      const consultantEmail =
+        fallbackEmail
+        || toTrimmedString(source?.email)
+        || `${pendingProfile.id}@pending.local`;
+      const consultantExpertise = toTrimmedString(source?.expertise)
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean);
+      const consultantPayload: Omit<Consultant, "id"> = {
+        name: consultantName,
+        title: "컨설턴트",
+        email: consultantEmail,
+        expertise: consultantExpertise,
+        bio: toTrimmedString(source?.bio) || `${consultantName} 컨설턴트`,
+        status: "active",
+        joinedDate: new Date(),
+        availability: buildDefaultConsultantAvailability(),
+        ...(phone ? { phone } : {}),
+        ...(organization ? { organization } : {}),
+        ...(secondaryEmail ? { secondaryEmail } : {}),
+        ...(secondaryPhone ? { secondaryPhone } : {}),
+        ...(fixedMeetingLink ? { fixedMeetingLink } : {}),
+      };
+      const consultantSaved = await consultantCrud.set(
+        pendingProfile.id,
+        consultantPayload
+      );
+      if (!consultantSaved) {
+        toast.error("컨설턴트 프로필 생성에 실패했습니다");
+        return;
+      }
+    }
+
+    let approvedCompanyId: string | null = null;
+    if (approvedRole === "company") {
+      approvedCompanyId =
+        toTrimmedString(signupRequest?.companyId)
+        || toTrimmedString(profileSnapshot?.companyId)
+        || toTrimmedString(pendingProfile.companyId)
+        || pendingProfile.id;
+      const pendingCompanyForm = toPendingCompanyForm(
+        signupRequest?.companyInfo
+          ?? (profileSnapshot as { pendingCompanyInfo?: Partial<CompanyInfoForm> | null } | null)
+            ?.pendingCompanyInfo
+      );
+      const pendingInvestmentRows = toPendingInvestmentRows(
+        signupRequest?.investmentRows
+          ?? (profileSnapshot as { pendingInvestmentRows?: InvestmentInput[] | null } | null)
+            ?.pendingInvestmentRows
+      );
+      const companyInfoRecord = buildCompanyInfoRecord(
+        pendingCompanyForm,
+        pendingInvestmentRows
+      );
+      const companyName = toTrimmedString(pendingCompanyForm.companyInfo) || null;
+
+      const companySaved = await firestoreService.setDocument(
+        "companies",
+        approvedCompanyId,
+        {
+          ownerUid: pendingProfile.id,
+          name: companyName,
+          createdAt: new Date(),
+        },
+        true
+      );
+      if (!companySaved) {
+        toast.error("회사 기본 정보 생성에 실패했습니다");
+        return;
+      }
+
+      const companyInfoSaved = await firestoreService.setDocument(
+        `companies/${approvedCompanyId}/companyInfo`,
+        "info",
+        {
+          ...companyInfoRecord,
+          metadata: {
+            ...companyInfoRecord.metadata,
+            createdAt: new Date(),
+          },
+        },
+        true
+      );
+      if (!companyInfoSaved) {
+        toast.error("회사 상세 정보 생성에 실패했습니다");
+        return;
+      }
     }
 
     const ok = await profileCrud.update(pendingProfile.id, {
       role: approvedRole,
       requestedRole: approvedRole,
       active: true,
+      companyId: approvedRole === "company" ? approvedCompanyId : null,
+      pendingConsultantInfo: deleteField(),
+      pendingCompanyInfo: deleteField(),
+      pendingInvestmentRows: deleteField(),
       activatedAt: new Date(),
       approvedAt: new Date(),
       approvedByUid: firebaseUser?.uid ?? null,
@@ -3604,6 +3777,16 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     if (!ok) {
       toast.error("계정 승인에 실패했습니다");
       return;
+    }
+
+    if (signupRequest) {
+      const removed = await firestoreService.deleteDocument(
+        "signupRequests",
+        pendingProfile.id
+      );
+      if (!removed) {
+        toast.error("승인 요청 정리에 실패했습니다. 다시 시도해주세요.");
+      }
     }
 
     toast.success("계정 승인이 완료되었습니다");
@@ -3615,6 +3798,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
               role: approvedRole,
               requestedRole: approvedRole,
               active: true,
+              companyId: approvedRole === "company" ? approvedCompanyId : null,
               activatedAt: new Date(),
               approvedAt: new Date(),
             }
