@@ -2218,29 +2218,44 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
         consultant.status === "active"
         && (consultant.agendaIds ?? []).includes(data.agendaId)
     );
-    if (linkedConsultants.length === 1) {
-      const primaryConsultant = linkedConsultants[0];
-      if (!primaryConsultant) {
-        toast.error("담당 컨설턴트를 확인할 수 없습니다");
-        return;
-      }
-      const available = isConsultantAvailableAt(
-        primaryConsultant,
-        scheduledDate,
-        data.time
+    if (linkedConsultants.length === 0) {
+      toast.error("선택한 아젠다에 연결된 활성 컨설턴트가 없습니다");
+      return;
+    }
+
+    const isConsultantBusyAt = (consultant: Consultant) => {
+      const targetTime = normalizeTimeKey(data.time);
+      const consultantNameKey = normalizeConsultantDisplayName(consultant.name);
+      return applications.some((application) => {
+        const normalizedStatus = normalizeApplicationStatus(application.status);
+        if (
+          normalizedStatus !== "pending"
+          && normalizedStatus !== "confirmed"
+          && normalizedStatus !== "completed"
+        ) {
+          return false;
+        }
+        if (!application.scheduledDate || !application.scheduledTime) return false;
+        if (application.scheduledDate !== scheduledDate) return false;
+        if (normalizeTimeKey(application.scheduledTime) !== targetTime) return false;
+
+        if (application.consultantId) {
+          return application.consultantId === consultant.id;
+        }
+        return normalizeConsultantDisplayName(application.consultant) === consultantNameKey;
+      });
+    };
+
+    const assignableConsultants = linkedConsultants.filter((consultant) =>
+      isConsultantAvailableAt(consultant, scheduledDate, data.time)
+      && !isConsultantBusyAt(consultant)
+    );
+
+    if (assignableConsultants.length === 0) {
+      toast.error(
+        "선택한 시간에 현재 배정 가능한 컨설턴트가 없어 신청할 수 없습니다. 다른 시간을 선택해 주세요."
       );
-      if (!available) {
-        toast.error("선택한 시간은 컨설턴트 가능 시간이 아닙니다");
-        return;
-      }
-    } else if (linkedConsultants.length > 1) {
-      const availableCount = linkedConsultants.filter((consultant) =>
-        isConsultantAvailableAt(consultant, scheduledDate, data.time)
-      ).length;
-      if (availableCount === 0) {
-        toast.error("선택한 시간에 가능한 컨설턴트가 없습니다");
-        return;
-      }
+      return;
     }
 
     const attachmentNames = data.files.map((f) => f.name);
@@ -3181,6 +3196,16 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     id: string,
     data: Partial<Consultant>
   ) => {
+    const currentConsultant = consultants.find((consultant) => consultant.id === id);
+    const nextConsultantStatus = data.status;
+    const nextPrimaryEmail = toNormalizedEmail(
+      typeof data.email === "string" ? data.email : currentConsultant?.email
+    );
+    const nextSecondaryEmail = toNormalizedEmail(
+      typeof data.secondaryEmail === "string"
+        ? data.secondaryEmail
+        : currentConsultant?.secondaryEmail
+    );
     setConsultants((prev) => prev.map((c) => (c.id === id ? { ...c, ...data } : c)));
 
     if (isFirebaseConfigured) {
@@ -3193,6 +3218,50 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
         return;
       }
     }
+
+    if (nextConsultantStatus === "active" || nextConsultantStatus === "inactive") {
+      const nextActive = nextConsultantStatus === "active";
+      const matchedProfile = profileList.find((profileItem) => {
+        if (profileItem.id === id) return true;
+        const profileEmail = toNormalizedEmail(profileItem.email);
+        return (
+          (nextPrimaryEmail !== "" && profileEmail === nextPrimaryEmail)
+          || (nextSecondaryEmail !== "" && profileEmail === nextSecondaryEmail)
+        );
+      });
+      if (matchedProfile) {
+        if (isFirebaseConfigured) {
+          const profileSaved = await profileCrud.update(matchedProfile.id, {
+            active: nextActive,
+          });
+          if (!profileSaved) {
+            toast.error("사용자 활성 상태 동기화에 실패했습니다");
+            return;
+          }
+        }
+        setProfileList((prev) =>
+          prev.map((item) =>
+            item.id === matchedProfile.id
+              ? { ...item, active: nextActive }
+              : item
+          )
+        );
+        setUsers((prev) =>
+          prev.map((userItem) => {
+            const sameProfileId = userItem.id === matchedProfile.id;
+            const sameEmail =
+              nextPrimaryEmail !== ""
+              && toNormalizedEmail(userItem.email) === nextPrimaryEmail;
+            if (!sameProfileId && !sameEmail) return userItem;
+            return {
+              ...userItem,
+              status: nextActive ? "active" : "inactive",
+            };
+          })
+        );
+      }
+    }
+
     toast.success("컨설턴트 정보가 업데이트되었습니다");
   };
 
@@ -3603,30 +3672,101 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     toast.success(`${generatedSlots.length}개 슬롯을 생성했습니다`);
   };
 
-  const handleUpdateUser = (id: string, data: Partial<UserWithPermissions>) => {
+  const handleUpdateUser = async (id: string, data: Partial<UserWithPermissions>) => {
+    const targetUser = users.find((userItem) => userItem.id === id);
+    const nextStatus = data.status ?? targetUser?.status ?? "active";
+    const nextActive = nextStatus === "active";
+    const targetUserEmail = toNormalizedEmail(targetUser?.email);
+
     setUsers(
       users.map((u) => (u.id === id ? { ...u, ...data } : u))
     );
+
     if (isFirebaseConfigured) {
-      const nextStatus = data.status ?? "active";
-      profileCrud.update(id, {
-        active: nextStatus === "active",
-      }).then((ok) => {
-        if (!ok) {
-          toast.error("사용자 정보 저장에 실패했습니다");
-          return;
-        }
-        setProfileList((prev) =>
-          prev.map((item) =>
-            item.id === id
-              ? { ...item, active: nextStatus === "active" }
-              : item
+      const profileSaved = await profileCrud.update(id, {
+        active: nextActive,
+      });
+      if (!profileSaved) {
+        toast.error("사용자 정보 저장에 실패했습니다");
+        return;
+      }
+
+      if (
+        (nextStatus === "active" || nextStatus === "inactive")
+        && targetUser?.role === "consultant"
+      ) {
+        const targetConsultantIds = Array.from(
+          new Set(
+            consultants
+              .filter((consultant) => {
+                if (consultant.id === id) return true;
+                if (!targetUserEmail) return false;
+                return (
+                  toNormalizedEmail(consultant.email) === targetUserEmail
+                  || toNormalizedEmail(consultant.secondaryEmail) === targetUserEmail
+                );
+              })
+              .map((consultant) => consultant.id)
           )
         );
-        toast.success("사용자 정보가 업데이트되었습니다");
-      });
+        if (targetConsultantIds.length > 0) {
+          const consultantResults = await Promise.all(
+            targetConsultantIds.map((consultantId) =>
+              consultantCrud.update(consultantId, {
+                status: nextActive ? "active" : "inactive",
+              })
+            )
+          );
+          if (consultantResults.some((result) => !result)) {
+            toast.error("컨설턴트 상태 동기화에 실패했습니다");
+            return;
+          }
+          setConsultants((prev) =>
+            prev.map((consultant) =>
+              targetConsultantIds.includes(consultant.id)
+                ? {
+                    ...consultant,
+                    status: nextActive ? "active" : "inactive",
+                  }
+                : consultant
+            )
+          );
+        }
+      }
+
+      setProfileList((prev) =>
+        prev.map((item) =>
+          item.id === id
+            ? { ...item, active: nextActive }
+            : item
+        )
+      );
+      toast.success("사용자 정보가 업데이트되었습니다");
       return;
     }
+
+    if (
+      (nextStatus === "active" || nextStatus === "inactive")
+      && targetUser?.role === "consultant"
+    ) {
+      setConsultants((prev) =>
+        prev.map((consultant) => {
+          const sameId = consultant.id === id;
+          const sameEmail =
+            targetUserEmail !== ""
+            && (
+              toNormalizedEmail(consultant.email) === targetUserEmail
+              || toNormalizedEmail(consultant.secondaryEmail) === targetUserEmail
+            );
+          if (!sameId && !sameEmail) return consultant;
+          return {
+            ...consultant,
+            status: nextActive ? "active" : "inactive",
+          };
+        })
+      );
+    }
+
     toast.success("사용자 정보가 업데이트되었습니다");
   };
 
