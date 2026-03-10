@@ -37,8 +37,8 @@ const FIELD_LABELS: Record<keyof CompanyInfoForm, string> = {
   capitalTotal: "자본총계",
   certification: "인증/지정 여부",
   tipsLipsHistory: "TIPS/LIPS 이력",
-  desiredInvestment2026: "2026년 내 희망 투자액",
-  desiredPreValue: "투자전 희망기업가치",
+  desiredInvestment2026: "2026년 내 희망 투자액 (억)",
+  desiredPreValue: "투자전 희망기업가치 (Pre-Value, 억)",
 }
 
 function formatNumber(value: number | null | undefined) {
@@ -305,9 +305,11 @@ export function useCompanyInfoForm(companyId: string) {
     field: keyof InvestmentInput,
     value: string
   ) {
+    const nextValue =
+      field === "postMoney" ? formatRevenueInput(value) : value
     setInvestmentRows((prev) =>
       prev.map((row, rowIndex) =>
-        rowIndex === index ? { ...row, [field]: value } : row
+        rowIndex === index ? { ...row, [field]: nextValue } : row
       )
     )
   }
@@ -348,12 +350,12 @@ export function useCompanyInfoForm(companyId: string) {
       investments: investmentRows.map((row) => ({
         stage: normalizeInvestmentStageValue(row.stage),
         date: row.date,
-        postMoney: toNumber(row.postMoney),
+        postMoney: toDecimalNumber(row.postMoney),
         majorShareholder: row.majorShareholder,
       })),
       fundingPlan: {
-        desiredAmount2026: toNumber(form.desiredInvestment2026),
-        preValue: toNumber(form.desiredPreValue),
+        desiredAmount2026: toDecimalNumber(form.desiredInvestment2026),
+        preValue: toDecimalNumber(form.desiredPreValue),
       },
       metadata: {
         updatedAt: serverTimestamp(),

@@ -826,8 +826,8 @@ function CompanySignupInfo({
     capitalTotal: "자본총계",
     certification: "인증/지정 여부",
     tipsLipsHistory: "TIPS/LIPS 이력",
-    desiredInvestment2026: "2026년 내 희망 투자액",
-    desiredPreValue: "투자전 희망기업가치",
+    desiredInvestment2026: "2026년 내 희망 투자액 (억)",
+    desiredPreValue: "투자전 희망기업가치 (Pre-Value, 억)",
   }
 
   function isFilled(value: string) {
@@ -1633,10 +1633,11 @@ function CompanySignupInfo({
                     <span className="block whitespace-nowrap">투자금액 (억)</span>
                     <input
                       className={inputClass(false)}
-                      placeholder="예: 25"
+                      placeholder="예: 25.5"
+                      inputMode="decimal"
                       value={row.postMoney}
                       onChange={(e) =>
-                        updateInvestmentRow(idx, "postMoney", formatNumberInput(e.target.value))
+                        updateInvestmentRow(idx, "postMoney", formatRevenueInput(e.target.value))
                       }
                     />
                   </label>
@@ -1733,30 +1734,32 @@ function CompanySignupInfo({
             <div className="text-sm font-semibold text-slate-700">투자 희망</div>
             <div className="mt-3 grid gap-3 md:grid-cols-2">
               <label className="text-xs text-slate-500">
-                2026년 내 희망 투자액
+                2026년 내 희망 투자액 (억)
                 <input
                   className={inputClass(isFieldInvalid("desiredInvestment2026"))}
-                  placeholder="예: 20억"
+                  placeholder="예: 20.5"
+                  inputMode="decimal"
                   value={form.desiredInvestment2026}
                   onChange={(e) =>
                     setForm((prev) => ({
                       ...prev,
-                      desiredInvestment2026: formatNumberInput(e.target.value),
+                      desiredInvestment2026: formatRevenueInput(e.target.value),
                     }))
                   }
                   onBlur={() => markTouched("desiredInvestment2026")}
                 />
               </label>
               <label className="text-xs text-slate-500">
-                투자전 희망기업가치
+                투자전 희망기업가치 (Pre-Value, 억)
                 <input
                   className={inputClass(isFieldInvalid("desiredPreValue"))}
-                  placeholder="예: 120억"
+                  placeholder="예: 120.0"
+                  inputMode="decimal"
                   value={form.desiredPreValue}
                   onChange={(e) =>
                     setForm((prev) => ({
                       ...prev,
-                      desiredPreValue: formatNumberInput(e.target.value),
+                      desiredPreValue: formatRevenueInput(e.target.value),
                     }))
                   }
                   onBlur={() => markTouched("desiredPreValue")}
