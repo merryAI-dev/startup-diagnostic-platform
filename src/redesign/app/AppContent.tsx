@@ -358,6 +358,15 @@ function normalizeConsultantDisplayName(value?: string | null): string {
     .toLowerCase();
 }
 
+function normalizeTimeKey(value?: string): string {
+  if (!value) return "";
+  const [hourRaw, minuteRaw] = value.trim().split(":");
+  const hour = Number(hourRaw);
+  const minute = Number(minuteRaw);
+  if (Number.isNaN(hour) || Number.isNaN(minute)) return value.trim();
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+
 function isConsultantAvailableAt(
   consultant: Consultant,
   dateKey: string,
