@@ -1646,13 +1646,14 @@ export function CompanyDashboard({
                             </span>
                             <input
                               className={inputClass(false, "rounded-lg")}
-                              placeholder="예: 25"
+                              placeholder="예: 25.5"
+                              inputMode="decimal"
                               value={row.postMoney}
                               onChange={(e) =>
                                 updateInvestmentRow(
                                   idx,
                                   "postMoney",
-                                  formatNumberInput(e.target.value)
+                                  formatRevenueInput(e.target.value)
                                 )
                               }
                             />
@@ -1766,17 +1767,18 @@ export function CompanyDashboard({
                     </div>
                     <div className="mt-3 grid gap-3 sm:grid-cols-2">
                       <label className="text-xs text-slate-500">
-                        2026년 내 희망 투자액
+                        2026년 내 희망 투자액 (억)
                         <input
                           className={inputClass(
                             isFieldInvalid("desiredInvestment2026")
                           )}
-                          placeholder="예: 20억"
+                          placeholder="예: 20.5"
+                          inputMode="decimal"
                           value={form.desiredInvestment2026}
                           onChange={(e) =>
                             setForm((prev) => ({
                               ...prev,
-                              desiredInvestment2026: formatNumberInput(
+                              desiredInvestment2026: formatRevenueInput(
                                 e.target.value
                               ),
                             }))
@@ -1785,17 +1787,18 @@ export function CompanyDashboard({
                         />
                       </label>
                       <label className="text-xs text-slate-500">
-                        투자전 희망기업가치 (Pre-Value)
+                        투자전 희망기업가치 (Pre-Value, 억)
                         <input
                           className={inputClass(
                             isFieldInvalid("desiredPreValue")
                           )}
-                          placeholder="예: 200억"
+                          placeholder="예: 200.0"
+                          inputMode="decimal"
                           value={form.desiredPreValue}
                           onChange={(e) =>
                             setForm((prev) => ({
                               ...prev,
-                              desiredPreValue: formatNumberInput(
+                              desiredPreValue: formatRevenueInput(
                                 e.target.value
                               ),
                             }))

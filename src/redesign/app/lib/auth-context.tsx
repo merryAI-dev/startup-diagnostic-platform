@@ -98,8 +98,8 @@ function buildCompanyInfoRecord(form: CompanyInfoForm): CompanyInfoRecord {
     },
     investments: [],
     fundingPlan: {
-      desiredAmount2026: toNumber(form.desiredInvestment2026),
-      preValue: toNumber(form.desiredPreValue),
+      desiredAmount2026: toDecimalNumber(form.desiredInvestment2026),
+      preValue: toDecimalNumber(form.desiredPreValue),
     },
     metadata: {
       updatedAt: serverTimestamp(),
