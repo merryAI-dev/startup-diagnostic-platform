@@ -1,5 +1,7 @@
 import {
+  GoogleAuthProvider,
   signInWithEmailAndPassword,
+  signInWithPopup,
   createUserWithEmailAndPassword,
   signOut,
 } from "firebase/auth"
@@ -11,6 +13,12 @@ export function signInWithEmail(email: string, password: string) {
 
 export function signUpWithEmail(email: string, password: string) {
   return createUserWithEmailAndPassword(auth, email, password)
+}
+
+export function signInWithGoogle() {
+  const provider = new GoogleAuthProvider()
+  provider.setCustomParameters({ prompt: "select_account" })
+  return signInWithPopup(auth, provider)
 }
 
 export function signOutUser() {
