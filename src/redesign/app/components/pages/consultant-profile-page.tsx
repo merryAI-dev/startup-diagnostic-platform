@@ -347,7 +347,7 @@ export function ConsultantProfilePage({
                 </div>
               ) : (
                 <div className="rounded-lg border border-dashed border-slate-200 bg-white px-3 py-3 text-sm text-muted-foreground">
-                  매핑된 아젠다가 없습니다. 관리자에게 요청해주세요.
+                  매칭된 아젠다가 없습니다. 관리자에게 요청해주세요.
                 </div>
               )}
               </div>

@@ -18,7 +18,7 @@ export function RoleSelector({ role, setRole }: RoleSelectorProps) {
           }`}
           onClick={() => setRole("company")}
         >
-          회사
+          스타트업
         </button>
         <button
           className={`flex-1 rounded-lg px-3 py-2 text-xs font-semibold ${

@@ -96,7 +96,7 @@ export function Signup({ onSignup, onNavigateToLogin }: SignupProps) {
   };
 
   const title = useMemo(() => (
-    role === "company" ? "기업 회원가입" : "컨설턴트 회원가입"
+    role === "company" ? "스타트업 회원가입" : "컨설턴트 회원가입"
   ), [role]);
 
   return (
@@ -118,7 +118,7 @@ export function Signup({ onSignup, onNavigateToLogin }: SignupProps) {
                 setStep("info");
               }}
             >
-              기업 회원
+              스타트업 회원
             </Button>
             <Button
               type="button"
@@ -136,7 +136,7 @@ export function Signup({ onSignup, onNavigateToLogin }: SignupProps) {
             {step === "info" && role === "company" && (
               <div className="grid grid-cols-2 gap-4">
                 <div className="col-span-2">
-                  <Label htmlFor="companyInfo">기업명</Label>
+                  <Label htmlFor="companyInfo">스타트업명</Label>
                   <Input
                     id="companyInfo"
                     placeholder="예: 임팩트스타트업"

@@ -119,7 +119,7 @@ export function SignupPage() {
         subtitle={
           isOnboardingSignedInUser
             ? "역할 선택 후 필수 정보를 입력하면 승인 대기로 접수됩니다."
-            : "회사, 관리자, 컨설턴트 중 역할을 선택해 계정을 생성하세요."
+            : "스타트업, 관리자, 컨설턴트 중 역할을 선택해 계정을 생성하세요."
         }
         onSubmit={handleEmailSignup}
         onContinue={handleSignedInContinue}

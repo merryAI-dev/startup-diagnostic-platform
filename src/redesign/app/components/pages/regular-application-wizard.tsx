@@ -81,6 +81,22 @@ const steps = [
   "최종 확인",
 ];
 
+function normalizeTimeKey(value?: string): string {
+  if (!value) return "";
+  const [hourRaw, minuteRaw] = value.trim().split(":");
+  const hour = Number(hourRaw);
+  const minute = Number(minuteRaw);
+  if (Number.isNaN(hour) || Number.isNaN(minute)) return value.trim();
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+
+function normalizeConsultantDisplayName(value?: string | null): string {
+  return (value ?? "")
+    .replace(/\s*컨설턴트\s*$/u, "")
+    .trim()
+    .toLowerCase();
+}
+
 export function RegularApplicationWizard({
   officeHour,
   officeHours,
@@ -127,6 +143,43 @@ export function RegularApplicationWizard({
   const consultantPool = selectedAgendaId
     ? consultantsByAgendaId.get(selectedAgendaId) ?? []
     : [];
+  const consultantBusySlots = useMemo(() => {
+    const byId = new Map<string, Set<string>>();
+    const byName = new Map<string, Set<string>>();
+
+    applications.forEach((application) => {
+      if (
+        application.status !== "pending"
+        && application.status !== "review"
+        && application.status !== "confirmed"
+        && application.status !== "completed"
+      ) {
+        return;
+      }
+      if (!application.scheduledDate || !application.scheduledTime) return;
+      const slotKey = `${application.scheduledDate}|${normalizeTimeKey(application.scheduledTime)}`;
+
+      if (application.consultantId) {
+        const idSet = byId.get(application.consultantId);
+        if (idSet) {
+          idSet.add(slotKey);
+        } else {
+          byId.set(application.consultantId, new Set([slotKey]));
+        }
+      }
+
+      const consultantNameKey = normalizeConsultantDisplayName(application.consultant);
+      if (!consultantNameKey) return;
+      const nameSet = byName.get(consultantNameKey);
+      if (nameSet) {
+        nameSet.add(slotKey);
+      } else {
+        byName.set(consultantNameKey, new Set([slotKey]));
+      }
+    });
+
+    return { byId, byName };
+  }, [applications]);
   const programOfficeHours = officeHour.programId
     ? officeHours.filter((item) => item.programId === officeHour.programId)
     : [officeHour];
@@ -182,12 +235,36 @@ export function RegularApplicationWizard({
     const slotsForDate = programOfficeHours.flatMap((item) =>
       item.slots?.filter((slot) => slot.date === selectedDateKey) ?? []
     );
-    const availabilityRequired = consultantPool.length > 0;
-    const dayAvailabilityList = availabilityRequired
-      ? consultantPool.map((consultant) =>
-        consultant.availability.find((day) => day.dayOfWeek === selectedDate.getDay())
-      )
-      : [];
+    const hasMatchedConsultant = consultantPool.length > 0;
+    const hasAssignableConsultantAt = (time: string) => {
+      if (!hasMatchedConsultant) return false;
+      const timeKey = normalizeTimeKey(time);
+      const slotKey = `${selectedDateKey}|${timeKey}`;
+      return consultantPool.some((consultant) => {
+        const dayAvailability = consultant.availability.find(
+          (day) => day.dayOfWeek === selectedDate.getDay()
+        );
+        const availableInSchedule = Boolean(
+          dayAvailability?.slots.some(
+            (slotAvailability) =>
+              normalizeTimeKey(slotAvailability.start) === timeKey && slotAvailability.available
+          )
+        );
+        if (!availableInSchedule) return false;
+
+        if (consultantBusySlots.byId.get(consultant.id)?.has(slotKey)) return false;
+
+        const consultantNameKey = normalizeConsultantDisplayName(consultant.name);
+        if (
+          consultantNameKey
+          && consultantBusySlots.byName.get(consultantNameKey)?.has(slotKey)
+        ) {
+          return false;
+        }
+
+        return true;
+      });
+    };
 
     if (slotsForDate.length > 0) {
       const byTime = new Map<string, { hasOpen: boolean; slotId?: string }>();
@@ -208,15 +285,8 @@ export function RegularApplicationWizard({
         .sort(([a], [b]) => a.localeCompare(b))
         .map(([time, meta]) => {
           const blockedByAgenda = blockedAgendaTimes.has(time);
-          const consultantAvailable = availabilityRequired
-            ? dayAvailabilityList.some((availability) =>
-              availability?.slots.some(
-                (slotAvailability) =>
-                  slotAvailability.start === time && slotAvailability.available
-              )
-            )
-            : true;
-          const available = meta.hasOpen && !blockedByAgenda && consultantAvailable;
+          const consultantAssignable = hasAssignableConsultantAt(time);
+          const available = meta.hasOpen && !blockedByAgenda && consultantAssignable;
           return {
             time,
             available,
@@ -224,9 +294,11 @@ export function RegularApplicationWizard({
               ? undefined
               : blockedByAgenda
                 ? "이미 예약된 시간입니다"
-                : consultantAvailable
-                  ? "예약 불가한 시간입니다"
-                  : "컨설턴트 가능 시간이 아닙니다",
+                : !consultantAssignable
+                  ? "해당 시간에 배정 가능한 컨설턴트가 없습니다"
+                  : meta.hasOpen
+                    ? undefined
+                    : "예약 불가한 시간입니다",
             slotId: meta.slotId,
           };
         });
@@ -234,24 +306,15 @@ export function RegularApplicationWizard({
 
     return getTimeSlots(selectedDate.toISOString()).map((slot) => {
       const blockedByAgenda = blockedAgendaTimes.has(slot.time);
-      const consultantAvailable = availabilityRequired
-        ? consultantPool.some((consultant) =>
-          consultant.availability
-            .find((day) => day.dayOfWeek === selectedDate.getDay())
-            ?.slots.some(
-              (slotAvailability) =>
-                slotAvailability.start === slot.time && slotAvailability.available
-            )
-        )
-        : true;
+      const consultantAssignable = hasAssignableConsultantAt(slot.time);
       return {
         ...slot,
-        available: slot.available && !blockedByAgenda && consultantAvailable,
+        available: slot.available && !blockedByAgenda && consultantAssignable,
         reason: blockedByAgenda
           ? "이미 예약된 시간입니다"
-          : consultantAvailable
-            ? slot.reason
-            : "컨설턴트 가능 시간이 아닙니다",
+          : !consultantAssignable
+            ? "해당 시간에 배정 가능한 컨설턴트가 없습니다"
+            : slot.reason,
         slotId: undefined,
       };
     });

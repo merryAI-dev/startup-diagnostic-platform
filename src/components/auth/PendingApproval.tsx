@@ -32,7 +32,7 @@ export function PendingApproval({
           </div>
         ) : role === "company" ? (
           <div className="space-y-2">
-            <div className="font-semibold text-slate-700">회사 계정</div>
+            <div className="font-semibold text-slate-700">스타트업 계정</div>
             <div>1. 운영자가 계정을 승인하면 이용할 수 있습니다.</div>
           </div>
         ) : role === "consultant" ? (

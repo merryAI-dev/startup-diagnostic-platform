@@ -301,7 +301,7 @@ export function AuthCard({
           명확하게 분리해 운영하세요.
         </p>
         <div className="mt-6 space-y-2 text-sm text-slate-200">
-          <div>• 회사: 진단 설문 작성, 결과 확인, 리포트 다운로드</div>
+          <div>• 스타트업: 진단 설문 작성, 결과 확인, 리포트 다운로드</div>
           <div>• 관리자: 사용자 승인, 운영 대시보드 관리</div>
           <div>• 컨설턴트: 오피스아워 운영 및 기업 지원</div>
         </div>

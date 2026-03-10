@@ -3,7 +3,6 @@ import { Application, Program, OfficeHourReport, User } from "@/redesign/app/lib
 import { Button } from "@/redesign/app/components/ui/button";
 import { Badge } from "@/redesign/app/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/redesign/app/components/ui/dialog";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/redesign/app/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/redesign/app/components/ui/table";
 import { AlertCircle, Clock, Calendar, FileText } from "lucide-react";
 import { addDays, format, differenceInDays } from "date-fns";
@@ -90,9 +89,6 @@ export function PendingReportsDashboard({
 }: PendingReportsDashboardProps) {
   const isConsultantUser = currentUser.role === "consultant";
   const isAdminUser = currentUser.role === "admin";
-  const [reportProgramFilter, setReportProgramFilter] = useState("all");
-  const [reportConsultantFilter, setReportConsultantFilter] = useState("all");
-  const [reportStatusFilter, setReportStatusFilter] = useState("all");
   const [selectedReportItem, setSelectedReportItem] = useState<{
     report: OfficeHourReport;
     application: Application;
@@ -274,60 +270,6 @@ export function PendingReportsDashboard({
       });
   }, [applications, programs, reports, isConsultantUser, currentConsultantId, currentConsultantName]);
 
-  const reportProgramOptions = useMemo(() => {
-    const map = new Map<string, string>();
-    submittedReports.forEach((item) => {
-      if (!map.has(item.programId)) {
-        map.set(item.programId, item.programName);
-      }
-    });
-    return Array.from(map.entries()).map(([id, name]) => ({ id, name }));
-  }, [submittedReports]);
-
-  const reportConsultantOptions = useMemo(() => {
-    return Array.from(
-      new Set(
-        submittedReports.map(
-          (item) => item.report.consultantName || item.application.consultant
-        )
-      )
-    ).filter(Boolean);
-  }, [submittedReports]);
-
-  const filteredSubmittedReports = useMemo(() => {
-    return submittedReports.filter((item) => {
-      const matchesProgram = reportProgramFilter === "all" || item.programId === reportProgramFilter;
-      const consultantLabel = item.report.consultantName || item.application.consultant;
-      const matchesConsultant =
-        reportConsultantFilter === "all" || consultantLabel === reportConsultantFilter;
-      return matchesProgram && matchesConsultant;
-    });
-  }, [submittedReports, reportProgramFilter, reportConsultantFilter]);
-
-  const reportProgramOptionsAll = useMemo(() => {
-    const map = new Map<string, { name: string; color: string }>();
-    pendingReports.forEach((item) => {
-      const programId = item.application.programId || "unknown";
-      if (!map.has(programId)) {
-        map.set(programId, { name: item.programName, color: item.programColor });
-      }
-    });
-    submittedReports.forEach((item) => {
-      if (!map.has(item.programId)) {
-        map.set(item.programId, { name: item.programName, color: item.programColor });
-      }
-    });
-    return Array.from(map.entries()).map(([id, meta]) => ({ id, ...meta }));
-  }, [pendingReports, submittedReports]);
-
-  const reportConsultantOptionsAll = useMemo(() => {
-    const pendingNames = pendingReports.map((item) => item.application.consultant);
-    const submittedNames = submittedReports.map(
-      (item) => item.report.consultantName || item.application.consultant
-    );
-    return Array.from(new Set([...pendingNames, ...submittedNames])).filter(Boolean);
-  }, [pendingReports, submittedReports]);
-
   const reportRows = useMemo<ReportRow[]>(() => {
     const rows: ReportRow[] = pendingReports.map((item) => ({
       type: "pending" as const,
@@ -356,15 +298,8 @@ export function PendingReportsDashboard({
       });
     });
 
-    return rows.filter((row) => {
-      const matchesProgram = reportProgramFilter === "all" || row.programId === reportProgramFilter;
-      const matchesConsultant =
-        reportConsultantFilter === "all" || row.consultantName === reportConsultantFilter;
-      const matchesStatus =
-        reportStatusFilter === "all" || row.statusLabel === reportStatusFilter;
-      return matchesProgram && matchesConsultant && matchesStatus;
-    });
-  }, [pendingReports, submittedReports, reportProgramFilter, reportConsultantFilter, reportStatusFilter]);
+    return rows;
+  }, [pendingReports, submittedReports]);
   const selectedReportContent = useMemo(
     () => parseReportContent(selectedReportItem?.report.content),
     [selectedReportItem?.report.content]
@@ -460,54 +395,13 @@ export function PendingReportsDashboard({
           <div className="p-6 border-b space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="font-semibold text-gray-900">오피스아워 보고서 현황</h3>
-              <span className="text-sm text-muted-foreground">
-                {reportRows.length}건
-              </span>
-            </div>
-            <div className="flex flex-wrap items-center gap-3">
-              <Select value={reportProgramFilter} onValueChange={setReportProgramFilter}>
-                <SelectTrigger className="w-48">
-                  <SelectValue placeholder="사업 필터" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">전체 사업</SelectItem>
-                  {reportProgramOptionsAll.map((program) => (
-                    <SelectItem key={program.id} value={program.id}>
-                      {program.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Select value={reportConsultantFilter} onValueChange={setReportConsultantFilter}>
-                <SelectTrigger className="w-52">
-                  <SelectValue placeholder="컨설턴트 필터" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">전체 컨설턴트</SelectItem>
-                  {reportConsultantOptionsAll.map((name) => (
-                    <SelectItem key={name} value={name}>
-                      {name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Select value={reportStatusFilter} onValueChange={setReportStatusFilter}>
-                <SelectTrigger className="w-40">
-                  <SelectValue placeholder="상태 필터" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">전체 상태</SelectItem>
-                  <SelectItem value="작성">작성</SelectItem>
-                  <SelectItem value="미작성">미작성</SelectItem>
-                </SelectContent>
-              </Select>
               {!isAdminUser && (
                 <Button
                   size="sm"
-                  className="bg-slate-900 text-white hover:bg-slate-800"
+                  className="bg-emerald-600 text-white hover:bg-emerald-700"
                   onClick={() => onCreateReport("irregular-manual")}
                 >
-                  새 일지 작성
+                  비정기 오피스아워 작성
                 </Button>
               )}
             </div>
