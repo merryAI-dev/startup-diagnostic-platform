@@ -1,36 +1,14 @@
-import { type ChangeEvent, useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useLocation, useNavigate } from "react-router-dom"
-import {
-  collection,
-  deleteDoc,
-  doc,
-  getDocs,
-  orderBy,
-  query,
-  serverTimestamp,
-  setDoc,
-} from "firebase/firestore"
 import type { User as FirebaseUser } from "firebase/auth"
-import {
-  deleteObject,
-  getDownloadURL,
-  ref as storageRef,
-  uploadBytesResumable,
-  type UploadTask,
-} from "firebase/storage"
 import { useAuth } from "@/context/AuthContext"
 import { signInWithEmail, signOutUser, signUpWithEmail } from "@/firebase/auth"
-import { db, storage } from "@/firebase/client"
+import { db } from "@/firebase/client"
 import type { Role } from "@/types/auth"
 import { ConsultantProfilePage } from "@/redesign/app/components/pages/consultant-profile-page"
 import {
   ChevronDown,
-  Eye,
-  FileImage,
-  FileText,
-  Loader2,
   Trash2,
-  UploadCloud,
 } from "lucide-react"
 import { toast } from "sonner"
 import { createUserProfile } from "@/firebase/profile"
@@ -57,6 +35,13 @@ function getSignupErrorMessage(error: any) {
     return "비밀번호가 너무 약합니다. 더 강한 비밀번호를 입력해주세요."
   }
   return "회원가입에 실패했습니다. 입력값을 확인하세요."
+}
+
+function getErrorCode(error: unknown) {
+  if (error && typeof error === "object" && "code" in error) {
+    return String((error as { code?: unknown }).code ?? "")
+  }
+  return ""
 }
 
 function getRoleFromQuery(search: string): Role | null {
@@ -90,6 +75,7 @@ export function SignupInfoPage() {
   )
 
   useEffect(() => {
+    if (creatingAccount) return
     if (loading) return
     if (!user) return
     if (profile) return
@@ -103,9 +89,9 @@ export function SignupInfoPage() {
     return () => {
       alive = false
     }
-  }, [loading, profile, refreshProfile, user])
+  }, [creatingAccount, loading, profile, refreshProfile, user])
 
-  if (loading || hydratingProfile) {
+  if (loading || (hydratingProfile && !creatingAccount)) {
     return (
       <div className="flex h-full items-center justify-center text-sm text-slate-500">
         불러오는 중...
@@ -192,7 +178,12 @@ export function SignupInfoPage() {
               )
               await handleComplete()
             } catch (error) {
-              toast.error("승인 요청에 실패했습니다. 다시 시도해주세요.")
+              const code = getErrorCode(error)
+              toast.error(
+                code
+                  ? `승인 요청에 실패했습니다. (${code})`
+                  : "승인 요청에 실패했습니다. 다시 시도해주세요."
+              )
             }
           }}
           type="button"
@@ -221,8 +212,6 @@ export function SignupInfoPage() {
 
   return (
     <CompanySignupInfo
-      companyId={profile?.companyId ?? null}
-      userId={user?.uid ?? ""}
       userEmail={fallbackEmail}
       requestedRole={requestedRole}
       ensureAuthUser={ensureAuthUser}
@@ -273,7 +262,12 @@ function ConsultantSignupInfo({
       )
       await onComplete()
     } catch (error) {
-      toast.error("승인 요청에 실패했습니다. 다시 시도해주세요.")
+      const code = getErrorCode(error)
+      toast.error(
+        code
+          ? `승인 요청에 실패했습니다. (${code})`
+          : "승인 요청에 실패했습니다. 다시 시도해주세요."
+      )
     }
   }
 
@@ -294,38 +288,18 @@ function ConsultantSignupInfo({
 }
 
 function CompanySignupInfo({
-  companyId,
-  userId,
   userEmail,
   requestedRole,
   ensureAuthUser,
   onComplete,
   onCancel,
 }: {
-  companyId: string | null
-  userId: string
   userEmail: string
   requestedRole: Role
   ensureAuthUser: () => Promise<FirebaseUser | null>
   onComplete: () => Promise<void>
   onCancel: () => void
 }) {
-  const [generatedCompanyId] = useState(() => {
-    if (!db) return null
-    const ref = doc(collection(db, "companies"))
-    return ref.id
-  })
-  const effectiveCompanyId = companyId ?? generatedCompanyId
-  const companyIdValue = effectiveCompanyId ?? ""
-
-  if (!effectiveCompanyId) {
-    return (
-      <div className="flex h-full items-center justify-center text-sm text-slate-500">
-        회사 정보를 찾을 수 없습니다. 로그인 화면으로 이동해주세요.
-      </div>
-    )
-  }
-
   const [form, setForm] = useState<CompanyInfoForm>(DEFAULT_FORM)
   const [investmentRows, setInvestmentRows] = useState<InvestmentInput[]>([
     { stage: "", date: "", postMoney: "", majorShareholder: "" },
@@ -338,40 +312,8 @@ function CompanySignupInfo({
   const [consentPrivacy, setConsentPrivacy] = useState(false)
   const [consentMarketing, setConsentMarketing] = useState(false)
   const [consentError, setConsentError] = useState<string | null>(null)
-  const [uploadingFiles, setUploadingFiles] = useState(false)
-  const [uploadError, setUploadError] = useState<string | null>(null)
-  const [deletedFileIds, setDeletedFileIds] = useState<Record<string, boolean>>(
-    {}
-  )
-  const [deletingFileIds, setDeletingFileIds] = useState<Record<string, boolean>>(
-    {}
-  )
-  const [uploads, setUploads] = useState<
-    {
-      id: string
-      name: string
-      progress: number
-      status: "queued" | "uploading" | "done" | "error" | "canceled"
-      storagePath: string
-      file?: File
-    }[]
-  >([])
-  const uploadTasksRef = useRef<Map<string, UploadTask>>(new Map())
-  const fileInputRef = useRef<HTMLInputElement | null>(null)
-  const [companyFiles, setCompanyFiles] = useState<
-    {
-      id: string
-      name: string
-      size: number
-      contentType: string | null
-      storagePath: string
-      downloadUrl: string | null
-      createdAt?: unknown
-    }[]
-  >([])
   const CONSENT_VERSION = "v1.0"
   const CONSENT_METHOD = "company_signup_modal"
-  const allowedExtensions = ["pdf", "png", "ai"]
 
 
   const CERTIFICATION_OPTIONS = [
@@ -423,306 +365,6 @@ function CompanySignupInfo({
   const DAUM_POSTCODE_SCRIPT_SRC =
     "https://t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"
   const postcodeScriptLoadingRef = useRef(false)
-
-  async function loadCompanyFiles() {
-    try {
-      const filesRef = collection(db, "companies", companyIdValue, "files")
-      const filesQuery = query(filesRef, orderBy("createdAt", "desc"))
-      const snapshot = await getDocs(filesQuery)
-      const items = await Promise.all(
-        snapshot.docs.map(async (docSnap) => {
-          const data = docSnap.data() as {
-            name: string
-            size: number
-            contentType?: string | null
-            storagePath: string
-            createdAt?: unknown
-          }
-          let downloadUrl: string | null = null
-          try {
-            downloadUrl = await getDownloadURL(storageRef(storage, data.storagePath))
-          } catch {
-            downloadUrl = null
-          }
-          return {
-            id: docSnap.id,
-            name: data.name,
-            size: data.size,
-            contentType: data.contentType ?? null,
-            storagePath: data.storagePath,
-            createdAt: data.createdAt,
-            downloadUrl,
-          }
-        })
-      )
-      setCompanyFiles(items)
-      setUploads((prev) =>
-        prev.filter(
-          (item) =>
-            !(item.status === "done" && items.some((saved) => saved.id === item.id))
-        )
-      )
-    } catch (error) {
-      console.warn("Failed to load company files:", error)
-    }
-  }
-
-  useEffect(() => {
-    if (!effectiveCompanyId) return
-    void loadCompanyFiles()
-  }, [effectiveCompanyId])
-
-  async function startUpload(
-    file: File,
-    docId: string,
-    storagePath: string,
-    createdByUid: string
-  ) {
-    return new Promise<void>((resolve, reject) => {
-      const task = uploadBytesResumable(storageRef(storage, storagePath), file, {
-        customMetadata: {
-          createdByUid,
-          companyId: companyIdValue,
-        },
-      })
-      uploadTasksRef.current.set(docId, task)
-      setUploads((prev) =>
-        prev.map((item) =>
-          item.id === docId ? { ...item, status: "uploading" } : item
-        )
-      )
-      task.on(
-        "state_changed",
-        (snapshot) => {
-          const rawProgress = Math.round(
-            (snapshot.bytesTransferred / snapshot.totalBytes) * 100
-          )
-          const progress =
-            rawProgress >= 100 ? 99 : Math.max(0, Math.min(rawProgress, 99))
-          setUploads((prev) =>
-            prev.map((item) =>
-              item.id === docId ? { ...item, progress } : item
-            )
-          )
-        },
-        (error) => {
-          uploadTasksRef.current.delete(docId)
-          setUploads((prev) =>
-            prev.map((item) =>
-              item.id === docId ? { ...item, status: "error" } : item
-            )
-          )
-          reject(error)
-        },
-        async () => {
-          try {
-            const downloadUrl = await getDownloadURL(task.snapshot.ref)
-            await setDoc(
-              doc(db, "companies", companyIdValue, "files", docId),
-              {
-                name: file.name,
-                size: file.size,
-                contentType: file.type || null,
-                storagePath,
-                createdByUid,
-                createdAt: serverTimestamp(),
-              }
-            )
-            setUploads((prev) =>
-              prev.filter((item) => item.id !== docId)
-            )
-            setCompanyFiles((prev) => [
-              {
-                id: docId,
-                name: file.name,
-                size: file.size,
-                contentType: file.type || null,
-                storagePath,
-                downloadUrl,
-                createdAt: serverTimestamp(),
-              },
-              ...prev,
-            ])
-            toast.success(`${file.name} 업로드 완료`)
-            resolve()
-          } catch (error) {
-            setUploads((prev) =>
-              prev.map((item) =>
-                item.id === docId ? { ...item, status: "error" } : item
-              )
-            )
-            reject(error)
-          } finally {
-            uploadTasksRef.current.delete(docId)
-          }
-        }
-      )
-    })
-  }
-
-  async function handleFileUpload(files: FileList | File[] | null) {
-    if (!files || files.length === 0) return
-    setUploadError(null)
-    setUploadingFiles(true)
-    try {
-      const authUser = await ensureAuthUser()
-      if (!authUser) {
-        setUploadError("로그인 정보를 확인할 수 없습니다. 다시 시도해주세요.")
-        return
-      }
-      const entries = Array.isArray(files) ? files : Array.from(files)
-      const uploadJobs = entries.map(async (file) => {
-        const extension = file.name.split(".").pop()?.toLowerCase() ?? ""
-        if (!allowedExtensions.includes(extension)) {
-          setUploadError("PDF, PNG, AI 파일만 업로드할 수 있습니다.")
-          toast.error("PDF, PNG, AI 파일만 업로드할 수 있습니다.")
-          return
-        }
-        if (file.size > 50 * 1024 * 1024) {
-          setUploadError("파일은 50MB 이하만 업로드할 수 있습니다.")
-          toast.error("파일은 50MB 이하만 업로드할 수 있습니다.")
-          return
-        }
-        await setDoc(
-          doc(db, "companies", companyIdValue),
-          {
-            ownerUid: authUser.uid,
-            updatedAt: serverTimestamp(),
-          },
-          { merge: true }
-        )
-        const filesRef = collection(db, "companies", companyIdValue, "files")
-        const docRef = doc(filesRef)
-        const storagePath = `company-files/${companyIdValue}/${docRef.id}/${file.name}`
-        setUploads((prev) => [
-          ...prev,
-          {
-            id: docRef.id,
-            name: file.name,
-            progress: 0,
-            status: "queued",
-            storagePath,
-            file,
-          },
-        ])
-        await startUpload(file, docRef.id, storagePath, authUser.uid)
-      })
-      await Promise.all(uploadJobs)
-    } catch (error) {
-      console.warn("File upload failed:", error)
-      const code = (error as { code?: string })?.code ?? ""
-      if (code === "storage/unauthorized") {
-        const message =
-          "파일 업로드 권한이 없습니다. Storage Rules 배포 상태를 확인해주세요."
-        setUploadError(message)
-        toast.error(message)
-      } else {
-        setUploadError("파일 업로드에 실패했습니다. 다시 시도해주세요.")
-        toast.error("파일 업로드에 실패했습니다. 다시 시도해주세요.")
-      }
-    } finally {
-      setUploadingFiles(false)
-    }
-  }
-
-  function openFilePicker() {
-    if (uploadingFiles) return
-    fileInputRef.current?.click()
-  }
-
-  function handleFileInputChange(event: ChangeEvent<HTMLInputElement>) {
-    const selectedFiles = event.target.files
-      ? Array.from(event.target.files)
-      : null
-    // Allow selecting the same file again after a failed upload.
-    event.target.value = ""
-    void handleFileUpload(selectedFiles)
-  }
-
-  function cancelUpload(targetId: string) {
-    const task = uploadTasksRef.current.get(targetId)
-    if (!task) return
-    task.cancel()
-    uploadTasksRef.current.delete(targetId)
-    setUploads((prev) =>
-      prev.map((item) =>
-        item.id === targetId ? { ...item, status: "canceled" } : item
-      )
-    )
-  }
-
-  async function retryUpload(targetId: string) {
-    const target = uploads.find((item) => item.id === targetId)
-    if (!target || !target.file) return
-    setUploads((prev) =>
-      prev.map((item) =>
-        item.id === targetId
-          ? { ...item, status: "queued", progress: 0 }
-          : item
-      )
-    )
-    try {
-      const authUser = await ensureAuthUser()
-      if (!authUser) return
-      await startUpload(target.file, target.id, target.storagePath, authUser.uid)
-      await loadCompanyFiles()
-    } catch (error) {
-      console.warn("Retry upload failed:", error)
-    }
-  }
-
-  async function handleFileDelete(file: {
-    id: string
-    storagePath: string
-  }) {
-    let storageDeleted = false
-    let docDeleted = false
-    try {
-      setDeletingFileIds((prev) => ({ ...prev, [file.id]: true }))
-      try {
-        await deleteObject(storageRef(storage, file.storagePath))
-        storageDeleted = true
-      } catch (error: any) {
-        const code = error?.code ?? ""
-        if (code === "storage/object-not-found") {
-          storageDeleted = true
-        } else {
-          throw error
-        }
-      }
-
-      try {
-        await deleteDoc(doc(db, "companies", companyIdValue, "files", file.id))
-        docDeleted = true
-      } catch (error) {
-        console.warn("Failed to delete file metadata:", error)
-      }
-
-      await loadCompanyFiles()
-      if (!docDeleted) {
-        toast.warning("파일은 삭제되었지만 목록 정리에 실패했습니다.")
-      } else {
-        setDeletedFileIds((prev) => ({ ...prev, [file.id]: true }))
-        setTimeout(() => {
-          setDeletedFileIds((prev) => {
-            const next = { ...prev }
-            delete next[file.id]
-            return next
-          })
-        }, 2000)
-        toast.success("파일이 삭제되었습니다.")
-      }
-    } catch (error) {
-      console.warn("Failed to delete file:", error)
-      toast.error("파일 삭제에 실패했습니다.")
-    } finally {
-      setDeletingFileIds((prev) => {
-        const next = { ...prev }
-        delete next[file.id]
-        return next
-      })
-    }
-  }
 
   function openAddressSearchPopup(targetField: AddressFieldKey) {
     const typedWindow = window as Window & { daum?: { Postcode?: DaumPostcodeConstructor } }
@@ -1072,7 +714,7 @@ function CompanySignupInfo({
         requestedRole,
         authUser.email ?? userEmail,
         {
-          companyId: companyIdValue,
+          companyId: authUser.uid,
           companyInfo: form,
           investmentRows,
           consents: {
@@ -1093,7 +735,12 @@ function CompanySignupInfo({
       )
       await onComplete()
     } catch (error) {
-      toast.error("승인 요청에 실패했습니다. 다시 시도해주세요.")
+      const code = getErrorCode(error)
+      toast.error(
+        code
+          ? `승인 요청에 실패했습니다. (${code})`
+          : "승인 요청에 실패했습니다. 다시 시도해주세요."
+      )
     } finally {
       setSaving(false)
     }
@@ -1255,170 +902,9 @@ function CompanySignupInfo({
 
           <section>
             <div className="text-sm font-semibold text-slate-700">자료 업로드</div>
-            <div className="mt-3 rounded-xl border border-slate-200 bg-gradient-to-br from-slate-50 via-white to-slate-50 p-4">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-900 text-white">
-                    <UploadCloud className="h-5 w-5" />
-                  </div>
-                  <div>
-                    <div className="text-sm font-semibold text-slate-900">
-                      회사 자료 업로드
-                    </div>
-                    <div className="text-xs text-slate-500">
-                      PDF, PNG, AI · 최대 50MB · 여러 파일 가능
-                    </div>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  className="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
-                  onClick={openFilePicker}
-                  disabled={uploadingFiles}
-                >
-                  <UploadCloud className="h-4 w-4" />
-                  {uploadingFiles ? "업로드 중..." : "파일 업로드"}
-                </button>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  multiple
-                  accept=".pdf,.png,.ai"
-                  className="hidden"
-                  onChange={handleFileInputChange}
-                  disabled={uploadingFiles}
-                />
-              </div>
-              <div className="mt-3 flex items-center gap-3 text-[11px] text-slate-500">
-                <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-1">
-                  <FileText className="h-3.5 w-3.5" /> PDF
-                </span>
-                <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-1">
-                  <FileImage className="h-3.5 w-3.5" /> PNG/AI
-                </span>
-              </div>
-              {uploadError ? (
-                <div className="mt-2 text-xs text-rose-600">{uploadError}</div>
-              ) : null}
-              {uploads.length === 0 && companyFiles.length === 0 ? (
-                <div className="mt-3 text-xs text-slate-400">업로드된 파일이 없습니다.</div>
-              ) : (
-                <div className="mt-3 space-y-2">
-                  {[
-                    ...uploads.map((item) => ({
-                      kind: "upload" as const,
-                      id: item.id,
-                      name: item.name,
-                      size: null as number | null,
-                      status: item.status,
-                      progress: item.progress,
-                      downloadUrl: null as string | null,
-                    })),
-                    ...companyFiles
-                      .filter((file) => !uploads.some((item) => item.id === file.id))
-                      .map((file) => ({
-                        kind: "file" as const,
-                        id: file.id,
-                        name: file.name,
-                        size: file.size,
-                        status: "done" as const,
-                        progress: 100,
-                        downloadUrl: file.downloadUrl,
-                        storagePath: file.storagePath,
-                      })),
-                  ].map((item) => (
-                    <div
-                      key={item.id}
-                      className={`flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs ${
-                        item.kind === "file" && deletingFileIds[item.id]
-                          ? "opacity-60 pointer-events-none"
-                          : ""
-                      }`}
-                    >
-                      <div className="min-w-[120px] flex-1 text-slate-700">
-                        {item.name}
-                      </div>
-                      <div className="text-slate-400">
-                        {item.size !== null
-                          ? `${(item.size / (1024 * 1024)).toFixed(1)}MB`
-                          : item.status === "uploading"
-                            ? `${item.progress}%`
-                            : item.status === "done"
-                              ? "업로드 완료"
-                              : `${item.progress}%`}
-                      </div>
-                      <div className="flex items-center gap-2">
-                        {item.kind === "upload" && item.status === "uploading" ? (
-                          <button
-                            type="button"
-                            className="text-xs text-slate-500 hover:text-slate-700"
-                            onClick={() => cancelUpload(item.id)}
-                          >
-                            업로드 취소
-                          </button>
-                        ) : null}
-                        {item.kind === "upload" && item.status === "error" ? (
-                          <button
-                            type="button"
-                            className="text-xs text-slate-600 hover:text-slate-900"
-                            onClick={() => retryUpload(item.id)}
-                          >
-                            재시도
-                          </button>
-                        ) : null}
-                        {item.kind === "upload" && item.status === "queued" ? (
-                          <span className="text-xs text-slate-400">대기중</span>
-                        ) : null}
-                        {item.kind === "upload" && item.status === "error" ? (
-                          <span className="text-xs text-rose-600">실패</span>
-                        ) : null}
-                        {item.kind === "upload" && item.status === "canceled" ? (
-                          <span className="text-xs text-slate-400">취소됨</span>
-                        ) : null}
-                        {item.kind === "file" && deletedFileIds[item.id] ? (
-                          <span className="text-xs text-emerald-600">삭제됨</span>
-                        ) : null}
-                        {item.kind === "file" && !deletedFileIds[item.id] ? (
-                          <>
-                            {item.downloadUrl ? (
-                              <a
-                                href={item.downloadUrl}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="inline-flex items-center gap-1 rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-600 hover:text-slate-900"
-                                aria-label="미리보기"
-                              >
-                                <Eye className="h-3.5 w-3.5" />
-                                미리보기
-                              </a>
-                            ) : (
-                              <span className="text-xs text-slate-400">링크 준비중</span>
-                            )}
-                            <button
-                              type="button"
-                              className="rounded-md border border-rose-200 px-2 py-1 text-xs text-rose-600 hover:border-rose-300 hover:bg-rose-50 hover:text-rose-700 disabled:cursor-not-allowed disabled:opacity-60"
-                              onClick={() =>
-                                handleFileDelete({
-                                  id: item.id,
-                                  storagePath: item.storagePath,
-                                })
-                              }
-                              aria-label="파일 삭제"
-                              disabled={Boolean(deletingFileIds[item.id])}
-                            >
-                              {deletingFileIds[item.id] ? (
-                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                              ) : (
-                                <Trash2 className="h-3.5 w-3.5" />
-                              )}
-                            </button>
-                          </>
-                        ) : null}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
+            <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-4 text-xs text-slate-600">
+              회원가입 단계에서는 회사 자료 업로드를 받지 않습니다.
+              계정 승인 후 기업 정보 입력 페이지에서 업로드해주세요.
             </div>
           </section>
 

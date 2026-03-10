@@ -4,7 +4,7 @@ import {
   doc,
   getDoc,
   serverTimestamp,
-  setDoc,
+  writeBatch,
 } from "firebase/firestore"
 import { db } from "@/firebase/client"
 import type { ConsentSnapshot, Role, UserProfile } from "@/types/auth"
@@ -12,7 +12,7 @@ import type { CompanyInfoForm, CompanyInfoRecord, InvestmentInput } from "@/type
 
 const collectionName = "profiles"
 
-type ConsultantSignupInfo = {
+export type ConsultantSignupInfo = {
   name: string
   organization: string
   email: string
@@ -44,7 +44,7 @@ function toIsoDate(value: string) {
   return `${digits.slice(0, 4)}-${digits.slice(4, 6)}-${digits.slice(6, 8)}`
 }
 
-function buildCompanyInfoRecord(
+export function buildCompanyInfoRecord(
   form: CompanyInfoForm,
   investmentRows?: InvestmentInput[]
 ): CompanyInfoRecord {
@@ -120,93 +120,11 @@ export async function createUserProfile(
     consents?: ConsentSnapshot
   }
 ) {
-  let companyId: string | null = null
-  if (requestedRole === "company") {
-    const providedCompanyId = options?.companyId ?? null
-    if (providedCompanyId) {
-      companyId = providedCompanyId
-      const companyName = options?.companyInfo?.companyInfo?.trim() || null
-      await setDoc(
-        doc(db, "companies", companyId),
-        {
-          ownerUid: uid,
-          name: companyName,
-          updatedAt: serverTimestamp(),
-        },
-        { merge: true }
-      )
-      if (options?.companyInfo) {
-        const companyInfo = buildCompanyInfoRecord(
-          options.companyInfo,
-          options.investmentRows
-        )
-        await setDoc(
-          doc(db, "companies", companyId, "companyInfo", "info"),
-          {
-            ...companyInfo,
-            metadata: {
-              ...companyInfo.metadata,
-              createdAt: serverTimestamp(),
-            },
-          },
-          { merge: true }
-        )
-      }
-    } else {
-      const companyName = options?.companyInfo?.companyInfo?.trim() || null
-      const companyRef = await addDoc(collection(db, "companies"), {
-        ownerUid: uid,
-        name: companyName,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      })
-      companyId = companyRef.id
-      if (options?.companyInfo) {
-        const companyInfo = buildCompanyInfoRecord(
-          options.companyInfo,
-          options.investmentRows
-        )
-        await setDoc(
-          doc(db, "companies", companyId, "companyInfo", "info"),
-          {
-            ...companyInfo,
-            metadata: {
-              ...companyInfo.metadata,
-              createdAt: serverTimestamp(),
-            },
-          },
-          { merge: true }
-        )
-      }
-    }
-  } else if (requestedRole === "consultant" && options?.consultantInfo) {
-    const consultantName = options.consultantInfo.name.trim()
-    const consultantPrimaryEmail =
-      (email ?? "").trim()
-      || options.consultantInfo.email.trim()
-      || null
-    await setDoc(
-      doc(db, "consultants", uid),
-      {
-        name: consultantName,
-        title: "컨설턴트",
-        email: consultantPrimaryEmail,
-        phone: options.consultantInfo.phone.trim() || null,
-        organization: options.consultantInfo.organization.trim() || null,
-        secondaryEmail: options.consultantInfo.secondaryEmail.trim() || null,
-        secondaryPhone: options.consultantInfo.secondaryPhone.trim() || null,
-        fixedMeetingLink: options.consultantInfo.fixedMeetingLink.trim() || null,
-        expertise: options.consultantInfo.expertise
-          .split(",")
-          .map((value) => value.trim())
-          .filter(Boolean),
-        bio: options.consultantInfo.bio.trim() || `${consultantName} 컨설턴트`,
-        status: "active",
-        joinedDate: serverTimestamp(),
-      },
-      { merge: true }
-    )
-  }
+  const companyId =
+    requestedRole === "company"
+      ? (options?.companyId ?? uid)
+      : null
+
   const ref = doc(db, collectionName, uid)
   const profileData: Record<string, any> = {
     role,
@@ -232,7 +150,39 @@ export async function createUserProfile(
         : undefined,
     }
   }
-  await setDoc(ref, profileData)
+  const signupRequestData: Record<string, any> = {
+    uid,
+    requestedRole,
+    role,
+    email: email ?? null,
+    companyId,
+    status: "pending",
+    updatedAt: serverTimestamp(),
+    createdAt: serverTimestamp(),
+  }
+  if (requestedRole === "company") {
+    signupRequestData.companyInfo = options?.companyInfo ?? null
+    signupRequestData.investmentRows = options?.investmentRows ?? []
+  }
+  if (requestedRole === "consultant" && options?.consultantInfo) {
+    signupRequestData.consultantInfo = {
+      ...options.consultantInfo,
+      name: options.consultantInfo.name.trim(),
+      organization: options.consultantInfo.organization.trim(),
+      email: options.consultantInfo.email.trim(),
+      phone: options.consultantInfo.phone.trim(),
+      secondaryEmail: options.consultantInfo.secondaryEmail.trim(),
+      secondaryPhone: options.consultantInfo.secondaryPhone.trim(),
+      fixedMeetingLink: options.consultantInfo.fixedMeetingLink.trim(),
+      expertise: options.consultantInfo.expertise.trim(),
+      bio: options.consultantInfo.bio.trim(),
+    }
+  }
+
+  const batch = writeBatch(db)
+  batch.set(ref, profileData)
+  batch.set(doc(db, "signupRequests", uid), signupRequestData)
+  await batch.commit()
 
   if (options?.consents) {
     const consentEntries = ([
