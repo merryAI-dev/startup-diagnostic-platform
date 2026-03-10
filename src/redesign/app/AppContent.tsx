@@ -569,6 +569,9 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     resolvedRole === "admin"
     || resolvedRole === "consultant"
     || resolvedRole === "staff";
+  const canAutoTransitionApplications =
+    resolvedRole === "admin"
+    || resolvedRole === "consultant";
   const isPage = useCallback(
     (pages: AppPage[]) => pages.includes(routePage),
     [routePage]
@@ -1667,7 +1670,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
   // 1) 진행 시간이 지난 pending는 rejected로 자동 전환
   // 2) 진행 시간이 지난 confirmed는 completed로 자동 전환
   useEffect(() => {
-    if (!needsApplications) return;
+    if (!needsApplications || !canAutoTransitionApplications) return;
     let isRunning = false;
     const runAutoStatusTransitions = async () => {
       if (isRunning) return;
@@ -1739,6 +1742,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
   }, [
     applications,
     needsApplications,
+    canAutoTransitionApplications,
     isFirebaseConfigured,
     officeHourApplicationCrud,
     officeHourSlotList,
@@ -3936,6 +3940,9 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
               programs={programList}
               agendas={agendaList}
               currentConsultantAgendaIds={currentConsultant?.agendaIds ?? []}
+              currentConsultantAvailability={currentConsultant?.availability ?? []}
+              currentConsultantId={currentConsultant?.id ?? null}
+              currentConsultantName={currentConsultant?.name ?? null}
               onNavigateToApplication={(id) => {
                 handleNavigate("application", id);
               }}
@@ -4023,6 +4030,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
                 programs={scopedProgramList}
                 agendas={agendaList}
                 currentConsultantAgendaIds={currentConsultant?.agendaIds ?? []}
+                currentConsultantAvailability={currentConsultant?.availability ?? []}
                 allowManualEventCreate={false}
                 onNavigateToApplication={(id) => {
                   handleNavigate("application", id);
@@ -4032,6 +4040,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
                 onConfirmApplication={handleConfirmApplication}
                 onUpdateStatus={handleUpdateApplicationStatus}
                 onUpdateApplication={handleUpdateApplication}
+                currentConsultantId={currentConsultant?.id ?? null}
                 currentConsultantName={currentConsultant?.name ?? null}
               />
             </ProtectedRoute>
