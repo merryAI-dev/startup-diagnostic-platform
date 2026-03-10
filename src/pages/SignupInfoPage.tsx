@@ -826,8 +826,8 @@ function CompanySignupInfo({
     capitalTotal: "자본총계",
     certification: "인증/지정 여부",
     tipsLipsHistory: "TIPS/LIPS 이력",
-    desiredInvestment2026: "2026년 내 희망 투자액",
-    desiredPreValue: "투자전 희망기업가치",
+    desiredInvestment2026: "2026년 내 희망 투자액 (억)",
+    desiredPreValue: "투자전 희망기업가치 (Pre-Value, 억)",
   }
 
   function isFilled(value: string) {
@@ -876,6 +876,49 @@ function CompanySignupInfo({
       : ""
     if (!hasDot) return formattedInteger
     return `${formattedInteger || "0"}.${decimalDigits}`
+  }
+
+  function sanitizeInvestmentDateDigits(value: string) {
+    const source = value.replace(/[^\d]/g, "").slice(0, 8)
+    if (!source) return ""
+
+    let digits = source.slice(0, 4)
+    if (source.length <= 4) return digits
+
+    const monthTens = source[4]
+    if (!monthTens || monthTens < "0" || monthTens > "1") return digits
+    digits += monthTens
+    if (source.length === 5) return digits
+
+    const monthOnes = source[5]
+    if (!monthOnes) return digits
+    const month = Number(`${monthTens}${monthOnes}`)
+    if (month < 1 || month > 12) return digits
+    digits += monthOnes
+    if (source.length === 6) return digits
+
+    const dayTens = source[6]
+    if (!dayTens || dayTens < "0" || dayTens > "3") return digits
+    digits += dayTens
+    if (source.length === 7) return digits
+
+    const dayOnes = source[7]
+    if (!dayOnes) return digits
+    const year = Number(source.slice(0, 4))
+    const maxDay = new Date(year, month, 0).getDate()
+    const day = Number(`${dayTens}${dayOnes}`)
+    if (day < 1 || day > maxDay) return digits
+    digits += dayOnes
+
+    return digits
+  }
+
+  function formatInvestmentDateInput(value: string) {
+    const digits = sanitizeInvestmentDateDigits(value)
+    if (!digits) return ""
+    if (digits.length <= 4) return digits
+    if (digits.length <= 6) return `${digits.slice(0, 4)}.${digits.slice(4)}`
+    return `${digits.slice(0, 4)}.${digits.slice(4, 6)}.${digits.slice(6, 8)}`
   }
 
   function formatBusinessNumber(value: string) {
@@ -976,9 +1019,15 @@ function CompanySignupInfo({
     field: keyof InvestmentInput,
     value: string
   ) {
+    const nextValue =
+      field === "postMoney"
+        ? formatRevenueInput(value)
+        : field === "date"
+          ? formatInvestmentDateInput(value)
+          : value
     setInvestmentRows((prev) =>
       prev.map((row, rowIndex) =>
-        rowIndex === index ? { ...row, [field]: value } : row
+        rowIndex === index ? { ...row, [field]: nextValue } : row
       )
     )
   }
@@ -1623,21 +1672,32 @@ function CompanySignupInfo({
                   <label className="text-xs text-slate-500">
                     <span className="block whitespace-nowrap">투자일시</span>
                     <input
-                      type="date"
+                      type="text"
                       className={inputClass(false)}
+                      inputMode="numeric"
+                      maxLength={10}
+                      placeholder="YYYY.MM.DD"
                       value={row.date}
-                      onChange={(e) => updateInvestmentRow(idx, "date", e.target.value)}
+                      onInput={(e) => {
+                        const nextValue = formatInvestmentDateInput(e.currentTarget.value)
+                        e.currentTarget.value = nextValue
+                        updateInvestmentRow(idx, "date", nextValue)
+                      }}
+                      onBlur={(e) => {
+                        const nextValue = formatInvestmentDateInput(e.currentTarget.value)
+                        const digits = nextValue.replace(/[^\d]/g, "")
+                        updateInvestmentRow(idx, "date", digits.length === 8 ? nextValue : "")
+                      }}
                     />
                   </label>
                   <label className="text-xs text-slate-500">
                     <span className="block whitespace-nowrap">투자금액 (억)</span>
                     <input
                       className={inputClass(false)}
-                      placeholder="예: 25"
+                      placeholder="예: 25.5"
+                      inputMode="decimal"
                       value={row.postMoney}
-                      onChange={(e) =>
-                        updateInvestmentRow(idx, "postMoney", formatNumberInput(e.target.value))
-                      }
+                      onChange={(e) => updateInvestmentRow(idx, "postMoney", e.target.value)}
                     />
                   </label>
                   <div className="flex items-start gap-2">
@@ -1733,30 +1793,32 @@ function CompanySignupInfo({
             <div className="text-sm font-semibold text-slate-700">투자 희망</div>
             <div className="mt-3 grid gap-3 md:grid-cols-2">
               <label className="text-xs text-slate-500">
-                2026년 내 희망 투자액
+                2026년 내 희망 투자액 (억)
                 <input
                   className={inputClass(isFieldInvalid("desiredInvestment2026"))}
-                  placeholder="예: 20억"
+                  placeholder="예: 20.5"
+                  inputMode="decimal"
                   value={form.desiredInvestment2026}
                   onChange={(e) =>
                     setForm((prev) => ({
                       ...prev,
-                      desiredInvestment2026: formatNumberInput(e.target.value),
+                      desiredInvestment2026: formatRevenueInput(e.target.value),
                     }))
                   }
                   onBlur={() => markTouched("desiredInvestment2026")}
                 />
               </label>
               <label className="text-xs text-slate-500">
-                투자전 희망기업가치
+                투자전 희망기업가치 (Pre-Value, 억)
                 <input
                   className={inputClass(isFieldInvalid("desiredPreValue"))}
-                  placeholder="예: 120억"
+                  placeholder="예: 120.0"
+                  inputMode="decimal"
                   value={form.desiredPreValue}
                   onChange={(e) =>
                     setForm((prev) => ({
                       ...prev,
-                      desiredPreValue: formatNumberInput(e.target.value),
+                      desiredPreValue: formatRevenueInput(e.target.value),
                     }))
                   }
                   onBlur={() => markTouched("desiredPreValue")}

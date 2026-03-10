@@ -108,6 +108,49 @@ const INVESTMENT_STAGE_OPTIONS = [
   "Convertible Note",
 ] as const
 
+function sanitizeInvestmentDateDigits(value: string) {
+  const source = value.replace(/[^\d]/g, "").slice(0, 8)
+  if (!source) return ""
+
+  let digits = source.slice(0, 4)
+  if (source.length <= 4) return digits
+
+  const monthTens = source[4]
+  if (!monthTens || monthTens < "0" || monthTens > "1") return digits
+  digits += monthTens
+  if (source.length === 5) return digits
+
+  const monthOnes = source[5]
+  if (!monthOnes) return digits
+  const month = Number(`${monthTens}${monthOnes}`)
+  if (month < 1 || month > 12) return digits
+  digits += monthOnes
+  if (source.length === 6) return digits
+
+  const dayTens = source[6]
+  if (!dayTens || dayTens < "0" || dayTens > "3") return digits
+  digits += dayTens
+  if (source.length === 7) return digits
+
+  const dayOnes = source[7]
+  if (!dayOnes) return digits
+  const year = Number(source.slice(0, 4))
+  const maxDay = new Date(year, month, 0).getDate()
+  const day = Number(`${dayTens}${dayOnes}`)
+  if (day < 1 || day > maxDay) return digits
+  digits += dayOnes
+
+  return digits
+}
+
+function formatInvestmentDateInput(value: string) {
+  const digits = sanitizeInvestmentDateDigits(value)
+  if (!digits) return ""
+  if (digits.length <= 4) return digits
+  if (digits.length <= 6) return `${digits.slice(0, 4)}.${digits.slice(4)}`
+  return `${digits.slice(0, 4)}.${digits.slice(4, 6)}.${digits.slice(6, 8)}`
+}
+
 function StatusBadge({
   label,
   variant,
@@ -1627,16 +1670,30 @@ export function CompanyDashboard({
                               투자일시
                             </span>
                             <input
-                              type="date"
+                              type="text"
                               className={inputClass(false, "rounded-lg")}
+                              inputMode="numeric"
+                              maxLength={10}
+                              placeholder="YYYY.MM.DD"
                               value={row.date}
-                              onChange={(e) =>
+                              onInput={(e) => {
+                                const nextValue = formatInvestmentDateInput(
+                                  e.currentTarget.value
+                                )
+                                e.currentTarget.value = nextValue
+                                updateInvestmentRow(idx, "date", nextValue)
+                              }}
+                              onBlur={(e) => {
+                                const nextValue = formatInvestmentDateInput(
+                                  e.currentTarget.value
+                                )
+                                const digits = nextValue.replace(/[^\d]/g, "")
                                 updateInvestmentRow(
                                   idx,
                                   "date",
-                                  e.target.value
+                                  digits.length === 8 ? nextValue : ""
                                 )
-                              }
+                              }}
                             />
                           </label>
 
@@ -1646,13 +1703,14 @@ export function CompanyDashboard({
                             </span>
                             <input
                               className={inputClass(false, "rounded-lg")}
-                              placeholder="예: 25"
+                              placeholder="예: 25.5"
+                              inputMode="decimal"
                               value={row.postMoney}
                               onChange={(e) =>
                                 updateInvestmentRow(
                                   idx,
                                   "postMoney",
-                                  formatNumberInput(e.target.value)
+                                  e.target.value
                                 )
                               }
                             />
@@ -1766,17 +1824,18 @@ export function CompanyDashboard({
                     </div>
                     <div className="mt-3 grid gap-3 sm:grid-cols-2">
                       <label className="text-xs text-slate-500">
-                        2026년 내 희망 투자액
+                        2026년 내 희망 투자액 (억)
                         <input
                           className={inputClass(
                             isFieldInvalid("desiredInvestment2026")
                           )}
-                          placeholder="예: 20억"
+                          placeholder="예: 20.5"
+                          inputMode="decimal"
                           value={form.desiredInvestment2026}
                           onChange={(e) =>
                             setForm((prev) => ({
                               ...prev,
-                              desiredInvestment2026: formatNumberInput(
+                              desiredInvestment2026: formatRevenueInput(
                                 e.target.value
                               ),
                             }))
@@ -1785,17 +1844,18 @@ export function CompanyDashboard({
                         />
                       </label>
                       <label className="text-xs text-slate-500">
-                        투자전 희망기업가치 (Pre-Value)
+                        투자전 희망기업가치 (Pre-Value, 억)
                         <input
                           className={inputClass(
                             isFieldInvalid("desiredPreValue")
                           )}
-                          placeholder="예: 200억"
+                          placeholder="예: 200.0"
+                          inputMode="decimal"
                           value={form.desiredPreValue}
                           onChange={(e) =>
                             setForm((prev) => ({
                               ...prev,
-                              desiredPreValue: formatNumberInput(
+                              desiredPreValue: formatRevenueInput(
                                 e.target.value
                               ),
                             }))

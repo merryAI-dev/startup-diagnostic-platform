@@ -45,9 +45,17 @@ export function RegularOfficeHourDetail({
       </div>
 
       <Tabs defaultValue="apply" className="w-full">
-        <TabsList>
-          <TabsTrigger value="apply">신청하기</TabsTrigger>
-          <TabsTrigger value="confirmed">
+        <TabsList className="justify-start">
+          <TabsTrigger
+            value="apply"
+            className="text-slate-500 hover:text-slate-700 data-[state=active]:text-slate-900"
+          >
+            신청하기
+          </TabsTrigger>
+          <TabsTrigger
+            value="confirmed"
+            className="text-slate-500 hover:text-slate-700 data-[state=active]:text-slate-900"
+          >
             확정 일정 ({confirmedApplications.length})
           </TabsTrigger>
         </TabsList>
