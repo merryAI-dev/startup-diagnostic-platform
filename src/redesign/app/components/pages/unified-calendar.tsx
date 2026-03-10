@@ -1,12 +1,19 @@
 import { useState, useMemo } from "react";
-import { Agenda, Application, ApplicationStatus, User, Program } from "@/redesign/app/lib/types";
+import {
+  Agenda,
+  Application,
+  ApplicationStatus,
+  ConsultantAvailability,
+  Program,
+  User,
+} from "@/redesign/app/lib/types";
 import { Card } from "@/redesign/app/components/ui/card";
 import { Button } from "@/redesign/app/components/ui/button";
 import { Badge } from "@/redesign/app/components/ui/badge";
 import { Calendar } from "@/redesign/app/components/ui/calendar";
 import {
   Calendar as CalendarIcon, ChevronLeft, ChevronRight, Grid3x3,
-  List, Filter, Download, Share2, Plus, Clock, MapPin, Video, Users,
+  List, Download, Share2, Plus, Clock, MapPin, Video, Users,
   Database, Wifi, WifiOff
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
@@ -33,6 +40,7 @@ interface UnifiedCalendarProps {
   programs: Program[];
   agendas?: Agenda[];
   currentConsultantAgendaIds?: string[];
+  currentConsultantAvailability?: ConsultantAvailability[];
   allowManualEventCreate?: boolean;
   onNavigateToApplication?: (id: string) => void;
   onRequestApplication?: (id: string) => void;
@@ -76,6 +84,22 @@ function toEventDateKey(value?: string | Date): string | null {
   return parsed ? toLocalDateKey(parsed) : null;
 }
 
+function normalizeTimeKey(value?: string): string {
+  if (!value) return "";
+  const [hourRaw, minuteRaw] = value.trim().split(":");
+  const hour = Number(hourRaw);
+  const minute = Number(minuteRaw);
+  if (Number.isNaN(hour) || Number.isNaN(minute)) return value.trim();
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+
+function normalizeConsultantDisplayName(value?: string | null): string {
+  return (value ?? "")
+    .replace(/\s*컨설턴트\s*$/u, "")
+    .trim()
+    .toLowerCase();
+}
+
 function clampDateToMonth(baseDate: Date, targetMonth: Date): Date {
   const year = targetMonth.getFullYear();
   const month = targetMonth.getMonth();
@@ -90,6 +114,7 @@ export function UnifiedCalendar({
   programs,
   agendas = [],
   currentConsultantAgendaIds = [],
+  currentConsultantAvailability = [],
   allowManualEventCreate = true,
   onNavigateToApplication,
   onRequestApplication,
@@ -106,8 +131,6 @@ export function UnifiedCalendar({
   );
   const [viewMode, setViewMode] = useState<ViewMode>("month");
   const [selectedProgram, setSelectedProgram] = useState<string | null>(null);
-  const [pendingAgendaFilter, setPendingAgendaFilter] = useState<string>("all");
-  const [pendingProgramFilter, setPendingProgramFilter] = useState<string>("all");
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [actionDialogOpen, setActionDialogOpen] = useState(false);
   const [actionTarget, setActionTarget] = useState<Application | null>(null);
@@ -207,6 +230,7 @@ export function UnifiedCalendar({
   };
 
   const isConsultant = currentUser.role === "consultant";
+  const normalizedCurrentConsultantName = normalizeConsultantDisplayName(currentConsultantName);
   const isMyEvent = (event: Application) => {
     if (!isConsultant) return false;
     if (currentConsultantId && event.consultantId === currentConsultantId) return true;
@@ -235,6 +259,48 @@ export function UnifiedCalendar({
     const agendaIdOk = app.agendaId ? currentConsultantAgendaIds.includes(app.agendaId) : false;
     const agendaNameOk = app.agenda ? consultantAgendaNameSet.has(app.agenda) : false;
     return agendaIdOk || agendaNameOk;
+  };
+  const isAssignedToCurrentConsultant = (app: Application) => {
+    if (!isConsultant) return false;
+    if (currentConsultantId && app.consultantId) return app.consultantId === currentConsultantId;
+    if (app.consultantId && !currentConsultantId) return false;
+    return normalizeConsultantDisplayName(app.consultant) === normalizedCurrentConsultantName;
+  };
+  const isCurrentConsultantAvailableAt = (app: Application) => {
+    if (!isConsultant) return true;
+    if (!app.scheduledDate || !app.scheduledTime) return true;
+    const parsedDate = parseLocalDateKey(app.scheduledDate);
+    if (!parsedDate) return false;
+    const dayAvailability = currentConsultantAvailability.find(
+      (availability) => availability.dayOfWeek === parsedDate.getDay()
+    );
+    if (!dayAvailability) return false;
+    const targetTime = normalizeTimeKey(app.scheduledTime);
+    return dayAvailability.slots.some(
+      (slot) => normalizeTimeKey(slot.start) === targetTime && slot.available
+    );
+  };
+  const hasCurrentConsultantConflict = (targetApp: Application) => {
+    if (!isConsultant) return false;
+    if (!targetApp.scheduledDate || !targetApp.scheduledTime) return false;
+    const targetTime = normalizeTimeKey(targetApp.scheduledTime);
+    return applications.some((app) => {
+      if (app.id === targetApp.id) return false;
+      if (!isAssignedToCurrentConsultant(app)) return false;
+      if (
+        app.status !== "pending"
+        && app.status !== "review"
+        && app.status !== "confirmed"
+        && app.status !== "completed"
+      ) {
+        return false;
+      }
+      if (!app.scheduledDate || !app.scheduledTime) return false;
+      return (
+        app.scheduledDate === targetApp.scheduledDate
+        && normalizeTimeKey(app.scheduledTime) === targetTime
+      );
+    });
   };
   const getSessionEndTime = (app: Application) => {
     const durationHours = app.duration ?? 2;
@@ -265,84 +331,20 @@ export function UnifiedCalendar({
         && (!app.consultant || app.consultant === "담당자 배정 중")
         && !hasSessionEnded(app)
         && matchesConsultantAgenda(app)
+        && isCurrentConsultantAvailableAt(app)
+        && !hasCurrentConsultantConflict(app)
       )
       .sort((a, b) => {
         const dateA = new Date(a.createdAt).getTime();
         const dateB = new Date(b.createdAt).getTime();
         return dateB - dateA;
       });
-  }, [applications, isConsultant, matchesConsultantAgenda]);
+  }, [applications, isConsultant, matchesConsultantAgenda, currentConsultantAvailability]);
 
-  const agendaOptions = useMemo(() => {
-    if (agendas.length > 0) {
-      const agendaNames = agendas
-        .filter((agenda) => (isConsultant
-          ? (currentConsultantAgendaIds.length === 0
-            ? false
-            : currentConsultantAgendaIds.includes(agenda.id))
-          : true))
-        .map((agenda) => agenda.name)
-        .filter(Boolean);
-      return agendaNames.sort((a, b) => a.localeCompare(b));
-    }
-    const names = new Set<string>();
-    applications.forEach((app) => {
-      if (app.agenda && (!isConsultant || matchesConsultantAgenda(app))) {
-        names.add(app.agenda);
-      }
-    });
-    return Array.from(names).sort((a, b) => a.localeCompare(b));
-  }, [agendas, applications, currentConsultantAgendaIds, isConsultant, matchesConsultantAgenda]);
-
-  const filteredPendingRequests = useMemo(() => {
-    return pendingRequests.filter((app) => {
-      const agendaOk = pendingAgendaFilter === "all" || app.agenda === pendingAgendaFilter;
-      const programOk = pendingProgramFilter === "all" || app.programId === pendingProgramFilter;
-      return agendaOk && programOk;
-    });
-  }, [pendingRequests, pendingAgendaFilter, pendingProgramFilter]);
   const selectedPendingApplication = useMemo(() => {
     if (!selectedPendingApplicationId) return null;
     return applications.find((app) => app.id === selectedPendingApplicationId) ?? null;
   }, [applications, selectedPendingApplicationId]);
-
-  const pendingProgramOptions = useMemo(() => {
-    return programs.filter((program) =>
-      pendingRequests.some((app) => app.programId === program.id)
-    );
-  }, [pendingRequests, programs]);
-
-  const renderPendingFilters = () => (
-    <div className="flex items-center gap-2 flex-nowrap overflow-x-auto">
-      <Select value={pendingProgramFilter} onValueChange={setPendingProgramFilter}>
-        <SelectTrigger className="w-36 shrink-0">
-          <SelectValue placeholder="사업 전체" />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="all">사업 전체</SelectItem>
-          {pendingProgramOptions.map((program) => (
-            <SelectItem key={program.id} value={program.id}>
-              {program.name}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-
-      <Select value={pendingAgendaFilter} onValueChange={setPendingAgendaFilter}>
-        <SelectTrigger className="w-36 shrink-0">
-          <SelectValue placeholder="아젠다 전체" />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="all">아젠다 전체</SelectItem>
-          {agendaOptions.map((agenda) => (
-            <SelectItem key={agenda} value={agenda}>
-              {agenda}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-    </div>
-  );
 
   const openAcceptDialog = (event: Application) => {
     setActionType("accept");
@@ -595,22 +597,24 @@ export function UnifiedCalendar({
                 </DialogContent>
               </Dialog>
 
-              <Select value={selectedProgram || "all"} onValueChange={(val) => setSelectedProgram(val === "all" ? null : val)}>
-                <SelectTrigger className="w-48">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">전체 프로그램</SelectItem>
-                  {programs.map(program => (
-                    <SelectItem key={program.id} value={program.id}>
-                      <div className="flex items-center gap-2">
-                        <div className="w-2 h-2 rounded-full" style={{ backgroundColor: program.color }} />
-                        {program.name}
-                      </div>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              {!isConsultant && (
+                <Select value={selectedProgram || "all"} onValueChange={(val) => setSelectedProgram(val === "all" ? null : val)}>
+                  <SelectTrigger className="w-48">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">전체 프로그램</SelectItem>
+                    {programs.map(program => (
+                      <SelectItem key={program.id} value={program.id}>
+                        <div className="flex items-center gap-2">
+                          <div className="w-2 h-2 rounded-full" style={{ backgroundColor: program.color }} />
+                          {program.name}
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
 
               <div className="flex gap-1 bg-slate-100 rounded-lg p-1">
                 <Button
@@ -819,27 +823,23 @@ export function UnifiedCalendar({
                         </p>
                       </div>
                       <Badge variant="outline" className="text-xs">
-                        {filteredPendingRequests.length}건
+                        {pendingRequests.length}건
                       </Badge>
-                    </div>
-
-                    <div className="mb-4">
-                      {renderPendingFilters()}
                     </div>
 
                     <div className="space-y-6">
                       <div>
                         <div className="flex items-center justify-between mb-3">
                           <span className="text-sm font-semibold text-slate-700">수락 대기</span>
-                          <span className="text-xs text-slate-400">{filteredPendingRequests.length}건</span>
+                          <span className="text-xs text-slate-400">{pendingRequests.length}건</span>
                         </div>
-                        {filteredPendingRequests.length === 0 ? (
+                        {pendingRequests.length === 0 ? (
                           <p className="text-sm text-slate-500 text-center py-4">
                             수락 요청 가능한 항목이 없습니다
                           </p>
                         ) : (
                           <div className="space-y-3">
-                            {filteredPendingRequests.slice(0, 5).map((event) => {
+                            {pendingRequests.slice(0, 5).map((event) => {
                               const actionLabel = "수락";
                               const actionHandler = onRequestApplication;
                               return (
@@ -891,9 +891,9 @@ export function UnifiedCalendar({
                               </div>
                             );
                             })}
-                            {filteredPendingRequests.length > 5 && (
+                            {pendingRequests.length > 5 && (
                               <p className="text-xs text-slate-500 text-center">
-                                외 {filteredPendingRequests.length - 5}건
+                                외 {pendingRequests.length - 5}건
                               </p>
                             )}
                           </div>
@@ -918,27 +918,23 @@ export function UnifiedCalendar({
                       </p>
                     </div>
                     <Badge variant="outline" className="text-xs">
-                      {filteredPendingRequests.length}건
+                      {pendingRequests.length}건
                     </Badge>
-                  </div>
-
-                  <div className="mb-4">
-                    {renderPendingFilters()}
                   </div>
 
                   <div className="space-y-6">
                     <div>
                       <div className="flex items-center justify-between mb-3">
                         <span className="text-sm font-semibold text-slate-700">수락 대기</span>
-                        <span className="text-xs text-slate-400">{filteredPendingRequests.length}건</span>
+                        <span className="text-xs text-slate-400">{pendingRequests.length}건</span>
                       </div>
-                      {filteredPendingRequests.length === 0 ? (
+                      {pendingRequests.length === 0 ? (
                         <p className="text-sm text-slate-500 text-center py-4">
                           수락 요청 가능한 항목이 없습니다
                         </p>
                       ) : (
                         <div className="space-y-3">
-                          {filteredPendingRequests.slice(0, 5).map((event) => {
+                          {pendingRequests.slice(0, 5).map((event) => {
                             const actionLabel = "수락";
                             const actionHandler = onRequestApplication;
                             return (
@@ -990,9 +986,9 @@ export function UnifiedCalendar({
                             </div>
                           );
                           })}
-                          {filteredPendingRequests.length > 5 && (
+                          {pendingRequests.length > 5 && (
                             <p className="text-xs text-slate-500 text-center">
-                              외 {filteredPendingRequests.length - 5}건
+                              외 {pendingRequests.length - 5}건
                             </p>
                           )}
                         </div>
