@@ -77,7 +77,8 @@ import {
 import { firestoreService } from "@/redesign/app/lib/firestore-service";
 import { storage as firebaseStorage } from "@/redesign/app/lib/firebase";
 import { mockNotifications, mockChatRooms, mockChatMessages, mockAIRecommendations, mockGoals, mockTeamMembers } from "@/redesign/app/lib/advanced-mock-data";
-import type { CompanyInfoRecord } from "@/types/company";
+import { buildCompanyInfoRecord } from "@/firebase/profile";
+import { DEFAULT_FORM, type CompanyInfoForm, type CompanyInfoRecord, type InvestmentInput } from "@/types/company";
 
 type AppPage = 
   | "dashboard" 
@@ -125,6 +126,21 @@ type RawProfileApprovalDoc = {
   createdAt?: unknown;
   activatedAt?: unknown;
   approvedAt?: unknown;
+};
+
+type SignupRequestDoc = {
+  id: string;
+  uid?: string;
+  role?: string;
+  requestedRole?: string | null;
+  email?: string | null;
+  companyId?: string | null;
+  status?: string;
+  consultantInfo?: Partial<ConsultantProfileFormValues> | null;
+  companyInfo?: Partial<CompanyInfoForm> | null;
+  investmentRows?: InvestmentInput[] | null;
+  createdAt?: unknown;
+  updatedAt?: unknown;
 };
 
 const APPROVAL_ROLE_VALUES: PendingProfileApproval["role"][] = [
@@ -200,6 +216,51 @@ function normalizeDateValue(value: unknown): Date | string {
     }
   }
   return new Date();
+}
+
+function toTrimmedString(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function toPendingCompanyForm(value: unknown): CompanyInfoForm {
+  if (!value || typeof value !== "object") {
+    return DEFAULT_FORM;
+  }
+  const source = value as Partial<CompanyInfoForm>;
+  return {
+    companyInfo: toTrimmedString(source.companyInfo),
+    ceoName: toTrimmedString(source.ceoName),
+    ceoEmail: toTrimmedString(source.ceoEmail),
+    ceoPhone: toTrimmedString(source.ceoPhone),
+    foundedAt: toTrimmedString(source.foundedAt),
+    businessNumber: toTrimmedString(source.businessNumber),
+    primaryBusiness: toTrimmedString(source.primaryBusiness),
+    primaryIndustry: toTrimmedString(source.primaryIndustry),
+    headOffice: toTrimmedString(source.headOffice),
+    branchOffice: toTrimmedString(source.branchOffice),
+    workforceFullTime: toTrimmedString(source.workforceFullTime),
+    workforceContract: toTrimmedString(source.workforceContract),
+    revenue2025: toTrimmedString(source.revenue2025),
+    revenue2026: toTrimmedString(source.revenue2026),
+    capitalTotal: toTrimmedString(source.capitalTotal),
+    certification: toTrimmedString(source.certification),
+    tipsLipsHistory: toTrimmedString(source.tipsLipsHistory),
+    desiredInvestment2026: toTrimmedString(source.desiredInvestment2026),
+    desiredPreValue: toTrimmedString(source.desiredPreValue),
+  };
+}
+
+function toPendingInvestmentRows(value: unknown): InvestmentInput[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => {
+    const source = item as Partial<InvestmentInput>;
+    return {
+      stage: toTrimmedString(source.stage),
+      date: toTrimmedString(source.date),
+      postMoney: toTrimmedString(source.postMoney),
+      majorShareholder: toTrimmedString(source.majorShareholder),
+    };
+  });
 }
 
 function buildDefaultConsultantAvailability(): Consultant["availability"] {
@@ -295,6 +356,15 @@ function normalizeConsultantDisplayName(value?: string | null): string {
     .replace(/\s*컨설턴트\s*$/u, "")
     .trim()
     .toLowerCase();
+}
+
+function normalizeTimeKey(value?: string): string {
+  if (!value) return "";
+  const [hourRaw, minuteRaw] = value.trim().split(":");
+  const hour = Number(hourRaw);
+  const minute = Number(minuteRaw);
+  if (Number.isNaN(hour) || Number.isNaN(minute)) return value.trim();
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
 }
 
 function isConsultantAvailableAt(
@@ -2157,29 +2227,44 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
         consultant.status === "active"
         && (consultant.agendaIds ?? []).includes(data.agendaId)
     );
-    if (linkedConsultants.length === 1) {
-      const primaryConsultant = linkedConsultants[0];
-      if (!primaryConsultant) {
-        toast.error("담당 컨설턴트를 확인할 수 없습니다");
-        return;
-      }
-      const available = isConsultantAvailableAt(
-        primaryConsultant,
-        scheduledDate,
-        data.time
+    if (linkedConsultants.length === 0) {
+      toast.error("선택한 아젠다에 연결된 활성 컨설턴트가 없습니다");
+      return;
+    }
+
+    const isConsultantBusyAt = (consultant: Consultant) => {
+      const targetTime = normalizeTimeKey(data.time);
+      const consultantNameKey = normalizeConsultantDisplayName(consultant.name);
+      return applications.some((application) => {
+        const normalizedStatus = normalizeApplicationStatus(application.status);
+        if (
+          normalizedStatus !== "pending"
+          && normalizedStatus !== "confirmed"
+          && normalizedStatus !== "completed"
+        ) {
+          return false;
+        }
+        if (!application.scheduledDate || !application.scheduledTime) return false;
+        if (application.scheduledDate !== scheduledDate) return false;
+        if (normalizeTimeKey(application.scheduledTime) !== targetTime) return false;
+
+        if (application.consultantId) {
+          return application.consultantId === consultant.id;
+        }
+        return normalizeConsultantDisplayName(application.consultant) === consultantNameKey;
+      });
+    };
+
+    const assignableConsultants = linkedConsultants.filter((consultant) =>
+      isConsultantAvailableAt(consultant, scheduledDate, data.time)
+      && !isConsultantBusyAt(consultant)
+    );
+
+    if (assignableConsultants.length === 0) {
+      toast.error(
+        "선택한 시간에 현재 배정 가능한 컨설턴트가 없어 신청할 수 없습니다. 다른 시간을 선택해 주세요."
       );
-      if (!available) {
-        toast.error("선택한 시간은 컨설턴트 가능 시간이 아닙니다");
-        return;
-      }
-    } else if (linkedConsultants.length > 1) {
-      const availableCount = linkedConsultants.filter((consultant) =>
-        isConsultantAvailableAt(consultant, scheduledDate, data.time)
-      ).length;
-      if (availableCount === 0) {
-        toast.error("선택한 시간에 가능한 컨설턴트가 없습니다");
-        return;
-      }
+      return;
     }
 
     const attachmentNames = data.files.map((f) => f.name);
@@ -3120,6 +3205,16 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     id: string,
     data: Partial<Consultant>
   ) => {
+    const currentConsultant = consultants.find((consultant) => consultant.id === id);
+    const nextConsultantStatus = data.status;
+    const nextPrimaryEmail = toNormalizedEmail(
+      typeof data.email === "string" ? data.email : currentConsultant?.email
+    );
+    const nextSecondaryEmail = toNormalizedEmail(
+      typeof data.secondaryEmail === "string"
+        ? data.secondaryEmail
+        : currentConsultant?.secondaryEmail
+    );
     setConsultants((prev) => prev.map((c) => (c.id === id ? { ...c, ...data } : c)));
 
     if (isFirebaseConfigured) {
@@ -3132,6 +3227,50 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
         return;
       }
     }
+
+    if (nextConsultantStatus === "active" || nextConsultantStatus === "inactive") {
+      const nextActive = nextConsultantStatus === "active";
+      const matchedProfile = profileList.find((profileItem) => {
+        if (profileItem.id === id) return true;
+        const profileEmail = toNormalizedEmail(profileItem.email);
+        return (
+          (nextPrimaryEmail !== "" && profileEmail === nextPrimaryEmail)
+          || (nextSecondaryEmail !== "" && profileEmail === nextSecondaryEmail)
+        );
+      });
+      if (matchedProfile) {
+        if (isFirebaseConfigured) {
+          const profileSaved = await profileCrud.update(matchedProfile.id, {
+            active: nextActive,
+          });
+          if (!profileSaved) {
+            toast.error("사용자 활성 상태 동기화에 실패했습니다");
+            return;
+          }
+        }
+        setProfileList((prev) =>
+          prev.map((item) =>
+            item.id === matchedProfile.id
+              ? { ...item, active: nextActive }
+              : item
+          )
+        );
+        setUsers((prev) =>
+          prev.map((userItem) => {
+            const sameProfileId = userItem.id === matchedProfile.id;
+            const sameEmail =
+              nextPrimaryEmail !== ""
+              && toNormalizedEmail(userItem.email) === nextPrimaryEmail;
+            if (!sameProfileId && !sameEmail) return userItem;
+            return {
+              ...userItem,
+              status: nextActive ? "active" : "inactive",
+            };
+          })
+        );
+      }
+    }
+
     toast.success("컨설턴트 정보가 업데이트되었습니다");
   };
 
@@ -3542,30 +3681,101 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     toast.success(`${generatedSlots.length}개 슬롯을 생성했습니다`);
   };
 
-  const handleUpdateUser = (id: string, data: Partial<UserWithPermissions>) => {
+  const handleUpdateUser = async (id: string, data: Partial<UserWithPermissions>) => {
+    const targetUser = users.find((userItem) => userItem.id === id);
+    const nextStatus = data.status ?? targetUser?.status ?? "active";
+    const nextActive = nextStatus === "active";
+    const targetUserEmail = toNormalizedEmail(targetUser?.email);
+
     setUsers(
       users.map((u) => (u.id === id ? { ...u, ...data } : u))
     );
+
     if (isFirebaseConfigured) {
-      const nextStatus = data.status ?? "active";
-      profileCrud.update(id, {
-        active: nextStatus === "active",
-      }).then((ok) => {
-        if (!ok) {
-          toast.error("사용자 정보 저장에 실패했습니다");
-          return;
-        }
-        setProfileList((prev) =>
-          prev.map((item) =>
-            item.id === id
-              ? { ...item, active: nextStatus === "active" }
-              : item
+      const profileSaved = await profileCrud.update(id, {
+        active: nextActive,
+      });
+      if (!profileSaved) {
+        toast.error("사용자 정보 저장에 실패했습니다");
+        return;
+      }
+
+      if (
+        (nextStatus === "active" || nextStatus === "inactive")
+        && targetUser?.role === "consultant"
+      ) {
+        const targetConsultantIds = Array.from(
+          new Set(
+            consultants
+              .filter((consultant) => {
+                if (consultant.id === id) return true;
+                if (!targetUserEmail) return false;
+                return (
+                  toNormalizedEmail(consultant.email) === targetUserEmail
+                  || toNormalizedEmail(consultant.secondaryEmail) === targetUserEmail
+                );
+              })
+              .map((consultant) => consultant.id)
           )
         );
-        toast.success("사용자 정보가 업데이트되었습니다");
-      });
+        if (targetConsultantIds.length > 0) {
+          const consultantResults = await Promise.all(
+            targetConsultantIds.map((consultantId) =>
+              consultantCrud.update(consultantId, {
+                status: nextActive ? "active" : "inactive",
+              })
+            )
+          );
+          if (consultantResults.some((result) => !result)) {
+            toast.error("컨설턴트 상태 동기화에 실패했습니다");
+            return;
+          }
+          setConsultants((prev) =>
+            prev.map((consultant) =>
+              targetConsultantIds.includes(consultant.id)
+                ? {
+                    ...consultant,
+                    status: nextActive ? "active" : "inactive",
+                  }
+                : consultant
+            )
+          );
+        }
+      }
+
+      setProfileList((prev) =>
+        prev.map((item) =>
+          item.id === id
+            ? { ...item, active: nextActive }
+            : item
+        )
+      );
+      toast.success("사용자 정보가 업데이트되었습니다");
       return;
     }
+
+    if (
+      (nextStatus === "active" || nextStatus === "inactive")
+      && targetUser?.role === "consultant"
+    ) {
+      setConsultants((prev) =>
+        prev.map((consultant) => {
+          const sameId = consultant.id === id;
+          const sameEmail =
+            targetUserEmail !== ""
+            && (
+              toNormalizedEmail(consultant.email) === targetUserEmail
+              || toNormalizedEmail(consultant.secondaryEmail) === targetUserEmail
+            );
+          if (!sameId && !sameEmail) return consultant;
+          return {
+            ...consultant,
+            status: nextActive ? "active" : "inactive",
+          };
+        })
+      );
+    }
+
     toast.success("사용자 정보가 업데이트되었습니다");
   };
 
@@ -3588,15 +3798,127 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     }
 
     const approvedRole = pendingProfile.requestedRole ?? pendingProfile.role;
-    if (approvedRole === "company" && !pendingProfile.companyId) {
-      toast.error("회사 계정 정보가 없어 승인할 수 없습니다");
-      return;
+    const profileSnapshot =
+      profileList.find((item) => item.id === pendingProfile.id) ?? null;
+    const signupRequest = await firestoreService.getDocument<SignupRequestDoc>(
+      "signupRequests",
+      pendingProfile.id
+    );
+    const fallbackEmail =
+      toTrimmedString(signupRequest?.email) || toTrimmedString(pendingProfile.email);
+
+    if (approvedRole === "consultant") {
+      const source =
+        signupRequest?.consultantInfo
+        ?? (profileSnapshot as { pendingConsultantInfo?: Partial<ConsultantProfileFormValues> | null } | null)
+          ?.pendingConsultantInfo
+        ?? null;
+      const phone = toTrimmedString(source?.phone);
+      const organization = toTrimmedString(source?.organization);
+      const secondaryEmail = toTrimmedString(source?.secondaryEmail);
+      const secondaryPhone = toTrimmedString(source?.secondaryPhone);
+      const fixedMeetingLink = toTrimmedString(source?.fixedMeetingLink);
+      const consultantName =
+        toTrimmedString(source?.name)
+        || fallbackEmail.split("@")[0]
+        || "컨설턴트";
+      const consultantEmail =
+        fallbackEmail
+        || toTrimmedString(source?.email)
+        || `${pendingProfile.id}@pending.local`;
+      const consultantExpertise = toTrimmedString(source?.expertise)
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean);
+      const consultantPayload: Omit<Consultant, "id"> = {
+        name: consultantName,
+        title: "컨설턴트",
+        email: consultantEmail,
+        expertise: consultantExpertise,
+        bio: toTrimmedString(source?.bio) || `${consultantName} 컨설턴트`,
+        status: "active",
+        joinedDate: new Date(),
+        availability: buildDefaultConsultantAvailability(),
+        ...(phone ? { phone } : {}),
+        ...(organization ? { organization } : {}),
+        ...(secondaryEmail ? { secondaryEmail } : {}),
+        ...(secondaryPhone ? { secondaryPhone } : {}),
+        ...(fixedMeetingLink ? { fixedMeetingLink } : {}),
+      };
+      const consultantSaved = await consultantCrud.set(
+        pendingProfile.id,
+        consultantPayload
+      );
+      if (!consultantSaved) {
+        toast.error("컨설턴트 프로필 생성에 실패했습니다");
+        return;
+      }
+    }
+
+    let approvedCompanyId: string | null = null;
+    if (approvedRole === "company") {
+      approvedCompanyId =
+        toTrimmedString(signupRequest?.companyId)
+        || toTrimmedString(profileSnapshot?.companyId)
+        || toTrimmedString(pendingProfile.companyId)
+        || pendingProfile.id;
+      const pendingCompanyForm = toPendingCompanyForm(
+        signupRequest?.companyInfo
+          ?? (profileSnapshot as { pendingCompanyInfo?: Partial<CompanyInfoForm> | null } | null)
+            ?.pendingCompanyInfo
+      );
+      const pendingInvestmentRows = toPendingInvestmentRows(
+        signupRequest?.investmentRows
+          ?? (profileSnapshot as { pendingInvestmentRows?: InvestmentInput[] | null } | null)
+            ?.pendingInvestmentRows
+      );
+      const companyInfoRecord = buildCompanyInfoRecord(
+        pendingCompanyForm,
+        pendingInvestmentRows
+      );
+      const companyName = toTrimmedString(pendingCompanyForm.companyInfo) || null;
+
+      const companySaved = await firestoreService.setDocument(
+        "companies",
+        approvedCompanyId,
+        {
+          ownerUid: pendingProfile.id,
+          name: companyName,
+          createdAt: new Date(),
+        },
+        true
+      );
+      if (!companySaved) {
+        toast.error("회사 기본 정보 생성에 실패했습니다");
+        return;
+      }
+
+      const companyInfoSaved = await firestoreService.setDocument(
+        `companies/${approvedCompanyId}/companyInfo`,
+        "info",
+        {
+          ...companyInfoRecord,
+          metadata: {
+            ...companyInfoRecord.metadata,
+            createdAt: new Date(),
+          },
+        },
+        true
+      );
+      if (!companyInfoSaved) {
+        toast.error("회사 상세 정보 생성에 실패했습니다");
+        return;
+      }
     }
 
     const ok = await profileCrud.update(pendingProfile.id, {
       role: approvedRole,
       requestedRole: approvedRole,
       active: true,
+      companyId: approvedRole === "company" ? approvedCompanyId : null,
+      pendingConsultantInfo: deleteField(),
+      pendingCompanyInfo: deleteField(),
+      pendingInvestmentRows: deleteField(),
       activatedAt: new Date(),
       approvedAt: new Date(),
       approvedByUid: firebaseUser?.uid ?? null,
@@ -3604,6 +3926,16 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     if (!ok) {
       toast.error("계정 승인에 실패했습니다");
       return;
+    }
+
+    if (signupRequest) {
+      const removed = await firestoreService.deleteDocument(
+        "signupRequests",
+        pendingProfile.id
+      );
+      if (!removed) {
+        toast.error("승인 요청 정리에 실패했습니다. 다시 시도해주세요.");
+      }
     }
 
     toast.success("계정 승인이 완료되었습니다");
@@ -3615,6 +3947,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
               role: approvedRole,
               requestedRole: approvedRole,
               active: true,
+              companyId: approvedRole === "company" ? approvedCompanyId : null,
               activatedAt: new Date(),
               approvedAt: new Date(),
             }
