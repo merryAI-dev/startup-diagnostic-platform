@@ -38,6 +38,13 @@ import type { CompanyInfoForm, InvestmentInput } from "@/types/company"
 import { DEFAULT_FORM } from "@/types/company"
 
 const PENDING_SIGNUP_KEY = "pending-signup"
+type PendingSignupDraft = {
+  role: Role
+  email: string
+  password?: string
+  provider?: "email" | "google"
+}
+
 function getSignupErrorMessage(error: any) {
   const code = error?.code ?? ""
   if (code === "auth/email-already-in-use") {
@@ -68,19 +75,19 @@ export function SignupInfoPage() {
   const [hydratingProfile, setHydratingProfile] = useState(false)
   const [creatingAccount, setCreatingAccount] = useState(false)
 
-  const requestedRole = useMemo(
-    () => profile?.requestedRole ?? getRoleFromQuery(location.search),
-    [location.search, profile?.requestedRole]
-  )
   const pendingSignup = useMemo(() => {
     try {
       const raw = sessionStorage.getItem(PENDING_SIGNUP_KEY)
       if (!raw) return null
-      return JSON.parse(raw) as { role: Role; email: string; password: string }
+      return JSON.parse(raw) as PendingSignupDraft
     } catch {
       return null
     }
   }, [])
+  const requestedRole = useMemo(
+    () => profile?.requestedRole ?? getRoleFromQuery(location.search) ?? pendingSignup?.role ?? null,
+    [location.search, pendingSignup?.role, profile?.requestedRole]
+  )
 
   useEffect(() => {
     if (loading) return
@@ -123,6 +130,10 @@ export function SignupInfoPage() {
     if (user) return user
     if (!pendingSignup) {
       toast.error("회원가입 정보가 없습니다. 다시 회원가입을 진행해주세요.")
+      return null
+    }
+    if (!pendingSignup.password) {
+      toast.error("로그인 정보가 만료되었습니다. 다시 로그인 후 시도해주세요.")
       return null
     }
     if (creatingAccount) return null
