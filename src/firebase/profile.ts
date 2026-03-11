@@ -44,6 +44,14 @@ function toIsoDate(value: string) {
   return `${digits.slice(0, 4)}-${digits.slice(4, 6)}-${digits.slice(6, 8)}`
 }
 
+function toTargetCountries(value: string) {
+  return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .slice(0, 3)
+}
+
 export function buildCompanyInfoRecord(
   form: CompanyInfoForm,
   investmentRows?: InvestmentInput[]
@@ -51,11 +59,17 @@ export function buildCompanyInfoRecord(
   return {
     basic: {
       companyInfo: form.companyInfo,
+      representativeSolution: form.representativeSolution,
       ceo: {
         name: form.ceoName,
         email: form.ceoEmail,
         phone: form.ceoPhone,
+        age: toNumber(form.ceoAge),
+        gender: form.ceoGender,
+        nationality: form.ceoNationality,
       },
+      founderSerialNumber: toNumber(form.founderSerialNumber),
+      website: form.website,
       foundedAt: form.foundedAt,
       businessNumber: form.businessNumber,
       primaryBusiness: form.primaryBusiness,
@@ -80,12 +94,28 @@ export function buildCompanyInfoRecord(
       designation: form.certification,
       tipsLipsHistory: form.tipsLipsHistory,
     },
+    impact: {
+      sdgPriority1: form.sdgPriority1,
+      sdgPriority2: form.sdgPriority2,
+      myscExpectation: form.myscExpectation,
+    },
+    globalExpansion: {
+      targetCountries: toTargetCountries(form.targetCountries),
+    },
     investments: (investmentRows ?? []).map((row) => ({
       stage: row.stage,
       date: toIsoDate(row.date),
       postMoney: toDecimalNumber(row.postMoney),
       majorShareholder: row.majorShareholder,
     })),
+    vouchers: {
+      exportVoucherHeld: form.exportVoucherHeld,
+      exportVoucherAmount: form.exportVoucherAmount,
+      exportVoucherUsageRate: form.exportVoucherUsageRate,
+      innovationVoucherHeld: form.innovationVoucherHeld,
+      innovationVoucherAmount: form.innovationVoucherAmount,
+      innovationVoucherUsageRate: form.innovationVoucherUsageRate,
+    },
     fundingPlan: {
       desiredAmount2026: toDecimalNumber(form.desiredInvestment2026),
       preValue: toDecimalNumber(form.desiredPreValue),
@@ -114,6 +144,7 @@ export async function createUserProfile(
   options?: {
     companyId?: string | null
     companyInfo?: CompanyInfoForm
+    programIds?: string[]
     investmentRows?: InvestmentInput[]
     consultantInfo?: ConsultantSignupInfo
     active?: boolean
@@ -162,6 +193,7 @@ export async function createUserProfile(
   }
   if (requestedRole === "company") {
     signupRequestData.companyInfo = options?.companyInfo ?? null
+    signupRequestData.programIds = options?.programIds ?? []
     signupRequestData.investmentRows = options?.investmentRows ?? []
   }
   if (requestedRole === "consultant" && options?.consultantInfo) {

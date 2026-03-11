@@ -1,12 +1,22 @@
 import { useMemo, useState } from "react";
-import { Application, Program, OfficeHourReport, User } from "@/redesign/app/lib/types";
+import { Application, Consultant, Program, OfficeHourReport, User } from "@/redesign/app/lib/types";
 import { Button } from "@/redesign/app/components/ui/button";
 import { Badge } from "@/redesign/app/components/ui/badge";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/redesign/app/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/redesign/app/components/ui/dialog";
+import { Input } from "@/redesign/app/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/redesign/app/components/ui/table";
+import { Textarea } from "@/redesign/app/components/ui/textarea";
 import { AlertCircle, Clock, Calendar, FileText } from "lucide-react";
 import { addDays, format, differenceInDays } from "date-fns";
 import { ko } from "date-fns/locale";
+import { toast } from "sonner";
 
 const parseLocalDate = (value?: string | null) => {
   if (!value) return null;
@@ -45,6 +55,7 @@ interface PendingReportsDashboardProps {
   applications: Application[];
   reports: OfficeHourReport[];
   programs: Program[];
+  consultants: Consultant[];
   currentUser: User;
   currentConsultantId?: string | null;
   currentConsultantName?: string | null;
@@ -70,16 +81,24 @@ type ReportRow = {
   programColor: string;
   programId: string;
   consultantName: string;
+  consultantEmail?: string;
   statusLabel: "작성" | "미작성";
   report: OfficeHourReport | null;
   dueLabel: string;
   dueOverdue: boolean;
 };
 
+type EmailDraft = {
+  recipient: string;
+  subject: string;
+  body: string;
+};
+
 export function PendingReportsDashboard({
   applications,
   reports,
   programs,
+  consultants,
   currentUser,
   currentConsultantId,
   currentConsultantName,
@@ -96,9 +115,97 @@ export function PendingReportsDashboard({
     programColor: string;
     programId: string;
   } | null>(null);
+  const [emailDraft, setEmailDraft] = useState<EmailDraft | null>(null);
 
   const normalizeConsultantName = (value?: string | null) =>
     (value ?? "").replace(/\s*컨설턴트\s*$/u, "").trim().toLowerCase();
+
+  const isValidEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+
+  const resolveConsultantEmail = (application?: Application | null, report?: OfficeHourReport | null) => {
+    const consultantId = report?.consultantId || application?.consultantId || "";
+    const consultantName = report?.consultantName || application?.consultant || "";
+
+    if (consultantId) {
+      const byId = consultants.find((consultant) => consultant.id === consultantId);
+      if (byId?.email) return byId.email;
+    }
+
+    const normalizedName = normalizeConsultantName(consultantName);
+    if (!normalizedName) return "";
+
+    const byName = consultants.find(
+      (consultant) => normalizeConsultantName(consultant.name) === normalizedName
+    );
+    return byName?.email ?? "";
+  };
+
+  const handleSendReminderEmail = (row: ReportRow) => {
+    const scheduledDate = row.application.scheduledDate
+      ? format(
+          parseLocalDate(row.application.scheduledDate) ?? new Date(row.application.scheduledDate),
+          "yyyy년 M월 d일",
+          { locale: ko }
+        )
+      : "일정 확인 필요";
+    const companyName = row.application.companyName?.trim() || row.application.applicantName?.trim() || "기업";
+    const subject = `[MYSC] 오피스아워 일지 작성 요청 - ${row.application.officeHourTitle}`;
+    const body = [
+      `${row.consultantName}님 안녕하세요.`,
+      "",
+      "아래 오피스아워 일정의 일지가 아직 작성되지 않아 확인 요청드립니다.",
+      "",
+      `- 사업: ${row.programName}`,
+      `- 기업: ${companyName}`,
+      `- 오피스아워: ${row.application.officeHourTitle}`,
+      `- 진행일: ${scheduledDate}`,
+      "",
+      "로그인 후 오피스아워 일지 메뉴에서 작성 부탁드립니다.",
+      "",
+      "감사합니다.",
+    ].join("\n");
+    setEmailDraft({
+      recipient: row.consultantEmail?.trim() ?? "",
+      subject,
+      body,
+    });
+  };
+
+  const handleOpenGmail = () => {
+    if (!emailDraft) return;
+    const email = emailDraft.recipient.trim();
+    if (!email) {
+      toast.error("이메일을 입력해주세요.");
+      return;
+    }
+    if (!isValidEmail(email)) {
+      toast.error("올바른 이메일 형식이 아닙니다.");
+      return;
+    }
+
+    const url =
+      `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(email)}`
+      + `&su=${encodeURIComponent(emailDraft.subject)}`
+      + `&body=${encodeURIComponent(emailDraft.body)}`;
+    window.open(url, "_blank", "noopener,noreferrer");
+  };
+
+  const handleCopyEmailDraft = async () => {
+    if (!emailDraft) return;
+    const text = [
+      `받는 사람: ${emailDraft.recipient}`,
+      `제목: ${emailDraft.subject}`,
+      "",
+      emailDraft.body,
+    ].join("\n");
+
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success("메일 초안을 복사했습니다.");
+    } catch {
+      toast.error("복사에 실패했습니다.");
+    }
+  };
 
   const isForCurrentConsultant = (application?: Application | null, report?: OfficeHourReport | null) => {
     if (!isConsultantUser) return true;
@@ -278,6 +385,7 @@ export function PendingReportsDashboard({
       programColor: item.programColor,
       programId: item.application.programId || "unknown",
       consultantName: item.application.consultant,
+      consultantEmail: resolveConsultantEmail(item.application, null),
       statusLabel: "미작성",
       report: null,
       dueLabel: item.isOverdue ? `${item.overdueDays}일 초과` : `D-${item.daysLeft}`,
@@ -291,6 +399,7 @@ export function PendingReportsDashboard({
         programColor: item.programColor,
         programId: item.programId,
         consultantName: item.report.consultantName || item.application.consultant,
+        consultantEmail: resolveConsultantEmail(item.application, item.report),
         statusLabel: "작성",
         report: item.report,
         dueLabel: "작성됨",
@@ -299,7 +408,7 @@ export function PendingReportsDashboard({
     });
 
     return rows;
-  }, [pendingReports, submittedReports]);
+  }, [pendingReports, submittedReports, consultants]);
   const selectedReportContent = useMemo(
     () => parseReportContent(selectedReportItem?.report.content),
     [selectedReportItem?.report.content]
@@ -500,7 +609,13 @@ export function PendingReportsDashboard({
                               상세
                             </Button>
                           ) : isAdminUser ? (
-                            <span className="text-xs text-muted-foreground">-</span>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handleSendReminderEmail(row)}
+                            >
+                              이메일 작성
+                            </Button>
                           ) : (
                             <Button
                               size="sm"
@@ -643,6 +758,86 @@ export function PendingReportsDashboard({
               </div>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+      <Dialog
+        open={!!emailDraft}
+        onOpenChange={(open) => {
+          if (!open) setEmailDraft(null);
+        }}
+      >
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>리마인드 메일 작성</DialogTitle>
+            <DialogDescription>
+              이메일을 확인하거나 수정한 뒤 Gmail에서 열거나 내용을 복사할 수 있습니다.
+            </DialogDescription>
+          </DialogHeader>
+          {emailDraft ? (
+            <div className="space-y-4">
+              <label className="space-y-2 text-sm text-slate-700">
+                <span className="font-medium">받는 사람</span>
+                <Input
+                  type="email"
+                  value={emailDraft.recipient}
+                  onChange={(event) =>
+                    setEmailDraft((prev) =>
+                      prev
+                        ? {
+                            ...prev,
+                            recipient: event.target.value,
+                          }
+                        : prev
+                    )
+                  }
+                />
+              </label>
+              <label className="space-y-2 text-sm text-slate-700">
+                <span className="font-medium">제목</span>
+                <Input
+                  value={emailDraft.subject}
+                  onChange={(event) =>
+                    setEmailDraft((prev) =>
+                      prev
+                        ? {
+                            ...prev,
+                            subject: event.target.value,
+                          }
+                        : prev
+                    )
+                  }
+                />
+              </label>
+              <label className="space-y-2 text-sm text-slate-700">
+                <span className="font-medium">본문</span>
+                <Textarea
+                  className="min-h-[240px]"
+                  value={emailDraft.body}
+                  onChange={(event) =>
+                    setEmailDraft((prev) =>
+                      prev
+                        ? {
+                            ...prev,
+                            body: event.target.value,
+                          }
+                        : prev
+                    )
+                  }
+                />
+              </label>
+            </div>
+          ) : null}
+          <DialogFooter className="flex-wrap gap-2 sm:justify-end">
+            <Button variant="outline" onClick={handleCopyEmailDraft}>
+              복사
+            </Button>
+            <Button variant="outline" onClick={handleOpenGmail}>
+              Gmail에서 열기
+            </Button>
+            <Button variant="outline" onClick={() => setEmailDraft(null)}>
+              닫기
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

@@ -180,7 +180,7 @@ service cloud.firestore {
     }
 
     match /programs/{programId} {
-      allow read: if isActiveUser();
+      allow read: if true;
       allow create, update, delete: if isAdmin();
     }
 

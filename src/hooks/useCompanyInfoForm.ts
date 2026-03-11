@@ -21,24 +21,40 @@ type SaveType = "draft" | "final"
 
 const FIELD_LABELS: Record<keyof CompanyInfoForm, string> = {
   companyInfo: "기업정보",
+  representativeSolution: "대표 솔루션",
+  sdgPriority1: "UN SDGs 우선순위 1위",
+  sdgPriority2: "UN SDGs 우선순위 2위",
   ceoName: "대표자 성명",
   ceoEmail: "대표자 이메일",
   ceoPhone: "대표자 전화번호",
+  ceoAge: "대표자 나이",
+  ceoGender: "대표자 성별",
+  ceoNationality: "대표자 국적",
+  founderSerialNumber: "이전 창업 횟수",
+  website: "회사 홈페이지",
   foundedAt: "법인 설립일자",
   businessNumber: "사업자등록번호",
   primaryBusiness: "주업태",
   primaryIndustry: "주업종",
   headOffice: "본점 소재지",
   branchOffice: "지점 또는 연구소 소재지",
+  targetCountries: "해외 지사 또는 진출 희망국가",
   workforceFullTime: "종업원수 (정규)",
   workforceContract: "종업원수 (계약)",
-  revenue2025: "매출액 (2025년)",
-  revenue2026: "매출액 (2026년)",
-  capitalTotal: "자본총계",
+  revenue2025: "매출액 (2025년, 원)",
+  revenue2026: "매출액 (2026년, 원)",
+  capitalTotal: "자본총계 (원)",
   certification: "인증/지정 여부",
   tipsLipsHistory: "TIPS/LIPS 이력",
-  desiredInvestment2026: "2026년 내 희망 투자액 (억)",
-  desiredPreValue: "투자전 희망기업가치 (Pre-Value, 억)",
+  exportVoucherHeld: "수출바우처 보유 여부",
+  exportVoucherAmount: "수출바우처 확보 금액 (원)",
+  exportVoucherUsageRate: "수출바우처 소진율 (%)",
+  innovationVoucherHeld: "중소기업혁신바우처 보유 여부",
+  innovationVoucherAmount: "중소기업혁신바우처 확보 금액 (원)",
+  innovationVoucherUsageRate: "중소기업혁신바우처 소진율 (%)",
+  myscExpectation: "MYSC에 가장 기대하는 점",
+  desiredInvestment2026: "2026년 내 희망 투자액 (원)",
+  desiredPreValue: "투자전 희망기업가치 (Pre-Value, 원)",
 }
 
 function formatNumber(value: number | null | undefined) {
@@ -53,32 +69,7 @@ function formatNumberInput(value: string) {
 }
 
 function formatRevenueInput(value: string) {
-  const sanitized = value.replace(/[^\d.]/g, "")
-  if (!sanitized) return ""
-
-  const firstDotIndex = sanitized.indexOf(".")
-  const hasDot = firstDotIndex >= 0
-  const compact = hasDot
-    ? `${sanitized.slice(0, firstDotIndex)}.${sanitized
-        .slice(firstDotIndex + 1)
-        .replace(/\./g, "")}`
-    : sanitized
-  const [rawInteger = "", rawDecimal = ""] = compact.split(".")
-  const integerDigits = rawInteger.replace(/[^\d]/g, "")
-  const decimalDigits = rawDecimal.replace(/[^\d]/g, "").slice(0, 1)
-
-  let integerValue = integerDigits
-  if (!integerValue && hasDot) {
-    integerValue = "0"
-  }
-  const normalizedInteger =
-    integerValue.length > 1 ? integerValue.replace(/^0+(?=\d)/, "") : integerValue
-  const formattedInteger = normalizedInteger
-    ? normalizedInteger.replace(/\B(?=(\d{3})+(?!\d))/g, ",")
-    : ""
-
-  if (!hasDot) return formattedInteger
-  return `${formattedInteger || "0"}.${decimalDigits}`
+  return formatNumberInput(value)
 }
 
 function sanitizeInvestmentDateDigits(value: string) {
@@ -200,9 +191,19 @@ function normalizeInvestmentStageValue(value: unknown) {
   return ""
 }
 
+function toTargetCountries(value: string) {
+  return value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .slice(0, 3)
+}
+
 export function useCompanyInfoForm(companyId: string) {
   const [form, setForm] = useState<CompanyInfoForm>(DEFAULT_FORM)
   const [savedForm, setSavedForm] = useState<CompanyInfoForm>(DEFAULT_FORM)
+  const [companyProgramIds, setCompanyProgramIds] = useState<string[]>([])
+  const [savedCompanyProgramIds, setSavedCompanyProgramIds] = useState<string[]>([])
   const [investmentRows, setInvestmentRows] = useState<InvestmentInput[]>(
     DEFAULT_INVESTMENTS
   )
@@ -269,9 +270,22 @@ export function useCompanyInfoForm(companyId: string) {
     async function loadCompanyInfo() {
       setLoading(true)
       try {
+        const companyRef = doc(db, "companies", companyId)
         const ref = doc(db, "companies", companyId, "companyInfo", "info")
-        const snapshot = await getDoc(ref)
+        const [companySnapshot, snapshot] = await Promise.all([
+          getDoc(companyRef),
+          getDoc(ref),
+        ])
         if (!mounted) return
+
+        const programs = Array.isArray(companySnapshot.data()?.programs)
+          ? companySnapshot
+              .data()!
+              .programs.filter((value: unknown): value is string => typeof value === "string")
+          : []
+        setCompanyProgramIds(programs)
+        setSavedCompanyProgramIds(programs)
+
         if (!snapshot.exists()) {
           setLoading(false)
           return
@@ -281,15 +295,28 @@ export function useCompanyInfoForm(companyId: string) {
         setHasFinalSavedData(data.metadata?.saveType !== "draft")
         const nextForm: CompanyInfoForm = {
           companyInfo: data.basic?.companyInfo ?? "",
+          representativeSolution: data.basic?.representativeSolution ?? "",
+          sdgPriority1: data.impact?.sdgPriority1 ?? "",
+          sdgPriority2: data.impact?.sdgPriority2 ?? "",
           ceoName: data.basic?.ceo?.name ?? "",
           ceoEmail: data.basic?.ceo?.email ?? "",
           ceoPhone: formatPhoneNumber(data.basic?.ceo?.phone ?? ""),
+          ceoAge:
+            data.basic?.ceo?.age != null ? String(data.basic.ceo.age) : "",
+          ceoGender: data.basic?.ceo?.gender ?? "",
+          ceoNationality: data.basic?.ceo?.nationality ?? "",
+          founderSerialNumber:
+            data.basic?.founderSerialNumber != null
+              ? String(data.basic.founderSerialNumber)
+              : "",
+          website: data.basic?.website ?? "",
           foundedAt: data.basic?.foundedAt ?? "",
           businessNumber: formatBusinessNumber(data.basic?.businessNumber ?? ""),
           primaryBusiness: data.basic?.primaryBusiness ?? "",
           primaryIndustry: data.basic?.primaryIndustry ?? "",
           headOffice: data.locations?.headOffice ?? "",
           branchOffice: data.locations?.branchOrLab ?? "",
+          targetCountries: (data.globalExpansion?.targetCountries ?? []).join(", "),
           workforceFullTime: formatNumber(data.workforce?.fullTime),
           workforceContract: formatNumber(data.workforce?.contract),
           revenue2025: formatNumber(data.finance?.revenue?.y2025),
@@ -297,6 +324,13 @@ export function useCompanyInfoForm(companyId: string) {
           capitalTotal: formatNumber(data.finance?.capitalTotal),
           certification: data.certifications?.designation ?? "",
           tipsLipsHistory: data.certifications?.tipsLipsHistory ?? "",
+          exportVoucherHeld: data.vouchers?.exportVoucherHeld ?? "",
+          exportVoucherAmount: data.vouchers?.exportVoucherAmount ?? "",
+          exportVoucherUsageRate: data.vouchers?.exportVoucherUsageRate ?? "",
+          innovationVoucherHeld: data.vouchers?.innovationVoucherHeld ?? "",
+          innovationVoucherAmount: data.vouchers?.innovationVoucherAmount ?? "",
+          innovationVoucherUsageRate: data.vouchers?.innovationVoucherUsageRate ?? "",
+          myscExpectation: data.impact?.myscExpectation ?? "",
           desiredInvestment2026: formatNumber(
             data.fundingPlan?.desiredAmount2026
           ),
@@ -371,11 +405,17 @@ export function useCompanyInfoForm(companyId: string) {
     const companyInfo: CompanyInfoRecord = {
       basic: {
         companyInfo: form.companyInfo,
+        representativeSolution: form.representativeSolution,
         ceo: {
           name: form.ceoName,
           email: form.ceoEmail,
           phone: form.ceoPhone,
+          age: toNumber(form.ceoAge),
+          gender: form.ceoGender,
+          nationality: form.ceoNationality,
         },
+        founderSerialNumber: toNumber(form.founderSerialNumber),
+        website: form.website,
         foundedAt: form.foundedAt,
         businessNumber: form.businessNumber,
         primaryBusiness: form.primaryBusiness,
@@ -400,12 +440,28 @@ export function useCompanyInfoForm(companyId: string) {
         designation: form.certification,
         tipsLipsHistory: form.tipsLipsHistory,
       },
+      impact: {
+        sdgPriority1: form.sdgPriority1,
+        sdgPriority2: form.sdgPriority2,
+        myscExpectation: form.myscExpectation,
+      },
+      globalExpansion: {
+        targetCountries: toTargetCountries(form.targetCountries),
+      },
       investments: investmentRows.map((row) => ({
         stage: normalizeInvestmentStageValue(row.stage),
         date: toIsoDate(row.date),
         postMoney: toDecimalNumber(row.postMoney),
         majorShareholder: row.majorShareholder,
       })),
+      vouchers: {
+        exportVoucherHeld: form.exportVoucherHeld,
+        exportVoucherAmount: form.exportVoucherAmount,
+        exportVoucherUsageRate: form.exportVoucherUsageRate,
+        innovationVoucherHeld: form.innovationVoucherHeld,
+        innovationVoucherAmount: form.innovationVoucherAmount,
+        innovationVoucherUsageRate: form.innovationVoucherUsageRate,
+      },
       fundingPlan: {
         desiredAmount2026: toDecimalNumber(form.desiredInvestment2026),
         preValue: toDecimalNumber(form.desiredPreValue),
@@ -439,11 +495,13 @@ export function useCompanyInfoForm(companyId: string) {
         doc(db, "companies", companyId),
         {
           name: companyInfo.basic.companyInfo || null,
+          programs: companyProgramIds,
           updatedAt: serverTimestamp(),
         },
         { merge: true }
       )
       setSavedForm(form)
+      setSavedCompanyProgramIds(companyProgramIds)
       setSavedInvestmentRows(investmentRows)
       setHasSavedData(true)
       if (saveType === "final") {
@@ -476,6 +534,8 @@ export function useCompanyInfoForm(companyId: string) {
   return {
     form,
     setForm,
+    companyProgramIds,
+    setCompanyProgramIds,
     investmentRows,
     addInvestmentRow,
     removeInvestmentRow,
@@ -490,6 +550,7 @@ export function useCompanyInfoForm(companyId: string) {
     invalidRequiredLabels: invalidRequiredFields.map((field) => FIELD_LABELS[field]),
     hasSavedData,
     hasFinalSavedData,
+    savedCompanyProgramIds,
     savedInvestmentRows,
     formatNumberInput,
     formatRevenueInput,

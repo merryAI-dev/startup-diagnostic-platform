@@ -138,6 +138,7 @@ type SignupRequestDoc = {
   status?: string;
   consultantInfo?: Partial<ConsultantProfileFormValues> | null;
   companyInfo?: Partial<CompanyInfoForm> | null;
+  programIds?: string[] | null;
   investmentRows?: InvestmentInput[] | null;
   createdAt?: unknown;
   updatedAt?: unknown;
@@ -228,16 +229,26 @@ function toPendingCompanyForm(value: unknown): CompanyInfoForm {
   }
   const source = value as Partial<CompanyInfoForm>;
   return {
+    ...DEFAULT_FORM,
     companyInfo: toTrimmedString(source.companyInfo),
+    representativeSolution: toTrimmedString(source.representativeSolution),
+    sdgPriority1: toTrimmedString(source.sdgPriority1),
+    sdgPriority2: toTrimmedString(source.sdgPriority2),
     ceoName: toTrimmedString(source.ceoName),
     ceoEmail: toTrimmedString(source.ceoEmail),
     ceoPhone: toTrimmedString(source.ceoPhone),
+    ceoAge: toTrimmedString(source.ceoAge),
+    ceoGender: toTrimmedString(source.ceoGender),
+    ceoNationality: toTrimmedString(source.ceoNationality),
+    founderSerialNumber: toTrimmedString(source.founderSerialNumber),
+    website: toTrimmedString(source.website),
     foundedAt: toTrimmedString(source.foundedAt),
     businessNumber: toTrimmedString(source.businessNumber),
     primaryBusiness: toTrimmedString(source.primaryBusiness),
     primaryIndustry: toTrimmedString(source.primaryIndustry),
     headOffice: toTrimmedString(source.headOffice),
     branchOffice: toTrimmedString(source.branchOffice),
+    targetCountries: toTrimmedString(source.targetCountries),
     workforceFullTime: toTrimmedString(source.workforceFullTime),
     workforceContract: toTrimmedString(source.workforceContract),
     revenue2025: toTrimmedString(source.revenue2025),
@@ -245,6 +256,13 @@ function toPendingCompanyForm(value: unknown): CompanyInfoForm {
     capitalTotal: toTrimmedString(source.capitalTotal),
     certification: toTrimmedString(source.certification),
     tipsLipsHistory: toTrimmedString(source.tipsLipsHistory),
+    exportVoucherHeld: toTrimmedString(source.exportVoucherHeld),
+    exportVoucherAmount: toTrimmedString(source.exportVoucherAmount),
+    exportVoucherUsageRate: toTrimmedString(source.exportVoucherUsageRate),
+    innovationVoucherHeld: toTrimmedString(source.innovationVoucherHeld),
+    innovationVoucherAmount: toTrimmedString(source.innovationVoucherAmount),
+    innovationVoucherUsageRate: toTrimmedString(source.innovationVoucherUsageRate),
+    myscExpectation: toTrimmedString(source.myscExpectation),
     desiredInvestment2026: toTrimmedString(source.desiredInvestment2026),
     desiredPreValue: toTrimmedString(source.desiredPreValue),
   };
@@ -677,7 +695,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     || isPage(["admin-agendas", "admin-consultants", "admin-programs"]);
   const needsConsultants =
     resolvedRole === "consultant"
-    || isPage(["consultants", "regular-wizard", "admin-consultants", "admin-users"]);
+    || isPage(["consultants", "regular-wizard", "admin-consultants", "admin-users", "pending-reports"]);
   const needsOfficeHourSlots = needsApplications || needsRegularOfficeHours;
   const needsCompanyLookup = resolvedRole === "admin" && needsApplications;
   const needsCompanyDirectory =
@@ -687,7 +705,11 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     && resolvedRole === "user"
     && !!firebaseUser?.uid
     && !isCompanyInfoRoute;
-  const { data: companyDocs } = useFirestoreCollection<{ id: string; name?: string | null }>(
+  const { data: companyDocs } = useFirestoreCollection<{
+    id: string;
+    name?: string | null;
+    programs?: string[];
+  }>(
     "companies",
     {
       enabled:
@@ -732,7 +754,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
           name: doc.name?.trim()
             || companyNameById.get(doc.id)
             || "회사명 미입력",
-          programs: programsByCompanyId.get(doc.id) ?? [],
+          programs: doc.programs ?? programsByCompanyId.get(doc.id) ?? [],
         }));
       }
       return companyUserDocs.map((doc) => ({
@@ -789,6 +811,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
   );
   const { data: companyMetaDoc } = useFirestoreDocument<{
     programTicketOverrides?: Record<string, { internal?: number; external?: number }>;
+    programs?: string[];
   }>("companies", companyRecordId ?? null, {
     enabled: isFirebaseConfigured && resolvedRole === "user" && !!companyRecordId,
   });
@@ -800,6 +823,12 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
         ? companyInfoDoc?.basic?.companyInfo?.trim() || null
         : null;
     const resolvedCompanyName = resolveCompanyName(profile?.companyId ?? null);
+    const resolvedProgramIds =
+      resolvedRole === "user"
+        ? (Array.isArray(companyMetaDoc?.programs)
+            ? companyMetaDoc.programs
+            : (fallbackUser.programs ?? []))
+        : (fallbackUser.programs ?? []);
     return {
       ...fallbackUser,
       id: firebaseUser?.uid ?? fallbackUser.id,
@@ -809,9 +838,10 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
         ?? (profile?.companyId ? "회사명 미입력" : fallbackUser.companyName),
       role: resolvedRole,
       programName: fallbackUser.programName ?? "MYSC",
-      programs: fallbackUser.programs ?? [],
+      programs: resolvedProgramIds,
     };
   }, [
+    companyMetaDoc?.programs,
     companyInfoDoc?.basic?.companyInfo,
     fallbackUser,
     firebaseUser?.email,
@@ -1218,6 +1248,9 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
 
   const companyProgramIds = useMemo(() => {
     if (resolvedRole !== "user") return new Set<string>();
+    if (Array.isArray(companyMetaDoc?.programs)) {
+      return new Set(companyMetaDoc.programs);
+    }
     const ids = new Set<string>();
     const candidateIds = new Set(
       [companyRecordId, firebaseUser?.uid, profile?.companyId, user.id].filter(
@@ -1244,6 +1277,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     }
     return ids;
   }, [
+    companyMetaDoc?.programs,
     companyRecordId,
     firebaseUser?.uid,
     profile?.companyId,
@@ -3634,6 +3668,38 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
         toast.error("참여 기업 업데이트에 실패했습니다");
         return;
       }
+
+      const affectedCompanyIds = Array.from(
+        new Set([...(targetProgram.companyIds ?? []), ...uniqueCompanyIds])
+      );
+      if (affectedCompanyIds.length > 0) {
+        const companyProgramsById = new Map(
+          companyDirectory.map((company) => [company.id, company.programs ?? []] as const)
+        );
+        const syncResults = await Promise.all(
+          affectedCompanyIds.map((companyId) => {
+            const nextPrograms = new Set(companyProgramsById.get(companyId) ?? []);
+            if (uniqueCompanyIds.includes(companyId)) {
+              nextPrograms.add(programId);
+            } else {
+              nextPrograms.delete(programId);
+            }
+            return firestoreService.setDocument(
+              "companies",
+              companyId,
+              {
+                programs: Array.from(nextPrograms),
+                updatedAt: new Date(),
+              },
+              true
+            );
+          })
+        );
+        if (syncResults.some((result) => !result)) {
+          toast.error("회사 참여사업 동기화에 실패했습니다");
+          return;
+        }
+      }
     }
 
     toast.success("참여 기업 구성이 업데이트되었습니다");
@@ -3978,6 +4044,9 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
         {
           ownerUid: pendingProfile.id,
           name: companyName,
+          programs: Array.isArray(signupRequest?.programIds)
+            ? signupRequest.programIds.filter((value): value is string => typeof value === "string")
+            : [],
           createdAt: new Date(),
         },
         true
@@ -4141,7 +4210,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
         <main className="flex-1 overflow-y-auto bg-gray-50">
           {currentPage === "dashboard" && (
             <DashboardCalendar
-              applications={resolvedApplications}
+              applications={scopedApplications}
               user={user}
               programs={scopedProgramList}
               agendas={agendaList}
@@ -4628,6 +4697,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
                 applications={scopedApplications}
                 reports={reports}
                 programs={scopedProgramList}
+                consultants={consultants}
                 currentUser={scopedUser}
                 currentConsultantName={currentConsultant?.name ?? null}
                 onCreateReport={(applicationId) => {

@@ -7,15 +7,24 @@ export type InvestmentInput = {
 
 export type CompanyInfoForm = {
   companyInfo: string
+  representativeSolution: string
+  sdgPriority1: string
+  sdgPriority2: string
   ceoName: string
   ceoEmail: string
   ceoPhone: string
+  ceoAge: string
+  ceoGender: string
+  ceoNationality: string
+  founderSerialNumber: string
+  website: string
   foundedAt: string
   businessNumber: string
   primaryBusiness: string
   primaryIndustry: string
   headOffice: string
   branchOffice: string
+  targetCountries: string
   workforceFullTime: string
   workforceContract: string
   revenue2025: string
@@ -23,6 +32,13 @@ export type CompanyInfoForm = {
   capitalTotal: string
   certification: string
   tipsLipsHistory: string
+  exportVoucherHeld: string
+  exportVoucherAmount: string
+  exportVoucherUsageRate: string
+  innovationVoucherHeld: string
+  innovationVoucherAmount: string
+  innovationVoucherUsageRate: string
+  myscExpectation: string
   desiredInvestment2026: string
   desiredPreValue: string
 }
@@ -30,11 +46,17 @@ export type CompanyInfoForm = {
 export type CompanyInfoRecord = {
   basic: {
     companyInfo: string
+    representativeSolution: string
     ceo: {
       name: string
       email: string
       phone: string
+      age: number | null
+      gender: string
+      nationality: string
     }
+    founderSerialNumber: number | null
+    website: string
     foundedAt: string
     businessNumber: string
     primaryBusiness: string
@@ -59,12 +81,28 @@ export type CompanyInfoRecord = {
     designation: string
     tipsLipsHistory: string
   }
+  impact: {
+    sdgPriority1: string
+    sdgPriority2: string
+    myscExpectation: string
+  }
+  globalExpansion: {
+    targetCountries: string[]
+  }
   investments: {
     stage: string
     date: string
     postMoney: number | null
     majorShareholder: string
   }[]
+  vouchers: {
+    exportVoucherHeld: string
+    exportVoucherAmount: string
+    exportVoucherUsageRate: string
+    innovationVoucherHeld: string
+    innovationVoucherAmount: string
+    innovationVoucherUsageRate: string
+  }
   fundingPlan: {
     desiredAmount2026: number | null
     preValue: number | null
@@ -78,15 +116,24 @@ export type CompanyInfoRecord = {
 
 export const DEFAULT_FORM: CompanyInfoForm = {
   companyInfo: "",
+  representativeSolution: "",
+  sdgPriority1: "",
+  sdgPriority2: "",
   ceoName: "",
   ceoEmail: "",
   ceoPhone: "",
+  ceoAge: "",
+  ceoGender: "",
+  ceoNationality: "",
+  founderSerialNumber: "",
+  website: "",
   foundedAt: "",
   businessNumber: "",
   primaryBusiness: "",
   primaryIndustry: "",
   headOffice: "",
   branchOffice: "",
+  targetCountries: "",
   workforceFullTime: "",
   workforceContract: "",
   revenue2025: "",
@@ -94,6 +141,13 @@ export const DEFAULT_FORM: CompanyInfoForm = {
   capitalTotal: "",
   certification: "",
   tipsLipsHistory: "",
+  exportVoucherHeld: "",
+  exportVoucherAmount: "",
+  exportVoucherUsageRate: "",
+  innovationVoucherHeld: "",
+  innovationVoucherAmount: "",
+  innovationVoucherUsageRate: "",
+  myscExpectation: "",
   desiredInvestment2026: "",
   desiredPreValue: "",
 }

@@ -176,6 +176,23 @@ export function AdminPrograms({
     return grouped
   }, [applications])
 
+  const companyIdsByProgram = useMemo(() => {
+    const map = new Map<string, string[]>()
+
+    programs.forEach((program) => {
+      const explicitCompanyIds = companies
+        .filter((company) => company.programs?.includes(program.id))
+        .map((company) => company.id)
+      const legacyCompanyIds = (program.companyIds ?? []).filter((companyId) => {
+        const targetCompany = companies.find((company) => company.id === companyId)
+        return !targetCompany || !Array.isArray(targetCompany.programs)
+      })
+      map.set(program.id, Array.from(new Set([...explicitCompanyIds, ...legacyCompanyIds])))
+    })
+
+    return map
+  }, [companies, programs])
+
   const programStats = useMemo<ProgramStats[]>(() => {
     return programs.map((program) => {
       const programApplications = applicationsByProgram.get(program.id) ?? []
@@ -196,9 +213,10 @@ export function AdminPrograms({
         (app) => app.status === "cancelled"
       ).length
 
+      const mappedCompanyIds = companyIdsByProgram.get(program.id) ?? []
       const mappedCompanies =
-        (program.companyIds && program.companyIds.length > 0)
-          ? program.companyIds.length
+        mappedCompanyIds.length > 0
+          ? mappedCompanyIds.length
           : companySet.size
       return {
         program,
@@ -211,7 +229,7 @@ export function AdminPrograms({
         achievementRate: getProgressRate(program.completedHours, program.targetHours),
       }
     })
-  }, [applicationsByProgram, programs])
+  }, [applicationsByProgram, companyIdsByProgram, programs])
 
   const summaryStats = useMemo(() => {
     const totalPrograms = programs.length
@@ -262,20 +280,24 @@ export function AdminPrograms({
     [sortedCompanies]
   )
   const companySearchQuery = companySearch.trim().toLowerCase()
+  const editingProgramCompanyIds = useMemo(() => {
+    if (!editingProgram) return []
+    return companyIdsByProgram.get(editingProgram.id) ?? []
+  }, [companyIdsByProgram, editingProgram])
   const selectedCompanies = useMemo(() => {
     if (!editingProgram) return []
-    return (editingProgram.companyIds ?? [])
+    return editingProgramCompanyIds
       .map((id) => companyById.get(id) || { id, name: "회사명 미입력" })
-  }, [companyById, editingProgram])
+  }, [companyById, editingProgram, editingProgramCompanyIds])
   const availableCompanies = useMemo(() => {
     if (!editingProgram) return []
-    const currentIds = new Set(editingProgram.companyIds ?? [])
+    const currentIds = new Set(editingProgramCompanyIds)
     return sortedCompanies.filter((company) => {
       if (currentIds.has(company.id)) return false
       if (!companySearchQuery) return true
       return company.name.toLowerCase().includes(companySearchQuery)
     })
-  }, [companySearchQuery, editingProgram, sortedCompanies])
+  }, [companySearchQuery, editingProgram, editingProgramCompanyIds, sortedCompanies])
 
   useEffect(() => {
     if (programs.length === 0) {
@@ -374,7 +396,7 @@ export function AdminPrograms({
 
   function addCompanyToProgram(companyId: string) {
     if (!editingProgram) return
-    const currentIds = editingProgram.companyIds ?? []
+    const currentIds = editingProgramCompanyIds
     if (currentIds.includes(companyId)) return
     const nextCompanyIds = [...currentIds, companyId]
     onUpdateProgramCompanies(editingProgram.id, nextCompanyIds)
@@ -382,7 +404,7 @@ export function AdminPrograms({
 
   function removeCompanyFromProgram(companyId: string) {
     if (!editingProgram) return
-    const currentIds = editingProgram.companyIds ?? []
+    const currentIds = editingProgramCompanyIds
     const nextCompanyIds = currentIds.filter((id) => id !== companyId)
     onUpdateProgramCompanies(editingProgram.id, nextCompanyIds)
   }
@@ -390,7 +412,7 @@ export function AdminPrograms({
   function addSelectedCompanies() {
     if (!editingProgram) return
     if (selectedAvailableIds.length === 0) return
-    const currentIds = editingProgram.companyIds ?? []
+    const currentIds = editingProgramCompanyIds
     const nextCompanyIds = Array.from(new Set([...currentIds, ...selectedAvailableIds]))
     onUpdateProgramCompanies(editingProgram.id, nextCompanyIds)
     setSelectedAvailableIds([])
@@ -399,7 +421,7 @@ export function AdminPrograms({
   function removeSelectedCompanies() {
     if (!editingProgram) return
     if (selectedCompanyIds.length === 0) return
-    const currentIds = editingProgram.companyIds ?? []
+    const currentIds = editingProgramCompanyIds
     const removalSet = new Set(selectedCompanyIds)
     const nextCompanyIds = currentIds.filter((id) => !removalSet.has(id))
     onUpdateProgramCompanies(editingProgram.id, nextCompanyIds)
