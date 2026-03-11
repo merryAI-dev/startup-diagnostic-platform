@@ -1168,14 +1168,17 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       const email = firebaseUser?.email ?? user.email;
       return resolvedApplications.filter((application) => {
         if (application.status === "cancelled") return false;
-        if (application.createdByUid && uid) {
-          return application.createdByUid === uid;
+        const appUid = toNormalizedEmail(application.createdByUid);
+        const appEmail = toNormalizedEmail(application.applicantEmail);
+        const userUid = toNormalizedEmail(uid);
+        const userEmail = toNormalizedEmail(email);
+
+        // 회사명 fallback 비교는 동명이인/기본값 충돌로 타사 신청이 섞일 수 있어 제외한다.
+        if (appUid && userUid) {
+          return appUid === userUid;
         }
-        if (application.applicantEmail && email) {
-          return application.applicantEmail === email;
-        }
-        if (user.companyName) {
-          return application.companyName === user.companyName;
+        if (appEmail && userEmail) {
+          return appEmail === userEmail;
         }
         return false;
       });
@@ -1198,7 +1201,6 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     firebaseUser?.uid,
     resolvedApplications,
     resolvedRole,
-    user.companyName,
     user.email,
     user.id,
     consultantAgendaIds,
@@ -3135,7 +3137,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
         ? authEmail
         : requestedSecondaryEmail;
 
-    const consultantId = currentConsultant?.id ?? firebaseUser?.uid ?? `consultant-${Date.now()}`;
+    const consultantId = firebaseUser?.uid ?? currentConsultant?.id ?? `consultant-${Date.now()}`;
     const nextConsultant: Consultant = {
       ...currentConsultant,
       id: consultantId,
@@ -3150,8 +3152,52 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       expertise: parseExpertiseInput(values.expertise),
       bio: values.bio.trim() || `${name} 컨설턴트`,
       status: currentConsultant?.status ?? "active",
+      agendaIds:
+        (currentConsultant?.agendaIds?.length ?? 0) > 0
+          ? currentConsultant?.agendaIds
+          : undefined,
       availability: currentConsultant?.availability ?? buildDefaultConsultantAvailability(),
     };
+
+    if (isFirebaseConfigured) {
+      const authUid = firebaseUser?.uid ?? "";
+      const authEmail = firebaseUser?.email?.trim() ?? "";
+      if (!authUid || !authEmail) {
+        toast.error("로그인 정보를 확인한 뒤 다시 시도해주세요");
+        return;
+      }
+      const payload = omitId(nextConsultant);
+      const updated = await consultantCrud.update(authUid, payload);
+      if (!updated) {
+        const authEmailKey = toNormalizedEmail(authEmail);
+        const primaryEmailKey = toNormalizedEmail(payload.email);
+        const createPayload: Omit<Consultant, "id"> = {
+          ...payload,
+          email: authEmail,
+          ...(primaryEmailKey && primaryEmailKey !== authEmailKey
+            ? { secondaryEmail: payload.email }
+            : {}),
+        };
+        const created = await consultantCrud.set(authUid, createPayload, true);
+        if (!created) {
+          toast.error("내 정보 저장에 실패했습니다");
+          return;
+        }
+        saveConsultantToState({
+          ...nextConsultant,
+          id: authUid,
+          email: authEmail,
+          ...(primaryEmailKey && primaryEmailKey !== authEmailKey
+            ? { secondaryEmail: payload.email }
+            : {}),
+        });
+        toast.success("내 정보가 저장되었습니다");
+        return;
+      }
+      saveConsultantToState({ ...nextConsultant, id: authUid });
+      toast.success("내 정보가 저장되었습니다");
+      return;
+    }
 
     const ok = await persistConsultant(nextConsultant, currentConsultant?.id);
     if (!ok) {
@@ -3169,7 +3215,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       ?? firebaseUser?.displayName?.trim()
       ?? (firebaseUser?.email?.split("@")[0] ?? "컨설턴트");
     const fallbackEmail = currentConsultant?.email ?? firebaseUser?.email ?? "";
-    const consultantId = currentConsultant?.id ?? firebaseUser?.uid ?? `consultant-${Date.now()}`;
+    const consultantId = firebaseUser?.uid ?? currentConsultant?.id ?? `consultant-${Date.now()}`;
 
     if (!fallbackEmail) {
       toast.error("계정 이메일 정보를 확인할 수 없습니다");
@@ -3190,8 +3236,56 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       expertise: currentConsultant?.expertise ?? [],
       bio: currentConsultant?.bio ?? `${fallbackName} 컨설턴트`,
       status: currentConsultant?.status ?? "active",
+      agendaIds:
+        (currentConsultant?.agendaIds?.length ?? 0) > 0
+          ? currentConsultant?.agendaIds
+          : undefined,
       availability,
     };
+
+    if (isFirebaseConfigured) {
+      const updated = await consultantCrud.update(consultantId, { availability });
+      if (!updated) {
+        const authUid = firebaseUser?.uid ?? "";
+        const authEmail = firebaseUser?.email?.trim() ?? "";
+        if (!authUid || !authEmail) {
+          toast.error("로그인 정보를 확인한 뒤 다시 시도해주세요");
+          return;
+        }
+        const authEmailKey = toNormalizedEmail(authEmail);
+        const fallbackEmailKey = toNormalizedEmail(fallbackEmail);
+        const preservedSecondaryEmail =
+          fallbackEmail
+          && fallbackEmailKey !== authEmailKey
+            ? fallbackEmail
+            : currentConsultant?.secondaryEmail;
+        const createPayload: Omit<Consultant, "id"> = {
+          ...omitId(nextConsultant),
+          email: authEmail,
+          ...(preservedSecondaryEmail
+            ? { secondaryEmail: preservedSecondaryEmail }
+            : {}),
+        };
+        const created = await consultantCrud.set(authUid, createPayload, true);
+        if (!created) {
+          toast.error("스케줄 저장에 실패했습니다");
+          return;
+        }
+        saveConsultantToState({
+          ...nextConsultant,
+          id: authUid,
+          email: authEmail,
+          ...(preservedSecondaryEmail
+            ? { secondaryEmail: preservedSecondaryEmail }
+            : {}),
+        });
+        toast.success("내 스케줄이 저장되었습니다");
+        return;
+      }
+      saveConsultantToState(nextConsultant);
+      toast.success("내 스케줄이 저장되었습니다");
+      return;
+    }
 
     const ok = await persistConsultant(nextConsultant, currentConsultant?.id);
     if (!ok) {
