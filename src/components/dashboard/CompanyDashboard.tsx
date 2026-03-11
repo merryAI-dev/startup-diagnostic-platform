@@ -17,6 +17,7 @@ import {
   type UploadTask,
 } from "firebase/storage"
 import {
+  Check,
   ChevronDown,
   Eye,
   FileImage,
@@ -38,6 +39,11 @@ type CompanyDashboardProps = {
   onLogout: () => void
   companyId: string
   user: User
+}
+
+type ProgramOption = {
+  id: string
+  name: string
 }
 
 type StatusVariant = "idle" | "warning" | "complete"
@@ -107,6 +113,27 @@ const INVESTMENT_STAGE_OPTIONS = [
   "Angel",
   "Convertible Note",
 ] as const
+const SDG_OPTIONS = [
+  "1. 빈곤 종식",
+  "2. 기아 종식",
+  "3. 건강과 웰빙",
+  "4. 양질의 교육",
+  "5. 성평등",
+  "6. 깨끗한 물과 위생",
+  "7. 모두를 위한 깨끗한 에너지",
+  "8. 양질의 일자리와 경제성장",
+  "9. 산업, 혁신과 사회기반시설",
+  "10. 불평등 감소",
+  "11. 지속가능한 도시와 공동체",
+  "12. 책임 있는 소비와 생산",
+  "13. 기후행동",
+  "14. 해양생태계 보전",
+  "15. 육상생태계 보전",
+  "16. 평화, 정의와 제도",
+  "17. 목표를 위한 파트너십",
+] as const
+const GENDER_OPTIONS = ["남", "여"] as const
+const YES_NO_OPTIONS = ["예", "아니요"] as const
 
 function sanitizeInvestmentDateDigits(value: string) {
   const source = value.replace(/[^\d]/g, "").slice(0, 8)
@@ -288,6 +315,8 @@ export function CompanyDashboard({
   const {
     form,
     setForm,
+    companyProgramIds,
+    setCompanyProgramIds,
     investmentRows,
     addInvestmentRow,
     removeInvestmentRow,
@@ -328,6 +357,7 @@ export function CompanyDashboard({
 
   const [uploadingFiles, setUploadingFiles] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
+  const [availablePrograms, setAvailablePrograms] = useState<ProgramOption[]>([])
   const [deletedFileIds, setDeletedFileIds] = useState<Record<string, boolean>>(
     {}
   )
@@ -356,6 +386,26 @@ export function CompanyDashboard({
   const uploadTasksRef = useRef<Map<string, UploadTask>>(new Map())
 
   const allowedExtensions = ["pdf", "png", "ai"]
+
+  async function loadAvailablePrograms() {
+    try {
+      const programsRef = collection(db, "programs")
+      const programsQuery = query(programsRef, orderBy("name", "asc"))
+      const snapshot = await getDocs(programsQuery)
+      setAvailablePrograms(
+        snapshot.docs.map((docSnap) => {
+          const data = docSnap.data() as { name?: string }
+          return {
+            id: docSnap.id,
+            name: data.name?.trim() || "이름 없는 사업",
+          }
+        })
+      )
+    } catch (error) {
+      console.warn("Failed to load programs:", error)
+      setAvailablePrograms([])
+    }
+  }
 
 
   async function loadCompanyFiles() {
@@ -398,6 +448,10 @@ export function CompanyDashboard({
       console.warn("Failed to load company files:", error)
     }
   }
+
+  useEffect(() => {
+    void loadAvailablePrograms()
+  }, [])
 
   useEffect(() => {
     if (!companyId) return
@@ -722,7 +776,9 @@ export function CompanyDashboard({
   const [activeInvestmentStageRow, setActiveInvestmentStageRow] = useState<
     number | null
   >(null)
+  const [programDropdownOpen, setProgramDropdownOpen] = useState(false)
   const investmentStageDropdownRefs = useRef<Record<number, HTMLDivElement | null>>({})
+  const programDropdownRef = useRef<HTMLDivElement | null>(null)
   const [snackbarMessage, setSnackbarMessage] = useState<string | null>(null)
 
   useEffect(() => {
@@ -764,7 +820,7 @@ export function CompanyDashboard({
 
   function inputClass(invalid?: boolean, extra?: string) {
     return [
-      "mt-1 w-full rounded-lg border bg-white px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-1",
+      "mt-1 w-full rounded-lg border bg-white px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-1 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400 disabled:placeholder:text-slate-300",
       invalid
         ? "border-rose-300 bg-rose-50 text-rose-900 placeholder:text-rose-300 focus:border-rose-400 focus:ring-rose-200/60"
         : "border-slate-200 focus:border-slate-300 focus:ring-slate-200/60",
@@ -894,6 +950,19 @@ export function CompanyDashboard({
     })
   }
 
+  function toggleCompanyProgram(programId: string) {
+    setCompanyProgramIds((prev) => {
+      if (prev.includes(programId)) {
+        return prev.filter((value) => value !== programId)
+      }
+      return [...prev, programId]
+    })
+  }
+
+  function removeCompanyProgram(programId: string) {
+    setCompanyProgramIds((prev) => prev.filter((value) => value !== programId))
+  }
+
   useEffect(() => {
     const rowIndex = activeInvestmentStageRow
     if (rowIndex === null) return
@@ -911,6 +980,32 @@ export function CompanyDashboard({
       document.removeEventListener("mousedown", handleOutsideClick)
     }
   }, [activeInvestmentStageRow])
+
+  useEffect(() => {
+    if (!programDropdownOpen) return
+
+    function handleOutsideClick(event: MouseEvent) {
+      const current = programDropdownRef.current
+      if (!current) return
+      if (event.target instanceof Node && current.contains(event.target)) return
+      setProgramDropdownOpen(false)
+    }
+
+    document.addEventListener("mousedown", handleOutsideClick)
+    return () => {
+      document.removeEventListener("mousedown", handleOutsideClick)
+    }
+  }, [programDropdownOpen])
+
+  const selectedProgramOptions = useMemo(() => {
+    const programById = new Map(
+      availablePrograms.map((program) => [program.id, program.name])
+    )
+    return companyProgramIds.map((programId) => ({
+      id: programId,
+      name: programById.get(programId) ?? "알 수 없는 사업",
+    }))
+  }, [availablePrograms, companyProgramIds])
 
   return (
     <div className="w-full h-full bg-transparent">
@@ -1130,6 +1225,86 @@ export function CompanyDashboard({
                           onBlur={() => markTouched("companyInfo")}
                         />
                       </label>
+                      <label className="text-xs text-slate-500 md:col-span-2">
+                        2026년 MYSC 참여사업
+                        <div className="relative mt-1" ref={programDropdownRef}>
+                          <div
+                            tabIndex={0}
+                            className={`${inputClass(false, "cursor-pointer pr-9 text-left")}`}
+                            onMouseDown={(event) => {
+                              event.preventDefault()
+                              setProgramDropdownOpen((prev) => !prev)
+                            }}
+                          >
+                            {selectedProgramOptions.length > 0 ? (
+                              <div className="truncate pr-2 text-sm text-slate-700">
+                                {selectedProgramOptions.map((program) => program.name).join(", ")}
+                              </div>
+                            ) : (
+                              <span className="text-sm text-slate-400">
+                                참여 중인 사업을 선택하세요
+                              </span>
+                            )}
+                          </div>
+                          <ChevronDown
+                            className="pointer-events-none absolute right-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400"
+                            aria-hidden="true"
+                          />
+                          {programDropdownOpen ? (
+                            <div className="absolute z-20 mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white p-1 shadow-lg">
+                              {availablePrograms.length > 0 ? (
+                                availablePrograms.map((program) => {
+                                  const isSelected = companyProgramIds.includes(program.id)
+                                  return (
+                                    <button
+                                      key={program.id}
+                                      type="button"
+                                      className={`flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-xs ${
+                                        isSelected
+                                          ? "bg-emerald-50 font-semibold text-emerald-700"
+                                          : "text-slate-700 hover:bg-slate-50"
+                                      }`}
+                                      onMouseDown={(event) => {
+                                        event.preventDefault()
+                                        toggleCompanyProgram(program.id)
+                                      }}
+                                    >
+                                      <span
+                                        className={`inline-flex h-4 w-4 items-center justify-center rounded border ${
+                                          isSelected
+                                            ? "border-emerald-500 bg-emerald-500 text-white"
+                                            : "border-slate-300 bg-white text-transparent"
+                                        }`}
+                                      >
+                                        <Check className="h-3 w-3" />
+                                      </span>
+                                      <span className="min-w-0 flex-1 truncate">
+                                        {program.name}
+                                      </span>
+                                      {isSelected ? (
+                                        <span
+                                          className="text-slate-400 hover:text-slate-600"
+                                          onMouseDown={(event) => {
+                                            event.preventDefault()
+                                            event.stopPropagation()
+                                            removeCompanyProgram(program.id)
+                                          }}
+                                        >
+                                          ×
+                                        </span>
+                                      ) : null}
+                                    </button>
+                                  )
+                                })
+                              ) : (
+                                <div className="px-3 py-2 text-xs text-slate-500">
+                                  등록된 사업이 없습니다.
+                                </div>
+                              )}
+                            </div>
+                          ) : null}
+                        </div>
+                      </label>
                       <label className="text-xs text-slate-500 md:col-span-1">
                         대표자 성명
                         <input
@@ -1143,6 +1318,21 @@ export function CompanyDashboard({
                             }))
                           }
                           onBlur={() => markTouched("ceoName")}
+                        />
+                      </label>
+                      <label className="text-xs text-slate-500 md:col-span-1">
+                        대표자 나이
+                        <input
+                          className={inputClass(false)}
+                          inputMode="numeric"
+                          placeholder="예: 42"
+                          value={form.ceoAge}
+                          onChange={(e) =>
+                            setForm((prev) => ({
+                              ...prev,
+                              ceoAge: e.target.value.replace(/[^\d]/g, "").slice(0, 3),
+                            }))
+                          }
                         />
                       </label>
                       <label className="text-xs text-slate-500 md:col-span-2">
@@ -1173,6 +1363,59 @@ export function CompanyDashboard({
                             }))
                           }
                           onBlur={() => markTouched("ceoPhone")}
+                        />
+                      </label>
+                      <label className="text-xs text-slate-500 md:col-span-2">
+                        대표자 성별
+                        <div className="mt-1 flex flex-wrap gap-2">
+                          {GENDER_OPTIONS.map((option) => {
+                            const active = form.ceoGender === option
+                            return (
+                              <button
+                                key={option}
+                                type="button"
+                                className={`rounded-full border px-3 py-2 text-xs font-semibold transition ${
+                                  active
+                                    ? "border-slate-900 bg-slate-900 text-white"
+                                    : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50"
+                                }`}
+                                onClick={() =>
+                                  setForm((prev) => ({
+                                    ...prev,
+                                    ceoGender: prev.ceoGender === option ? "" : option,
+                                  }))
+                                }
+                              >
+                                {option}
+                              </button>
+                            )
+                          })}
+                        </div>
+                      </label>
+                      <label className="text-xs text-slate-500 md:col-span-2">
+                        대표자 국적
+                        <input
+                          className={inputClass(false)}
+                          placeholder="예: 대한민국"
+                          value={form.ceoNationality}
+                          onChange={(e) =>
+                            setForm((prev) => ({ ...prev, ceoNationality: e.target.value }))
+                          }
+                        />
+                      </label>
+                      <label className="text-xs text-slate-500 md:col-span-1">
+                        이전 창업 횟수
+                        <input
+                          className={inputClass(false)}
+                          inputMode="numeric"
+                          placeholder="예: 1"
+                          value={form.founderSerialNumber}
+                          onChange={(e) =>
+                            setForm((prev) => ({
+                              ...prev,
+                              founderSerialNumber: e.target.value.replace(/[^\d]/g, "").slice(0, 2),
+                            }))
+                          }
                         />
                       </label>
                       <label className="text-xs text-slate-500 md:col-span-1">
@@ -1236,6 +1479,88 @@ export function CompanyDashboard({
                           }
                           onBlur={() => markTouched("primaryIndustry")}
                         />
+                      </label>
+                      <label className="text-xs text-slate-500 md:col-span-3">
+                        회사 홈페이지
+                        <input
+                          className={inputClass(false)}
+                          placeholder="https://example.com"
+                          value={form.website}
+                          onChange={(e) =>
+                            setForm((prev) => ({ ...prev, website: e.target.value }))
+                          }
+                        />
+                      </label>
+                      <label className="text-xs text-slate-500 md:col-span-3">
+                        해외 지사 또는 진출 희망국가 (최대 3개)
+                        <input
+                          className={inputClass(false)}
+                          placeholder="예: 미국, 일본, 싱가포르"
+                          value={form.targetCountries}
+                          onChange={(e) =>
+                            setForm((prev) => ({ ...prev, targetCountries: e.target.value }))
+                          }
+                        />
+                      </label>
+                      <label className="text-xs text-slate-500 md:col-span-6">
+                        대표 솔루션
+                        <textarea
+                          className={`${inputClass(false)} min-h-[96px] resize-y`}
+                          placeholder="대표 솔루션을 입력하세요"
+                          value={form.representativeSolution}
+                          onChange={(e) =>
+                            setForm((prev) => ({
+                              ...prev,
+                              representativeSolution: e.target.value,
+                            }))
+                          }
+                        />
+                      </label>
+                      <label className="text-xs text-slate-500 md:col-span-3">
+                        UN SDGs 우선순위 1위
+                        <div className="relative">
+                          <select
+                            className={`${inputClass(false)} appearance-none pr-10`}
+                            value={form.sdgPriority1}
+                            onChange={(e) =>
+                              setForm((prev) => ({ ...prev, sdgPriority1: e.target.value }))
+                            }
+                          >
+                            <option value="">선택</option>
+                            {SDG_OPTIONS.map((option) => (
+                              <option key={option} value={option}>
+                                {option}
+                              </option>
+                            ))}
+                          </select>
+                          <ChevronDown
+                            className="pointer-events-none absolute right-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400"
+                            aria-hidden="true"
+                          />
+                        </div>
+                      </label>
+                      <label className="text-xs text-slate-500 md:col-span-3">
+                        UN SDGs 우선순위 2위
+                        <div className="relative">
+                          <select
+                            className={`${inputClass(false)} appearance-none pr-10`}
+                            value={form.sdgPriority2}
+                            onChange={(e) =>
+                              setForm((prev) => ({ ...prev, sdgPriority2: e.target.value }))
+                            }
+                          >
+                            <option value="">선택</option>
+                            {SDG_OPTIONS.map((option) => (
+                              <option key={option} value={option}>
+                                {option}
+                              </option>
+                            ))}
+                          </select>
+                          <ChevronDown
+                            className="pointer-events-none absolute right-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400"
+                            aria-hidden="true"
+                          />
+                        </div>
                       </label>
                       <label className="text-xs text-slate-500 md:col-span-1">
                         종업원수 (정규)
@@ -1530,10 +1855,10 @@ export function CompanyDashboard({
                     </div>
                     <div className="mt-3 grid gap-3 sm:grid-cols-2">
                       <label className="text-xs text-slate-500">
-                        매출액 (2025년)
+                        매출액 (2025년, 원)
                         <input
                           className={inputClass(isFieldInvalid("revenue2025"))}
-                          placeholder="예: 12.5억"
+                          placeholder="예: 1,250,000,000"
                           value={form.revenue2025}
                           onChange={(e) =>
                             setForm((prev) => ({
@@ -1545,10 +1870,10 @@ export function CompanyDashboard({
                         />
                       </label>
                       <label className="text-xs text-slate-500">
-                        매출액 (2026년)
+                        매출액 (2026년, 원)
                         <input
                           className={inputClass(isFieldInvalid("revenue2026"))}
-                          placeholder="예: 18.0억"
+                          placeholder="예: 1,800,000,000"
                           value={form.revenue2026}
                           onChange={(e) =>
                             setForm((prev) => ({
@@ -1667,7 +1992,7 @@ export function CompanyDashboard({
                           </label>
                           <label className="text-xs text-slate-500">
                             <span className="block whitespace-nowrap">
-                              투자일시
+                              투자유치시기
                             </span>
                             <input
                               type="text"
@@ -1699,12 +2024,12 @@ export function CompanyDashboard({
 
                           <label className="text-xs text-slate-500">
                             <span className="block whitespace-nowrap">
-                              투자금액 (억)
+                              투자 유치금액 (원)
                             </span>
                             <input
                               className={inputClass(false, "rounded-lg")}
-                              placeholder="예: 25.5"
-                              inputMode="decimal"
+                              placeholder="예: 2,550,000,000"
+                              inputMode="numeric"
                               value={row.postMoney}
                               onChange={(e) =>
                                 updateInvestmentRow(
@@ -1820,17 +2145,153 @@ export function CompanyDashboard({
 
                   <section>
                     <div className="text-sm font-semibold text-slate-700">
+                      바우처
+                    </div>
+                    <div className="mt-3 grid gap-4 sm:grid-cols-2">
+                      <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                        <label className="text-xs text-slate-500">
+                          <span className="block">수출바우처 보유 여부</span>
+                          <div className="mt-3 inline-flex gap-1 rounded-full border border-slate-200 bg-white p-1">
+                            {YES_NO_OPTIONS.map((option) => {
+                              const active = form.exportVoucherHeld === option
+                              return (
+                                <button
+                                  key={option}
+                                  type="button"
+                                  className={`rounded-full px-2.5 py-0.5 text-[10px] font-semibold transition ${
+                                    active
+                                      ? "bg-slate-900 text-white shadow-sm"
+                                      : "text-slate-600 hover:bg-slate-50"
+                                  }`}
+                                  onClick={() =>
+                                    setForm((prev) => ({
+                                      ...prev,
+                                      exportVoucherHeld: prev.exportVoucherHeld === option ? "" : option,
+                                    }))
+                                  }
+                                >
+                                  {option}
+                                </button>
+                              )
+                            })}
+                          </div>
+                        </label>
+                        <div className="mt-5 grid gap-3">
+                            <label className="text-xs text-slate-500">
+                              수출바우처 확보 금액 (원)
+                              <input
+                                className={inputClass(false)}
+                                placeholder="예: 50,000,000"
+                                inputMode="numeric"
+                                value={form.exportVoucherAmount}
+                                disabled={form.exportVoucherHeld !== "예"}
+                                onChange={(e) =>
+                                  setForm((prev) => ({
+                                    ...prev,
+                                    exportVoucherAmount: formatNumberInput(e.target.value),
+                                  }))
+                                }
+                              />
+                            </label>
+                            <label className="text-xs text-slate-500">
+                              수출바우처 소진율 (%)
+                              <input
+                                className={inputClass(false)}
+                                placeholder="예: 40"
+                                inputMode="numeric"
+                                value={form.exportVoucherUsageRate}
+                                disabled={form.exportVoucherHeld !== "예"}
+                                onChange={(e) =>
+                                  setForm((prev) => ({
+                                    ...prev,
+                                    exportVoucherUsageRate: formatNumberInput(e.target.value),
+                                  }))
+                                }
+                              />
+                            </label>
+                          </div>
+                      </div>
+
+                      <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                        <label className="text-xs text-slate-500">
+                          <span className="block">중소기업혁신바우처 보유 여부</span>
+                          <div className="mt-3 inline-flex gap-1 rounded-full border border-slate-200 bg-white p-1">
+                            {YES_NO_OPTIONS.map((option) => {
+                              const active = form.innovationVoucherHeld === option
+                              return (
+                                <button
+                                  key={option}
+                                  type="button"
+                                  className={`rounded-full px-2.5 py-0.5 text-[10px] font-semibold transition ${
+                                    active
+                                      ? "bg-slate-900 text-white shadow-sm"
+                                      : "text-slate-600 hover:bg-slate-50"
+                                  }`}
+                                  onClick={() =>
+                                    setForm((prev) => ({
+                                      ...prev,
+                                      innovationVoucherHeld:
+                                        prev.innovationVoucherHeld === option ? "" : option,
+                                    }))
+                                  }
+                                >
+                                  {option}
+                                </button>
+                              )
+                            })}
+                          </div>
+                        </label>
+                        <div className="mt-5 grid gap-3">
+                            <label className="text-xs text-slate-500">
+                              중소기업혁신바우처 확보 금액 (원)
+                              <input
+                                className={inputClass(false)}
+                                placeholder="예: 30,000,000"
+                                inputMode="numeric"
+                                value={form.innovationVoucherAmount}
+                                disabled={form.innovationVoucherHeld !== "예"}
+                                onChange={(e) =>
+                                  setForm((prev) => ({
+                                    ...prev,
+                                    innovationVoucherAmount: formatNumberInput(e.target.value),
+                                  }))
+                                }
+                              />
+                            </label>
+                            <label className="text-xs text-slate-500">
+                              중소기업혁신바우처 소진율 (%)
+                              <input
+                                className={inputClass(false)}
+                                placeholder="예: 75"
+                                inputMode="numeric"
+                                value={form.innovationVoucherUsageRate}
+                                disabled={form.innovationVoucherHeld !== "예"}
+                                onChange={(e) =>
+                                  setForm((prev) => ({
+                                    ...prev,
+                                    innovationVoucherUsageRate: formatNumberInput(e.target.value),
+                                  }))
+                                }
+                              />
+                            </label>
+                          </div>
+                      </div>
+                    </div>
+                  </section>
+
+                  <section>
+                    <div className="text-sm font-semibold text-slate-700">
                       투자 희망
                     </div>
                     <div className="mt-3 grid gap-3 sm:grid-cols-2">
                       <label className="text-xs text-slate-500">
-                        2026년 내 희망 투자액 (억)
+                        2026년 내 희망 투자액 (원)
                         <input
                           className={inputClass(
                             isFieldInvalid("desiredInvestment2026")
                           )}
-                          placeholder="예: 20.5"
-                          inputMode="decimal"
+                          placeholder="예: 2,050,000,000"
+                          inputMode="numeric"
                           value={form.desiredInvestment2026}
                           onChange={(e) =>
                             setForm((prev) => ({
@@ -1844,13 +2305,13 @@ export function CompanyDashboard({
                         />
                       </label>
                       <label className="text-xs text-slate-500">
-                        투자전 희망기업가치 (Pre-Value, 억)
+                        투자전 희망기업가치 (Pre-Value, 원)
                         <input
                           className={inputClass(
                             isFieldInvalid("desiredPreValue")
                           )}
-                          placeholder="예: 200.0"
-                          inputMode="decimal"
+                          placeholder="예: 20,000,000,000"
+                          inputMode="numeric"
                           value={form.desiredPreValue}
                           onChange={(e) =>
                             setForm((prev) => ({
@@ -1861,6 +2322,28 @@ export function CompanyDashboard({
                             }))
                           }
                           onBlur={() => markTouched("desiredPreValue")}
+                        />
+                      </label>
+                    </div>
+                  </section>
+
+                  <section>
+                    <div className="text-sm font-semibold text-slate-700">
+                      기대사항
+                    </div>
+                    <div className="mt-3">
+                      <label className="text-xs text-slate-500">
+                        MYSC에 가장 기대하는 점
+                        <textarea
+                          className={`${inputClass(false)} min-h-[96px] resize-y`}
+                          placeholder="MYSC에 기대하는 점을 입력하세요"
+                          value={form.myscExpectation}
+                          onChange={(e) =>
+                            setForm((prev) => ({
+                              ...prev,
+                              myscExpectation: e.target.value,
+                            }))
+                          }
                         />
                       </label>
                     </div>
