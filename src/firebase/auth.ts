@@ -1,5 +1,6 @@
 import {
   GoogleAuthProvider,
+  fetchSignInMethodsForEmail,
   signInWithEmailAndPassword,
   signInWithPopup,
   createUserWithEmailAndPassword,
@@ -19,6 +20,10 @@ export function signInWithGoogle() {
   const provider = new GoogleAuthProvider()
   provider.setCustomParameters({ prompt: "select_account" })
   return signInWithPopup(auth, provider)
+}
+
+export function getSignInMethods(email: string) {
+  return fetchSignInMethodsForEmail(auth, email.trim())
 }
 
 export function signOutUser() {
