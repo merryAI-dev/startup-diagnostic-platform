@@ -26,7 +26,6 @@ type PendingSignupDraft = {
   role: Role
   email: string
   password?: string
-  provider?: "email" | "google"
 }
 
 const PENDING_SIGNUP_KEY = "pending-signup"
@@ -38,7 +37,6 @@ export function SignupPage() {
   const navigate = useNavigate()
   const { user, profile, loading } = useAuth()
   const isBusy = loadingEmail
-  const isOnboardingSignedInUser = !loading && Boolean(user) && !profile
 
   useEffect(() => {
     if (loading || !user || !profile) return
@@ -73,7 +71,6 @@ export function SignupPage() {
         role: nextRole,
         email: email.trim(),
         password,
-        provider: "email",
       })
       navigate(`/signup-info?role=${nextRole}`)
     } catch (err) {
@@ -81,20 +78,6 @@ export function SignupPage() {
     } finally {
       setLoadingEmail(false)
     }
-  }
-
-  function handleSignedInContinue(nextRole: Role) {
-    if (!user) {
-      setError("로그인 상태를 확인할 수 없습니다. 다시 로그인해주세요.")
-      return
-    }
-    setError(null)
-    savePendingSignup({
-      role: nextRole,
-      email: user.email ?? "",
-      provider: "google",
-    })
-    navigate(`/signup-info?role=${nextRole}`)
   }
 
   async function handleSwapToLogin() {
@@ -116,19 +99,13 @@ export function SignupPage() {
     <div className="flex min-h-[calc(100vh-5rem)] items-center justify-center">
       <AuthCard
         title="회원가입"
-        subtitle={
-          isOnboardingSignedInUser
-            ? "역할 선택 후 필수 정보를 입력하면 승인 대기로 접수됩니다."
-            : "스타트업, 관리자, 컨설턴트 중 역할을 선택해 계정을 생성하세요."
-        }
+        subtitle="스타트업, 관리자, 컨설턴트 중 역할을 선택해 계정을 생성하세요."
         onSubmit={handleEmailSignup}
-        onContinue={handleSignedInContinue}
-        continueLabel="역할 선택 후 계속"
         onSwap={handleSwapToLogin}
         swapLabel="로그인"
         role={role}
         setRole={setRole}
-        showEmailForm={!isOnboardingSignedInUser}
+        showEmailForm
         showExtraStep={false}
         loadingEmail={loadingEmail}
         error={error}

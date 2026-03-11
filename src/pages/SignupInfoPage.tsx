@@ -4,14 +4,14 @@ import type { User as FirebaseUser } from "firebase/auth"
 import { useAuth } from "@/context/AuthContext"
 import { getSignInMethods, signInWithEmail, signOutUser, signUpWithEmail } from "@/firebase/auth"
 import { db } from "@/firebase/client"
-import type { AuthProviderType, Role } from "@/types/auth"
+import type { Role } from "@/types/auth"
 import { ConsultantProfilePage } from "@/redesign/app/components/pages/consultant-profile-page"
 import {
   ChevronDown,
   Trash2,
 } from "lucide-react"
 import { toast } from "sonner"
-import { createUserProfile } from "@/firebase/profile"
+import { createUserProfile, getUserProfile } from "@/firebase/profile"
 import type { CompanyInfoForm, InvestmentInput } from "@/types/company"
 import { DEFAULT_FORM } from "@/types/company"
 
@@ -20,7 +20,6 @@ type PendingSignupDraft = {
   role: Role
   email: string
   password?: string
-  provider?: "email" | "google"
 }
 
 function getSignupErrorMessage(error: any) {
@@ -53,15 +52,10 @@ function getRoleFromQuery(search: string): Role | null {
   return null
 }
 
-function extractAuthProviders(user: FirebaseUser): AuthProviderType[] {
-  const providers = user.providerData
-    .map((item) => item.providerId)
-    .filter(
-      (providerId): providerId is AuthProviderType =>
-        providerId === "password" || providerId === "google.com"
-    )
-
-  return Array.from(new Set(providers))
+function getRoleLabel(role: Role) {
+  if (role === "admin") return "관리자"
+  if (role === "consultant") return "컨설턴트"
+  return "스타트업"
 }
 
 export function SignupInfoPage() {
@@ -123,6 +117,41 @@ export function SignupInfoPage() {
     navigate(`/pending?role=${requestedRole}`)
   }
 
+  async function guardExistingProfile(
+    authUser: FirebaseUser,
+    nextRequestedRole: Role
+  ) {
+    const existingProfile = await getUserProfile(authUser.uid)
+    if (!existingProfile) return true
+
+    const existingRequestedRole = existingProfile.requestedRole ?? existingProfile.role
+    const existingRoleLabel = getRoleLabel(existingRequestedRole)
+    const requestedRoleLabel = getRoleLabel(nextRequestedRole)
+
+    if (existingProfile.active === true) {
+      if (existingRequestedRole !== nextRequestedRole) {
+        toast.error(`이미 승인된 ${existingRoleLabel} 계정입니다. ${requestedRoleLabel} 역할로는 가입할 수 없습니다.`)
+      } else {
+        toast.error(`이미 승인된 ${existingRoleLabel} 계정입니다. 로그인 후 이용해주세요.`)
+      }
+      navigate(
+        existingProfile.role === "admin" || existingProfile.role === "consultant"
+          ? "/admin"
+          : "/company"
+      )
+      return false
+    }
+
+    if (existingRequestedRole !== nextRequestedRole) {
+      toast.error(`이미 ${existingRoleLabel} 역할로 승인 대기 중입니다.`)
+    } else {
+      toast.error(`이미 ${existingRoleLabel} 역할로 승인 대기 중입니다. 승인 후 이용해주세요.`)
+    }
+    await signOutUser()
+    navigate(`/pending?role=${existingRequestedRole}`)
+    return false
+  }
+
   async function ensureAuthUser(): Promise<FirebaseUser | null> {
     if (user) return user
     if (!pendingSignup) {
@@ -140,7 +169,7 @@ export function SignupInfoPage() {
       const hasPasswordMethod = signInMethods.includes("password")
       const hasGoogleMethod = signInMethods.includes("google.com")
       if (hasGoogleMethod && !hasPasswordMethod) {
-        toast.error("이미 Google로 가입된 이메일입니다. Google 로그인을 이용해주세요.")
+        toast.error("이미 사용 중인 이메일입니다. 다른 이메일을 사용해주세요.")
         return null
       }
 
@@ -189,14 +218,13 @@ export function SignupInfoPage() {
             try {
               const authUser = await ensureAuthUser()
               if (!authUser) return
+              const canProceed = await guardExistingProfile(authUser, requestedRole)
+              if (!canProceed) return
               await createUserProfile(
                 authUser.uid,
                 "company",
                 requestedRole,
-                authUser.email,
-                {
-                  authProviders: extractAuthProviders(authUser),
-                }
+                authUser.email
               )
               await handleComplete()
             } catch (error) {
@@ -226,6 +254,7 @@ export function SignupInfoPage() {
         userEmail={fallbackEmail}
         requestedRole={requestedRole}
         ensureAuthUser={ensureAuthUser}
+        guardExistingProfile={guardExistingProfile}
         onComplete={handleComplete}
         onCancel={() => navigate("/login")}
       />
@@ -237,6 +266,7 @@ export function SignupInfoPage() {
       userEmail={fallbackEmail}
       requestedRole={requestedRole}
       ensureAuthUser={ensureAuthUser}
+      guardExistingProfile={guardExistingProfile}
       onComplete={handleComplete}
       onCancel={() => navigate("/login")}
     />
@@ -249,6 +279,7 @@ function ConsultantSignupInfo({
   userEmail,
   requestedRole,
   ensureAuthUser,
+  guardExistingProfile,
   onComplete,
   onCancel,
 }: {
@@ -257,6 +288,10 @@ function ConsultantSignupInfo({
   userEmail: string
   requestedRole: Role
   ensureAuthUser: () => Promise<FirebaseUser | null>
+  guardExistingProfile: (
+    authUser: FirebaseUser,
+    nextRequestedRole: Role
+  ) => Promise<boolean>
   onComplete: () => Promise<void>
   onCancel: () => void
 }) {
@@ -275,15 +310,14 @@ function ConsultantSignupInfo({
     try {
       const authUser = await ensureAuthUser()
       if (!authUser) return
+      const canProceed = await guardExistingProfile(authUser, requestedRole)
+      if (!canProceed) return
       await createUserProfile(
         authUser.uid,
         "company",
         requestedRole,
         authUser.email ?? userEmail,
-        {
-          consultantInfo: values,
-          authProviders: extractAuthProviders(authUser),
-        }
+        { consultantInfo: values }
       )
       await onComplete()
     } catch (error) {
@@ -316,12 +350,17 @@ function CompanySignupInfo({
   userEmail,
   requestedRole,
   ensureAuthUser,
+  guardExistingProfile,
   onComplete,
   onCancel,
 }: {
   userEmail: string
   requestedRole: Role
   ensureAuthUser: () => Promise<FirebaseUser | null>
+  guardExistingProfile: (
+    authUser: FirebaseUser,
+    nextRequestedRole: Role
+  ) => Promise<boolean>
   onComplete: () => Promise<void>
   onCancel: () => void
 }) {
@@ -731,6 +770,8 @@ function CompanySignupInfo({
     try {
       const authUser = await ensureAuthUser()
       if (!authUser) return
+      const canProceed = await guardExistingProfile(authUser, requestedRole)
+      if (!canProceed) return
       setSaving(true)
       const userAgent = typeof navigator !== "undefined" ? navigator.userAgent : null
       await createUserProfile(
@@ -742,7 +783,6 @@ function CompanySignupInfo({
           companyId: authUser.uid,
           companyInfo: form,
           investmentRows,
-          authProviders: extractAuthProviders(authUser),
           consents: {
             privacy: {
               consented: consentPrivacy,
