@@ -704,7 +704,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     isFirebaseConfigured
     && resolvedRole === "user"
     && !!firebaseUser?.uid
-    && !isCompanyInfoRoute;
+    ;
   const { data: companyDocs } = useFirestoreCollection<{
     id: string;
     name?: string | null;
@@ -718,7 +718,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
         && (needsCompanyLookup || needsCompanyDirectory || needsUsers),
     }
   );
-  const { data: ownedCompanyDocs } = useFirestoreCollection<{ id: string; ownerUid?: string | null }>(
+  const { data: ownedCompanyDocs, loading: ownedCompanyDocsLoading } = useFirestoreCollection<{ id: string; ownerUid?: string | null }>(
     "companies",
     {
       constraints: [where("ownerUid", "==", firebaseUser?.uid ?? "")],
@@ -799,9 +799,24 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     [companyNameById]
   );
   const companyRecordId = useMemo(() => {
+    if (
+      isFirebaseConfigured
+      && resolvedRole === "user"
+      && !profile?.companyId
+      && ownedCompanyDocsLoading
+    ) {
+      return null;
+    }
     const ownedId = ownedCompanyDocs[0]?.id ?? null;
     return ownedId ?? profile?.companyId ?? firebaseUser?.uid ?? null;
-  }, [firebaseUser?.uid, ownedCompanyDocs, profile?.companyId]);
+  }, [
+    firebaseUser?.uid,
+    isFirebaseConfigured,
+    ownedCompanyDocs,
+    ownedCompanyDocsLoading,
+    profile?.companyId,
+    resolvedRole,
+  ]);
   const { data: companyInfoDoc } = useFirestoreDocument<CompanyInfoDoc>(
     companyRecordId ? `companies/${companyRecordId}/companyInfo` : "",
     "info",
