@@ -152,19 +152,25 @@ service cloud.firestore {
       allow update: if isAdmin()
         || (
           isSignedIn()
-          && (
-            consultantId == request.auth.uid
-            || (
-              resource.data.email is string
-              && resource.data.email == request.auth.token.email
-            )
-            || (
-              resource.data.secondaryEmail is string
-              && resource.data.secondaryEmail == request.auth.token.email
-            )
-          )
-          && request.resource.data.agendaIds == resource.data.agendaIds
-        );
+          && consultantId == request.auth.uid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            "name",
+            "title",
+            "email",
+            "phone",
+            "organization",
+            "secondaryEmail",
+            "secondaryPhone",
+            "fixedMeetingLink",
+            "expertise",
+            "bio",
+            "status",
+            "availability",
+            "joinedDate",
+            "updatedAt"
+          ])
+        )
+      ;
       allow delete: if isAdmin();
     }
 
