@@ -4358,6 +4358,18 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
               user={firebaseUser}
             />
           )}
+          {currentPage === "company-info" && firebaseUser && !companyRecordId && (
+            <div className="p-10">
+              <div className="rounded-2xl border border-slate-200 bg-white p-8">
+                <h2 className="text-lg font-semibold text-slate-900">
+                  기업 정보를 준비하고 있습니다
+                </h2>
+                <p className="mt-2 text-sm text-slate-600">
+                  연결된 기업 문서를 아직 찾지 못했습니다. 승인 정보 또는 계정 연결 상태를 확인해 주세요.
+                </p>
+              </div>
+            </div>
+          )}
 
           {currentPage === "consultants" && (
             <ConsultantsDirectory consultants={consultants} />
