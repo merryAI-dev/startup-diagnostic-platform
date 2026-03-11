@@ -1,4 +1,5 @@
 export type Role = "admin" | "company" | "consultant"
+export type AuthProviderType = "password" | "google.com"
 
 export type ConsentType = "privacy" | "marketing"
 
@@ -21,5 +22,6 @@ export type UserProfile = {
   active: boolean
   email?: string | null
   companyId?: string | null
+  authProviders?: AuthProviderType[] | null
   consents?: ConsentSnapshot
 }

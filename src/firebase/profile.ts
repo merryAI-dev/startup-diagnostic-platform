@@ -7,7 +7,7 @@ import {
   writeBatch,
 } from "firebase/firestore"
 import { db } from "@/firebase/client"
-import type { ConsentSnapshot, Role, UserProfile } from "@/types/auth"
+import type { AuthProviderType, ConsentSnapshot, Role, UserProfile } from "@/types/auth"
 import type { CompanyInfoForm, CompanyInfoRecord, InvestmentInput } from "@/types/company"
 
 const collectionName = "profiles"
@@ -117,6 +117,7 @@ export async function createUserProfile(
     investmentRows?: InvestmentInput[]
     consultantInfo?: ConsultantSignupInfo
     active?: boolean
+    authProviders?: AuthProviderType[]
     consents?: ConsentSnapshot
   }
 ) {
@@ -132,6 +133,7 @@ export async function createUserProfile(
     active: options?.active ?? false,
     email: email ?? null,
     companyId,
+    authProviders: options?.authProviders ?? null,
     createdAt: serverTimestamp(),
   }
   if (options?.consents) {

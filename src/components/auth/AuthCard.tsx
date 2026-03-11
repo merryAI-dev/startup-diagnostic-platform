@@ -8,7 +8,7 @@ type AuthCardProps = {
   onSubmit: (role: Role, email: string, password: string) => void
   onContinue?: (role: Role) => void
   continueLabel?: string
-  onGoogle?: () => void
+  onGoogle?: (email?: string) => void
   showGoogle?: boolean
   loadingGoogle?: boolean
   googleLabel?: string
@@ -263,7 +263,7 @@ export function AuthCard({
             <button
               type="button"
               className="w-full rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
-              onClick={onGoogle}
+              onClick={() => onGoogle?.(email.trim() || undefined)}
               disabled={isBusy}
             >
               <span className="inline-flex items-center justify-center gap-2">

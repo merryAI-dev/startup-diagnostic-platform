@@ -2,9 +2,9 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { useLocation, useNavigate } from "react-router-dom"
 import type { User as FirebaseUser } from "firebase/auth"
 import { useAuth } from "@/context/AuthContext"
-import { signInWithEmail, signOutUser, signUpWithEmail } from "@/firebase/auth"
+import { getSignInMethods, signInWithEmail, signOutUser, signUpWithEmail } from "@/firebase/auth"
 import { db } from "@/firebase/client"
-import type { Role } from "@/types/auth"
+import type { AuthProviderType, Role } from "@/types/auth"
 import { ConsultantProfilePage } from "@/redesign/app/components/pages/consultant-profile-page"
 import {
   ChevronDown,
@@ -51,6 +51,17 @@ function getRoleFromQuery(search: string): Role | null {
     return value
   }
   return null
+}
+
+function extractAuthProviders(user: FirebaseUser): AuthProviderType[] {
+  const providers = user.providerData
+    .map((item) => item.providerId)
+    .filter(
+      (providerId): providerId is AuthProviderType =>
+        providerId === "password" || providerId === "google.com"
+    )
+
+  return Array.from(new Set(providers))
 }
 
 export function SignupInfoPage() {
@@ -125,6 +136,14 @@ export function SignupInfoPage() {
     if (creatingAccount) return null
     setCreatingAccount(true)
     try {
+      const signInMethods = await getSignInMethods(pendingSignup.email)
+      const hasPasswordMethod = signInMethods.includes("password")
+      const hasGoogleMethod = signInMethods.includes("google.com")
+      if (hasGoogleMethod && !hasPasswordMethod) {
+        toast.error("이미 Google로 가입된 이메일입니다. Google 로그인을 이용해주세요.")
+        return null
+      }
+
       const credential = await signUpWithEmail(
         pendingSignup.email,
         pendingSignup.password
@@ -174,7 +193,10 @@ export function SignupInfoPage() {
                 authUser.uid,
                 "company",
                 requestedRole,
-                authUser.email
+                authUser.email,
+                {
+                  authProviders: extractAuthProviders(authUser),
+                }
               )
               await handleComplete()
             } catch (error) {
@@ -258,7 +280,10 @@ function ConsultantSignupInfo({
         "company",
         requestedRole,
         authUser.email ?? userEmail,
-        { consultantInfo: values }
+        {
+          consultantInfo: values,
+          authProviders: extractAuthProviders(authUser),
+        }
       )
       await onComplete()
     } catch (error) {
@@ -717,6 +742,7 @@ function CompanySignupInfo({
           companyId: authUser.uid,
           companyInfo: form,
           investmentRows,
+          authProviders: extractAuthProviders(authUser),
           consents: {
             privacy: {
               consented: consentPrivacy,

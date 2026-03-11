@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom"
 import { AuthCard } from "@/components/auth/AuthCard"
 import { useAuth } from "@/context/AuthContext"
 import { getUserProfile } from "@/firebase/profile"
-import { signInWithEmail, signInWithGoogle, signOutUser } from "@/firebase/auth"
+import { getSignInMethods, signInWithEmail, signInWithGoogle, signOutUser } from "@/firebase/auth"
 import type { Role } from "@/types/auth"
 
 export function LoginPage() {
@@ -14,7 +14,7 @@ export function LoginPage() {
   const { refreshProfile } = useAuth()
   const isBusy = loadingEmail || loadingGoogle
 
-  async function routeAfterLogin(uid: string) {
+  async function routeAfterLogin(uid: string, loginProvider: "password" | "google.com") {
     let profile = null
     try {
       profile = await getUserProfile(uid)
@@ -31,6 +31,20 @@ export function LoginPage() {
 
     if (!profile) {
       navigate("/signup")
+      return
+    }
+
+    if (
+      Array.isArray(profile.authProviders)
+      && profile.authProviders.length > 0
+      && !profile.authProviders.includes(loginProvider)
+    ) {
+      setError(
+        loginProvider === "google.com"
+          ? "이 계정은 이메일/비밀번호 로그인만 허용됩니다."
+          : "이 계정은 Google 로그인만 허용됩니다."
+      )
+      await signOutUser()
       return
     }
 
@@ -56,9 +70,17 @@ export function LoginPage() {
     setLoadingEmail(true)
     setError(null)
     try {
+      const signInMethods = await getSignInMethods(email)
+      const hasPasswordMethod = signInMethods.includes("password")
+      const hasGoogleMethod = signInMethods.includes("google.com")
+      if (hasGoogleMethod && !hasPasswordMethod) {
+        setError("Google로 가입된 이메일입니다. Google 로그인을 이용해주세요.")
+        return
+      }
+
       const result = await signInWithEmail(email, password)
       await refreshProfile()
-      await routeAfterLogin(result.user.uid)
+      await routeAfterLogin(result.user.uid, "password")
     } catch (err: any) {
       const code = err?.code ?? ""
       if (code === "auth/user-not-found" || code === "auth/invalid-credential") {
@@ -75,14 +97,42 @@ export function LoginPage() {
     }
   }
 
-  async function handleGoogleLogin() {
+  async function handleGoogleLogin(emailHint?: string) {
     if (isBusy) return
     setLoadingGoogle(true)
     setError(null)
     try {
+      const normalizedEmail = emailHint?.trim() ?? ""
+      if (normalizedEmail) {
+        const signInMethods = await getSignInMethods(normalizedEmail)
+        const hasPasswordMethod = signInMethods.includes("password")
+        const hasGoogleMethod = signInMethods.includes("google.com")
+        if (hasPasswordMethod && !hasGoogleMethod) {
+          setError("이 계정은 이메일/비밀번호 로그인만 허용됩니다.")
+          return
+        }
+        if (hasPasswordMethod && hasGoogleMethod) {
+          setError("보안 정책상 동일 이메일의 Google/이메일 혼용 로그인은 허용되지 않습니다. 이메일/비밀번호로 로그인해주세요.")
+          return
+        }
+      }
+
       const result = await signInWithGoogle()
+
+      const currentEmail = result.user.email ?? ""
+      if (currentEmail) {
+        const methodsAfterSignIn = await getSignInMethods(currentEmail)
+        const hasPasswordMethod = methodsAfterSignIn.includes("password")
+        const hasGoogleMethod = methodsAfterSignIn.includes("google.com")
+        if (hasPasswordMethod && hasGoogleMethod) {
+          setError("보안 정책상 동일 이메일의 Google/이메일 혼용 로그인은 허용되지 않습니다. 이메일/비밀번호로 로그인해주세요.")
+          await signOutUser()
+          return
+        }
+      }
+
       await refreshProfile()
-      await routeAfterLogin(result.user.uid)
+      await routeAfterLogin(result.user.uid, "google.com")
     } catch (err: any) {
       const code = err?.code ?? ""
       if (code === "auth/popup-closed-by-user") {
