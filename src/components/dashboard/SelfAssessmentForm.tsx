@@ -179,11 +179,6 @@ export function SelfAssessmentForm({
           <div className="text-lg font-semibold text-slate-900">
             {activeSection.title}
           </div>
-          {activeSection.description ? (
-            <p className="mt-1 text-sm text-slate-600">
-              {activeSection.description}
-            </p>
-          ) : null}
         </div>
 
         {activeSection.subsections.map((subsection) => (

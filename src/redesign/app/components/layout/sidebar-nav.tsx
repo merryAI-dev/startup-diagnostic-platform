@@ -81,6 +81,12 @@ const companyCoreNavIds = new Set([
   "company-info",
 ]);
 
+const activeNavIdByPage: Record<string, string> = {
+  "regular-detail": "regular",
+  "regular-wizard": "regular",
+  "irregular-wizard": "irregular",
+};
+
 export function SidebarNav({
   currentPage,
   onNavigate,
@@ -99,10 +105,11 @@ export function SidebarNav({
   const companyCoreNavItems = userNavItems.filter((item) =>
     companyCoreNavIds.has(item.id)
   );
+  const activeNavId = activeNavIdByPage[currentPage] ?? currentPage;
 
   const renderNavButton = (item: NavItem) => {
     const Icon = item.icon;
-    const isActive = currentPage === item.id;
+    const isActive = activeNavId === item.id;
     const isDisabled = disabledPages?.has(item.id) ?? false;
     const needsAttention = attentionPages?.has(item.id) ?? false;
 
@@ -133,7 +140,7 @@ export function SidebarNav({
   };
 
   return (
-    <div className="w-64 border-r bg-white h-full flex flex-col">
+    <div className="flex h-full w-64 flex-col border-r border-slate-300 bg-slate-200">
       <nav className="flex-1 p-4 space-y-1">
         {isAdminUser || isConsultantUser ? (
           visibleNavItems.map((item) => renderNavButton(item))
@@ -144,14 +151,6 @@ export function SidebarNav({
         )}
       </nav>
 
-      <div className="p-4 border-t">
-        <div className="p-3 bg-blue-50 rounded-lg">
-          <p className="text-xs text-blue-900 mb-1">도움이 필요하신가요?</p>
-          <a href="#" className="text-xs text-primary hover:underline">
-            사용 가이드 보기
-          </a>
-        </div>
-      </div>
     </div>
   );
 }

@@ -221,7 +221,31 @@ export function AdminApplicationDetailModal({
         let resolvedCompanyId: string | null = null;
         let resolvedCompanyName: string | null = null;
 
-        if (application.createdByUid) {
+        if (application.companyId) {
+          const companySnap = await getDoc(doc(db, "companies", application.companyId));
+          if (companySnap.exists()) {
+            const data = companySnap.data() as { name?: string | null };
+            resolvedCompanyId = companySnap.id;
+            resolvedCompanyName = data.name ?? application.companyName ?? null;
+          }
+        }
+
+        if (!resolvedCompanyId && application.createdByUid) {
+          const profileSnap = await getDoc(doc(db, "profiles", application.createdByUid));
+          const profileData = profileSnap.exists()
+            ? (profileSnap.data() as { companyId?: string | null })
+            : null;
+          if (profileData?.companyId) {
+            const companySnap = await getDoc(doc(db, "companies", profileData.companyId));
+            if (companySnap.exists()) {
+              const data = companySnap.data() as { name?: string | null };
+              resolvedCompanyId = companySnap.id;
+              resolvedCompanyName = data.name ?? application.companyName ?? null;
+            }
+          }
+        }
+
+        if (!resolvedCompanyId && application.createdByUid) {
           const ownerQuery = query(
             collection(db, "companies"),
             where("ownerUid", "==", application.createdByUid),
@@ -285,7 +309,7 @@ export function AdminApplicationDetailModal({
     return () => {
       mounted = false;
     };
-  }, [application.createdByUid, application.companyName]);
+  }, [application.companyId, application.createdByUid, application.companyName]);
 
   useEffect(() => {
     const nextCompanyName =

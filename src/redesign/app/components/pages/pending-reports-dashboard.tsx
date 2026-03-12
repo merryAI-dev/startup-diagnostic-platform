@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import ExcelJS from "exceljs";
 import { Application, Consultant, Program, OfficeHourReport, User } from "@/redesign/app/lib/types";
 import { Button } from "@/redesign/app/components/ui/button";
@@ -14,9 +14,12 @@ import {
 import { Input } from "@/redesign/app/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/redesign/app/components/ui/table";
 import { Textarea } from "@/redesign/app/components/ui/textarea";
+import { DateRangePicker } from "@/redesign/app/components/ui/date-range-picker";
+import { PaginationControls } from "@/redesign/app/components/ui/pagination-controls";
 import { AlertCircle, Clock, Download, Eye, FileText, Mail } from "lucide-react";
 import { addDays, format, differenceInDays } from "date-fns";
 import { ko } from "date-fns/locale";
+import type { DateRange } from "react-day-picker";
 import { toast } from "sonner";
 
 const parseLocalDate = (value?: string | null) => {
@@ -121,8 +124,11 @@ export function PendingReportsDashboard({
   onEditReport,
   onDeleteReport,
 }: PendingReportsDashboardProps) {
+  const PAGE_SIZE = 10;
   const isConsultantUser = currentUser.role === "consultant";
   const isAdminUser = currentUser.role === "admin";
+  const [reportDateRange, setReportDateRange] = useState<DateRange | undefined>();
+  const [reportPage, setReportPage] = useState(1);
   const [selectedReportItem, setSelectedReportItem] = useState<{
     report: OfficeHourReport;
     application: Application;
@@ -765,13 +771,62 @@ export function PendingReportsDashboard({
 
     return rows;
   }, [pendingReports, submittedReports, consultants]);
+  const filteredReportRows = useMemo(() => {
+    if (!reportDateRange?.from && !reportDateRange?.to) {
+      return reportRows;
+    }
+
+    const rangeStart = reportDateRange.from
+      ? new Date(
+          reportDateRange.from.getFullYear(),
+          reportDateRange.from.getMonth(),
+          reportDateRange.from.getDate()
+        )
+      : null;
+    const rangeEnd = reportDateRange.to
+      ? new Date(
+          reportDateRange.to.getFullYear(),
+          reportDateRange.to.getMonth(),
+          reportDateRange.to.getDate()
+        )
+      : rangeStart;
+
+    return reportRows.filter((row) => {
+      const scheduledDate = parseLocalDate(row.application.scheduledDate);
+      if (!scheduledDate) return false;
+      const normalized = new Date(
+        scheduledDate.getFullYear(),
+        scheduledDate.getMonth(),
+        scheduledDate.getDate()
+      );
+
+      if (rangeStart && normalized < rangeStart) return false;
+      if (rangeEnd && normalized > rangeEnd) return false;
+      return true;
+    });
+  }, [reportDateRange, reportRows]);
+  const paginatedReportRows = useMemo(() => {
+    const startIndex = (reportPage - 1) * PAGE_SIZE;
+    return filteredReportRows.slice(startIndex, startIndex + PAGE_SIZE);
+  }, [filteredReportRows, reportPage]);
   const selectedReportContent = useMemo(
     () => parseReportContent(selectedReportItem?.report.content),
     [selectedReportItem?.report.content]
   );
 
+  useEffect(() => {
+    setReportPage(1);
+  }, [filteredReportRows.length, reportDateRange?.from, reportDateRange?.to]);
+
+  useEffect(() => {
+    const totalPages = Math.max(1, Math.ceil(filteredReportRows.length / PAGE_SIZE));
+    if (reportPage > totalPages) {
+      setReportPage(totalPages);
+    }
+  }, [filteredReportRows.length, reportPage]);
+
   return (
-    <div className="h-full flex flex-col bg-gray-50">
+    <div className="flex h-full min-h-0 flex-col bg-gray-50">
       {/* Header */}
       <div className="bg-white border-b px-8 py-6">
         <div className="flex items-center justify-between mb-4">
@@ -822,8 +877,8 @@ export function PendingReportsDashboard({
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-y-auto px-8 py-6">
-        <div className="grid grid-cols-3 gap-6 mb-6">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-8 py-6">
+        <div className="shrink-0 grid grid-cols-3 gap-6 mb-6">
           {/* 사업별 통계 */}
           <div className="col-span-3 bg-white rounded-lg border p-6">
             <h3 className="font-semibold text-gray-900 mb-4">사업별 미작성 현황</h3>
@@ -856,23 +911,29 @@ export function PendingReportsDashboard({
         </div>
 
         {/* 오피스아워 보고서 현황 */}
-        <div className="bg-white rounded-lg border mt-6">
-          <div className="p-6 border-b space-y-4">
+        <div className="mt-6 flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border bg-white">
+          <div className="shrink-0 border-b p-6 space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="font-semibold text-gray-900">오피스아워 보고서 현황</h3>
-              {!isAdminUser && (
-                <Button
-                  size="sm"
-                  className="bg-emerald-600 text-white hover:bg-emerald-700"
-                  onClick={() => onCreateReport("irregular-manual")}
-                >
-                  비정기 오피스아워 작성
-                </Button>
-              )}
+              <div className="flex items-center gap-2">
+                <DateRangePicker
+                  value={reportDateRange}
+                  onChange={setReportDateRange}
+                />
+                {!isAdminUser && (
+                  <Button
+                    size="sm"
+                    className="bg-emerald-600 text-white hover:bg-emerald-700"
+                    onClick={() => onCreateReport("irregular-manual")}
+                  >
+                    비정기 오피스아워 작성
+                  </Button>
+                )}
+              </div>
             </div>
           </div>
-          <div className="divide-y">
-            {reportRows.length === 0 ? (
+          <div className="min-h-0 flex-1 divide-y overflow-hidden">
+            {filteredReportRows.length === 0 ? (
               <div className="p-12 text-center">
                 <FileText className="w-12 h-12 text-slate-300 mx-auto mb-3" />
                 <p className="text-sm text-muted-foreground">
@@ -880,23 +941,23 @@ export function PendingReportsDashboard({
                 </p>
               </div>
             ) : (
-              <div className="max-h-[560px] overflow-y-auto">
+              <div className="min-h-0 flex-1 overflow-y-auto">
                 <Table>
-                  <TableHeader className="sticky top-0 bg-white z-10">
-                    <TableRow>
-                      <TableHead>상태</TableHead>
-                      <TableHead>사업</TableHead>
-                      <TableHead>컨설턴트</TableHead>
-                      <TableHead>오피스아워</TableHead>
-                      <TableHead>기한</TableHead>
-                      <TableHead>진행일</TableHead>
-                      <TableHead>작성일</TableHead>
-                      <TableHead className="w-[72px] text-center">다운로드</TableHead>
-                      <TableHead className="text-right">관리</TableHead>
+                  <TableHeader className="[&_tr]:sticky [&_tr]:top-0 [&_tr]:z-10 [&_tr]:bg-white">
+                    <TableRow className="hover:bg-white">
+                      <TableHead className="bg-white">상태</TableHead>
+                      <TableHead className="bg-white">사업</TableHead>
+                      <TableHead className="bg-white">컨설턴트</TableHead>
+                      <TableHead className="bg-white">오피스아워</TableHead>
+                      <TableHead className="bg-white">기한</TableHead>
+                      <TableHead className="bg-white">진행일</TableHead>
+                      <TableHead className="bg-white">작성일</TableHead>
+                      <TableHead className="w-[72px] bg-white text-center">다운로드</TableHead>
+                      <TableHead className="bg-white text-right">관리</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {reportRows.map((row) => (
+                    {paginatedReportRows.map((row) => (
                       <TableRow key={`${row.type}-${row.application.id}`}>
                         <TableCell>
                           <span className="text-sm text-muted-foreground">
@@ -1042,6 +1103,15 @@ export function PendingReportsDashboard({
                 </Table>
               </div>
             )}
+          </div>
+          <div className="shrink-0 border-t bg-white px-6 py-3">
+            <PaginationControls
+              page={reportPage}
+              pageSize={PAGE_SIZE}
+              totalItems={filteredReportRows.length}
+              onPageChange={setReportPage}
+              className="justify-end"
+            />
           </div>
         </div>
       </div>

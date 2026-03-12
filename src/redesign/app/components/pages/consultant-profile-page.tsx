@@ -1,7 +1,6 @@
 import { type FormEvent, useEffect, useMemo, useState } from "react";
 import { Agenda, Consultant, ConsultantAvailability } from "@/redesign/app/lib/types";
 import { Button } from "@/redesign/app/components/ui/button";
-import { Badge } from "@/redesign/app/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/redesign/app/components/ui/card";
 import { Input } from "@/redesign/app/components/ui/input";
 import { Label } from "@/redesign/app/components/ui/label";
@@ -25,6 +24,8 @@ interface ConsultantProfilePageProps {
   agendas?: Agenda[];
   defaultEmail?: string | null;
   saving?: boolean;
+  embedded?: boolean;
+  hideFooterActions?: boolean;
   submitLabel?: string;
   submitClassName?: string;
   hideReset?: boolean;
@@ -80,6 +81,8 @@ export function ConsultantProfilePage({
   defaultEmail,
   saving = false,
   scheduleSaving = false,
+  embedded = false,
+  hideFooterActions = false,
   submitLabel,
   submitClassName,
   hideReset = false,
@@ -97,13 +100,6 @@ export function ConsultantProfilePage({
     () => buildInitialValues(consultant, defaultEmail),
     [consultant, defaultEmail]
   );
-
-  const consultantAgendaLabels = useMemo(() => {
-    if (!consultant?.agendaIds?.length) return [];
-    return consultant.agendaIds
-      .map((agendaId) => agendas.find((agenda) => agenda.id === agendaId)?.name)
-      .filter(Boolean) as string[];
-  }, [consultant, agendas]);
 
   const scheduleDays = useMemo(
     () => [
@@ -234,11 +230,25 @@ export function ConsultantProfilePage({
     </span>
   );
 
+  const cardHeaderClassName = embedded ? "px-0 pt-0" : undefined;
+  const cardContentClassName = embedded ? "px-0 pb-0 pt-6" : "p-6";
+  const hasSchedulePanel = Boolean(onSaveSchedule);
+
   return (
-    <div className="p-8 max-w-7xl mx-auto">
-      <div className="grid gap-6 lg:grid-cols-10">
-        <Card className="lg:col-span-4">
-        <CardHeader>
+    <div className={embedded ? "h-full" : "mx-auto max-w-7xl p-8"}>
+      <div
+        className={cn(
+          "grid gap-6",
+          hasSchedulePanel ? "lg:grid-cols-10" : "mx-auto max-w-3xl"
+        )}
+      >
+        <Card
+          className={cn(
+            hasSchedulePanel ? "lg:col-span-4" : "w-full",
+            embedded && "border-0 shadow-none"
+          )}
+        >
+        <CardHeader className={cardHeaderClassName}>
           <CardTitle>내 정보 입력</CardTitle>
           {!hideDescription && (
             <CardDescription>
@@ -246,7 +256,7 @@ export function ConsultantProfilePage({
             </CardDescription>
           )}
         </CardHeader>
-        <CardContent className="p-6">
+        <CardContent className={cardContentClassName}>
           <form id="consultant-profile-form" onSubmit={handleSubmit} className="grid grid-cols-2 gap-4">
             <div>
               <Label className="mb-2 block" htmlFor="consultant-name">
@@ -358,27 +368,6 @@ export function ConsultantProfilePage({
               />
               </div>
 
-              <div className="col-span-2">
-              <Label className="mb-2 block">담당 아젠다</Label>
-              {consultantAgendaLabels.length > 0 ? (
-                <div className="flex flex-wrap gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-3">
-                  {consultantAgendaLabels.map((label) => (
-                    <Badge
-                      key={label}
-                      variant="outline"
-                      className="border-slate-200 bg-white text-slate-900 font-medium"
-                    >
-                      {label}
-                    </Badge>
-                  ))}
-                </div>
-              ) : (
-                <div className="rounded-lg border border-dashed border-slate-200 bg-white px-3 py-3 text-sm text-muted-foreground">
-                  매칭된 아젠다가 없습니다. 관리자에게 요청해주세요.
-                </div>
-              )}
-              </div>
-
             <div className="col-span-2">
               <Label className="mb-2 block" htmlFor="consultant-bio">
                 메모
@@ -394,49 +383,51 @@ export function ConsultantProfilePage({
               />
             </div>
           </form>
-          <div className="mt-6 pt-4 border-t flex items-center justify-end gap-2">
-            {onBack && (
+          {hideFooterActions ? null : (
+            <div className="mt-6 pt-4 border-t flex items-center justify-end gap-2">
+              {onBack && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={onBack}
+                  disabled={saving}
+                  className="text-slate-500 hover:text-slate-700"
+                >
+                  {backLabel ?? "로그인으로 돌아가기"}
+                </Button>
+              )}
+              {!hideReset && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setFormValues(initialValues)}
+                  disabled={saving}
+                >
+                  초기화
+                </Button>
+              )}
               <Button
-                type="button"
-                variant="ghost"
-                onClick={onBack}
-                disabled={saving}
-                className="text-slate-500 hover:text-slate-700"
+                type="submit"
+                form="consultant-profile-form"
+                disabled={saving || isInvalid}
+                className={submitClassName}
               >
-                {backLabel ?? "로그인으로 돌아가기"}
+                {saving ? "저장 중..." : (submitLabel ?? "정보 저장")}
               </Button>
-            )}
-            {!hideReset && (
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setFormValues(initialValues)}
-                disabled={saving}
-              >
-                초기화
-              </Button>
-            )}
-            <Button
-              type="submit"
-              form="consultant-profile-form"
-              disabled={saving || isInvalid}
-              className={submitClassName}
-            >
-              {saving ? "저장 중..." : (submitLabel ?? "정보 저장")}
-            </Button>
-          </div>
+            </div>
+          )}
         </CardContent>
       </Card>
 
       {onSaveSchedule && (
-        <Card className="lg:col-span-6">
-          <CardHeader>
+        <Card className={cn("lg:col-span-6", embedded && "border-0 shadow-none")}>
+          <CardHeader className={cardHeaderClassName}>
             <CardTitle>내 스케줄 설정</CardTitle>
             <CardDescription>
               화/목 기준으로 가능한 시간을 선택하세요.
             </CardDescription>
           </CardHeader>
-          <CardContent className="p-6">
+          <CardContent className={cardContentClassName}>
             <div className="flex flex-wrap items-center gap-2 justify-end mb-4">
               <Button
                 type="button"

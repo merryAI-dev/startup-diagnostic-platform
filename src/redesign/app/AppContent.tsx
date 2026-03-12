@@ -235,6 +235,7 @@ function toPendingCompanyForm(value: unknown): CompanyInfoForm {
   const source = value as Partial<CompanyInfoForm>;
   return {
     ...DEFAULT_FORM,
+    companyType: toTrimmedString(source.companyType) || DEFAULT_FORM.companyType,
     companyInfo: toTrimmedString(source.companyInfo),
     representativeSolution: toTrimmedString(source.representativeSolution),
     sdgPriority1: toTrimmedString(source.sdgPriority1),
@@ -245,6 +246,11 @@ function toPendingCompanyForm(value: unknown): CompanyInfoForm {
     ceoAge: toTrimmedString(source.ceoAge),
     ceoGender: toTrimmedString(source.ceoGender),
     ceoNationality: toTrimmedString(source.ceoNationality),
+    hasCoRepresentative: toTrimmedString(source.hasCoRepresentative),
+    coRepresentativeName: toTrimmedString(source.coRepresentativeName),
+    coRepresentativeBirthDate: toTrimmedString(source.coRepresentativeBirthDate),
+    coRepresentativeGender: toTrimmedString(source.coRepresentativeGender),
+    coRepresentativeTitle: toTrimmedString(source.coRepresentativeTitle),
     founderSerialNumber: toTrimmedString(source.founderSerialNumber),
     website: toTrimmedString(source.website),
     foundedAt: toTrimmedString(source.foundedAt),
@@ -2362,6 +2368,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       status: "pending",
       officeHourId: data.officeHourId,
       officeHourSlotId: selectedSlot?.id ?? data.slotId,
+      companyId: companyRecordId,
       programId: officeHour.programId,
       officeHourTitle: officeHour.title,
       agendaId: data.agendaId,
@@ -2504,6 +2511,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       id: `app${Date.now()}`,
       type: "irregular",
       status: "pending",
+      companyId: companyRecordId,
       officeHourTitle: `비정기 오피스아워 - ${agenda?.name || ""}`,
       agendaId: data.agendaId,
       companyName: user.companyName,
@@ -3041,6 +3049,9 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       requestContent: string;
       retainedAttachments: Array<{ name: string; url?: string }>;
       newFiles: FileItem[];
+      scheduledDate?: string;
+      scheduledTime?: string;
+      slotId?: string;
     }
   ) => {
     const targetApplication = applications.find((app) => app.id === id);
@@ -3115,16 +3126,207 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       (url) => !retainedUrls.includes(url)
     );
 
-    const updated = await handleUpdateApplication(id, {
+    const requestedDateKey = normalizeDateKey(payload.scheduledDate);
+    const requestedTimeKey = normalizeTimeKey(payload.scheduledTime);
+    const scheduleChanged =
+      targetApplication.type === "regular"
+      && Boolean(requestedDateKey && requestedTimeKey && payload.slotId)
+      && (
+        requestedDateKey !== targetApplication.scheduledDate
+        || requestedTimeKey !== normalizeTimeKey(targetApplication.scheduledTime)
+        || payload.slotId !== targetApplication.officeHourSlotId
+      );
+
+    let selectedSlot: OfficeHourSlot | null = null;
+    if (scheduleChanged) {
+      if (!requestedDateKey || !requestedTimeKey || !payload.slotId) {
+        toast.error("변경할 날짜와 시간을 선택해주세요");
+        if (uploadedUrls.length > 0) {
+          await removeApplicationAttachmentsFromStorage(uploadedUrls);
+        }
+        return false;
+      }
+
+      if (isBefore(startOfDay(parseDateKey(requestedDateKey)), startOfDay(new Date()))) {
+        toast.error("오늘 이전 날짜로는 변경할 수 없습니다");
+        if (uploadedUrls.length > 0) {
+          await removeApplicationAttachmentsFromStorage(uploadedUrls);
+        }
+        return false;
+      }
+
+      selectedSlot = officeHourSlotList.find((slot) => slot.id === payload.slotId) ?? null;
+      if (!selectedSlot || selectedSlot.type !== "regular") {
+        toast.error("선택한 일정 정보를 다시 확인해주세요");
+        if (uploadedUrls.length > 0) {
+          await removeApplicationAttachmentsFromStorage(uploadedUrls);
+        }
+        return false;
+      }
+
+      if (
+        selectedSlot.date !== requestedDateKey
+        || normalizeTimeKey(selectedSlot.startTime) !== requestedTimeKey
+      ) {
+        toast.error("선택한 일정 정보가 일치하지 않습니다");
+        if (uploadedUrls.length > 0) {
+          await removeApplicationAttachmentsFromStorage(uploadedUrls);
+        }
+        return false;
+      }
+
+      if (selectedSlot.status !== "open") {
+        toast.error("선택한 시간이 이미 마감되었습니다");
+        if (uploadedUrls.length > 0) {
+          await removeApplicationAttachmentsFromStorage(uploadedUrls);
+        }
+        return false;
+      }
+
+      const agenda = targetApplication.agendaId
+        ? agendaList.find((item) => item.id === targetApplication.agendaId)
+        : agendaList.find((item) => item.name === targetApplication.agenda);
+      if (!agenda) {
+        toast.error("신청된 아젠다 정보를 찾을 수 없습니다");
+        if (uploadedUrls.length > 0) {
+          await removeApplicationAttachmentsFromStorage(uploadedUrls);
+        }
+        return false;
+      }
+
+      const linkedConsultants = consultants.filter(
+        (consultant) =>
+          consultant.status === "active"
+          && (consultant.agendaIds ?? []).includes(agenda.id)
+      );
+      if (linkedConsultants.length === 0) {
+        toast.error("선택한 일정에 배정 가능한 컨설턴트가 없습니다");
+        if (uploadedUrls.length > 0) {
+          await removeApplicationAttachmentsFromStorage(uploadedUrls);
+        }
+        return false;
+      }
+
+      const isConsultantBusyAt = (consultant: Consultant) => {
+        const consultantNameKey = normalizeConsultantDisplayName(consultant.name);
+        return applications.some((application) => {
+          if (application.id === targetApplication.id) return false;
+          const normalizedStatus = normalizeApplicationStatus(application.status);
+          if (
+            normalizedStatus !== "pending"
+            && normalizedStatus !== "review"
+            && normalizedStatus !== "confirmed"
+            && normalizedStatus !== "completed"
+          ) {
+            return false;
+          }
+          if (!application.scheduledDate || !application.scheduledTime) return false;
+          if (application.scheduledDate !== requestedDateKey) return false;
+          if (normalizeTimeKey(application.scheduledTime) !== requestedTimeKey) return false;
+
+          if (application.consultantId) {
+            return application.consultantId === consultant.id;
+          }
+          return normalizeConsultantDisplayName(application.consultant) === consultantNameKey;
+        });
+      };
+
+      const assignableConsultants = linkedConsultants.filter(
+        (consultant) =>
+          isConsultantAvailableAt(consultant, requestedDateKey, requestedTimeKey)
+          && !isConsultantBusyAt(consultant)
+      );
+
+      if (assignableConsultants.length === 0) {
+        toast.error("변경한 시간에 배정 가능한 컨설턴트가 없습니다");
+        if (uploadedUrls.length > 0) {
+          await removeApplicationAttachmentsFromStorage(uploadedUrls);
+        }
+        return false;
+      }
+    }
+
+    const updatedAt = new Date();
+    const basePatch: Partial<Application> = {
       requestContent: nextRequestContent,
       attachments: nextAttachmentNames,
       attachmentUrls: nextAttachmentUrls,
-    });
-    if (!updated) {
-      if (uploadedUrls.length > 0) {
-        await removeApplicationAttachmentsFromStorage(uploadedUrls);
+      updatedAt,
+    };
+    const schedulePatch: Partial<Application> = scheduleChanged && selectedSlot && requestedDateKey
+      ? {
+          officeHourSlotId: selectedSlot.id,
+          scheduledDate: requestedDateKey,
+          scheduledTime: requestedTimeKey,
+          status: "pending",
+          consultant: "담당자 배정 중",
+          consultantId: "",
+          updatedAt,
+        }
+      : {};
+    const nextApplications = applications.map((app) =>
+      app.id === id
+        ? {
+            ...app,
+            ...basePatch,
+            ...schedulePatch,
+            ...(scheduleChanged ? { rejectionReason: undefined } : {}),
+          }
+        : app
+    );
+
+    const remotePayload: Record<string, any> = {
+      requestContent: nextRequestContent,
+      attachments: nextAttachmentNames,
+      attachmentUrls: nextAttachmentUrls,
+      updatedAt,
+      ...schedulePatch,
+    };
+    if (scheduleChanged) {
+      remotePayload.rejectionReason = deleteField();
+    }
+
+    if (isFirebaseConfigured) {
+      const updated = await officeHourApplicationCrud.update(id, remotePayload);
+      if (!updated) {
+        if (uploadedUrls.length > 0) {
+          await removeApplicationAttachmentsFromStorage(uploadedUrls);
+        }
+        return false;
       }
-      return false;
+    } else {
+      setApplications(nextApplications);
+    }
+
+    if (scheduleChanged && selectedSlot) {
+      const releasableSlotIds = collectReleasableSlotIds([targetApplication], nextApplications);
+      await releaseSlots(releasableSlotIds);
+
+      const nextSlotIds = officeHourSlotList
+        .filter(
+          (slot) =>
+            slot.type === "regular"
+            && slot.programId === selectedSlot?.programId
+            && slot.date === selectedSlot.date
+            && slot.startTime === selectedSlot.startTime
+        )
+        .map((slot) => slot.id);
+      const bookingSlotIds = nextSlotIds.length > 0 ? nextSlotIds : [selectedSlot.id];
+
+      if (isFirebaseConfigured) {
+        const operations = bookingSlotIds.map((slotId) => ({
+          type: "update" as const,
+          collection: COLLECTIONS.OFFICE_HOUR_SLOTS,
+          docId: slotId,
+          data: { status: "booked" },
+        }));
+        const booked = await officeHourSlotCrud.batchUpdate(operations);
+        if (!booked) {
+          toast.error("일정은 변경됐지만 슬롯 상태 업데이트에 실패했습니다");
+        }
+      } else {
+        bookingSlotIds.forEach((slotId) => applyLocalSlotStatus(slotId, "booked"));
+      }
     }
 
     if (removedUrls.length > 0) {
@@ -3134,7 +3336,11 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       }
     }
 
-    toast.success("신청 내용이 수정되었습니다");
+    if (scheduleChanged) {
+      toast.success("일정이 변경되어 다시 검토 대기 상태가 되었습니다");
+    } else {
+      toast.success("신청 내용이 수정되었습니다");
+    }
     return true;
   };
 
@@ -4243,15 +4449,25 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
           userRole={user.role}
           disabledPages={disabledPages}
         />
-        <main className="flex-1 overflow-y-auto bg-gray-50">
+        <main
+          className={`flex-1 bg-gray-50 ${
+            currentPage === "admin-applications" || currentPage === "pending-reports"
+              ? "overflow-hidden"
+              : "overflow-y-auto"
+          }`}
+        >
           {currentPage === "dashboard" && (
             <DashboardCalendar
               applications={scopedApplications}
               user={user}
               programs={scopedProgramList}
               agendas={agendaList}
+              regularOfficeHours={scopedRegularOfficeHourList}
+              officeHourSlots={officeHourSlotList}
+              consultants={consultants}
               ticketOverrides={companyMetaDoc?.programTicketOverrides}
               onCancelApplication={handleCancelApplication}
+              onUpdateCompanyApplication={handleUpdateApplicationByCompany}
               onNavigate={handleNavigateLoose}
             />
           )}
