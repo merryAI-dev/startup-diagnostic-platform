@@ -4,6 +4,10 @@ import type {
   AnswerValue,
   SelfAssessmentSections,
 } from "@/types/selfAssessment"
+import {
+  isSelfAssessmentAnswerComplete,
+  MIN_SELF_ASSESSMENT_REASON_LENGTH,
+} from "@/utils/selfAssessment"
 
 function AnswerToggle({
   value,
@@ -42,14 +46,6 @@ function formatScore(score: number) {
     return `${score}`
   }
   return score.toFixed(1).replace(/\.0$/, "")
-}
-
-function isQuestionInputComplete(answer?: {
-  answer?: AnswerValue
-  reason?: string
-}) {
-  return answer?.answer !== null && answer?.answer !== undefined
-    && (answer?.reason ?? "").trim().length >= 1
 }
 
 export function SelfAssessmentForm({
@@ -101,7 +97,7 @@ export function SelfAssessmentForm({
               question.storageKey
             ]
           const score = answer?.answer === true ? question.weight : 0
-          if (isQuestionInputComplete(answer)) {
+          if (isSelfAssessmentAnswerComplete(answer)) {
             sectionAnsweredCount += 1
           }
           sectionQuestionCount += 1
@@ -213,6 +209,13 @@ export function SelfAssessmentForm({
                     subsection.storageKey
                   ]?.[question.storageKey]
                 const score = questionScores[question.id] ?? 0
+                const reasonLength = (answer?.reason ?? "").trim().length
+                const needsMoreReason =
+                  !readOnly
+                  && answer?.answer !== null
+                  && answer?.answer !== undefined
+                  && reasonLength > 0
+                  && reasonLength < MIN_SELF_ASSESSMENT_REASON_LENGTH
                 return (
                   <div
                     key={question.id}
@@ -285,6 +288,11 @@ export function SelfAssessmentForm({
                           : answer?.answer === false
                           ? "아니오라면 MYSC가 어떻게 도우면 좋을지 작성해주세요."
                           : "예/아니오를 선택한 뒤 이유를 작성해주세요."}
+                        {!readOnly ? (
+                          <span className="ml-1 text-slate-400">
+                            (최소 {MIN_SELF_ASSESSMENT_REASON_LENGTH}자)
+                          </span>
+                        ) : null}
                         <textarea
                           rows={2}
                           readOnly={readOnly}
@@ -293,7 +301,7 @@ export function SelfAssessmentForm({
                               ? "border-slate-100 bg-slate-50 text-slate-600"
                               : "border-slate-200 bg-white text-slate-700 focus:border-slate-400 focus:outline-none"
                           }`}
-                          placeholder="근거 또는 도움 요청 내용을 작성해주세요."
+                          placeholder={`근거 또는 도움 요청 내용을 ${MIN_SELF_ASSESSMENT_REASON_LENGTH}자 이상 작성해주세요.`}
                           value={answer?.reason ?? ""}
                           onChange={(event) =>
                             onReasonChange(
@@ -304,6 +312,15 @@ export function SelfAssessmentForm({
                             )
                           }
                         />
+                        {!readOnly ? (
+                          <div
+                            className={`mt-1 text-[11px] ${
+                              needsMoreReason ? "text-rose-600" : "text-slate-400"
+                            }`}
+                          >
+                            {reasonLength}/{MIN_SELF_ASSESSMENT_REASON_LENGTH}자
+                          </div>
+                        ) : null}
                       </label>
                     </div>
                   </div>
