@@ -79,6 +79,8 @@ import { storage as firebaseStorage } from "@/redesign/app/lib/firebase";
 import { mockNotifications, mockChatRooms, mockChatMessages, mockAIRecommendations, mockGoals, mockTeamMembers } from "@/redesign/app/lib/advanced-mock-data";
 import { buildCompanyInfoRecord } from "@/firebase/profile";
 import { DEFAULT_FORM, type CompanyInfoForm, type CompanyInfoRecord, type InvestmentInput } from "@/types/company";
+import type { SelfAssessmentSections } from "@/types/selfAssessment";
+import { isSelfAssessmentComplete } from "@/utils/selfAssessment";
 
 type AppPage = 
   | "dashboard" 
@@ -115,6 +117,9 @@ type AppPage =
   | "consultant-calendar";
 
 type CompanyInfoDoc = Partial<CompanyInfoRecord>;
+type SelfAssessmentDoc = {
+  sections?: SelfAssessmentSections | null;
+};
 
 type RawProfileApprovalDoc = {
   id: string;
@@ -830,6 +835,13 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
   }>("companies", companyRecordId ?? null, {
     enabled: isFirebaseConfigured && resolvedRole === "user" && !!companyRecordId,
   });
+  const { data: selfAssessmentDoc } = useFirestoreDocument<SelfAssessmentDoc>(
+    companyRecordId ? `companies/${companyRecordId}/selfAssessment` : "",
+    "info",
+    {
+      enabled: isFirebaseConfigured && resolvedRole === "user" && !!companyRecordId,
+    }
+  );
   const fallbackUser =
     initialUsers.find((u) => u.role === resolvedRole) ?? initialUsers[0]!;
   const user: User = useMemo(() => {
@@ -1615,6 +1627,14 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     }
     return set;
   }, [firebaseUser]);
+  const companyInfoNeedsAttention = useMemo(
+    () =>
+      isFirebaseConfigured
+      && resolvedRole === "user"
+      && !!companyRecordId
+      && !isSelfAssessmentComplete(selfAssessmentDoc?.sections),
+    [companyRecordId, resolvedRole, selfAssessmentDoc?.sections]
+  );
 
   useEffect(() => {
     const segment = location.pathname.split("/")[2] ?? "";
@@ -4210,6 +4230,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
         }
         onNavigate={handleNavigateLoose}
         disabledPages={disabledPages}
+        companyInfoNeedsAttention={companyInfoNeedsAttention}
         onLogout={async () => {
           await signOutUser();
           toast.success("로그아웃되었습니다");
