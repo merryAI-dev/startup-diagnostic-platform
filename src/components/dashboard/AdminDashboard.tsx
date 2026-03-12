@@ -12,6 +12,7 @@ import { useNavigate } from "react-router-dom"
 import { toast } from "sonner"
 import { SELF_ASSESSMENT_SECTIONS } from "@/data/selfAssessment"
 import { db, storage } from "@/firebase/client"
+import { PaginationControls } from "@/redesign/app/components/ui/pagination-controls"
 import type { CompanyInfoRecord } from "@/types/company"
 import type { SelfAssessmentSections } from "@/types/selfAssessment"
 
@@ -34,6 +35,8 @@ type ProgramSummary = {
   companyIds?: string[]
 }
 
+const COMPANY_PAGE_SIZE = 8
+
 export function AdminDashboard({
   user,
   onLogout,
@@ -51,6 +54,7 @@ export function AdminDashboard({
   const [loadingCompanies, setLoadingCompanies] = useState(true)
   const [loadingDetails, setLoadingDetails] = useState(false)
   const [companyQuery, setCompanyQuery] = useState("")
+  const [companyPage, setCompanyPage] = useState(1)
   const [activeTab, setActiveTab] = useState<"info" | "assessment" | "report" | "officeHours">(
     "info"
   )
@@ -301,9 +305,27 @@ export function AdminDashboard({
     if (!query) return companies
     return companies.filter((company) => {
       const name = (company.name ?? "").toLowerCase()
-      return name.includes(query) || company.id.toLowerCase().includes(query)
+      return name.includes(query)
     })
   }, [companies, companyQuery])
+
+  const totalCompanyPages = Math.max(
+    1,
+    Math.ceil(filteredCompanies.length / COMPANY_PAGE_SIZE)
+  )
+
+  const paginatedCompanies = useMemo(() => {
+    const startIndex = (companyPage - 1) * COMPANY_PAGE_SIZE
+    return filteredCompanies.slice(startIndex, startIndex + COMPANY_PAGE_SIZE)
+  }, [companyPage, filteredCompanies])
+
+  useEffect(() => {
+    setCompanyPage(1)
+  }, [companyQuery])
+
+  useEffect(() => {
+    setCompanyPage((prev) => Math.min(prev, totalCompanyPages))
+  }, [totalCompanyPages])
 
   const assessmentSummary = useMemo(() => {
     let totalScore = 0
@@ -382,23 +404,33 @@ export function AdminDashboard({
   return (
     <div className="bg-transparent h-full">
       <div className="flex h-full flex-col">
-        <div className="flex items-center justify-between border-b border-slate-100 px-8 py-5">
-          <h1 className="text-2xl font-semibold text-slate-900">
-            Admin Dashboard
-          </h1>
+        <div className="shrink-0 border-b border-slate-200 bg-white px-6 py-5">
+          <div className="mx-auto w-full max-w-7xl">
+            <h1 className="text-2xl font-semibold text-slate-900">
+              기업 관리
+            </h1>
+            <p className="mt-1 text-sm text-slate-500">
+              기업 기본 정보, 자가진단표, 업로드 자료와 티켓 현황을 관리합니다.
+            </p>
+          </div>
         </div>
-        <div className="flex-1 min-h-0 grid gap-6 lg:grid-cols-[280px_1fr] px-8 py-5">
-          <div className="rounded-2xl border border-slate-200 bg-white p-4 h-full overflow-y-auto">
-            <div className="text-sm font-semibold text-slate-700">
-              회사 목록
+        <div className="mx-auto grid h-full w-full max-w-7xl flex-1 min-h-0 gap-6 px-6 py-5 lg:grid-cols-[300px_1fr]">
+          <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white lg:sticky lg:top-5 lg:max-h-[calc(100vh-12rem)]">
+            <div className="shrink-0 border-b border-slate-100 px-4 py-4">
+              <div className="text-sm font-semibold text-slate-700">
+                회사 목록
+              </div>
+              <input
+                className="mt-3 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-slate-400 focus:outline-none"
+                placeholder="회사명 검색"
+                value={companyQuery}
+                onChange={(e) => setCompanyQuery(e.target.value)}
+              />
+              <div className="mt-2 text-xs text-slate-500">
+                총 {filteredCompanies.length.toLocaleString()}개
+              </div>
             </div>
-            <input
-              className="mt-3 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm focus:border-slate-400 focus:outline-none"
-              placeholder="회사명 또는 ID 검색"
-              value={companyQuery}
-              onChange={(e) => setCompanyQuery(e.target.value)}
-            />
-            <div className="mt-3 space-y-2">
+            <div className="flex-1 overflow-y-auto p-3">
               {loadingCompanies ? (
                 <div className="rounded-xl border border-slate-100 bg-slate-50 p-3 text-xs text-slate-500">
                   회사 목록을 불러오는 중입니다.
@@ -408,24 +440,33 @@ export function AdminDashboard({
                   검색 결과가 없습니다.
                 </div>
               ) : (
-                filteredCompanies.map((company) => (
-                  <button
-                    key={company.id}
-                    type="button"
-                    onClick={() => setSelectedCompanyId(company.id)}
-                    className={`w-full rounded-xl border px-3 py-2 text-left text-sm transition ${company.id === selectedCompanyId
-                      ? "border-slate-900 bg-slate-900 text-white"
-                      : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-                      }`}
-                  >
-                    <div className="font-semibold">{company.name}</div>
-                    <div className="mt-1 text-xs text-slate-300">
-                      {company.id}
-                    </div>
-                  </button>
-                ))
+                <div className="space-y-2">
+                  {paginatedCompanies.map((company) => (
+                    <button
+                      key={company.id}
+                      type="button"
+                      onClick={() => setSelectedCompanyId(company.id)}
+                      className={`w-full rounded-lg border px-3 py-2.5 text-left text-sm transition ${company.id === selectedCompanyId
+                        ? "border-slate-900 bg-slate-900 text-white"
+                        : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                        }`}
+                    >
+                      <div className="truncate font-medium">{company.name}</div>
+                    </button>
+                  ))}
+                </div>
               )}
             </div>
+            {filteredCompanies.length > COMPANY_PAGE_SIZE ? (
+              <div className="shrink-0 border-t border-slate-100 px-3 py-3">
+                <PaginationControls
+                  page={companyPage}
+                  totalItems={filteredCompanies.length}
+                  pageSize={COMPANY_PAGE_SIZE}
+                  onPageChange={setCompanyPage}
+                />
+              </div>
+            ) : null}
           </div>
 
           <div className="rounded-2xl border border-slate-200 bg-white flex flex-col min-h-0 overflow-hidden">
@@ -1211,12 +1252,9 @@ export function AdminDashboard({
                   </div>
                 </div>
               )}
-            </div>
           </div>
         </div>
-
-
-
+      </div>
       </div>
     </div>
   )
