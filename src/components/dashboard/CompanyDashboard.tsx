@@ -1306,36 +1306,28 @@ export function CompanyDashboard({
                     </div>
                   </div>
                   <div className="border-b border-slate-100 px-4 py-4">
-                    <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                    <div className="rounded-2xl border border-slate-600 bg-gradient-to-br from-slate-700 via-slate-800 to-slate-900 p-3.5 shadow-sm shadow-slate-900/15">
                       <div className="flex items-start justify-between gap-3">
                         <div>
-                          <div className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+                          <div className="text-xs font-semibold uppercase tracking-wider text-slate-300">
                             Overall
                           </div>
-                          <div className="mt-2 text-2xl font-semibold text-slate-900">
+                          <div className="mt-1.5 text-xl font-semibold text-white">
                             {assessmentTotalScore}
-                            <span className="ml-1 text-sm font-medium text-slate-400">
+                            <span className="ml-1 text-sm font-medium text-slate-300">
                               / 100
                             </span>
                           </div>
                         </div>
-                        <span
-                          className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold ${
-                            assessmentComplete
-                              ? "bg-emerald-100 text-emerald-700"
-                              : "bg-amber-100 text-amber-800"
-                          }`}
-                        >
-                          {assessmentComplete ? "완료" : "작성중"}
-                        </span>
+                        {assessmentComplete ? (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-200 px-2 py-0.5 text-[10px] font-semibold text-emerald-800">
+                            완료
+                          </span>
+                        ) : null}
                       </div>
-                      <div className="mt-3 text-xs text-slate-500">
+                      <div className="mt-2 text-[11px] text-slate-200">
                         완료 {answeredCount}/{totalQuestionCount}
                         {assessmentComplete ? null : ` · 미입력 ${remainingCount}개`}
-                      </div>
-                      <div className="mt-2 text-[11px] leading-5 text-slate-400">
-                        저장하려면 각 문항의 답변과 근거를{" "}
-                        {MIN_SELF_ASSESSMENT_REASON_LENGTH}자 이상 입력해야 합니다.
                       </div>
                     </div>
                   </div>
@@ -1378,13 +1370,6 @@ export function CompanyDashboard({
                           >
                             {section.description}
                           </div>
-                          <div
-                            className={`mt-2 text-[11px] ${
-                              active ? "text-slate-500" : "text-slate-400"
-                            }`}
-                          >
-                            문항 {section.questionCount}개 · 배점 {section.totalScore}점
-                          </div>
                         </button>
                       )
                     })}
@@ -1403,7 +1388,7 @@ export function CompanyDashboard({
                         onClick={saveSelfAssessment}
                         disabled={assessmentSaving || !assessmentComplete}
                       >
-                        {assessmentComplete ? "자가진단표 수정" : "자가진단표 저장"}
+                        저장
                       </button>
                     </div>
                   </div>
@@ -1412,18 +1397,18 @@ export function CompanyDashboard({
                   ref={assessmentScrollRef}
                   className="min-h-0 flex-1 overflow-y-auto px-6 pb-6 pt-4 lg:px-8"
                 >
-                  <div className="rounded-2xl border border-slate-200 bg-white p-4 lg:hidden">
+                  <div className="rounded-2xl border border-slate-600 bg-gradient-to-br from-slate-700 via-slate-800 to-slate-900 p-3.5 shadow-sm shadow-slate-900/15 lg:hidden">
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div>
-                        <div className="text-sm font-semibold text-slate-900">
+                        <div className="text-[13px] font-semibold text-white">
                           자가진단표 작성
                         </div>
-                        <div className="mt-1 text-xs text-slate-500">
+                        <div className="mt-1 text-[11px] text-slate-200">
                           완료 {answeredCount}/{totalQuestionCount}
                           {assessmentComplete ? null : ` · 미입력 ${remainingCount}개`}
                         </div>
                       </div>
-                      <div className="rounded-xl border border-slate-900 bg-slate-900 px-3 py-2 text-sm font-semibold text-white shadow-sm">
+                      <div className="rounded-xl border border-white/15 bg-white/10 px-2.5 py-1.5 text-[13px] font-semibold text-white shadow-sm backdrop-blur-sm">
                         총점 {assessmentTotalScore}/100점
                       </div>
                     </div>
@@ -1440,12 +1425,8 @@ export function CompanyDashboard({
                         onClick={saveSelfAssessment}
                         disabled={assessmentSaving || !assessmentComplete}
                       >
-                        {assessmentComplete ? "자가진단표 수정" : "자가진단표 저장"}
+                        저장
                       </button>
-                    </div>
-                    <div className="mt-3 text-[11px] leading-5 text-slate-400">
-                      저장하려면 각 문항의 답변과 근거를{" "}
-                      {MIN_SELF_ASSESSMENT_REASON_LENGTH}자 이상 입력해야 합니다.
                     </div>
                   </div>
                   <div className="mb-4 mt-4 flex gap-2 overflow-x-auto lg:hidden">

@@ -175,12 +175,6 @@ export function SelfAssessmentForm({
 
       {variant !== "header" ? (
       <section className="space-y-4">
-        <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-          <div className="text-lg font-semibold text-slate-900">
-            {activeSection.title}
-          </div>
-        </div>
-
         {activeSection.subsections.map((subsection) => (
           <div
             key={subsection.id}
