@@ -45,7 +45,7 @@ export function Topbar({
       <div className="flex items-center gap-3">
         <div className="flex items-center gap-2">
           <div>
-            <h2 className="font-semibold">MYSC Reserve</h2>
+            <h2 className="font-semibold">MYSC 기업육성플랫폼</h2>
             <p className="text-xs text-muted-foreground">{user.programName}</p>
           </div>
         </div>

@@ -73,19 +73,19 @@ export function RegularOfficeHoursCalendar({
     acc[dayOfWeek].push(session);
     return acc;
   }, {} as Record<string, typeof expandedSessions>);
+  const currentMonthSessionCount = expandedSessions.filter((session) =>
+    isSameMonth(parseISO(session.date), currentMonth)
+  ).length;
 
   return (
     <div className="min-h-full flex flex-col bg-gray-50">
       {/* Header */}
-      <div className="bg-white border-b px-8 py-6">
-        <div className="flex items-center justify-between mb-4">
+      <div className="border-b border-slate-200/80 bg-white/80 px-8 py-4 backdrop-blur-sm">
+        <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">정기 오피스아워</h1>
-            <p className="text-sm text-muted-foreground mt-1">
+            <h1 className="text-2xl font-semibold text-slate-900">정기 오피스아워</h1>
+            <p className="mt-1 text-sm text-slate-500">
               매주 정해진 시간에 진행되는 오피스아워를 신청하세요
-            </p>
-            <p className="text-xs text-muted-foreground mt-1">
-              컨설턴트는 수락 후 확정됩니다.
             </p>
           </div>
           <div className="flex gap-2">
@@ -146,8 +146,12 @@ export function RegularOfficeHoursCalendar({
                       </Button>
                     </div>
                   </div>
-                  <div className="text-sm text-muted-foreground">
-                    총 {filteredOfficeHours.length}개 세션
+                  <div className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-800">
+                    <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                    이번 달 예약 가능 일정
+                    <span className="rounded-full bg-white px-2 py-0.5 text-emerald-900">
+                      {currentMonthSessionCount}건
+                    </span>
                   </div>
                 </div>
               </div>
@@ -187,14 +191,21 @@ export function RegularOfficeHoursCalendar({
                         <div className="flex items-center justify-between mb-2">
                           <span
                             className={`text-xs font-medium ${
-                              isTodayDate ? "bg-primary text-white rounded-full w-5 h-5 flex items-center justify-center text-[10px]" : ""
+                              isTodayDate
+                                ? "bg-primary text-white rounded-full w-5 h-5 flex items-center justify-center text-[10px]"
+                                : isCurrentMonth
+                                  ? "inline-flex min-w-6 items-center justify-center px-1 text-[10px] font-semibold text-slate-700"
+                                  : "inline-flex min-w-6 items-center justify-center px-1 text-[10px] font-semibold text-slate-400"
                             }`}
                           >
                             {format(day, "d")}
                           </span>
                           {sessions.length > 0 && (
-                            <Badge variant="secondary" className="text-[10px] h-4 px-1">
-                              {sessions.length}
+                            <Badge
+                              variant="outline"
+                              className="h-5 rounded-full border-emerald-200 bg-emerald-50 px-1.5 text-[10px] font-semibold text-emerald-800"
+                            >
+                              {sessions.length}건
                             </Badge>
                           )}
                         </div>

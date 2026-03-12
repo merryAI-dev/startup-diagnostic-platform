@@ -21,6 +21,9 @@ export function ConsultantDashboard({
   programs, 
   currentUser 
 }: ConsultantDashboardProps) {
+  const pageTitleClassName = "text-2xl font-semibold text-slate-900";
+  const pageDescriptionClassName = "mt-1 text-sm text-slate-500";
+  const pageContainerClassName = "mx-auto w-full max-w-6xl";
   const [selectedView, setSelectedView] = useState<"companies" | "topics" | "monthly" | "growth">("companies");
   const toDate = (value: Date | string) =>
     value instanceof Date ? value : new Date(value);
@@ -224,17 +227,18 @@ export function ConsultantDashboard({
   return (
     <div className="h-full flex flex-col bg-gray-50">
       {/* Header */}
-      <div className="bg-white border-b px-8 py-6">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">담당 사업 현황</h1>
-          <p className="text-sm text-muted-foreground mt-1">
+      <div className="bg-white border-b px-6 py-5">
+        <div className={pageContainerClassName}>
+          <h1 className={pageTitleClassName}>담당 사업 현황</h1>
+          <p className={pageDescriptionClassName}>
             {accessiblePrograms.map(p => p.name).join(", ")} 사업의 스타트업 활동을 분석합니다
           </p>
         </div>
       </div>
 
       {/* Stats Cards */}
-      <div className="px-8 py-6 grid grid-cols-4 gap-4">
+      <div className="px-6 py-5">
+        <div className={`${pageContainerClassName} grid grid-cols-4 gap-4`}>
         <div className="bg-white rounded-lg border p-5">
           <div className="flex items-center justify-between mb-2">
             <span className="text-sm text-muted-foreground">총 세션</span>
@@ -272,11 +276,12 @@ export function ConsultantDashboard({
           </div>
           <p className="text-xs text-muted-foreground mt-1">완료율</p>
         </div>
+        </div>
       </div>
 
       {/* View Selector */}
-      <div className="px-8 pb-4">
-        <div className="flex gap-2">
+      <div className="px-6 pb-4">
+        <div className={`${pageContainerClassName} flex gap-2`}>
           <Button
             variant={selectedView === "companies" ? "default" : "outline"}
             size="sm"
@@ -309,11 +314,12 @@ export function ConsultantDashboard({
       </div>
 
       {/* Charts */}
-      <div className="flex-1 px-8 pb-8 overflow-y-auto">
+      <div className="flex-1 px-6 pb-6">
+        <div className={pageContainerClassName}>
         {selectedView === "companies" && (
-          <div className="bg-white rounded-lg border p-6">
+          <div className="bg-white rounded-lg border p-5">
             <h3 className="font-semibold text-gray-900 mb-4">스타트업별 오피스아워 활동</h3>
-            <ResponsiveContainer width="100%" height={600}>
+            <ResponsiveContainer width="100%" height={440}>
               <BarChart data={companyActivity} layout="vertical" margin={{ left: 20, right: 20 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                 <XAxis type="number" tick={{ fontSize: 12 }} />
@@ -328,9 +334,9 @@ export function ConsultantDashboard({
         )}
 
         {selectedView === "topics" && (
-          <div className="bg-white rounded-lg border p-6">
+          <div className="bg-white rounded-lg border p-5">
             <h3 className="font-semibold text-gray-900 mb-4">주제별 인기도</h3>
-            <ResponsiveContainer width="100%" height={500}>
+            <ResponsiveContainer width="100%" height={360}>
               <BarChart data={topicPopularity} margin={{ left: 20, right: 20 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                 <XAxis dataKey="name" tick={{ fontSize: 12 }} angle={-15} textAnchor="end" height={100} />
@@ -343,9 +349,9 @@ export function ConsultantDashboard({
         )}
 
         {selectedView === "monthly" && (
-          <div className="bg-white rounded-lg border p-6">
+          <div className="bg-white rounded-lg border p-5">
             <h3 className="font-semibold text-gray-900 mb-4">주제별 월별 트렌드 (TOP 5)</h3>
-            <ResponsiveContainer width="100%" height={500}>
+            <ResponsiveContainer width="100%" height={360}>
               <LineChart data={topicMonthlyTrend}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                 <XAxis dataKey="월" tick={{ fontSize: 12 }} />
@@ -363,9 +369,9 @@ export function ConsultantDashboard({
         )}
 
         {selectedView === "growth" && (
-          <div className="bg-white rounded-lg border p-6">
+          <div className="bg-white rounded-lg border p-5">
             <h3 className="font-semibold text-gray-900 mb-4">스타트업 성장 트랙킹 (최근 3개월 vs 이전)</h3>
-            <ResponsiveContainer width="100%" height={500}>
+            <ResponsiveContainer width="100%" height={380}>
               <BarChart data={companyGrowth} layout="vertical" margin={{ left: 20, right: 20 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
                 <XAxis type="number" tick={{ fontSize: 12 }} />
@@ -378,6 +384,7 @@ export function ConsultantDashboard({
             </ResponsiveContainer>
           </div>
         )}
+        </div>
       </div>
     </div>
   );

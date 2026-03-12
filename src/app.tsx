@@ -1,5 +1,5 @@
 
-import { BrowserRouter, Outlet, Route, Routes } from "react-router-dom"
+import { BrowserRouter, Outlet, Route, Routes, useLocation } from "react-router-dom"
 import {
   RequireApproved,
   RequireAuth,
@@ -15,15 +15,20 @@ import { SignupPage } from "@/pages/SignupPage"
 import { SignupInfoPage } from "@/pages/SignupInfoPage"
 import { Toaster } from "sonner"
 function PublicLayout() {
+  const location = useLocation()
+  const isSignupInfo = location.pathname === "/signup-info"
+
   return (
     <div className="flex h-screen w-full flex-col overflow-hidden">
-      <div className="flex-1 overflow-y-auto">
+      <div className={`flex-1 ${isSignupInfo ? "overflow-hidden" : "overflow-y-auto"}`}>
         <Outlet />
       </div>
       <Toaster position="top-center" />
-      <footer className="border-t border-slate-200 bg-slate-100 px-6 py-4 text-right text-xs text-slate-500">
-        © MYSC. All rights reserved.
-      </footer>
+      {isSignupInfo ? null : (
+        <footer className="border-t border-slate-200 bg-slate-100 px-6 py-4 text-right text-xs text-slate-500">
+          © MYSC. All rights reserved.
+        </footer>
+      )}
     </div>
   )
 }

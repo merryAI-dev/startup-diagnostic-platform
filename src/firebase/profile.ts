@@ -58,6 +58,7 @@ export function buildCompanyInfoRecord(
 ): CompanyInfoRecord {
   return {
     basic: {
+      companyType: form.companyType,
       companyInfo: form.companyInfo,
       representativeSolution: form.representativeSolution,
       ceo: {
@@ -67,11 +68,27 @@ export function buildCompanyInfoRecord(
         age: toNumber(form.ceoAge),
         gender: form.ceoGender,
         nationality: form.ceoNationality,
+        coRepresentative: {
+          enabled: form.hasCoRepresentative === "예",
+          name:
+            form.hasCoRepresentative === "예" ? form.coRepresentativeName : "",
+          birthDate:
+            form.hasCoRepresentative === "예"
+              ? form.coRepresentativeBirthDate
+              : "",
+          gender:
+            form.hasCoRepresentative === "예"
+              ? form.coRepresentativeGender
+              : "",
+          title:
+            form.hasCoRepresentative === "예" ? form.coRepresentativeTitle : "",
+        },
       },
       founderSerialNumber: toNumber(form.founderSerialNumber),
       website: form.website,
       foundedAt: form.foundedAt,
-      businessNumber: form.businessNumber,
+      businessNumber:
+        form.companyType === "예비창업" ? "" : form.businessNumber,
       primaryBusiness: form.primaryBusiness,
       primaryIndustry: form.primaryIndustry,
     },

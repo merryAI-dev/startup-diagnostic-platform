@@ -28,9 +28,13 @@ export function PendingPage() {
   }, [profile, navigate])
 
   return (
-    <PendingApproval
-      role={profile?.requestedRole ?? profile?.role ?? roleFromQuery}
-      onBack={() => navigate("/login")}
-    />
+    <div className="h-full overflow-hidden bg-gray-50 p-6">
+      <div className="mx-auto flex h-full w-full max-w-4xl items-center justify-center">
+        <PendingApproval
+          role={profile?.requestedRole ?? profile?.role ?? roleFromQuery}
+          onBack={() => navigate("/login")}
+        />
+      </div>
+    </div>
   )
 }

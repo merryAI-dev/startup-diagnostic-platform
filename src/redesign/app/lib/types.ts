@@ -145,6 +145,7 @@ export interface RegularOfficeHour {
     date: string;
     startTime: string;
     endTime: string;
+    agendaIds?: string[];
     status: OfficeHourSlotStatus;
   }[];
 }
@@ -172,6 +173,7 @@ export interface Application {
   status: ApplicationStatus;
   officeHourId?: string;
   officeHourSlotId?: string;
+  companyId?: string | null;
   officeHourTitle: string;
   agendaId?: string;
   companyName?: string;

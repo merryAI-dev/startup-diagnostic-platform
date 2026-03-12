@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import ExcelJS from "exceljs";
 import { Application, Consultant, Program, OfficeHourReport, User } from "@/redesign/app/lib/types";
 import { Button } from "@/redesign/app/components/ui/button";
@@ -14,9 +14,12 @@ import {
 import { Input } from "@/redesign/app/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/redesign/app/components/ui/table";
 import { Textarea } from "@/redesign/app/components/ui/textarea";
+import { DateRangePicker } from "@/redesign/app/components/ui/date-range-picker";
+import { PaginationControls } from "@/redesign/app/components/ui/pagination-controls";
 import { AlertCircle, Clock, Download, Eye, FileText, Mail } from "lucide-react";
 import { addDays, format, differenceInDays } from "date-fns";
 import { ko } from "date-fns/locale";
+import type { DateRange } from "react-day-picker";
 import { toast } from "sonner";
 
 const parseLocalDate = (value?: string | null) => {
@@ -121,8 +124,16 @@ export function PendingReportsDashboard({
   onEditReport,
   onDeleteReport,
 }: PendingReportsDashboardProps) {
+  const PAGE_SIZE = 10;
   const isConsultantUser = currentUser.role === "consultant";
   const isAdminUser = currentUser.role === "admin";
+  const pageTitleClassName = "text-2xl font-semibold text-slate-900";
+  const pageDescriptionClassName = "mt-1 text-sm text-slate-500";
+  const pageContainerClassName = isConsultantUser
+    ? "mx-auto w-full max-w-[1440px]"
+    : "mx-auto w-full max-w-7xl";
+  const [reportDateRange, setReportDateRange] = useState<DateRange | undefined>();
+  const [reportPage, setReportPage] = useState(1);
   const [selectedReportItem, setSelectedReportItem] = useState<{
     report: OfficeHourReport;
     application: Application;
@@ -656,32 +667,6 @@ export function PendingReportsDashboard({
     return pendingReports.filter((item) => item.application.type === "irregular");
   }, [pendingReports]);
 
-  // 사업별 통계
-  const statsByProgram = useMemo(() => {
-    const stats: Record<
-      string,
-      { name: string; color: string; pending: number; overdue: number }
-    > = {};
-
-    pendingReports.forEach((item) => {
-      const programId = item.application.programId || "unknown";
-      if (!stats[programId]) {
-        stats[programId] = {
-          name: item.programName,
-          color: item.programColor,
-          pending: 0,
-          overdue: 0,
-        };
-      }
-      stats[programId].pending++;
-      if (item.isOverdue) {
-        stats[programId].overdue++;
-      }
-    });
-
-    return Object.entries(stats).map(([id, data]) => ({ id, ...data }));
-  }, [pendingReports]);
-
   const overdueCount = pendingReports.filter((p) => p.isOverdue).length;
   const submittedReports = useMemo(() => {
     const appMap = new Map(applications.map((app) => [app.id, app]));
@@ -765,114 +750,141 @@ export function PendingReportsDashboard({
 
     return rows;
   }, [pendingReports, submittedReports, consultants]);
+  const filteredReportRows = useMemo(() => {
+    if (!reportDateRange?.from && !reportDateRange?.to) {
+      return reportRows;
+    }
+
+    const rangeStart = reportDateRange.from
+      ? new Date(
+          reportDateRange.from.getFullYear(),
+          reportDateRange.from.getMonth(),
+          reportDateRange.from.getDate()
+        )
+      : null;
+    const rangeEnd = reportDateRange.to
+      ? new Date(
+          reportDateRange.to.getFullYear(),
+          reportDateRange.to.getMonth(),
+          reportDateRange.to.getDate()
+        )
+      : rangeStart;
+
+    return reportRows.filter((row) => {
+      const scheduledDate = parseLocalDate(row.application.scheduledDate);
+      if (!scheduledDate) return false;
+      const normalized = new Date(
+        scheduledDate.getFullYear(),
+        scheduledDate.getMonth(),
+        scheduledDate.getDate()
+      );
+
+      if (rangeStart && normalized < rangeStart) return false;
+      if (rangeEnd && normalized > rangeEnd) return false;
+      return true;
+    });
+  }, [reportDateRange, reportRows]);
+  const paginatedReportRows = useMemo(() => {
+    const startIndex = (reportPage - 1) * PAGE_SIZE;
+    return filteredReportRows.slice(startIndex, startIndex + PAGE_SIZE);
+  }, [filteredReportRows, reportPage]);
   const selectedReportContent = useMemo(
     () => parseReportContent(selectedReportItem?.report.content),
     [selectedReportItem?.report.content]
   );
 
+  useEffect(() => {
+    setReportPage(1);
+  }, [filteredReportRows.length, reportDateRange?.from, reportDateRange?.to]);
+
+  useEffect(() => {
+    const totalPages = Math.max(1, Math.ceil(filteredReportRows.length / PAGE_SIZE));
+    if (reportPage > totalPages) {
+      setReportPage(totalPages);
+    }
+  }, [filteredReportRows.length, reportPage]);
+
+  const pageTitle = isConsultantUser ? "오피스아워 일지" : "미작성 보고서";
+  const pageDescription = isConsultantUser
+    ? "배정된 세션의 오피스아워 일지 작성 현황을 확인합니다"
+    : "세션 완료 후 3일 이내 보고서 작성 현황을 관리합니다";
+
   return (
-    <div className="h-full flex flex-col bg-gray-50">
+    <div className="flex h-full min-h-0 flex-col bg-gray-50">
       {/* Header */}
-      <div className="bg-white border-b px-8 py-6">
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900">
-              미작성 보고서 관리
-            </h1>
-            <p className="text-sm text-muted-foreground mt-1">
-              세션 완료 후 3일 이내 보고서를 작성해주세요
-            </p>
+      <div className="bg-white border-b px-6 py-5">
+        <div className={pageContainerClassName}>
+          <div className="mb-4 flex items-center justify-between">
+            <div>
+              <h1 className={pageTitleClassName}>{pageTitle}</h1>
+              <p className={pageDescriptionClassName}>{pageDescription}</p>
+            </div>
           </div>
-        </div>
 
         {/* Stats */}
-        <div className="grid grid-cols-3 gap-4">
-          <div className="bg-gray-50 rounded-lg border p-4">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-sm text-muted-foreground">전체 미작성</span>
-              <FileText className="w-4 h-4 text-blue-500" />
+        <div className="grid grid-cols-3 gap-3">
+          <div className="rounded-lg border bg-gray-50 px-4 py-3">
+            <div className="mb-1.5 flex items-center justify-between">
+              <span className="text-xs text-muted-foreground">전체 미작성</span>
+              <FileText className="h-3.5 w-3.5 text-blue-500" />
             </div>
-            <div className="text-3xl font-bold text-gray-900">
+            <div className="text-2xl font-bold text-gray-900">
               {pendingReports.length}건
             </div>
           </div>
 
-          <div className="bg-red-50 rounded-lg border border-red-200 p-4">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-sm text-red-700">기한 초과</span>
-              <AlertCircle className="w-4 h-4 text-red-500" />
+          <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3">
+            <div className="mb-1.5 flex items-center justify-between">
+              <span className="text-xs text-red-700">기한 초과</span>
+              <AlertCircle className="h-3.5 w-3.5 text-red-500" />
             </div>
-            <div className="text-3xl font-bold text-red-600">
+            <div className="text-2xl font-bold text-red-600">
               {overdueCount}건
             </div>
-            <p className="text-xs text-red-600 mt-1">3일 이상 지난 보고서</p>
+            <p className="mt-0.5 text-[11px] text-red-600">3일 이상 지난 보고서</p>
           </div>
 
-          <div className="bg-amber-50 rounded-lg border border-amber-200 p-4">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-sm text-amber-700">곧 마감</span>
-              <Clock className="w-4 h-4 text-amber-500" />
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
+            <div className="mb-1.5 flex items-center justify-between">
+              <span className="text-xs text-amber-700">곧 마감</span>
+              <Clock className="h-3.5 w-3.5 text-amber-500" />
             </div>
-            <div className="text-3xl font-bold text-amber-600">
+            <div className="text-2xl font-bold text-amber-600">
               {pendingReports.filter((p) => !p.isOverdue && p.daysLeft <= 1).length}건
             </div>
-            <p className="text-xs text-amber-600 mt-1">마감 1일 이내</p>
+            <p className="mt-0.5 text-[11px] text-amber-600">마감 1일 이내</p>
           </div>
+        </div>
         </div>
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-y-auto px-8 py-6">
-        <div className="grid grid-cols-3 gap-6 mb-6">
-          {/* 사업별 통계 */}
-          <div className="col-span-3 bg-white rounded-lg border p-6">
-            <h3 className="font-semibold text-gray-900 mb-4">사업별 미작성 현황</h3>
-            <div className="space-y-3">
-              {statsByProgram.map((program) => (
-                <div
-                  key={program.id}
-                  className="flex items-center justify-between p-3 rounded-lg border"
-                >
-                  <div className="flex items-center gap-3">
-                    <div
-                      className="w-3 h-3 rounded-full"
-                      style={{ backgroundColor: program.color }}
-                    />
-                    <span className="font-medium text-gray-900">{program.name}</span>
-                  </div>
-                  <div className="flex items-center gap-4">
-                    <span className="text-sm text-muted-foreground">
-                      미작성 {program.pending}건
-                    </span>
-                    {program.overdue > 0 && (
-                      <Badge variant="destructive">초과 {program.overdue}건</Badge>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-        </div>
-
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-6 py-5">
+        <div className={`${pageContainerClassName} flex min-h-0 flex-1 flex-col`}>
         {/* 오피스아워 보고서 현황 */}
-        <div className="bg-white rounded-lg border mt-6">
-          <div className="p-6 border-b space-y-4">
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border bg-white">
+          <div className="shrink-0 border-b p-6 space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="font-semibold text-gray-900">오피스아워 보고서 현황</h3>
-              {!isAdminUser && (
-                <Button
-                  size="sm"
-                  className="bg-emerald-600 text-white hover:bg-emerald-700"
-                  onClick={() => onCreateReport("irregular-manual")}
-                >
-                  비정기 오피스아워 작성
-                </Button>
-              )}
+              <div className="flex items-center gap-2">
+                <DateRangePicker
+                  value={reportDateRange}
+                  onChange={setReportDateRange}
+                />
+                {!isAdminUser && (
+                  <Button
+                    size="sm"
+                    className="bg-emerald-600 text-white hover:bg-emerald-700"
+                    onClick={() => onCreateReport("irregular-manual")}
+                  >
+                    비정기 오피스아워 작성
+                  </Button>
+                )}
+              </div>
             </div>
           </div>
-          <div className="divide-y">
-            {reportRows.length === 0 ? (
+          <div className="min-h-0 flex-1 divide-y overflow-hidden">
+            {filteredReportRows.length === 0 ? (
               <div className="p-12 text-center">
                 <FileText className="w-12 h-12 text-slate-300 mx-auto mb-3" />
                 <p className="text-sm text-muted-foreground">
@@ -880,23 +892,23 @@ export function PendingReportsDashboard({
                 </p>
               </div>
             ) : (
-              <div className="max-h-[560px] overflow-y-auto">
+              <div className="min-h-0 flex-1 overflow-y-auto">
                 <Table>
-                  <TableHeader className="sticky top-0 bg-white z-10">
-                    <TableRow>
-                      <TableHead>상태</TableHead>
-                      <TableHead>사업</TableHead>
-                      <TableHead>컨설턴트</TableHead>
-                      <TableHead>오피스아워</TableHead>
-                      <TableHead>기한</TableHead>
-                      <TableHead>진행일</TableHead>
-                      <TableHead>작성일</TableHead>
-                      <TableHead className="w-[72px] text-center">다운로드</TableHead>
-                      <TableHead className="text-right">관리</TableHead>
+                  <TableHeader className="[&_tr]:sticky [&_tr]:top-0 [&_tr]:z-10 [&_tr]:bg-white">
+                    <TableRow className="hover:bg-white">
+                      <TableHead className="bg-white">상태</TableHead>
+                      <TableHead className="bg-white">사업</TableHead>
+                      <TableHead className="bg-white">컨설턴트</TableHead>
+                      <TableHead className="bg-white">오피스아워</TableHead>
+                      <TableHead className="bg-white">기한</TableHead>
+                      <TableHead className="bg-white">진행일</TableHead>
+                      <TableHead className="bg-white">작성일</TableHead>
+                      <TableHead className="w-[72px] bg-white text-center">다운로드</TableHead>
+                      <TableHead className="bg-white text-right">관리</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {reportRows.map((row) => (
+                    {paginatedReportRows.map((row) => (
                       <TableRow key={`${row.type}-${row.application.id}`}>
                         <TableCell>
                           <span className="text-sm text-muted-foreground">
@@ -1043,141 +1055,157 @@ export function PendingReportsDashboard({
               </div>
             )}
           </div>
+          <div className="shrink-0 border-t bg-white px-6 py-3">
+            <PaginationControls
+              page={reportPage}
+              pageSize={PAGE_SIZE}
+              totalItems={filteredReportRows.length}
+              onPageChange={setReportPage}
+              alwaysShow
+            />
+          </div>
+        </div>
         </div>
       </div>
       <Dialog open={!!selectedReportItem} onOpenChange={(open) => {
         if (!open) setSelectedReportItem(null);
       }}>
-        <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto overflow-x-hidden">
+        <DialogContent className="flex max-h-[85vh] max-w-3xl flex-col overflow-hidden p-0">
           {selectedReportItem && (
-            <div className="space-y-6">
-              <DialogHeader>
+            <div className="flex min-h-0 flex-1 flex-col">
+              <DialogHeader className="shrink-0 border-b px-6 py-5">
                 <DialogTitle>오피스아워 일지 상세</DialogTitle>
               </DialogHeader>
-              <div className="grid grid-cols-2 gap-4 text-sm">
-                <div>
-                  <div className="text-xs text-muted-foreground">사업</div>
-                  <div className="font-medium">{selectedReportItem.programName}</div>
-                </div>
-                <div>
-                  <div className="text-xs text-muted-foreground">컨설턴트</div>
-                  <div className="font-medium">
-                    {selectedReportItem.report.consultantName || selectedReportItem.application.consultant}
+
+              <div className="min-h-0 flex-1 space-y-6 overflow-y-auto px-6 py-6">
+                <div className="grid grid-cols-2 gap-4 text-sm">
+                  <div>
+                    <div className="text-xs text-muted-foreground">사업</div>
+                    <div className="font-medium">{selectedReportItem.programName}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-muted-foreground">컨설턴트</div>
+                    <div className="font-medium">
+                      {selectedReportItem.report.consultantName || selectedReportItem.application.consultant}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-muted-foreground">오피스아워</div>
+                    <div className="font-medium">{selectedReportItem.application.officeHourTitle}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-muted-foreground">진행일</div>
+                    <div className="font-medium">
+                      {selectedReportItem.application.scheduledDate
+                        ? format(
+                          parseLocalDate(selectedReportItem.application.scheduledDate)
+                            ?? new Date(selectedReportItem.application.scheduledDate),
+                          "yyyy년 M월 d일",
+                          { locale: ko }
+                        )
+                        : "-"}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-muted-foreground">작성일</div>
+                    <div className="font-medium">
+                      {selectedReportItem.report.date
+                        ? format(
+                          parseLocalDate(selectedReportItem.report.date)
+                            ?? new Date(selectedReportItem.report.date),
+                          "yyyy년 M월 d일",
+                          { locale: ko }
+                        )
+                        : "-"}
+                    </div>
                   </div>
                 </div>
                 <div>
-                  <div className="text-xs text-muted-foreground">오피스아워</div>
-                  <div className="font-medium">{selectedReportItem.application.officeHourTitle}</div>
-                </div>
-                <div>
-                  <div className="text-xs text-muted-foreground">진행일</div>
-                  <div className="font-medium">
-                    {selectedReportItem.application.scheduledDate
-                      ? format(
-                        parseLocalDate(selectedReportItem.application.scheduledDate)
-                          ?? new Date(selectedReportItem.application.scheduledDate),
-                        "yyyy년 M월 d일",
-                        { locale: ko }
-                      )
-                      : "-"}
+                  <div className="text-xs text-muted-foreground mb-1">주제</div>
+                  <div className="rounded-lg border px-3 py-2 text-sm break-all">
+                    {selectedReportItem.report.topic || "-"}
                   </div>
                 </div>
                 <div>
-                  <div className="text-xs text-muted-foreground">작성일</div>
-                  <div className="font-medium">
-                    {selectedReportItem.report.date
-                      ? format(
-                        parseLocalDate(selectedReportItem.report.date)
-                          ?? new Date(selectedReportItem.report.date),
-                        "yyyy년 M월 d일",
-                        { locale: ko }
-                      )
-                      : "-"}
+                  <div className="text-xs text-muted-foreground mb-1">참여자</div>
+                  <div className="rounded-lg border px-3 py-2 text-sm break-all">
+                    {(selectedReportItem.report.participants ?? []).join(", ") || "-"}
                   </div>
                 </div>
-              </div>
-              <div>
-                <div className="text-xs text-muted-foreground mb-1">주제</div>
-                <div className="rounded-lg border px-3 py-2 text-sm break-all">
-                  {selectedReportItem.report.topic || "-"}
-                </div>
-              </div>
-              <div>
-                <div className="text-xs text-muted-foreground mb-1">참여자</div>
-                <div className="rounded-lg border px-3 py-2 text-sm break-all">
-                  {(selectedReportItem.report.participants ?? []).join(", ") || "-"}
-                </div>
-              </div>
-              <div>
-                <div className="text-xs text-muted-foreground mb-1">기업의 현황</div>
-                <div className="rounded-lg border px-3 py-2 text-sm whitespace-pre-wrap break-all">
-                  {selectedReportContent.companyStatus || "-"}
-                </div>
-              </div>
-              <div>
-                <div className="text-xs text-muted-foreground mb-1">자문내용</div>
-                <div className="rounded-lg border px-3 py-2 text-sm whitespace-pre-wrap break-all">
-                  {selectedReportContent.advisoryContent || "-"}
-                </div>
-              </div>
-              <div>
-                <div className="text-xs text-muted-foreground mb-1">팔로업</div>
-                <div className="rounded-lg border px-3 py-2 text-sm whitespace-pre-wrap break-all">
-                  {selectedReportItem.report.followUp || "-"}
-                </div>
-              </div>
-              {selectedReportItem.report.photos?.length > 0 && (
                 <div>
-                  <div className="text-xs text-muted-foreground mb-2">사진</div>
-                  <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                    {selectedReportItem.report.photos.map((url, idx) => (
-                      <img
-                        key={`${url}-${idx}`}
-                        src={url}
-                        alt="report"
-                        className="rounded-lg border object-cover h-32 w-full"
-                      />
-                    ))}
+                  <div className="text-xs text-muted-foreground mb-1">기업의 현황</div>
+                  <div className="rounded-lg border px-3 py-2 text-sm whitespace-pre-wrap break-all">
+                    {selectedReportContent.companyStatus || "-"}
                   </div>
                 </div>
-              )}
-              <div className="flex justify-end gap-2">
-                <Button
-                  variant="outline"
-                  onClick={() =>
-                    openReportPrintView({
-                      report: selectedReportItem.report,
-                      application: selectedReportItem.application,
-                      programName: selectedReportItem.programName,
-                    })
-                  }
-                >
-                  PDF 보기
-                </Button>
-                <Button
-                  variant="destructive"
-                  onClick={() => {
-                    const confirmed = window.confirm(
-                      "보고서를 삭제하시겠습니까? 첨부 사진도 Storage에서 함께 삭제됩니다."
-                    );
-                    if (!confirmed) return;
-                    onDeleteReport(selectedReportItem.report);
-                    setSelectedReportItem(null);
-                  }}
-                >
-                  삭제
-                </Button>
-                <Button
-                  onClick={() => {
-                    onEditReport(selectedReportItem.report);
-                    setSelectedReportItem(null);
-                  }}
-                >
-                  수정
-                </Button>
-                <Button variant="outline" onClick={() => setSelectedReportItem(null)}>
-                  닫기
-                </Button>
+                <div>
+                  <div className="text-xs text-muted-foreground mb-1">자문내용</div>
+                  <div className="rounded-lg border px-3 py-2 text-sm whitespace-pre-wrap break-all">
+                    {selectedReportContent.advisoryContent || "-"}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs text-muted-foreground mb-1">팔로업</div>
+                  <div className="rounded-lg border px-3 py-2 text-sm whitespace-pre-wrap break-all">
+                    {selectedReportItem.report.followUp || "-"}
+                  </div>
+                </div>
+                {selectedReportItem.report.photos?.length > 0 && (
+                  <div>
+                    <div className="text-xs text-muted-foreground mb-2">사진</div>
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                      {selectedReportItem.report.photos.map((url, idx) => (
+                        <img
+                          key={`${url}-${idx}`}
+                          src={url}
+                          alt="report"
+                          className="rounded-lg border object-cover h-32 w-full"
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="shrink-0 border-t px-6 py-4">
+                <div className="flex justify-end gap-2">
+                  <Button
+                    variant="outline"
+                    onClick={() =>
+                      openReportPrintView({
+                        report: selectedReportItem.report,
+                        application: selectedReportItem.application,
+                        programName: selectedReportItem.programName,
+                      })
+                    }
+                  >
+                    PDF 보기
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    onClick={() => {
+                      const confirmed = window.confirm(
+                        "보고서를 삭제하시겠습니까? 첨부 사진도 Storage에서 함께 삭제됩니다."
+                      );
+                      if (!confirmed) return;
+                      onDeleteReport(selectedReportItem.report);
+                      setSelectedReportItem(null);
+                    }}
+                  >
+                    삭제
+                  </Button>
+                  <Button
+                    onClick={() => {
+                      onEditReport(selectedReportItem.report);
+                      setSelectedReportItem(null);
+                    }}
+                  >
+                    수정
+                  </Button>
+                  <Button variant="outline" onClick={() => setSelectedReportItem(null)}>
+                    닫기
+                  </Button>
+                </div>
               </div>
             </div>
           )}
