@@ -54,14 +54,9 @@ export function DashboardCalendar({
     || user.role === "admin"
     || user.role === "staff"
     || user.role === "consultant";
-  const companyName = user.companyName?.trim();
-  const userApplications = canViewAll
-    ? applications
-    : applications.filter((app) => {
-      if (app.createdByUid && app.createdByUid === user.id) return true;
-      if (companyName && app.companyName === companyName) return true;
-      return false;
-    });
+  // AppContent already passes role-scoped applications.
+  // Re-filtering here with looser fallback rules can surface stale or unrelated items.
+  const userApplications = applications;
 
   // 확정된 일정들
   const confirmedApplications = userApplications.filter(

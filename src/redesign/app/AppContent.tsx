@@ -79,6 +79,8 @@ import { storage as firebaseStorage } from "@/redesign/app/lib/firebase";
 import { mockNotifications, mockChatRooms, mockChatMessages, mockAIRecommendations, mockGoals, mockTeamMembers } from "@/redesign/app/lib/advanced-mock-data";
 import { buildCompanyInfoRecord } from "@/firebase/profile";
 import { DEFAULT_FORM, type CompanyInfoForm, type CompanyInfoRecord, type InvestmentInput } from "@/types/company";
+import type { SelfAssessmentSections } from "@/types/selfAssessment";
+import { isSelfAssessmentComplete } from "@/utils/selfAssessment";
 
 type AppPage = 
   | "dashboard" 
@@ -115,6 +117,9 @@ type AppPage =
   | "consultant-calendar";
 
 type CompanyInfoDoc = Partial<CompanyInfoRecord>;
+type SelfAssessmentDoc = {
+  sections?: SelfAssessmentSections | null;
+};
 
 type RawProfileApprovalDoc = {
   id: string;
@@ -138,6 +143,7 @@ type SignupRequestDoc = {
   status?: string;
   consultantInfo?: Partial<ConsultantProfileFormValues> | null;
   companyInfo?: Partial<CompanyInfoForm> | null;
+  programIds?: string[] | null;
   investmentRows?: InvestmentInput[] | null;
   createdAt?: unknown;
   updatedAt?: unknown;
@@ -228,16 +234,26 @@ function toPendingCompanyForm(value: unknown): CompanyInfoForm {
   }
   const source = value as Partial<CompanyInfoForm>;
   return {
+    ...DEFAULT_FORM,
     companyInfo: toTrimmedString(source.companyInfo),
+    representativeSolution: toTrimmedString(source.representativeSolution),
+    sdgPriority1: toTrimmedString(source.sdgPriority1),
+    sdgPriority2: toTrimmedString(source.sdgPriority2),
     ceoName: toTrimmedString(source.ceoName),
     ceoEmail: toTrimmedString(source.ceoEmail),
     ceoPhone: toTrimmedString(source.ceoPhone),
+    ceoAge: toTrimmedString(source.ceoAge),
+    ceoGender: toTrimmedString(source.ceoGender),
+    ceoNationality: toTrimmedString(source.ceoNationality),
+    founderSerialNumber: toTrimmedString(source.founderSerialNumber),
+    website: toTrimmedString(source.website),
     foundedAt: toTrimmedString(source.foundedAt),
     businessNumber: toTrimmedString(source.businessNumber),
     primaryBusiness: toTrimmedString(source.primaryBusiness),
     primaryIndustry: toTrimmedString(source.primaryIndustry),
     headOffice: toTrimmedString(source.headOffice),
     branchOffice: toTrimmedString(source.branchOffice),
+    targetCountries: toTrimmedString(source.targetCountries),
     workforceFullTime: toTrimmedString(source.workforceFullTime),
     workforceContract: toTrimmedString(source.workforceContract),
     revenue2025: toTrimmedString(source.revenue2025),
@@ -245,6 +261,13 @@ function toPendingCompanyForm(value: unknown): CompanyInfoForm {
     capitalTotal: toTrimmedString(source.capitalTotal),
     certification: toTrimmedString(source.certification),
     tipsLipsHistory: toTrimmedString(source.tipsLipsHistory),
+    exportVoucherHeld: toTrimmedString(source.exportVoucherHeld),
+    exportVoucherAmount: toTrimmedString(source.exportVoucherAmount),
+    exportVoucherUsageRate: toTrimmedString(source.exportVoucherUsageRate),
+    innovationVoucherHeld: toTrimmedString(source.innovationVoucherHeld),
+    innovationVoucherAmount: toTrimmedString(source.innovationVoucherAmount),
+    innovationVoucherUsageRate: toTrimmedString(source.innovationVoucherUsageRate),
+    myscExpectation: toTrimmedString(source.myscExpectation),
     desiredInvestment2026: toTrimmedString(source.desiredInvestment2026),
     desiredPreValue: toTrimmedString(source.desiredPreValue),
   };
@@ -677,7 +700,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     || isPage(["admin-agendas", "admin-consultants", "admin-programs"]);
   const needsConsultants =
     resolvedRole === "consultant"
-    || isPage(["consultants", "regular-wizard", "admin-consultants", "admin-users"]);
+    || isPage(["consultants", "regular-wizard", "admin-consultants", "admin-users", "pending-reports"]);
   const needsOfficeHourSlots = needsApplications || needsRegularOfficeHours;
   const needsCompanyLookup = resolvedRole === "admin" && needsApplications;
   const needsCompanyDirectory =
@@ -686,8 +709,12 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     isFirebaseConfigured
     && resolvedRole === "user"
     && !!firebaseUser?.uid
-    && !isCompanyInfoRoute;
-  const { data: companyDocs } = useFirestoreCollection<{ id: string; name?: string | null }>(
+    ;
+  const { data: companyDocs } = useFirestoreCollection<{
+    id: string;
+    name?: string | null;
+    programs?: string[];
+  }>(
     "companies",
     {
       enabled:
@@ -696,7 +723,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
         && (needsCompanyLookup || needsCompanyDirectory || needsUsers),
     }
   );
-  const { data: ownedCompanyDocs } = useFirestoreCollection<{ id: string; ownerUid?: string | null }>(
+  const { data: ownedCompanyDocs, loading: ownedCompanyDocsLoading } = useFirestoreCollection<{ id: string; ownerUid?: string | null }>(
     "companies",
     {
       constraints: [where("ownerUid", "==", firebaseUser?.uid ?? "")],
@@ -732,7 +759,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
           name: doc.name?.trim()
             || companyNameById.get(doc.id)
             || "회사명 미입력",
-          programs: programsByCompanyId.get(doc.id) ?? [],
+          programs: doc.programs ?? programsByCompanyId.get(doc.id) ?? [],
         }));
       }
       return companyUserDocs.map((doc) => ({
@@ -777,9 +804,24 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     [companyNameById]
   );
   const companyRecordId = useMemo(() => {
+    if (
+      isFirebaseConfigured
+      && resolvedRole === "user"
+      && !profile?.companyId
+      && ownedCompanyDocsLoading
+    ) {
+      return null;
+    }
     const ownedId = ownedCompanyDocs[0]?.id ?? null;
     return ownedId ?? profile?.companyId ?? firebaseUser?.uid ?? null;
-  }, [firebaseUser?.uid, ownedCompanyDocs, profile?.companyId]);
+  }, [
+    firebaseUser?.uid,
+    isFirebaseConfigured,
+    ownedCompanyDocs,
+    ownedCompanyDocsLoading,
+    profile?.companyId,
+    resolvedRole,
+  ]);
   const { data: companyInfoDoc } = useFirestoreDocument<CompanyInfoDoc>(
     companyRecordId ? `companies/${companyRecordId}/companyInfo` : "",
     "info",
@@ -789,9 +831,17 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
   );
   const { data: companyMetaDoc } = useFirestoreDocument<{
     programTicketOverrides?: Record<string, { internal?: number; external?: number }>;
+    programs?: string[];
   }>("companies", companyRecordId ?? null, {
     enabled: isFirebaseConfigured && resolvedRole === "user" && !!companyRecordId,
   });
+  const { data: selfAssessmentDoc } = useFirestoreDocument<SelfAssessmentDoc>(
+    companyRecordId ? `companies/${companyRecordId}/selfAssessment` : "",
+    "info",
+    {
+      enabled: isFirebaseConfigured && resolvedRole === "user" && !!companyRecordId,
+    }
+  );
   const fallbackUser =
     initialUsers.find((u) => u.role === resolvedRole) ?? initialUsers[0]!;
   const user: User = useMemo(() => {
@@ -800,6 +850,12 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
         ? companyInfoDoc?.basic?.companyInfo?.trim() || null
         : null;
     const resolvedCompanyName = resolveCompanyName(profile?.companyId ?? null);
+    const resolvedProgramIds =
+      resolvedRole === "user"
+        ? (Array.isArray(companyMetaDoc?.programs)
+            ? companyMetaDoc.programs
+            : (fallbackUser.programs ?? []))
+        : (fallbackUser.programs ?? []);
     return {
       ...fallbackUser,
       id: firebaseUser?.uid ?? fallbackUser.id,
@@ -809,9 +865,10 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
         ?? (profile?.companyId ? "회사명 미입력" : fallbackUser.companyName),
       role: resolvedRole,
       programName: fallbackUser.programName ?? "MYSC",
-      programs: fallbackUser.programs ?? [],
+      programs: resolvedProgramIds,
     };
   }, [
+    companyMetaDoc?.programs,
     companyInfoDoc?.basic?.companyInfo,
     fallbackUser,
     firebaseUser?.email,
@@ -1168,14 +1225,17 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       const email = firebaseUser?.email ?? user.email;
       return resolvedApplications.filter((application) => {
         if (application.status === "cancelled") return false;
-        if (application.createdByUid && uid) {
-          return application.createdByUid === uid;
+        const appUid = toNormalizedEmail(application.createdByUid);
+        const appEmail = toNormalizedEmail(application.applicantEmail);
+        const userUid = toNormalizedEmail(uid);
+        const userEmail = toNormalizedEmail(email);
+
+        // 회사명 fallback 비교는 동명이인/기본값 충돌로 타사 신청이 섞일 수 있어 제외한다.
+        if (appUid && userUid) {
+          return appUid === userUid;
         }
-        if (application.applicantEmail && email) {
-          return application.applicantEmail === email;
-        }
-        if (user.companyName) {
-          return application.companyName === user.companyName;
+        if (appEmail && userEmail) {
+          return appEmail === userEmail;
         }
         return false;
       });
@@ -1198,7 +1258,6 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     firebaseUser?.uid,
     resolvedApplications,
     resolvedRole,
-    user.companyName,
     user.email,
     user.id,
     consultantAgendaIds,
@@ -1216,6 +1275,9 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
 
   const companyProgramIds = useMemo(() => {
     if (resolvedRole !== "user") return new Set<string>();
+    if (Array.isArray(companyMetaDoc?.programs)) {
+      return new Set(companyMetaDoc.programs);
+    }
     const ids = new Set<string>();
     const candidateIds = new Set(
       [companyRecordId, firebaseUser?.uid, profile?.companyId, user.id].filter(
@@ -1242,6 +1304,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     }
     return ids;
   }, [
+    companyMetaDoc?.programs,
     companyRecordId,
     firebaseUser?.uid,
     profile?.companyId,
@@ -1564,6 +1627,14 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     }
     return set;
   }, [firebaseUser]);
+  const companyInfoNeedsAttention = useMemo(
+    () =>
+      isFirebaseConfigured
+      && resolvedRole === "user"
+      && !!companyRecordId
+      && !isSelfAssessmentComplete(selfAssessmentDoc?.sections),
+    [companyRecordId, resolvedRole, selfAssessmentDoc?.sections]
+  );
 
   useEffect(() => {
     const segment = location.pathname.split("/")[2] ?? "";
@@ -3135,7 +3206,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
         ? authEmail
         : requestedSecondaryEmail;
 
-    const consultantId = currentConsultant?.id ?? firebaseUser?.uid ?? `consultant-${Date.now()}`;
+    const consultantId = firebaseUser?.uid ?? currentConsultant?.id ?? `consultant-${Date.now()}`;
     const nextConsultant: Consultant = {
       ...currentConsultant,
       id: consultantId,
@@ -3150,8 +3221,52 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       expertise: parseExpertiseInput(values.expertise),
       bio: values.bio.trim() || `${name} 컨설턴트`,
       status: currentConsultant?.status ?? "active",
+      agendaIds:
+        (currentConsultant?.agendaIds?.length ?? 0) > 0
+          ? currentConsultant?.agendaIds
+          : undefined,
       availability: currentConsultant?.availability ?? buildDefaultConsultantAvailability(),
     };
+
+    if (isFirebaseConfigured) {
+      const authUid = firebaseUser?.uid ?? "";
+      const authEmail = firebaseUser?.email?.trim() ?? "";
+      if (!authUid || !authEmail) {
+        toast.error("로그인 정보를 확인한 뒤 다시 시도해주세요");
+        return;
+      }
+      const payload = omitId(nextConsultant);
+      const updated = await consultantCrud.update(authUid, payload);
+      if (!updated) {
+        const authEmailKey = toNormalizedEmail(authEmail);
+        const primaryEmailKey = toNormalizedEmail(payload.email);
+        const createPayload: Omit<Consultant, "id"> = {
+          ...payload,
+          email: authEmail,
+          ...(primaryEmailKey && primaryEmailKey !== authEmailKey
+            ? { secondaryEmail: payload.email }
+            : {}),
+        };
+        const created = await consultantCrud.set(authUid, createPayload, true);
+        if (!created) {
+          toast.error("내 정보 저장에 실패했습니다");
+          return;
+        }
+        saveConsultantToState({
+          ...nextConsultant,
+          id: authUid,
+          email: authEmail,
+          ...(primaryEmailKey && primaryEmailKey !== authEmailKey
+            ? { secondaryEmail: payload.email }
+            : {}),
+        });
+        toast.success("내 정보가 저장되었습니다");
+        return;
+      }
+      saveConsultantToState({ ...nextConsultant, id: authUid });
+      toast.success("내 정보가 저장되었습니다");
+      return;
+    }
 
     const ok = await persistConsultant(nextConsultant, currentConsultant?.id);
     if (!ok) {
@@ -3169,7 +3284,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       ?? firebaseUser?.displayName?.trim()
       ?? (firebaseUser?.email?.split("@")[0] ?? "컨설턴트");
     const fallbackEmail = currentConsultant?.email ?? firebaseUser?.email ?? "";
-    const consultantId = currentConsultant?.id ?? firebaseUser?.uid ?? `consultant-${Date.now()}`;
+    const consultantId = firebaseUser?.uid ?? currentConsultant?.id ?? `consultant-${Date.now()}`;
 
     if (!fallbackEmail) {
       toast.error("계정 이메일 정보를 확인할 수 없습니다");
@@ -3190,8 +3305,56 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       expertise: currentConsultant?.expertise ?? [],
       bio: currentConsultant?.bio ?? `${fallbackName} 컨설턴트`,
       status: currentConsultant?.status ?? "active",
+      agendaIds:
+        (currentConsultant?.agendaIds?.length ?? 0) > 0
+          ? currentConsultant?.agendaIds
+          : undefined,
       availability,
     };
+
+    if (isFirebaseConfigured) {
+      const updated = await consultantCrud.update(consultantId, { availability });
+      if (!updated) {
+        const authUid = firebaseUser?.uid ?? "";
+        const authEmail = firebaseUser?.email?.trim() ?? "";
+        if (!authUid || !authEmail) {
+          toast.error("로그인 정보를 확인한 뒤 다시 시도해주세요");
+          return;
+        }
+        const authEmailKey = toNormalizedEmail(authEmail);
+        const fallbackEmailKey = toNormalizedEmail(fallbackEmail);
+        const preservedSecondaryEmail =
+          fallbackEmail
+          && fallbackEmailKey !== authEmailKey
+            ? fallbackEmail
+            : currentConsultant?.secondaryEmail;
+        const createPayload: Omit<Consultant, "id"> = {
+          ...omitId(nextConsultant),
+          email: authEmail,
+          ...(preservedSecondaryEmail
+            ? { secondaryEmail: preservedSecondaryEmail }
+            : {}),
+        };
+        const created = await consultantCrud.set(authUid, createPayload, true);
+        if (!created) {
+          toast.error("스케줄 저장에 실패했습니다");
+          return;
+        }
+        saveConsultantToState({
+          ...nextConsultant,
+          id: authUid,
+          email: authEmail,
+          ...(preservedSecondaryEmail
+            ? { secondaryEmail: preservedSecondaryEmail }
+            : {}),
+        });
+        toast.success("내 스케줄이 저장되었습니다");
+        return;
+      }
+      saveConsultantToState(nextConsultant);
+      toast.success("내 스케줄이 저장되었습니다");
+      return;
+    }
 
     const ok = await persistConsultant(nextConsultant, currentConsultant?.id);
     if (!ok) {
@@ -3540,6 +3703,38 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
         toast.error("참여 기업 업데이트에 실패했습니다");
         return;
       }
+
+      const affectedCompanyIds = Array.from(
+        new Set([...(targetProgram.companyIds ?? []), ...uniqueCompanyIds])
+      );
+      if (affectedCompanyIds.length > 0) {
+        const companyProgramsById = new Map(
+          companyDirectory.map((company) => [company.id, company.programs ?? []] as const)
+        );
+        const syncResults = await Promise.all(
+          affectedCompanyIds.map((companyId) => {
+            const nextPrograms = new Set(companyProgramsById.get(companyId) ?? []);
+            if (uniqueCompanyIds.includes(companyId)) {
+              nextPrograms.add(programId);
+            } else {
+              nextPrograms.delete(programId);
+            }
+            return firestoreService.setDocument(
+              "companies",
+              companyId,
+              {
+                programs: Array.from(nextPrograms),
+                updatedAt: new Date(),
+              },
+              true
+            );
+          })
+        );
+        if (syncResults.some((result) => !result)) {
+          toast.error("회사 참여사업 동기화에 실패했습니다");
+          return;
+        }
+      }
     }
 
     toast.success("참여 기업 구성이 업데이트되었습니다");
@@ -3884,6 +4079,9 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
         {
           ownerUid: pendingProfile.id,
           name: companyName,
+          programs: Array.isArray(signupRequest?.programIds)
+            ? signupRequest.programIds.filter((value): value is string => typeof value === "string")
+            : [],
           createdAt: new Date(),
         },
         true
@@ -4032,6 +4230,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
         }
         onNavigate={handleNavigateLoose}
         disabledPages={disabledPages}
+        companyInfoNeedsAttention={companyInfoNeedsAttention}
         onLogout={async () => {
           await signOutUser();
           toast.success("로그아웃되었습니다");
@@ -4047,7 +4246,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
         <main className="flex-1 overflow-y-auto bg-gray-50">
           {currentPage === "dashboard" && (
             <DashboardCalendar
-              applications={resolvedApplications}
+              applications={scopedApplications}
               user={user}
               programs={scopedProgramList}
               agendas={agendaList}
@@ -4179,6 +4378,18 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
               companyId={companyRecordId}
               user={firebaseUser}
             />
+          )}
+          {currentPage === "company-info" && firebaseUser && !companyRecordId && (
+            <div className="p-10">
+              <div className="rounded-2xl border border-slate-200 bg-white p-8">
+                <h2 className="text-lg font-semibold text-slate-900">
+                  기업 정보를 준비하고 있습니다
+                </h2>
+                <p className="mt-2 text-sm text-slate-600">
+                  연결된 기업 문서를 아직 찾지 못했습니다. 승인 정보 또는 계정 연결 상태를 확인해 주세요.
+                </p>
+              </div>
+            </div>
           )}
 
           {currentPage === "consultants" && (
@@ -4534,6 +4745,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
                 applications={scopedApplications}
                 reports={reports}
                 programs={scopedProgramList}
+                consultants={consultants}
                 currentUser={scopedUser}
                 currentConsultantName={currentConsultant?.name ?? null}
                 onCreateReport={(applicationId) => {

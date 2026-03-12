@@ -8,10 +8,6 @@ type AuthCardProps = {
   onSubmit: (role: Role, email: string, password: string) => void
   onContinue?: (role: Role) => void
   continueLabel?: string
-  onGoogle?: () => void
-  showGoogle?: boolean
-  loadingGoogle?: boolean
-  googleLabel?: string
   onSwap: () => void
   swapLabel: string
   role?: Role
@@ -77,10 +73,6 @@ export function AuthCard({
   loadingEmail = false,
   onContinue,
   continueLabel = "다음 단계로",
-  onGoogle,
-  showGoogle = false,
-  loadingGoogle = false,
-  googleLabel = "Google로 계속",
   error = null,
   notice = null,
 }: AuthCardProps) {
@@ -93,7 +85,7 @@ export function AuthCard({
   const passwordError = getPasswordError(password)
   const showEmailError = touched.email && emailError
   const showPasswordError = touched.password && passwordError
-  const isBusy = loadingEmail || loadingGoogle
+  const isBusy = loadingEmail
   const selectedRole = role ?? "company"
   const shouldShowRoleSelector = showRoleSelector && !!role && !!setRole
 
@@ -259,28 +251,6 @@ export function AuthCard({
             </button>
           ) : null}
 
-          {showGoogle ? (
-            <button
-              type="button"
-              className="w-full rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
-              onClick={onGoogle}
-              disabled={isBusy}
-            >
-              <span className="inline-flex items-center justify-center gap-2">
-                {loadingGoogle ? (
-                  <Spinner />
-                ) : (
-                  <svg className="h-4 w-4" viewBox="0 0 24 24" aria-hidden="true">
-                    <path
-                      fill="#EA4335"
-                      d="M12 10.2v3.9h5.5c-.2 1.3-1.5 3.9-5.5 3.9-3.3 0-6-2.7-6-6s2.7-6 6-6c1.9 0 3.1.8 3.9 1.5l2.7-2.6C16.9 3.2 14.7 2.2 12 2.2 6.9 2.2 2.8 6.3 2.8 11.4S6.9 20.6 12 20.6c6.9 0 9.2-4.8 9.2-7.3 0-.5 0-.8-.1-1.2H12z"
-                    />
-                  </svg>
-                )}
-                <span>{googleLabel}</span>
-              </span>
-            </button>
-          ) : null}
         </div>
 
         <div className="mt-6 text-center text-sm text-slate-500">

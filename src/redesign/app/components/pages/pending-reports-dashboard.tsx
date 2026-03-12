@@ -1,12 +1,23 @@
 import { useMemo, useState } from "react";
-import { Application, Program, OfficeHourReport, User } from "@/redesign/app/lib/types";
+import ExcelJS from "exceljs";
+import { Application, Consultant, Program, OfficeHourReport, User } from "@/redesign/app/lib/types";
 import { Button } from "@/redesign/app/components/ui/button";
 import { Badge } from "@/redesign/app/components/ui/badge";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/redesign/app/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/redesign/app/components/ui/dialog";
+import { Input } from "@/redesign/app/components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/redesign/app/components/ui/table";
-import { AlertCircle, Clock, Calendar, FileText } from "lucide-react";
+import { Textarea } from "@/redesign/app/components/ui/textarea";
+import { AlertCircle, Clock, Download, Eye, FileText, Mail } from "lucide-react";
 import { addDays, format, differenceInDays } from "date-fns";
 import { ko } from "date-fns/locale";
+import { toast } from "sonner";
 
 const parseLocalDate = (value?: string | null) => {
   if (!value) return null;
@@ -41,10 +52,19 @@ const parseReportContent = (raw?: string | null) => {
   };
 };
 
+const escapeHtml = (value: string) =>
+  value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+
 interface PendingReportsDashboardProps {
   applications: Application[];
   reports: OfficeHourReport[];
   programs: Program[];
+  consultants: Consultant[];
   currentUser: User;
   currentConsultantId?: string | null;
   currentConsultantName?: string | null;
@@ -70,16 +90,30 @@ type ReportRow = {
   programColor: string;
   programId: string;
   consultantName: string;
+  consultantEmail?: string;
   statusLabel: "작성" | "미작성";
   report: OfficeHourReport | null;
   dueLabel: string;
   dueOverdue: boolean;
 };
 
+type EmailDraft = {
+  recipient: string;
+  subject: string;
+  body: string;
+};
+
+type DownloadTarget = {
+  report: OfficeHourReport;
+  application: Application;
+  programName: string;
+};
+
 export function PendingReportsDashboard({
   applications,
   reports,
   programs,
+  consultants,
   currentUser,
   currentConsultantId,
   currentConsultantName,
@@ -96,9 +130,438 @@ export function PendingReportsDashboard({
     programColor: string;
     programId: string;
   } | null>(null);
+  const [emailDraft, setEmailDraft] = useState<EmailDraft | null>(null);
 
   const normalizeConsultantName = (value?: string | null) =>
     (value ?? "").replace(/\s*컨설턴트\s*$/u, "").trim().toLowerCase();
+
+  const isValidEmail = (value: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+
+  const resolveConsultantEmail = (application?: Application | null, report?: OfficeHourReport | null) => {
+    const consultantId = report?.consultantId || application?.consultantId || "";
+    const consultantName = report?.consultantName || application?.consultant || "";
+
+    if (consultantId) {
+      const byId = consultants.find((consultant) => consultant.id === consultantId);
+      if (byId?.email) return byId.email;
+    }
+
+    const normalizedName = normalizeConsultantName(consultantName);
+    if (!normalizedName) return "";
+
+    const byName = consultants.find(
+      (consultant) => normalizeConsultantName(consultant.name) === normalizedName
+    );
+    return byName?.email ?? "";
+  };
+
+  const handleSendReminderEmail = (row: ReportRow) => {
+    const scheduledDate = row.application.scheduledDate
+      ? format(
+          parseLocalDate(row.application.scheduledDate) ?? new Date(row.application.scheduledDate),
+          "yyyy년 M월 d일",
+          { locale: ko }
+        )
+      : "일정 확인 필요";
+    const companyName = row.application.companyName?.trim() || row.application.applicantName?.trim() || "기업";
+    const subject = `[MYSC] 오피스아워 일지 작성 요청 - ${row.application.officeHourTitle}`;
+    const body = [
+      `${row.consultantName}님 안녕하세요.`,
+      "",
+      "아래 오피스아워 일정의 일지가 아직 작성되지 않아 확인 요청드립니다.",
+      "",
+      `- 사업: ${row.programName}`,
+      `- 기업: ${companyName}`,
+      `- 오피스아워: ${row.application.officeHourTitle}`,
+      `- 진행일: ${scheduledDate}`,
+      "",
+      "로그인 후 오피스아워 일지 메뉴에서 작성 부탁드립니다.",
+      "",
+      "감사합니다.",
+    ].join("\n");
+    setEmailDraft({
+      recipient: row.consultantEmail?.trim() ?? "",
+      subject,
+      body,
+    });
+  };
+
+  const handleOpenGmail = () => {
+    if (!emailDraft) return;
+    const email = emailDraft.recipient.trim();
+    if (!email) {
+      toast.error("이메일을 입력해주세요.");
+      return;
+    }
+    if (!isValidEmail(email)) {
+      toast.error("올바른 이메일 형식이 아닙니다.");
+      return;
+    }
+
+    const url =
+      `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(email)}`
+      + `&su=${encodeURIComponent(emailDraft.subject)}`
+      + `&body=${encodeURIComponent(emailDraft.body)}`;
+    window.open(url, "_blank", "noopener,noreferrer");
+  };
+
+  const handleCopyEmailDraft = async () => {
+    if (!emailDraft) return;
+    const text = [
+      `받는 사람: ${emailDraft.recipient}`,
+      `제목: ${emailDraft.subject}`,
+      "",
+      emailDraft.body,
+    ].join("\n");
+
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success("메일 초안을 복사했습니다.");
+    } catch {
+      toast.error("복사에 실패했습니다.");
+    }
+  };
+
+  const downloadReportAsExcel = async ({ report, application, programName }: DownloadTarget) => {
+    const content = parseReportContent(report.content);
+    const participantText = (report.participants ?? []).join(", ");
+    const photoText = (report.photos ?? []).join("\n");
+    const scheduledDate = application.scheduledDate
+      ? format(
+          parseLocalDate(application.scheduledDate) ?? new Date(application.scheduledDate),
+          "yyyy-MM-dd",
+          { locale: ko }
+        )
+      : "-";
+    const writtenDate = report.date
+      ? format(
+          parseLocalDate(report.date) ?? new Date(report.date),
+          "yyyy-MM-dd",
+          { locale: ko }
+        )
+      : "-";
+
+    const rows: Array<[string, string]> = [
+      ["사업", programName],
+      ["컨설턴트", report.consultantName || application.consultant || "-"],
+      ["기업", application.companyName || application.applicantName || "-"],
+      ["오피스아워", application.officeHourTitle || "-"],
+      ["진행일", scheduledDate],
+      ["작성일", writtenDate],
+      ["주제", report.topic || "-"],
+      ["참여자", participantText || "-"],
+      ["기업의 현황", content.companyStatus || "-"],
+      ["자문내용", content.advisoryContent || "-"],
+      ["팔로업", report.followUp || "-"],
+      ["사진 링크", photoText || "-"],
+    ];
+
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = "MYSC";
+    workbook.created = new Date();
+    const worksheet = workbook.addWorksheet("오피스아워 일지");
+
+    worksheet.columns = [
+      { width: 22 },
+      { width: 80 },
+    ];
+    worksheet.mergeCells("A1:B1");
+    const titleCell = worksheet.getCell("A1");
+    titleCell.value = "오피스아워 일지";
+    titleCell.font = { name: "Malgun Gothic", size: 16, bold: true };
+    titleCell.alignment = { vertical: "middle", horizontal: "left" };
+    worksheet.getRow(1).height = 24;
+
+    let rowIndex = 3;
+    rows.forEach(([label, value]) => {
+      const row = worksheet.getRow(rowIndex);
+      row.getCell(1).value = label;
+      row.getCell(2).value = value;
+      row.getCell(1).font = { name: "Malgun Gothic", size: 10, bold: true };
+      row.getCell(2).font = { name: "Malgun Gothic", size: 10 };
+      row.getCell(1).alignment = { vertical: "top", wrapText: true };
+      row.getCell(2).alignment = { vertical: "top", wrapText: true };
+      row.getCell(1).fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FFF8FAFC" },
+      };
+      row.eachCell((cell) => {
+        cell.border = {
+          top: { style: "thin", color: { argb: "FFCBD5E1" } },
+          left: { style: "thin", color: { argb: "FFCBD5E1" } },
+          bottom: { style: "thin", color: { argb: "FFCBD5E1" } },
+          right: { style: "thin", color: { argb: "FFCBD5E1" } },
+        };
+      });
+      rowIndex += 1;
+    });
+
+    let imageFailures = 0;
+    const normalizeImageExtension = (
+      contentType: string,
+      url: string
+    ): "png" | "jpeg" | "gif" => {
+      const byType = contentType.toLowerCase();
+      if (byType.includes("png")) return "png";
+      if (byType.includes("jpeg") || byType.includes("jpg")) return "jpeg";
+      if (byType.includes("gif")) return "gif";
+      const path = (url.split("?")[0] ?? "").toLowerCase();
+      if (path.endsWith(".png")) return "png";
+      if (path.endsWith(".gif")) return "gif";
+      return "jpeg";
+    };
+
+    if (report.photos?.length) {
+      rowIndex += 1;
+      worksheet.getCell(`A${rowIndex}`).value = "사진";
+      worksheet.getCell(`A${rowIndex}`).font = { name: "Malgun Gothic", size: 12, bold: true };
+      rowIndex += 1;
+
+      for (let index = 0; index < report.photos.length; index += 1) {
+        const url = report.photos[index] ?? "";
+        if (!url) {
+          imageFailures += 1;
+          continue;
+        }
+        try {
+          const response = await fetch(url);
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+          }
+          const blob = await response.blob();
+          const buffer = await blob.arrayBuffer();
+          const extension = normalizeImageExtension(blob.type || "", url);
+          const imageId = workbook.addImage({
+            buffer,
+            extension,
+          });
+
+          worksheet.mergeCells(`A${rowIndex}:B${rowIndex}`);
+          worksheet.getCell(`A${rowIndex}`).value = `사진 ${index + 1}`;
+          worksheet.getCell(`A${rowIndex}`).font = { name: "Malgun Gothic", size: 10, bold: true };
+          rowIndex += 1;
+          worksheet.addImage(imageId, {
+            tl: { col: 0, row: rowIndex - 1 },
+            ext: { width: 560, height: 315 },
+            editAs: "oneCell",
+          });
+
+          for (let offset = 0; offset < 17; offset += 1) {
+            worksheet.getRow(rowIndex + offset).height = 18;
+          }
+          rowIndex += 18;
+        } catch {
+          imageFailures += 1;
+          worksheet.getCell(`A${rowIndex}`).value = `사진 ${index + 1} 링크`;
+          worksheet.getCell(`B${rowIndex}`).value = url;
+          worksheet.getCell(`B${rowIndex}`).font = {
+            name: "Malgun Gothic",
+            size: 10,
+            color: { argb: "FF2563EB" },
+            underline: true,
+          };
+          rowIndex += 1;
+        }
+      }
+    }
+
+    const buffer = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([buffer], {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
+    const safeCompanyName = (application.companyName || application.applicantName || "office-hour")
+      .replace(/[\\/:*?"<>|]/g, "-")
+      .trim();
+    const safeDate = scheduledDate === "-" ? "undated" : scheduledDate;
+    const filename = `${safeCompanyName}_오피스아워일지_${safeDate}.xlsx`;
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.URL.revokeObjectURL(url);
+    if (imageFailures > 0) {
+      toast.error(`이미지 ${imageFailures}개는 파일에 직접 넣지 못해 링크로 대체되었습니다.`);
+    }
+  };
+
+  const openReportPrintView = ({ report, application, programName }: DownloadTarget) => {
+    const content = parseReportContent(report.content);
+    const participantText = (report.participants ?? []).join(", ") || "-";
+    const scheduledDate = application.scheduledDate
+      ? format(
+          parseLocalDate(application.scheduledDate) ?? new Date(application.scheduledDate),
+          "yyyy년 M월 d일",
+          { locale: ko }
+        )
+      : "-";
+    const writtenDate = report.date
+      ? format(
+          parseLocalDate(report.date) ?? new Date(report.date),
+          "yyyy년 M월 d일",
+          { locale: ko }
+        )
+      : "-";
+
+    const sections: Array<[string, string]> = [
+      ["사업", programName],
+      ["컨설턴트", report.consultantName || application.consultant || "-"],
+      ["기업", application.companyName || application.applicantName || "-"],
+      ["오피스아워", application.officeHourTitle || "-"],
+      ["진행일", scheduledDate],
+      ["작성일", writtenDate],
+      ["주제", report.topic || "-"],
+      ["참여자", participantText],
+      ["기업의 현황", content.companyStatus || "-"],
+      ["자문내용", content.advisoryContent || "-"],
+      ["팔로업", report.followUp || "-"],
+    ];
+
+    const photoHtml =
+      report.photos?.length
+        ? `
+          <section class="section">
+            <h2>사진</h2>
+            <div class="photos">
+              ${report.photos
+                .map(
+                  (url, index) => `
+                    <figure class="photo-card">
+                      <img src="${escapeHtml(url)}" alt="report-photo-${index + 1}" />
+                    </figure>
+                  `
+                )
+                .join("")}
+            </div>
+          </section>
+        `
+        : "";
+
+    const html = `
+      <!doctype html>
+      <html lang="ko">
+        <head>
+          <meta charset="UTF-8" />
+          <title>${escapeHtml(application.officeHourTitle || "오피스아워 일지")}</title>
+          <style>
+            * { box-sizing: border-box; }
+            body {
+              margin: 0;
+              padding: 32px;
+              color: #0f172a;
+              font-family: Apple SD Gothic Neo, Pretendard, sans-serif;
+              background: #ffffff;
+            }
+            .wrap { max-width: 960px; margin: 0 auto; }
+            h1 { margin: 0 0 8px; font-size: 28px; }
+            .desc { margin: 0 0 24px; color: #64748b; font-size: 13px; }
+            .meta {
+              width: 100%;
+              border-collapse: collapse;
+              margin-bottom: 24px;
+            }
+            .meta th, .meta td {
+              border: 1px solid #cbd5e1;
+              padding: 10px 12px;
+              text-align: left;
+              vertical-align: top;
+              font-size: 13px;
+              white-space: pre-wrap;
+            }
+            .meta th {
+              width: 180px;
+              background: #f8fafc;
+              font-weight: 700;
+            }
+            .section { margin-top: 28px; }
+            .section h2 {
+              margin: 0 0 12px;
+              font-size: 18px;
+            }
+            .photos {
+              display: grid;
+              grid-template-columns: repeat(2, minmax(0, 1fr));
+              gap: 16px;
+            }
+            .photo-card {
+              margin: 0;
+              border: 1px solid #cbd5e1;
+              border-radius: 12px;
+              overflow: hidden;
+              background: #fff;
+              page-break-inside: avoid;
+            }
+            .photo-card img {
+              display: block;
+              width: 100%;
+              height: auto;
+              object-fit: contain;
+              background: #f8fafc;
+            }
+            .actions {
+              margin-top: 24px;
+              display: flex;
+              justify-content: flex-end;
+              gap: 8px;
+            }
+            .actions button {
+              border: 1px solid #cbd5e1;
+              background: #fff;
+              color: #0f172a;
+              border-radius: 10px;
+              padding: 10px 14px;
+              font-size: 13px;
+              cursor: pointer;
+            }
+            @media print {
+              body { padding: 0; }
+              .actions { display: none; }
+              .wrap { max-width: none; }
+            }
+          </style>
+        </head>
+        <body>
+          <div class="wrap">
+            <h1>오피스아워 일지</h1>
+            <p class="desc">인쇄 창이 자동으로 열리며, 브라우저에서 "PDF로 저장"을 선택할 수 있습니다.</p>
+            <table class="meta">
+              <tbody>
+                ${sections
+                  .map(
+                    ([label, value]) =>
+                      `<tr><th>${escapeHtml(label)}</th><td>${escapeHtml(value)}</td></tr>`
+                  )
+                  .join("")}
+              </tbody>
+            </table>
+            ${photoHtml}
+            <div class="actions">
+              <button onclick="window.print()">PDF로 저장</button>
+              <button onclick="window.close()">닫기</button>
+            </div>
+            <script>
+              window.addEventListener('load', function () {
+                setTimeout(function () { window.print(); }, 300);
+              });
+            </script>
+          </div>
+        </body>
+      </html>
+    `;
+
+    const printWindow = window.open("", "_blank", "noopener,noreferrer,width=1024,height=900");
+    if (!printWindow) {
+      toast.error("새 창을 열 수 없습니다. 팝업 차단을 확인해주세요.");
+      return;
+    }
+
+    printWindow.document.open();
+    printWindow.document.write(html);
+    printWindow.document.close();
+  };
 
   const isForCurrentConsultant = (application?: Application | null, report?: OfficeHourReport | null) => {
     if (!isConsultantUser) return true;
@@ -278,6 +741,7 @@ export function PendingReportsDashboard({
       programColor: item.programColor,
       programId: item.application.programId || "unknown",
       consultantName: item.application.consultant,
+      consultantEmail: resolveConsultantEmail(item.application, null),
       statusLabel: "미작성",
       report: null,
       dueLabel: item.isOverdue ? `${item.overdueDays}일 초과` : `D-${item.daysLeft}`,
@@ -291,6 +755,7 @@ export function PendingReportsDashboard({
         programColor: item.programColor,
         programId: item.programId,
         consultantName: item.report.consultantName || item.application.consultant,
+        consultantEmail: resolveConsultantEmail(item.application, item.report),
         statusLabel: "작성",
         report: item.report,
         dueLabel: "작성됨",
@@ -299,7 +764,7 @@ export function PendingReportsDashboard({
     });
 
     return rows;
-  }, [pendingReports, submittedReports]);
+  }, [pendingReports, submittedReports, consultants]);
   const selectedReportContent = useMemo(
     () => parseReportContent(selectedReportItem?.report.content),
     [selectedReportItem?.report.content]
@@ -426,6 +891,7 @@ export function PendingReportsDashboard({
                       <TableHead>기한</TableHead>
                       <TableHead>진행일</TableHead>
                       <TableHead>작성일</TableHead>
+                      <TableHead className="w-[72px] text-center">다운로드</TableHead>
                       <TableHead className="text-right">관리</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -482,11 +948,71 @@ export function PendingReportsDashboard({
                             )
                             : "-"}
                         </TableCell>
-                        <TableCell className="text-right">
-                          {row.type === "submitted" ? (
+                        <TableCell className="text-center">
+                          {row.report ? (
                             <Button
-                              size="sm"
+                              size="icon"
                               variant="outline"
+                              className="h-8 w-8 border-emerald-200 bg-emerald-50 text-emerald-700 hover:border-emerald-300 hover:bg-emerald-100 hover:text-emerald-800"
+                              onClick={() =>
+                                downloadReportAsExcel({
+                                  report: row.report!,
+                                  application: row.application,
+                                  programName: row.programName,
+                                })
+                              }
+                              aria-label="엑셀 다운로드"
+                              title="엑셀 다운로드"
+                            >
+                              <Download className="h-4 w-4" />
+                            </Button>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">-</span>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {isAdminUser ? (
+                            <div className="flex justify-end gap-2">
+                              <Button
+                                size="icon"
+                                variant="outline"
+                                className="h-8 w-8"
+                                disabled={!row.report}
+                                onClick={() => {
+                                  if (!row.report) return;
+                                  setSelectedReportItem({
+                                    report: row.report,
+                                    application: row.application,
+                                    programName: row.programName,
+                                    programColor: row.programColor,
+                                    programId: row.programId,
+                                  });
+                                }}
+                                aria-label="상세 보기"
+                                title={row.report ? "상세 보기" : "작성된 일지가 없습니다"}
+                              >
+                                <Eye className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                size="icon"
+                                variant="outline"
+                                className="h-8 w-8"
+                                disabled={!!row.report}
+                                onClick={() => {
+                                  if (row.report) return;
+                                  handleSendReminderEmail(row);
+                                }}
+                                aria-label="리마인드 메일 전송"
+                                title={row.report ? "이미 작성된 일지입니다" : "리마인드 메일 전송"}
+                              >
+                                <Mail className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          ) : row.type === "submitted" ? (
+                            <Button
+                              size="icon"
+                              variant="outline"
+                              className="h-8 w-8"
                               onClick={() =>
                                 setSelectedReportItem({
                                   report: row.report!,
@@ -496,11 +1022,11 @@ export function PendingReportsDashboard({
                                   programId: row.programId,
                                 })
                               }
+                              aria-label="상세 보기"
+                              title="상세 보기"
                             >
-                              상세
+                              <Eye className="h-4 w-4" />
                             </Button>
-                          ) : isAdminUser ? (
-                            <span className="text-xs text-muted-foreground">-</span>
                           ) : (
                             <Button
                               size="sm"
@@ -617,6 +1143,18 @@ export function PendingReportsDashboard({
               )}
               <div className="flex justify-end gap-2">
                 <Button
+                  variant="outline"
+                  onClick={() =>
+                    openReportPrintView({
+                      report: selectedReportItem.report,
+                      application: selectedReportItem.application,
+                      programName: selectedReportItem.programName,
+                    })
+                  }
+                >
+                  PDF 보기
+                </Button>
+                <Button
                   variant="destructive"
                   onClick={() => {
                     const confirmed = window.confirm(
@@ -643,6 +1181,86 @@ export function PendingReportsDashboard({
               </div>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+      <Dialog
+        open={!!emailDraft}
+        onOpenChange={(open) => {
+          if (!open) setEmailDraft(null);
+        }}
+      >
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>리마인드 메일 작성</DialogTitle>
+            <DialogDescription>
+              이메일을 확인하거나 수정한 뒤 Gmail에서 열거나 내용을 복사할 수 있습니다.
+            </DialogDescription>
+          </DialogHeader>
+          {emailDraft ? (
+            <div className="space-y-4">
+              <label className="space-y-2 text-sm text-slate-700">
+                <span className="font-medium">받는 사람</span>
+                <Input
+                  type="email"
+                  value={emailDraft.recipient}
+                  onChange={(event) =>
+                    setEmailDraft((prev) =>
+                      prev
+                        ? {
+                            ...prev,
+                            recipient: event.target.value,
+                          }
+                        : prev
+                    )
+                  }
+                />
+              </label>
+              <label className="space-y-2 text-sm text-slate-700">
+                <span className="font-medium">제목</span>
+                <Input
+                  value={emailDraft.subject}
+                  onChange={(event) =>
+                    setEmailDraft((prev) =>
+                      prev
+                        ? {
+                            ...prev,
+                            subject: event.target.value,
+                          }
+                        : prev
+                    )
+                  }
+                />
+              </label>
+              <label className="space-y-2 text-sm text-slate-700">
+                <span className="font-medium">본문</span>
+                <Textarea
+                  className="min-h-[240px]"
+                  value={emailDraft.body}
+                  onChange={(event) =>
+                    setEmailDraft((prev) =>
+                      prev
+                        ? {
+                            ...prev,
+                            body: event.target.value,
+                          }
+                        : prev
+                    )
+                  }
+                />
+              </label>
+            </div>
+          ) : null}
+          <DialogFooter className="flex-wrap gap-2 sm:justify-end">
+            <Button variant="outline" onClick={handleCopyEmailDraft}>
+              복사
+            </Button>
+            <Button variant="outline" onClick={handleOpenGmail}>
+              Gmail에서 열기
+            </Button>
+            <Button variant="outline" onClick={() => setEmailDraft(null)}>
+              닫기
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

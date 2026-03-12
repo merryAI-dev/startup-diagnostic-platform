@@ -1,26 +1,31 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useLocation, useNavigate } from "react-router-dom"
 import type { User as FirebaseUser } from "firebase/auth"
+import { collection, getDocs, orderBy, query } from "firebase/firestore"
 import { useAuth } from "@/context/AuthContext"
-import { signInWithEmail, signOutUser, signUpWithEmail } from "@/firebase/auth"
+import { getSignInMethods, signInWithEmail, signOutUser, signUpWithEmail } from "@/firebase/auth"
 import { db } from "@/firebase/client"
 import type { Role } from "@/types/auth"
 import { ConsultantProfilePage } from "@/redesign/app/components/pages/consultant-profile-page"
 import {
+  Check,
   ChevronDown,
   Trash2,
 } from "lucide-react"
 import { toast } from "sonner"
-import { createUserProfile } from "@/firebase/profile"
+import { createUserProfile, getUserProfile } from "@/firebase/profile"
 import type { CompanyInfoForm, InvestmentInput } from "@/types/company"
 import { DEFAULT_FORM } from "@/types/company"
 
 const PENDING_SIGNUP_KEY = "pending-signup"
+type ProgramOption = {
+  id: string
+  name: string
+}
 type PendingSignupDraft = {
   role: Role
   email: string
   password?: string
-  provider?: "email" | "google"
 }
 
 function getSignupErrorMessage(error: any) {
@@ -51,6 +56,12 @@ function getRoleFromQuery(search: string): Role | null {
     return value
   }
   return null
+}
+
+function getRoleLabel(role: Role) {
+  if (role === "admin") return "관리자"
+  if (role === "consultant") return "컨설턴트"
+  return "스타트업"
 }
 
 export function SignupInfoPage() {
@@ -112,6 +123,41 @@ export function SignupInfoPage() {
     navigate(`/pending?role=${requestedRole}`)
   }
 
+  async function guardExistingProfile(
+    authUser: FirebaseUser,
+    nextRequestedRole: Role
+  ) {
+    const existingProfile = await getUserProfile(authUser.uid)
+    if (!existingProfile) return true
+
+    const existingRequestedRole = existingProfile.requestedRole ?? existingProfile.role
+    const existingRoleLabel = getRoleLabel(existingRequestedRole)
+    const requestedRoleLabel = getRoleLabel(nextRequestedRole)
+
+    if (existingProfile.active === true) {
+      if (existingRequestedRole !== nextRequestedRole) {
+        toast.error(`이미 승인된 ${existingRoleLabel} 계정입니다. ${requestedRoleLabel} 역할로는 가입할 수 없습니다.`)
+      } else {
+        toast.error(`이미 승인된 ${existingRoleLabel} 계정입니다. 로그인 후 이용해주세요.`)
+      }
+      navigate(
+        existingProfile.role === "admin" || existingProfile.role === "consultant"
+          ? "/admin"
+          : "/company"
+      )
+      return false
+    }
+
+    if (existingRequestedRole !== nextRequestedRole) {
+      toast.error(`이미 ${existingRoleLabel} 역할로 승인 대기 중입니다.`)
+    } else {
+      toast.error(`이미 ${existingRoleLabel} 역할로 승인 대기 중입니다. 승인 후 이용해주세요.`)
+    }
+    await signOutUser()
+    navigate(`/pending?role=${existingRequestedRole}`)
+    return false
+  }
+
   async function ensureAuthUser(): Promise<FirebaseUser | null> {
     if (user) return user
     if (!pendingSignup) {
@@ -125,6 +171,14 @@ export function SignupInfoPage() {
     if (creatingAccount) return null
     setCreatingAccount(true)
     try {
+      const signInMethods = await getSignInMethods(pendingSignup.email)
+      const hasPasswordMethod = signInMethods.includes("password")
+      const hasGoogleMethod = signInMethods.includes("google.com")
+      if (hasGoogleMethod && !hasPasswordMethod) {
+        toast.error("이미 사용 중인 이메일입니다. 다른 이메일을 사용해주세요.")
+        return null
+      }
+
       const credential = await signUpWithEmail(
         pendingSignup.email,
         pendingSignup.password
@@ -158,10 +212,17 @@ export function SignupInfoPage() {
       <div className="mx-auto w-full max-w-2xl space-y-6 px-6 py-12">
         <div>
           <h1 className="text-2xl font-semibold text-slate-900">
-            관리자 정보 입력
+            관리자 승인 요청
           </h1>
           <p className="mt-2 text-sm text-slate-500">
-            별도 정보 입력 없이 관리자 승인 대기로 이동합니다.
+            관리자 계정은 별도 정보 입력 없이 승인 요청만 진행합니다.
+          </p>
+        </div>
+        <div className="rounded-2xl border border-sky-200 bg-sky-50 px-5 py-4 text-sm text-sky-900 shadow-sm">
+          <div className="font-semibold">승인 후 로그인 가능</div>
+          <p className="mt-1 text-sm leading-6 text-sky-800">
+            승인 요청을 완료 후 다른 관리자가 계정을 승인한 뒤에만 관리자 화면에
+            로그인할 수 있습니다.
           </p>
         </div>
         <button
@@ -170,6 +231,8 @@ export function SignupInfoPage() {
             try {
               const authUser = await ensureAuthUser()
               if (!authUser) return
+              const canProceed = await guardExistingProfile(authUser, requestedRole)
+              if (!canProceed) return
               await createUserProfile(
                 authUser.uid,
                 "company",
@@ -188,7 +251,7 @@ export function SignupInfoPage() {
           }}
           type="button"
         >
-          승인 대기 요청
+          관리자 승인 요청
         </button>
       </div>
     )
@@ -204,6 +267,7 @@ export function SignupInfoPage() {
         userEmail={fallbackEmail}
         requestedRole={requestedRole}
         ensureAuthUser={ensureAuthUser}
+        guardExistingProfile={guardExistingProfile}
         onComplete={handleComplete}
         onCancel={() => navigate("/login")}
       />
@@ -215,6 +279,7 @@ export function SignupInfoPage() {
       userEmail={fallbackEmail}
       requestedRole={requestedRole}
       ensureAuthUser={ensureAuthUser}
+      guardExistingProfile={guardExistingProfile}
       onComplete={handleComplete}
       onCancel={() => navigate("/login")}
     />
@@ -227,6 +292,7 @@ function ConsultantSignupInfo({
   userEmail,
   requestedRole,
   ensureAuthUser,
+  guardExistingProfile,
   onComplete,
   onCancel,
 }: {
@@ -235,6 +301,10 @@ function ConsultantSignupInfo({
   userEmail: string
   requestedRole: Role
   ensureAuthUser: () => Promise<FirebaseUser | null>
+  guardExistingProfile: (
+    authUser: FirebaseUser,
+    nextRequestedRole: Role
+  ) => Promise<boolean>
   onComplete: () => Promise<void>
   onCancel: () => void
 }) {
@@ -253,6 +323,8 @@ function ConsultantSignupInfo({
     try {
       const authUser = await ensureAuthUser()
       if (!authUser) return
+      const canProceed = await guardExistingProfile(authUser, requestedRole)
+      if (!canProceed) return
       await createUserProfile(
         authUser.uid,
         "company",
@@ -291,29 +363,71 @@ function CompanySignupInfo({
   userEmail,
   requestedRole,
   ensureAuthUser,
+  guardExistingProfile,
   onComplete,
   onCancel,
 }: {
   userEmail: string
   requestedRole: Role
   ensureAuthUser: () => Promise<FirebaseUser | null>
+  guardExistingProfile: (
+    authUser: FirebaseUser,
+    nextRequestedRole: Role
+  ) => Promise<boolean>
   onComplete: () => Promise<void>
   onCancel: () => void
 }) {
   const [form, setForm] = useState<CompanyInfoForm>(DEFAULT_FORM)
+  const [availablePrograms, setAvailablePrograms] = useState<ProgramOption[]>([])
+  const [selectedProgramIds, setSelectedProgramIds] = useState<string[]>([])
   const [investmentRows, setInvestmentRows] = useState<InvestmentInput[]>([
     { stage: "", date: "", postMoney: "", majorShareholder: "" },
   ])
   const [touched, setTouched] = useState<Partial<Record<keyof CompanyInfoForm, boolean>>>({})
   const [saving, setSaving] = useState(false)
   const [activeInvestmentStageRow, setActiveInvestmentStageRow] = useState<number | null>(null)
+  const [programDropdownOpen, setProgramDropdownOpen] = useState(false)
   const investmentStageDropdownRefs = useRef<Record<number, HTMLDivElement | null>>({})
+  const programDropdownRef = useRef<HTMLDivElement | null>(null)
   const [consentOpen, setConsentOpen] = useState(false)
   const [consentPrivacy, setConsentPrivacy] = useState(false)
   const [consentMarketing, setConsentMarketing] = useState(false)
   const [consentError, setConsentError] = useState<string | null>(null)
   const CONSENT_VERSION = "v1.0"
   const CONSENT_METHOD = "company_signup_modal"
+
+  useEffect(() => {
+    let active = true
+
+    async function loadPrograms() {
+      try {
+        const snapshot = await getDocs(
+          query(collection(db, "programs"), orderBy("name", "asc"))
+        )
+        if (!active) return
+        setAvailablePrograms(
+          snapshot.docs.map((docSnap) => {
+            const data = docSnap.data() as { name?: string }
+            return {
+              id: docSnap.id,
+              name: data.name?.trim() || "이름 없는 사업",
+            }
+          })
+        )
+      } catch (error) {
+        console.warn("Failed to load signup programs:", error)
+        if (active) {
+          setAvailablePrograms([])
+        }
+      }
+    }
+
+    void loadPrograms()
+
+    return () => {
+      active = false
+    }
+  }, [])
 
 
   const CERTIFICATION_OPTIONS = [
@@ -346,6 +460,27 @@ function CompanySignupInfo({
     "Angel",
     "Convertible Note",
   ] as const
+  const SDG_OPTIONS = [
+    "1. 빈곤 종식",
+    "2. 기아 종식",
+    "3. 건강과 웰빙",
+    "4. 양질의 교육",
+    "5. 성평등",
+    "6. 깨끗한 물과 위생",
+    "7. 모두를 위한 깨끗한 에너지",
+    "8. 양질의 일자리와 경제성장",
+    "9. 산업, 혁신과 사회기반시설",
+    "10. 불평등 감소",
+    "11. 지속가능한 도시와 공동체",
+    "12. 책임 있는 소비와 생산",
+    "13. 기후행동",
+    "14. 해양생태계 보전",
+    "15. 육상생태계 보전",
+    "16. 평화, 정의와 제도",
+    "17. 목표를 위한 파트너십",
+  ] as const
+  const GENDER_OPTIONS = ["남", "여"] as const
+  const YES_NO_OPTIONS = ["예", "아니요"] as const
 
   type AddressFieldKey = "headOffice" | "branchOffice"
   type DaumPostcodeAddress = {
@@ -452,24 +587,40 @@ function CompanySignupInfo({
 
   const FIELD_LABELS: Record<keyof CompanyInfoForm, string> = {
     companyInfo: "기업정보",
+    representativeSolution: "대표 솔루션",
+    sdgPriority1: "UN SDGs 우선순위 1위",
+    sdgPriority2: "UN SDGs 우선순위 2위",
     ceoName: "대표자 성명",
     ceoEmail: "대표자 이메일",
     ceoPhone: "대표자 전화번호",
+    ceoAge: "대표자 나이",
+    ceoGender: "대표자 성별",
+    ceoNationality: "대표자 국적",
+    founderSerialNumber: "이전 창업 횟수",
+    website: "회사 홈페이지",
     foundedAt: "법인 설립일자",
     businessNumber: "사업자등록번호",
     primaryBusiness: "주업태",
     primaryIndustry: "주업종",
     headOffice: "본점 소재지",
     branchOffice: "지점 또는 연구소 소재지",
+    targetCountries: "해외 지사 또는 진출 희망국가",
     workforceFullTime: "종업원수 (정규)",
     workforceContract: "종업원수 (계약)",
-    revenue2025: "매출액 (2025년)",
-    revenue2026: "매출액 (2026년)",
-    capitalTotal: "자본총계",
+    revenue2025: "매출액 (2025년, 원)",
+    revenue2026: "매출액 (2026년, 원)",
+    capitalTotal: "자본총계 (원)",
     certification: "인증/지정 여부",
     tipsLipsHistory: "TIPS/LIPS 이력",
-    desiredInvestment2026: "2026년 내 희망 투자액 (억)",
-    desiredPreValue: "투자전 희망기업가치 (Pre-Value, 억)",
+    exportVoucherHeld: "수출바우처 보유 여부",
+    exportVoucherAmount: "수출바우처 확보 금액 (원)",
+    exportVoucherUsageRate: "수출바우처 소진율 (%)",
+    innovationVoucherHeld: "중소기업혁신바우처 보유 여부",
+    innovationVoucherAmount: "중소기업혁신바우처 확보 금액 (원)",
+    innovationVoucherUsageRate: "중소기업혁신바우처 소진율 (%)",
+    myscExpectation: "MYSC에 가장 기대하는 점",
+    desiredInvestment2026: "2026년 내 희망 투자액 (원)",
+    desiredPreValue: "투자전 희망기업가치 (Pre-Value, 원)",
   }
 
   function isFilled(value: string) {
@@ -495,29 +646,7 @@ function CompanySignupInfo({
   }
 
   function formatRevenueInput(value: string) {
-    const sanitized = value.replace(/[^\d.]/g, "")
-    if (!sanitized) return ""
-    const firstDotIndex = sanitized.indexOf(".")
-    const hasDot = firstDotIndex >= 0
-    const compact = hasDot
-      ? `${sanitized.slice(0, firstDotIndex)}.${sanitized
-          .slice(firstDotIndex + 1)
-          .replace(/\./g, "")}`
-      : sanitized
-    const [rawInteger = "", rawDecimal = ""] = compact.split(".")
-    const integerDigits = rawInteger.replace(/[^\d]/g, "")
-    const decimalDigits = rawDecimal.replace(/[^\d]/g, "").slice(0, 1)
-    let integerValue = integerDigits
-    if (!integerValue && hasDot) {
-      integerValue = "0"
-    }
-    const normalizedInteger =
-      integerValue.length > 1 ? integerValue.replace(/^0+(?=\d)/, "") : integerValue
-    const formattedInteger = normalizedInteger
-      ? normalizedInteger.replace(/\B(?=(\d{3})+(?!\d))/g, ",")
-      : ""
-    if (!hasDot) return formattedInteger
-    return `${formattedInteger || "0"}.${decimalDigits}`
+    return formatNumberInput(value)
   }
 
   function sanitizeInvestmentDateDigits(value: string) {
@@ -656,6 +785,22 @@ function CompanySignupInfo({
     }
   }, [activeInvestmentStageRow])
 
+  useEffect(() => {
+    if (!programDropdownOpen) return
+
+    function handleOutsideClick(event: MouseEvent) {
+      const current = programDropdownRef.current
+      if (!current) return
+      if (event.target instanceof Node && current.contains(event.target)) return
+      setProgramDropdownOpen(false)
+    }
+
+    document.addEventListener("mousedown", handleOutsideClick)
+    return () => {
+      document.removeEventListener("mousedown", handleOutsideClick)
+    }
+  }, [programDropdownOpen])
+
   function updateInvestmentRow(
     index: number,
     field: keyof InvestmentInput,
@@ -685,6 +830,14 @@ function CompanySignupInfo({
     return values.join(", ")
   }
 
+  function toggleProgram(programId: string) {
+    setSelectedProgramIds((prev) =>
+      prev.includes(programId)
+        ? prev.filter((value) => value !== programId)
+        : [...prev, programId]
+    )
+  }
+
   function toggleInvestmentStage(index: number, stage: string) {
     const normalized = stage.trim()
     if (!normalized) return
@@ -706,6 +859,8 @@ function CompanySignupInfo({
     try {
       const authUser = await ensureAuthUser()
       if (!authUser) return
+      const canProceed = await guardExistingProfile(authUser, requestedRole)
+      if (!canProceed) return
       setSaving(true)
       const userAgent = typeof navigator !== "undefined" ? navigator.userAgent : null
       await createUserProfile(
@@ -716,6 +871,7 @@ function CompanySignupInfo({
         {
           companyId: authUser.uid,
           companyInfo: form,
+          programIds: selectedProgramIds,
           investmentRows,
           consents: {
             privacy: {
@@ -748,7 +904,7 @@ function CompanySignupInfo({
 
   function inputClass(invalid?: boolean) {
     return [
-      "mt-1 w-full rounded-lg border bg-white px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-1",
+      "mt-1 w-full rounded-lg border bg-white px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-1 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400 disabled:placeholder:text-slate-300",
       invalid
         ? "border-rose-300 bg-rose-50 text-rose-900 placeholder:text-rose-300 focus:border-rose-400 focus:ring-rose-200/60"
         : "border-slate-200 focus:border-slate-300 focus:ring-slate-200/60",
@@ -801,6 +957,77 @@ function CompanySignupInfo({
                   onBlur={() => markTouched("companyInfo")}
                 />
               </label>
+              <label className="text-xs text-slate-500 md:col-span-3">
+                2026년 MYSC 참여사업
+                <div className="relative mt-1" ref={programDropdownRef}>
+                  <div
+                    tabIndex={0}
+                    className={`${inputClass(false)} cursor-pointer pr-9 text-left`}
+                    onMouseDown={(event) => {
+                      event.preventDefault()
+                      setProgramDropdownOpen((prev) => !prev)
+                    }}
+                  >
+                    {selectedProgramIds.length > 0 ? (
+                      <div className="truncate pr-2 text-sm text-slate-700">
+                        {availablePrograms
+                          .filter((program) => selectedProgramIds.includes(program.id))
+                          .map((program) => program.name)
+                          .join(", ")}
+                      </div>
+                    ) : (
+                      <span className="text-sm text-slate-400">
+                        참여 중인 사업을 선택하세요
+                      </span>
+                    )}
+                  </div>
+                  <ChevronDown
+                    className="pointer-events-none absolute right-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400"
+                    aria-hidden="true"
+                  />
+                  {programDropdownOpen ? (
+                    <div className="absolute z-20 mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white p-1 shadow-lg">
+                      {availablePrograms.length > 0 ? (
+                        availablePrograms.map((program) => {
+                          const isSelected = selectedProgramIds.includes(program.id)
+                          return (
+                            <button
+                              key={program.id}
+                              type="button"
+                              className={`flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-xs ${
+                                isSelected
+                                  ? "bg-emerald-50 font-semibold text-emerald-700"
+                                  : "text-slate-700 hover:bg-slate-50"
+                              }`}
+                              onMouseDown={(event) => {
+                                event.preventDefault()
+                                toggleProgram(program.id)
+                              }}
+                            >
+                              <span
+                                className={`inline-flex h-4 w-4 items-center justify-center rounded border ${
+                                  isSelected
+                                    ? "border-emerald-500 bg-emerald-500 text-white"
+                                    : "border-slate-300 bg-white text-transparent"
+                                }`}
+                              >
+                                <Check className="h-3 w-3" />
+                              </span>
+                              <span className="min-w-0 flex-1 truncate">
+                                {program.name}
+                              </span>
+                            </button>
+                          )
+                        })
+                      ) : (
+                        <div className="px-3 py-2 text-xs text-slate-500">
+                          등록된 사업이 없습니다.
+                        </div>
+                      )}
+                    </div>
+                  ) : null}
+                </div>
+              </label>
               <label className="text-xs text-slate-500 md:col-span-2">
                 대표자 성명
                 <input
@@ -811,6 +1038,21 @@ function CompanySignupInfo({
                     setForm((prev) => ({ ...prev, ceoName: e.target.value }))
                   }
                   onBlur={() => markTouched("ceoName")}
+                />
+              </label>
+              <label className="text-xs text-slate-500 md:col-span-1">
+                대표자 나이
+                <input
+                  className={inputClass(false)}
+                  inputMode="numeric"
+                  placeholder="예: 42"
+                  value={form.ceoAge}
+                  onChange={(e) =>
+                    setForm((prev) => ({
+                      ...prev,
+                      ceoAge: e.target.value.replace(/[^\d]/g, "").slice(0, 3),
+                    }))
+                  }
                 />
               </label>
               <label className="text-xs text-slate-500 md:col-span-1">
@@ -828,6 +1070,33 @@ function CompanySignupInfo({
                   onBlur={() => markTouched("ceoPhone")}
                 />
               </label>
+              <label className="text-xs text-slate-500 md:col-span-2">
+                대표자 성별
+                <div className="mt-1 flex flex-wrap gap-2">
+                  {GENDER_OPTIONS.map((option) => {
+                    const active = form.ceoGender === option
+                    return (
+                      <button
+                        key={option}
+                        type="button"
+                        className={`rounded-full border px-3 py-2 text-xs font-semibold transition ${
+                          active
+                            ? "border-slate-900 bg-slate-900 text-white"
+                            : "border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50"
+                        }`}
+                        onClick={() =>
+                          setForm((prev) => ({
+                            ...prev,
+                            ceoGender: prev.ceoGender === option ? "" : option,
+                          }))
+                        }
+                      >
+                        {option}
+                      </button>
+                    )
+                  })}
+                </div>
+              </label>
               <label className="text-xs text-slate-500 md:col-span-3">
                 대표자 이메일
                 <input
@@ -838,6 +1107,32 @@ function CompanySignupInfo({
                     setForm((prev) => ({ ...prev, ceoEmail: e.target.value }))
                   }
                   onBlur={() => markTouched("ceoEmail")}
+                />
+              </label>
+              <label className="text-xs text-slate-500 md:col-span-2">
+                대표자 국적
+                <input
+                  className={inputClass(false)}
+                  placeholder="예: 대한민국"
+                  value={form.ceoNationality}
+                  onChange={(e) =>
+                    setForm((prev) => ({ ...prev, ceoNationality: e.target.value }))
+                  }
+                />
+              </label>
+              <label className="text-xs text-slate-500 md:col-span-1">
+                이전 창업 횟수
+                <input
+                  className={inputClass(false)}
+                  inputMode="numeric"
+                  placeholder="예: 1"
+                  value={form.founderSerialNumber}
+                  onChange={(e) =>
+                    setForm((prev) => ({
+                      ...prev,
+                      founderSerialNumber: e.target.value.replace(/[^\d]/g, "").slice(0, 2),
+                    }))
+                  }
                 />
               </label>
               <label className="text-xs text-slate-500 md:col-span-2">
@@ -896,6 +1191,88 @@ function CompanySignupInfo({
                   }
                   onBlur={() => markTouched("primaryIndustry")}
                 />
+              </label>
+              <label className="text-xs text-slate-500 md:col-span-3">
+                회사 홈페이지
+                <input
+                  className={inputClass(false)}
+                  placeholder="https://example.com"
+                  value={form.website}
+                  onChange={(e) =>
+                    setForm((prev) => ({ ...prev, website: e.target.value }))
+                  }
+                />
+              </label>
+              <label className="text-xs text-slate-500 md:col-span-3">
+                해외 지사 또는 진출 희망국가 (최대 3개)
+                <input
+                  className={inputClass(false)}
+                  placeholder="예: 미국, 일본, 싱가포르"
+                  value={form.targetCountries}
+                  onChange={(e) =>
+                    setForm((prev) => ({ ...prev, targetCountries: e.target.value }))
+                  }
+                />
+              </label>
+              <label className="text-xs text-slate-500 md:col-span-6">
+                대표 솔루션
+                <textarea
+                  className={`${inputClass(false)} min-h-[96px] resize-y`}
+                  placeholder="대표 솔루션을 입력하세요"
+                  value={form.representativeSolution}
+                  onChange={(e) =>
+                    setForm((prev) => ({
+                      ...prev,
+                      representativeSolution: e.target.value,
+                    }))
+                  }
+                />
+              </label>
+              <label className="text-xs text-slate-500 md:col-span-3">
+                UN SDGs 우선순위 1위
+                <div className="relative">
+                  <select
+                    className={`${inputClass(false)} appearance-none pr-10`}
+                    value={form.sdgPriority1}
+                    onChange={(e) =>
+                      setForm((prev) => ({ ...prev, sdgPriority1: e.target.value }))
+                    }
+                  >
+                    <option value="">선택</option>
+                    {SDG_OPTIONS.map((option) => (
+                      <option key={option} value={option}>
+                        {option}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown
+                    className="pointer-events-none absolute right-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400"
+                    aria-hidden="true"
+                  />
+                </div>
+              </label>
+              <label className="text-xs text-slate-500 md:col-span-3">
+                UN SDGs 우선순위 2위
+                <div className="relative">
+                  <select
+                    className={`${inputClass(false)} appearance-none pr-10`}
+                    value={form.sdgPriority2}
+                    onChange={(e) =>
+                      setForm((prev) => ({ ...prev, sdgPriority2: e.target.value }))
+                    }
+                  >
+                    <option value="">선택</option>
+                    {SDG_OPTIONS.map((option) => (
+                      <option key={option} value={option}>
+                        {option}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown
+                    className="pointer-events-none absolute right-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400"
+                    aria-hidden="true"
+                  />
+                </div>
               </label>
               </div>
           </section>
@@ -1021,10 +1398,10 @@ function CompanySignupInfo({
             </div>
             <div className="mt-3 grid gap-3 sm:grid-cols-2">
               <label className="text-xs text-slate-500">
-                매출액 (2025년)
+                매출액 (2025년, 원)
                 <input
                   className={inputClass(isFieldInvalid("revenue2025"))}
-                  placeholder="예: 12.5억"
+                  placeholder="예: 1,250,000,000"
                   value={form.revenue2025}
                   onChange={(e) =>
                     setForm((prev) => ({
@@ -1036,10 +1413,10 @@ function CompanySignupInfo({
                 />
               </label>
               <label className="text-xs text-slate-500">
-                매출액 (2026년)
+                매출액 (2026년, 원)
                 <input
                   className={inputClass(isFieldInvalid("revenue2026"))}
-                  placeholder="예: 18.0억"
+                  placeholder="예: 1,800,000,000"
                   value={form.revenue2026}
                   onChange={(e) =>
                     setForm((prev) => ({
@@ -1156,7 +1533,7 @@ function CompanySignupInfo({
                     </div>
                   </label>
                   <label className="text-xs text-slate-500">
-                    <span className="block whitespace-nowrap">투자일시</span>
+                    <span className="block whitespace-nowrap">투자유치시기</span>
                     <input
                       type="text"
                       className={inputClass(false)}
@@ -1177,11 +1554,11 @@ function CompanySignupInfo({
                     />
                   </label>
                   <label className="text-xs text-slate-500">
-                    <span className="block whitespace-nowrap">투자금액 (억)</span>
+                    <span className="block whitespace-nowrap">투자 유치금액 (원)</span>
                     <input
                       className={inputClass(false)}
-                      placeholder="예: 25.5"
-                      inputMode="decimal"
+                      placeholder="예: 2,550,000,000"
+                      inputMode="numeric"
                       value={row.postMoney}
                       onChange={(e) => updateInvestmentRow(idx, "postMoney", e.target.value)}
                     />
@@ -1276,14 +1653,148 @@ function CompanySignupInfo({
           </section>
 
           <section>
+            <div className="text-sm font-semibold text-slate-700">바우처</div>
+            <div className="mt-3 grid gap-4 md:grid-cols-2">
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                <label className="text-xs text-slate-500">
+                  <span className="block">수출바우처 보유 여부</span>
+                  <div className="mt-3 inline-flex gap-1 rounded-full border border-slate-200 bg-white p-1">
+                    {YES_NO_OPTIONS.map((option) => {
+                      const active = form.exportVoucherHeld === option
+                      return (
+                        <button
+                          key={option}
+                          type="button"
+                          className={`rounded-full px-2.5 py-0.5 text-[10px] font-semibold transition ${
+                            active
+                              ? "bg-slate-900 text-white shadow-sm"
+                              : "text-slate-600 hover:bg-slate-50"
+                          }`}
+                          onClick={() =>
+                            setForm((prev) => ({
+                              ...prev,
+                              exportVoucherHeld: prev.exportVoucherHeld === option ? "" : option,
+                            }))
+                          }
+                        >
+                          {option}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </label>
+                <div className="mt-5 grid gap-3">
+                    <label className="text-xs text-slate-500">
+                      수출바우처 확보 금액 (원)
+                      <input
+                        className={inputClass(false)}
+                        placeholder="예: 50,000,000"
+                        inputMode="numeric"
+                        value={form.exportVoucherAmount}
+                        disabled={form.exportVoucherHeld !== "예"}
+                        onChange={(e) =>
+                          setForm((prev) => ({
+                            ...prev,
+                            exportVoucherAmount: formatNumberInput(e.target.value),
+                          }))
+                        }
+                      />
+                    </label>
+                    <label className="text-xs text-slate-500">
+                      수출바우처 소진율 (%)
+                      <input
+                        className={inputClass(false)}
+                        placeholder="예: 40"
+                        inputMode="numeric"
+                        value={form.exportVoucherUsageRate}
+                        disabled={form.exportVoucherHeld !== "예"}
+                        onChange={(e) =>
+                          setForm((prev) => ({
+                            ...prev,
+                            exportVoucherUsageRate: formatNumberInput(e.target.value),
+                          }))
+                        }
+                      />
+                    </label>
+                  </div>
+              </div>
+
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                <label className="text-xs text-slate-500">
+                  <span className="block">중소기업혁신바우처 보유 여부</span>
+                  <div className="mt-3 inline-flex gap-1 rounded-full border border-slate-200 bg-white p-1">
+                    {YES_NO_OPTIONS.map((option) => {
+                      const active = form.innovationVoucherHeld === option
+                      return (
+                        <button
+                          key={option}
+                          type="button"
+                          className={`rounded-full px-2.5 py-0.5 text-[10px] font-semibold transition ${
+                            active
+                              ? "bg-slate-900 text-white shadow-sm"
+                              : "text-slate-600 hover:bg-slate-50"
+                          }`}
+                          onClick={() =>
+                            setForm((prev) => ({
+                              ...prev,
+                              innovationVoucherHeld:
+                                prev.innovationVoucherHeld === option ? "" : option,
+                            }))
+                          }
+                        >
+                          {option}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </label>
+                <div className="mt-5 grid gap-3">
+                    <label className="text-xs text-slate-500">
+                      중소기업혁신바우처 확보 금액 (원)
+                      <input
+                        className={inputClass(false)}
+                        placeholder="예: 30,000,000"
+                        inputMode="numeric"
+                        value={form.innovationVoucherAmount}
+                        disabled={form.innovationVoucherHeld !== "예"}
+                        onChange={(e) =>
+                          setForm((prev) => ({
+                            ...prev,
+                            innovationVoucherAmount: formatNumberInput(e.target.value),
+                          }))
+                        }
+                      />
+                    </label>
+                    <label className="text-xs text-slate-500">
+                      중소기업혁신바우처 소진율 (%)
+                      <input
+                        className={inputClass(false)}
+                        placeholder="예: 75"
+                        inputMode="numeric"
+                        value={form.innovationVoucherUsageRate}
+                        disabled={form.innovationVoucherHeld !== "예"}
+                        onChange={(e) =>
+                          setForm((prev) => ({
+                            ...prev,
+                            innovationVoucherUsageRate: formatNumberInput(e.target.value),
+                          }))
+                        }
+                      />
+                    </label>
+                  </div>
+              </div>
+            </div>
+          </section>
+
+          <section>
             <div className="text-sm font-semibold text-slate-700">투자 희망</div>
             <div className="mt-3 grid gap-3 md:grid-cols-2">
               <label className="text-xs text-slate-500">
-                2026년 내 희망 투자액 (억)
+                2026년 내 희망 투자액 (원)
                 <input
                   className={inputClass(isFieldInvalid("desiredInvestment2026"))}
-                  placeholder="예: 20.5"
-                  inputMode="decimal"
+                  placeholder="예: 2,050,000,000"
+                  inputMode="numeric"
                   value={form.desiredInvestment2026}
                   onChange={(e) =>
                     setForm((prev) => ({
@@ -1295,11 +1806,11 @@ function CompanySignupInfo({
                 />
               </label>
               <label className="text-xs text-slate-500">
-                투자전 희망기업가치 (Pre-Value, 억)
+                투자전 희망기업가치 (Pre-Value, 원)
                 <input
                   className={inputClass(isFieldInvalid("desiredPreValue"))}
-                  placeholder="예: 120.0"
-                  inputMode="decimal"
+                  placeholder="예: 12,000,000,000"
+                  inputMode="numeric"
                   value={form.desiredPreValue}
                   onChange={(e) =>
                     setForm((prev) => ({
@@ -1308,6 +1819,23 @@ function CompanySignupInfo({
                     }))
                   }
                   onBlur={() => markTouched("desiredPreValue")}
+                />
+              </label>
+            </div>
+          </section>
+
+          <section>
+            <div className="text-sm font-semibold text-slate-700">기대사항</div>
+            <div className="mt-3">
+              <label className="text-xs text-slate-500">
+                MYSC에 가장 기대하는 점
+                <textarea
+                  className={`${inputClass(false)} min-h-[96px] resize-y`}
+                  placeholder="MYSC에 기대하는 점을 입력하세요"
+                  value={form.myscExpectation}
+                  onChange={(e) =>
+                    setForm((prev) => ({ ...prev, myscExpectation: e.target.value }))
+                  }
                 />
               </label>
             </div>

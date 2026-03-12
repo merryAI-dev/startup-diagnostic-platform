@@ -17,6 +17,7 @@ interface TopbarProps {
   onLogout: () => void;
   onNavigate?: (page: string) => void;
   disabledPages?: Set<string>;
+  companyInfoNeedsAttention?: boolean;
 }
 
 export function Topbar({
@@ -26,6 +27,7 @@ export function Topbar({
   onLogout,
   onNavigate,
   disabledPages,
+  companyInfoNeedsAttention = false,
 }: TopbarProps) {
   const companyInfoDisabled = disabledPages?.has("company-info") ?? false;
   const resolvedRoleLabel = roleLabel
@@ -52,8 +54,14 @@ export function Topbar({
       <div className="flex items-center gap-2">
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon">
+            <Button variant="ghost" size="icon" className="relative">
               <UserIcon className="w-5 h-5" />
+              {companyInfoNeedsAttention ? (
+                <span
+                  className="absolute right-0.5 top-0.5 h-2 w-2 rounded-full bg-red-500 ring-2 ring-white"
+                  aria-label="자가진단표 미완료"
+                />
+              ) : null}
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-56">
@@ -69,22 +77,22 @@ export function Topbar({
               </div>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
-            <DropdownMenuItem
-              disabled={user.role === "user" ? companyInfoDisabled : false}
-              onClick={() => {
-                if (user.role === "consultant") {
-                  onNavigate?.("consultant-profile");
-                } else if (user.role === "user") {
-                  if (companyInfoDisabled) return;
-                  onNavigate?.("company-info");
-                } else {
-                  onNavigate?.("settings");
-                }
-              }}
-            >
-              프로필 설정
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
+            {user.role !== "user" ? (
+              <>
+                <DropdownMenuItem
+                  onClick={() => {
+                    if (user.role === "consultant") {
+                      onNavigate?.("consultant-profile");
+                    } else {
+                      onNavigate?.("settings");
+                    }
+                  }}
+                >
+                  프로필 설정
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+              </>
+            ) : null}
             {user.role === "user" ? (
               <>
                 <DropdownMenuItem
@@ -94,7 +102,14 @@ export function Topbar({
                     onNavigate?.("company-info");
                   }}
                 >
-                  기업 정보 입력
+                  <span className="flex flex-1 items-center justify-between gap-3">
+                    <span>기업 정보 입력</span>
+                    {companyInfoNeedsAttention ? (
+                      <span className="inline-flex items-center rounded-full bg-red-50 px-2 py-0.5 text-[11px] font-semibold text-red-600">
+                        자가진단표 미완료
+                      </span>
+                    ) : null}
+                  </span>
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
               </>
