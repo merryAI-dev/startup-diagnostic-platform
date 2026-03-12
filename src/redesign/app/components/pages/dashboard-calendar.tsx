@@ -15,9 +15,6 @@ import {
   Program,
   Agenda,
   FileItem,
-  RegularOfficeHour,
-  OfficeHourSlot,
-  Consultant,
 } from "@/redesign/app/lib/types";
 import { Button } from "@/redesign/app/components/ui/button";
 import { StatusChip } from "@/redesign/app/components/status-chip";
@@ -40,8 +37,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/redesign/app/components/ui/dialog";
-import { Calendar } from "@/redesign/app/components/ui/calendar";
-import { Label } from "@/redesign/app/components/ui/label";
 import { Textarea } from "@/redesign/app/components/ui/textarea";
 import {
   format,
@@ -55,20 +50,14 @@ import {
   startOfWeek,
   endOfWeek,
   isToday,
-  isBefore,
-  startOfDay,
 } from "date-fns";
 import { ko } from "date-fns/locale";
-import { cn } from "@/redesign/app/components/ui/utils";
 
 interface DashboardCalendarProps {
   applications: Application[];
   user: User;
   programs: Program[];
   agendas: Agenda[];
-  regularOfficeHours: RegularOfficeHour[];
-  officeHourSlots: OfficeHourSlot[];
-  consultants: Consultant[];
   ticketOverrides?: Record<string, { internal?: number; external?: number }>;
   onNavigate: (page: string, id?: string) => void;
   onCancelApplication: (id: string) => Promise<void> | void;
@@ -78,9 +67,6 @@ interface DashboardCalendarProps {
       requestContent: string;
       retainedAttachments: Array<{ name: string; url?: string }>;
       newFiles: FileItem[];
-      scheduledDate?: string;
-      scheduledTime?: string;
-      slotId?: string;
     }
   ) => Promise<boolean>;
 }
@@ -165,30 +151,11 @@ function buildRequestContent(sections: RequestSections): string {
   }).join("\n\n");
 }
 
-function normalizeTimeKey(value?: string): string {
-  if (!value) return "";
-  const [hourRaw, minuteRaw] = value.trim().split(":");
-  const hour = Number(hourRaw);
-  const minute = Number(minuteRaw);
-  if (Number.isNaN(hour) || Number.isNaN(minute)) return value.trim();
-  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
-}
-
-function normalizeConsultantDisplayName(value?: string | null): string {
-  return (value ?? "")
-    .replace(/\s*컨설턴트\s*$/u, "")
-    .trim()
-    .toLowerCase();
-}
-
 export function DashboardCalendar({
   applications,
   user,
   programs,
   agendas,
-  regularOfficeHours,
-  officeHourSlots,
-  consultants,
   ticketOverrides,
   onNavigate,
   onCancelApplication,
@@ -203,9 +170,6 @@ export function DashboardCalendar({
   const [editingRequestSections, setEditingRequestSections] = useState<RequestSections>(
     createEmptyRequestSections()
   );
-  const [editingScheduledDate, setEditingScheduledDate] = useState<Date | undefined>();
-  const [editingScheduledTime, setEditingScheduledTime] = useState("");
-  const [editingSlotId, setEditingSlotId] = useState<string | undefined>();
   const [editingRetainedAttachments, setEditingRetainedAttachments] = useState<
     Array<{ id: string; name: string; url?: string }>
   >([]);
@@ -452,214 +416,6 @@ export function DashboardCalendar({
     () => parseRequestSections(selectedApplication?.requestContent),
     [selectedApplication?.requestContent]
   );
-  const selectedAgenda = useMemo(() => {
-    if (!selectedApplication) return null;
-    if (selectedApplication.agendaId) {
-      return agendas.find((agenda) => agenda.id === selectedApplication.agendaId) ?? null;
-    }
-    return agendas.find((agenda) => agenda.name === selectedApplication.agenda) ?? null;
-  }, [agendas, selectedApplication]);
-  const canEditRegularSchedule = Boolean(
-    canEditApplication && selectedApplication?.type === "regular" && selectedAgenda
-  );
-  const relatedRegularOfficeHours = useMemo(() => {
-    if (!selectedApplication || selectedApplication.type !== "regular") return [];
-    if (selectedApplication.programId) {
-      return regularOfficeHours.filter(
-        (officeHour) => officeHour.programId === selectedApplication.programId
-      );
-    }
-    if (selectedApplication.officeHourId) {
-      return regularOfficeHours.filter(
-        (officeHour) => officeHour.id === selectedApplication.officeHourId
-      );
-    }
-    return [];
-  }, [regularOfficeHours, selectedApplication]);
-  const rescheduleConsultantPool = useMemo(() => {
-    if (!selectedAgenda?.id) return [];
-    return consultants.filter(
-      (consultant) =>
-        consultant.status === "active" && (consultant.agendaIds ?? []).includes(selectedAgenda.id)
-    );
-  }, [consultants, selectedAgenda]);
-  const availableRescheduleDateKeys = useMemo(() => {
-    const next = new Set<string>();
-    relatedRegularOfficeHours.forEach((officeHour) => {
-      (officeHour.availableDates ?? []).forEach((date) => {
-        if (typeof date === "string" && date.trim()) {
-          next.add(date.slice(0, 10));
-        }
-      });
-      (officeHour.slots ?? []).forEach((slot) => {
-        if (slot.date) next.add(slot.date);
-      });
-    });
-    if (selectedApplication?.scheduledDate) {
-      next.add(selectedApplication.scheduledDate);
-    }
-    return next;
-  }, [relatedRegularOfficeHours, selectedApplication?.scheduledDate]);
-  const rescheduleTimeSlots = useMemo(() => {
-    if (!canEditRegularSchedule || !editingScheduledDate || !selectedApplication || !selectedAgenda) {
-      return [];
-    }
-
-    const selectedDateKey = format(editingScheduledDate, "yyyy-MM-dd");
-    const currentTimeKey = normalizeTimeKey(selectedApplication.scheduledTime);
-    const relatedProgramIds = new Set(
-      relatedRegularOfficeHours
-        .map((officeHour) => officeHour.programId)
-        .filter((value): value is string => Boolean(value))
-    );
-    const embeddedSlotsForDate = relatedRegularOfficeHours.flatMap((officeHour) =>
-      (officeHour.slots ?? []).filter((slot) => {
-        if (slot.date !== selectedDateKey) return false;
-        if (!selectedAgenda.id) return true;
-        if (!slot.agendaIds || slot.agendaIds.length === 0) return true;
-        return slot.agendaIds.includes(selectedAgenda.id);
-      })
-    );
-    const slotsForDate = relatedProgramIds.size > 0
-      ? officeHourSlots.filter((slot) => {
-          if (slot.type !== "regular") return false;
-          if (slot.date !== selectedDateKey) return false;
-          if (!slot.programId || !relatedProgramIds.has(slot.programId)) return false;
-          if (!selectedAgenda.id) return true;
-          if (!slot.agendaIds || slot.agendaIds.length === 0) return true;
-          return slot.agendaIds.includes(selectedAgenda.id);
-        })
-      : embeddedSlotsForDate;
-
-    const blockedAgendaTimes = new Set<string>();
-    applications.forEach((application) => {
-      if (application.id === selectedApplication.id) return;
-      if (application.type !== "regular") return;
-      if (
-        application.status !== "pending"
-        && application.status !== "review"
-        && application.status !== "confirmed"
-        && application.status !== "completed"
-      ) {
-        return;
-      }
-      const sameAgenda = selectedApplication.agendaId
-        ? application.agendaId === selectedApplication.agendaId
-        : application.agenda === selectedApplication.agenda;
-      if (!sameAgenda) return;
-      if (application.scheduledDate !== selectedDateKey) return;
-      if (application.scheduledTime) {
-        blockedAgendaTimes.add(normalizeTimeKey(application.scheduledTime));
-      }
-    });
-
-    const hasAssignableConsultantAt = (time: string) => {
-      const normalizedTime = normalizeTimeKey(time);
-      return rescheduleConsultantPool.some((consultant) => {
-        const dayAvailability = consultant.availability.find(
-          (day) => day.dayOfWeek === editingScheduledDate.getDay()
-        );
-        const availableInSchedule = Boolean(
-          dayAvailability?.slots.some(
-            (slotAvailability) =>
-              normalizeTimeKey(slotAvailability.start) === normalizedTime
-              && slotAvailability.available
-          )
-        );
-        if (!availableInSchedule) return false;
-
-        const hasBusyConflict = applications.some((application) => {
-          if (application.id === selectedApplication.id) return false;
-          if (
-            application.status !== "pending"
-            && application.status !== "review"
-            && application.status !== "confirmed"
-            && application.status !== "completed"
-          ) {
-            return false;
-          }
-          if (!application.scheduledDate || !application.scheduledTime) return false;
-          if (application.scheduledDate !== selectedDateKey) return false;
-          if (normalizeTimeKey(application.scheduledTime) !== normalizedTime) return false;
-          if (application.consultantId) {
-            return application.consultantId === consultant.id;
-          }
-          return (
-            normalizeConsultantDisplayName(application.consultant)
-            === normalizeConsultantDisplayName(consultant.name)
-          );
-        });
-
-        return !hasBusyConflict;
-      });
-    };
-
-    const byTime = new Map<string, { hasOpen: boolean; hasCurrent: boolean; slotId?: string }>();
-    slotsForDate.forEach((slot) => {
-      const timeKey = normalizeTimeKey(slot.startTime);
-      const isCurrent =
-        selectedApplication.scheduledDate === selectedDateKey
-        && currentTimeKey === timeKey
-        && (
-          slot.id === selectedApplication.officeHourSlotId
-          || (!selectedApplication.officeHourSlotId && selectedApplication.scheduledTime === slot.startTime)
-        );
-      const existing = byTime.get(timeKey);
-      if (!existing) {
-        byTime.set(timeKey, {
-          hasOpen: slot.status === "open",
-          hasCurrent: isCurrent,
-          slotId: slot.id,
-        });
-        return;
-      }
-      byTime.set(timeKey, {
-        hasOpen: existing.hasOpen || slot.status === "open",
-        hasCurrent: existing.hasCurrent || isCurrent,
-        slotId: existing.hasOpen ? existing.slotId : slot.status === "open" ? slot.id : existing.slotId,
-      });
-    });
-
-    return Array.from(byTime.entries())
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([time, meta]) => {
-        const blockedByAgenda = blockedAgendaTimes.has(time);
-        const consultantAssignable = hasAssignableConsultantAt(time);
-        const available = meta.hasCurrent || (meta.hasOpen && !blockedByAgenda && consultantAssignable);
-        return {
-          time,
-          slotId: meta.slotId,
-          available,
-          reason: available
-            ? undefined
-            : blockedByAgenda
-              ? "이미 예약된 시간입니다"
-              : !consultantAssignable
-                ? "해당 시간에 배정 가능한 컨설턴트가 없습니다"
-                : "예약 불가한 시간입니다",
-        };
-      });
-  }, [
-    applications,
-    canEditRegularSchedule,
-    editingScheduledDate,
-    officeHourSlots,
-    relatedRegularOfficeHours,
-    rescheduleConsultantPool,
-    selectedAgenda,
-    selectedApplication,
-  ]);
-  const hasScheduleChanges = Boolean(
-    selectedApplication
-    && canEditRegularSchedule
-    && editingScheduledDate
-    && editingScheduledTime
-    && (
-      selectedApplication.scheduledDate !== format(editingScheduledDate, "yyyy-MM-dd")
-      || normalizeTimeKey(selectedApplication.scheduledTime) !== normalizeTimeKey(editingScheduledTime)
-      || (editingSlotId ?? "") !== (selectedApplication.officeHourSlotId ?? "")
-    )
-  );
 
   const listTabButtonClass = (tab: "pending" | "rejected") =>
     `inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-semibold transition ${
@@ -705,9 +461,6 @@ export function DashboardCalendar({
     if (!selectedApplication) {
       setIsEditingApplication(false);
       setEditingRequestSections(createEmptyRequestSections());
-      setEditingScheduledDate(undefined);
-      setEditingScheduledTime("");
-      setEditingSlotId(undefined);
       setEditingRetainedAttachments([]);
       setEditingNewFiles([]);
       setSavingApplicationEdit(false);
@@ -715,13 +468,6 @@ export function DashboardCalendar({
     }
 
     setEditingRequestSections(parseRequestSections(selectedApplication.requestContent));
-    setEditingScheduledDate(
-      selectedApplication.scheduledDate
-        ? new Date(`${selectedApplication.scheduledDate}T00:00:00`)
-        : undefined
-    );
-    setEditingScheduledTime(selectedApplication.scheduledTime ?? "");
-    setEditingSlotId(selectedApplication.officeHourSlotId);
     setEditingRetainedAttachments(selectedApplicationAttachments);
     setEditingNewFiles([]);
     setIsEditingApplication(false);
@@ -737,12 +483,6 @@ export function DashboardCalendar({
         url: item.url,
       })),
       newFiles: editingNewFiles,
-      scheduledDate:
-        hasScheduleChanges && editingScheduledDate
-          ? format(editingScheduledDate, "yyyy-MM-dd")
-          : undefined,
-      scheduledTime: hasScheduleChanges ? editingScheduledTime : undefined,
-      slotId: hasScheduleChanges ? editingSlotId : undefined,
     });
     setSavingApplicationEdit(false);
     if (!ok) return;
@@ -1226,13 +966,6 @@ export function DashboardCalendar({
                             setEditingRequestSections(
                               parseRequestSections(selectedApplication.requestContent)
                             );
-                            setEditingScheduledDate(
-                              selectedApplication.scheduledDate
-                                ? new Date(`${selectedApplication.scheduledDate}T00:00:00`)
-                                : undefined
-                            );
-                            setEditingScheduledTime(selectedApplication.scheduledTime ?? "");
-                            setEditingSlotId(selectedApplication.officeHourSlotId);
                             setEditingRetainedAttachments(selectedApplicationAttachments);
                             setEditingNewFiles([]);
                             return;
@@ -1268,76 +1001,9 @@ export function DashboardCalendar({
                       <CalendarIcon className="h-3.5 w-3.5" />
                       일정
                     </div>
-                    {isEditingApplication && canEditRegularSchedule ? (
-                      <div className="mt-3 space-y-4">
-                        <div>
-                          <Label className="mb-2 block text-xs font-semibold text-slate-700">
-                            신청 가능한 날짜
-                          </Label>
-                          <Calendar
-                            mode="single"
-                            selected={editingScheduledDate}
-                            onSelect={(date) => {
-                              setEditingScheduledDate(date);
-                              setEditingScheduledTime("");
-                              setEditingSlotId(undefined);
-                            }}
-                            disabled={(date) => {
-                              if (isBefore(date, startOfDay(new Date()))) return true;
-                              const dateKey = format(date, "yyyy-MM-dd");
-                              return !availableRescheduleDateKeys.has(dateKey);
-                            }}
-                            className="rounded-md border bg-white"
-                          />
-                        </div>
-                        {editingScheduledDate ? (
-                          <div>
-                            <Label className="mb-2 block text-xs font-semibold text-slate-700">
-                              시간 선택
-                            </Label>
-                            {rescheduleTimeSlots.length > 0 ? (
-                              <div className="grid grid-cols-2 gap-2">
-                                {rescheduleTimeSlots.map((slot) => (
-                                  <button
-                                    key={slot.time}
-                                    type="button"
-                                    disabled={!slot.available}
-                                    onClick={() => {
-                                      setEditingScheduledTime(slot.time);
-                                      setEditingSlotId(slot.slotId);
-                                    }}
-                                    className={cn(
-                                      "rounded-lg border px-3 py-2 text-left text-xs transition-colors",
-                                      !slot.available && "cursor-not-allowed bg-slate-100 text-slate-400",
-                                      slot.available && editingScheduledTime === slot.time
-                                        && "border-blue-500 bg-blue-500 text-white",
-                                      slot.available && editingScheduledTime !== slot.time
-                                        && "bg-white text-slate-700 hover:border-slate-400"
-                                    )}
-                                    title={slot.reason}
-                                  >
-                                    <div className="font-semibold">{slot.time}</div>
-                                    {!slot.available && slot.reason ? (
-                                      <div className="mt-1 text-[10px] leading-4 text-inherit opacity-80">
-                                        {slot.reason}
-                                      </div>
-                                    ) : null}
-                                  </button>
-                                ))}
-                              </div>
-                            ) : (
-                              <div className="rounded-lg border border-dashed border-slate-200 bg-white px-3 py-4 text-xs text-slate-500">
-                                선택 가능한 시간이 없습니다.
-                              </div>
-                            )}
-                          </div>
-                        ) : null}
-                      </div>
-                    ) : (
-                      <p className="mt-2 text-sm font-semibold text-slate-900">
-                        {formatScheduleLabel(selectedApplication)}
-                      </p>
-                    )}
+                    <p className="mt-2 text-sm font-semibold text-slate-900">
+                      {formatScheduleLabel(selectedApplication)}
+                    </p>
                   </div>
                   <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
                     <div className="flex items-center gap-2 text-xs font-semibold text-slate-500">
@@ -1521,7 +1187,6 @@ export function DashboardCalendar({
                     disabled={
                       savingApplicationEdit
                       || !isEditingRequestSectionsValid
-                      || (canEditRegularSchedule && (!editingScheduledDate || !editingScheduledTime || !editingSlotId))
                     }
                   >
                     {savingApplicationEdit ? "저장 중..." : "저장"}

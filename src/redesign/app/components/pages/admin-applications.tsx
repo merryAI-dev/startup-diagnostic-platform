@@ -41,12 +41,17 @@ export function AdminApplications({
   currentConsultantAgendaIds = [],
 }: AdminApplicationsProps) {
   const PAGE_SIZE = 10;
+  const pageTitleClassName = "text-2xl font-semibold text-slate-900";
+  const pageDescriptionClassName = "mt-1 text-sm text-slate-500";
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [dateRange, setDateRange] = useState<DateRange | undefined>();
   const [page, setPage] = useState(1);
   const [selectedApplication, setSelectedApplication] = useState<Application | null>(null);
   const isConsultantUser = currentUserRole === "consultant";
+  const pageContainerClassName = isConsultantUser
+    ? "mx-auto w-full max-w-6xl"
+    : "mx-auto w-full max-w-7xl";
 
   const parseDateValue = (value?: string | null) => {
     if (!value) return null;
@@ -165,18 +170,23 @@ export function AdminApplications({
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-slate-50">
-      <div className="shrink-0 border-b bg-white px-8 py-6">
-        <h1 className="text-2xl font-bold text-gray-900 mb-1">신청 관리</h1>
-        <p className="text-sm text-muted-foreground">
-          전체 오피스아워 신청을 관리하고 상태를 변경할 수 있습니다
-        </p>
+      <div className="shrink-0 border-b bg-white px-6 py-5">
+        <div className={pageContainerClassName}>
+          <h1 className={pageTitleClassName}>신청 관리</h1>
+          <p className={pageDescriptionClassName}>
+            {isConsultantUser
+              ? "담당 사업의 오피스아워 신청을 확인하고 상태를 처리합니다"
+              : "전체 오피스아워 신청을 관리하고 상태를 변경할 수 있습니다"}
+          </p>
+        </div>
       </div>
-      <div className="flex min-h-0 flex-1 flex-col p-8 pt-6">
+      <div className="flex min-h-0 flex-1 flex-col px-6 pb-6 pt-5">
+      <div className={pageContainerClassName}>
       <Card className="flex min-h-0 flex-1 flex-col overflow-hidden bg-white">
         <CardContent className="shrink-0 border-b bg-white p-4">
           <div className="flex flex-wrap items-center gap-3">
             <div className="flex flex-wrap items-center gap-3">
-              <div className="relative w-[240px]">
+              <div className="relative w-full sm:w-[320px]">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                 <Input
                   placeholder="기업명으로 검색"
@@ -306,6 +316,7 @@ export function AdminApplications({
           />
         </div>
       </Card>
+      </div>
       </div>
 
       {/* Detail Modal */}
