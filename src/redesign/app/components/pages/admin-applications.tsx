@@ -50,7 +50,7 @@ export function AdminApplications({
   const [selectedApplication, setSelectedApplication] = useState<Application | null>(null);
   const isConsultantUser = currentUserRole === "consultant";
   const pageContainerClassName = isConsultantUser
-    ? "mx-auto w-full max-w-6xl"
+    ? "mx-auto w-full max-w-[1440px]"
     : "mx-auto w-full max-w-7xl";
 
   const parseDateValue = (value?: string | null) => {
@@ -181,15 +181,15 @@ export function AdminApplications({
         </div>
       </div>
       <div className="flex min-h-0 flex-1 flex-col px-6 pb-6 pt-5">
-      <div className={pageContainerClassName}>
-      <Card className="flex min-h-0 flex-1 flex-col overflow-hidden bg-white">
+      <div className={`${pageContainerClassName} flex min-h-0 flex-1 flex-col`}>
+      <Card className="mt-1 flex min-h-0 flex-1 flex-col overflow-hidden bg-white">
         <CardContent className="shrink-0 border-b bg-white p-4">
           <div className="flex flex-wrap items-center gap-3">
             <div className="flex flex-wrap items-center gap-3">
               <div className="relative w-full sm:w-[320px]">
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
                 <Input
-                  placeholder="기업명으로 검색"
+                  placeholder="신청 기업명으로 검색"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   className="pl-9"
@@ -224,6 +224,7 @@ export function AdminApplications({
                 <TableHead className="bg-white">신청 기업</TableHead>
                 <TableHead className="bg-white">오피스아워</TableHead>
                 <TableHead className="bg-white">아젠다</TableHead>
+                <TableHead className="bg-white">컨설턴트</TableHead>
                 <TableHead className="bg-white">일정</TableHead>
                 <TableHead className="bg-white text-right">작업</TableHead>
               </TableRow>
@@ -252,6 +253,11 @@ export function AdminApplications({
                     </TableCell>
                     <TableCell>
                       <span className="text-sm">{app.agenda}</span>
+                    </TableCell>
+                    <TableCell>
+                      <span className="text-sm text-muted-foreground">
+                        {app.consultant?.trim() || "담당자 배정 중"}
+                      </span>
                     </TableCell>
                     <TableCell>
                       {app.scheduledDate ? (
@@ -291,7 +297,7 @@ export function AdminApplications({
               ))
             ) : (
                 <TableRow>
-                  <TableCell colSpan={7} className="text-center py-12">
+                  <TableCell colSpan={8} className="text-center py-12">
                     <div className="flex flex-col items-center gap-2">
                       <Search className="w-12 h-12 text-muted-foreground" />
                       <p className="text-sm text-muted-foreground">

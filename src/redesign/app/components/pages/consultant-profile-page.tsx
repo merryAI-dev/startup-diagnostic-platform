@@ -1,4 +1,4 @@
-import { type FormEvent, useEffect, useMemo, useState } from "react";
+import { type FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { Agenda, Consultant, ConsultantAvailability } from "@/redesign/app/lib/types";
 import { Button } from "@/redesign/app/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/redesign/app/components/ui/card";
@@ -94,6 +94,7 @@ export function ConsultantProfilePage({
 }: ConsultantProfilePageProps) {
   const pageTitleClassName = "text-2xl font-semibold text-slate-900";
   const pageDescriptionClassName = "mt-1 text-sm text-slate-500";
+  const consultantPageContainerClassName = "mx-auto w-full max-w-[1440px]";
   const [formValues, setFormValues] = useState<ConsultantProfileFormValues>(() =>
     buildInitialValues(consultant, defaultEmail)
   );
@@ -124,39 +125,39 @@ export function ConsultantProfilePage({
     []
   );
 
-  const buildDefaultAvailability = () =>
-    scheduleDays.map((day) => ({
-      dayOfWeek: day.value,
-      slots: timeSlots.map((slot) => ({
-        start: slot.start,
-        end: slot.end,
-        available: false,
+  const buildDefaultAvailability = useCallback(
+    () =>
+      scheduleDays.map((day) => ({
+        dayOfWeek: day.value,
+        slots: timeSlots.map((slot) => ({
+          start: slot.start,
+          end: slot.end,
+          available: false,
+        })),
       })),
-    }));
-
-  const normalizeAvailability = (
-    input: ConsultantAvailability[] | undefined
-  ): ConsultantAvailability[] => {
-    const base = buildDefaultAvailability();
-    if (!input || input.length === 0) return base;
-    return base.map((baseDay) => {
-      const found = input.find((item) => item.dayOfWeek === baseDay.dayOfWeek);
-      if (!found) return baseDay;
-      return {
-        ...baseDay,
-        slots: baseDay.slots.map((baseSlot) => {
-          const existing = found.slots.find(
-            (slot) => slot.start === baseSlot.start && slot.end === baseSlot.end
-          );
-          return existing ?? baseSlot;
-        }),
-      };
-    });
-  };
+    [scheduleDays, timeSlots]
+  );
 
   const normalizedAvailability = useMemo(
-    () => normalizeAvailability(consultant?.availability),
-    [consultant?.availability]
+    () => {
+      const base = buildDefaultAvailability();
+      const input = consultant?.availability;
+      if (!input || input.length === 0) return base;
+      return base.map((baseDay) => {
+        const found = input.find((item) => item.dayOfWeek === baseDay.dayOfWeek);
+        if (!found) return baseDay;
+        return {
+          ...baseDay,
+          slots: baseDay.slots.map((baseSlot) => {
+            const existing = found.slots.find(
+              (slot) => slot.start === baseSlot.start && slot.end === baseSlot.end
+            );
+            return existing ?? baseSlot;
+          }),
+        };
+      });
+    },
+    [consultant?.availability, buildDefaultAvailability]
   );
   const [draftAvailability, setDraftAvailability] = useState<ConsultantAvailability[]>(
     normalizedAvailability
@@ -232,34 +233,25 @@ export function ConsultantProfilePage({
     </span>
   );
 
-  const cardHeaderClassName = embedded ? "px-0 pt-0" : undefined;
+  const sectionCardClassName = cn(
+    "w-full overflow-hidden border-slate-200 bg-white shadow-sm shadow-slate-200/60",
+    embedded && "border-0 shadow-none"
+  );
+  const cardHeaderClassName = embedded
+    ? "px-0 pt-0"
+    : "gap-1 border-b border-slate-200 bg-slate-50 px-6 py-5";
   const cardContentClassName = embedded ? "px-0 pb-0 pt-6" : "p-6";
   const hasSchedulePanel = Boolean(onSaveSchedule);
-
-  return (
-    <div className={embedded ? "h-full" : "mx-auto max-w-7xl px-6 py-5"}>
-      {!embedded && (
-        <div className="mb-5">
-          <h1 className={pageTitleClassName}>내 정보 입력</h1>
-          <p className={pageDescriptionClassName}>
-            프로필과 정기 오피스아워 가능 시간을 관리합니다.
-          </p>
-        </div>
+  const content = (
+    <div
+      className={cn(
+        "grid gap-6",
+        hasSchedulePanel
+          ? "mx-auto w-full xl:grid-cols-[minmax(0,1.12fr)_minmax(340px,0.88fr)]"
+          : "mx-auto w-full max-w-4xl"
       )}
-      <div
-        className={cn(
-          "grid gap-6",
-          hasSchedulePanel
-            ? "mx-auto lg:grid-cols-[minmax(0,1.18fr)_minmax(360px,0.82fr)]"
-            : "mx-auto max-w-3xl"
-        )}
-      >
-        <Card
-          className={cn(
-            "w-full",
-            embedded && "border-0 shadow-none"
-          )}
-        >
+    >
+      <Card className={sectionCardClassName}>
         <CardHeader className={cardHeaderClassName}>
           <CardTitle className="text-xl font-semibold text-slate-900">
             {embedded ? "내 정보 입력" : "기본 정보"}
@@ -274,7 +266,7 @@ export function ConsultantProfilePage({
           <form
             id="consultant-profile-form"
             onSubmit={handleSubmit}
-            className="grid grid-cols-2 gap-3"
+            className="grid grid-cols-1 gap-4 md:grid-cols-2"
           >
             <div>
               <Label className="mb-2 block" htmlFor="consultant-name">
@@ -290,7 +282,7 @@ export function ConsultantProfilePage({
               />
             </div>
 
-              <div>
+            <div>
               <Label className="mb-2 block" htmlFor="consultant-organization">
                 소속
                 {requiredMark}
@@ -301,9 +293,9 @@ export function ConsultantProfilePage({
                 onChange={(event) => updateField("organization", event.target.value)}
                 placeholder="MYSC"
               />
-              </div>
+            </div>
 
-              <div>
+            <div>
               <Label className="mb-2 block" htmlFor="consultant-email">
                 이메일
                 {requiredMark}
@@ -315,9 +307,9 @@ export function ConsultantProfilePage({
                 onChange={(event) => updateField("email", event.target.value)}
                 required
               />
-              </div>
+            </div>
 
-              <div>
+            <div>
               <Label className="mb-2 block" htmlFor="consultant-phone">
                 전화번호
                 {requiredMark}
@@ -331,9 +323,9 @@ export function ConsultantProfilePage({
                 }
                 placeholder="010-0000-0000"
               />
-              </div>
+            </div>
 
-              <div>
+            <div>
               <Label className="mb-2 block" htmlFor="consultant-secondary-email">
                 보조 이메일
               </Label>
@@ -343,9 +335,9 @@ export function ConsultantProfilePage({
                 value={formValues.secondaryEmail}
                 onChange={(event) => updateField("secondaryEmail", event.target.value)}
               />
-              </div>
+            </div>
 
-              <div>
+            <div>
               <Label className="mb-2 block" htmlFor="consultant-secondary-phone">
                 보조 전화번호
               </Label>
@@ -358,9 +350,9 @@ export function ConsultantProfilePage({
                 }
                 placeholder="010-0000-0000"
               />
-              </div>
+            </div>
 
-              <div className="col-span-2">
+            <div className="md:col-span-2">
               <Label className="mb-2 block" htmlFor="consultant-meeting-link">
                 고정 화상회의 링크
                 {requiredMark}
@@ -371,9 +363,9 @@ export function ConsultantProfilePage({
                 onChange={(event) => updateField("fixedMeetingLink", event.target.value)}
                 placeholder="https://zoom.us/j/..."
               />
-              </div>
+            </div>
 
-              <div className="col-span-2">
+            <div className="md:col-span-2">
               <Label className="mb-2 block" htmlFor="consultant-expertise">
                 전문 분야 (쉼표 구분)
                 {requiredMark}
@@ -384,9 +376,9 @@ export function ConsultantProfilePage({
                 onChange={(event) => updateField("expertise", event.target.value)}
                 placeholder="예: 투자유치, 임팩트측정, BM"
               />
-              </div>
+            </div>
 
-            <div className="col-span-2">
+            <div className="md:col-span-2">
               <Label className="mb-2 block" htmlFor="consultant-bio">
                 메모
                 {requiredMark}
@@ -402,7 +394,7 @@ export function ConsultantProfilePage({
             </div>
           </form>
           {hideFooterActions ? null : (
-            <div className="mt-6 pt-4 border-t flex items-center justify-end gap-2">
+            <div className="mt-6 flex items-center justify-end gap-2 border-t pt-4">
               {onBack && (
                 <Button
                   type="button"
@@ -438,17 +430,17 @@ export function ConsultantProfilePage({
       </Card>
 
       {onSaveSchedule && (
-        <Card className={cn("w-full", embedded && "border-0 shadow-none")}>
+        <Card className={sectionCardClassName}>
           <CardHeader className={cardHeaderClassName}>
             <CardTitle className="text-xl font-semibold text-slate-900">
               내 스케줄 설정
             </CardTitle>
-            <CardDescription className="text-xs">
-              화/목 기준으로 가능한 시간을 선택하세요.
+            <CardDescription className="text-sm text-slate-500">
+              화요일/목요일 기준으로 가능한 시간을 선택하세요.
             </CardDescription>
           </CardHeader>
           <CardContent className={cardContentClassName}>
-            <div className="flex flex-wrap items-center gap-2 justify-end mb-4">
+            <div className="mb-4 flex flex-wrap items-center justify-end gap-2">
               <Button
                 type="button"
                 size="sm"
@@ -489,11 +481,11 @@ export function ConsultantProfilePage({
               {draftAvailability.map((day) => {
                 const dayInfo = scheduleDays.find((item) => item.value === day.dayOfWeek);
                 return (
-                  <div key={day.dayOfWeek} className="border rounded-lg p-3">
-                    <div className="text-xs font-semibold mb-2 text-slate-600">
+                  <div key={day.dayOfWeek} className="rounded-lg border p-3">
+                    <div className="mb-2 text-xs font-semibold text-slate-600">
                       {dayInfo?.label || "-"}요일
                     </div>
-                    <div className="grid grid-cols-4 md:grid-cols-6 gap-1.5">
+                    <div className="grid grid-cols-4 gap-1.5 md:grid-cols-6">
                       {day.slots.map((slot) => (
                         <button
                           key={`${day.dayOfWeek}-${slot.start}`}
@@ -529,7 +521,30 @@ export function ConsultantProfilePage({
           </CardContent>
         </Card>
       )}
-      </div>
+    </div>
+  );
+
+  return (
+    <div className={cn(embedded ? "h-full" : "flex min-h-full flex-col bg-slate-50")}>
+      {embedded ? (
+        <div className="h-full">{content}</div>
+      ) : (
+        <>
+          <div className="border-b bg-white px-6 py-5">
+            <div className={consultantPageContainerClassName}>
+              <h1 className={pageTitleClassName}>내 정보 입력</h1>
+              <p className={pageDescriptionClassName}>
+                프로필과 정기 오피스아워 가능 시간을 관리합니다.
+              </p>
+            </div>
+          </div>
+          <div className="flex-1 overflow-auto">
+            <div className={cn(consultantPageContainerClassName, "p-5")}>
+              {content}
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }
