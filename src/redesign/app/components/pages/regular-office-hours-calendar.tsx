@@ -77,15 +77,12 @@ export function RegularOfficeHoursCalendar({
   return (
     <div className="min-h-full flex flex-col bg-gray-50">
       {/* Header */}
-      <div className="bg-white border-b px-8 py-6">
-        <div className="flex items-center justify-between mb-4">
+      <div className="border-b border-slate-200/80 bg-white/80 px-8 py-4 backdrop-blur-sm">
+        <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h1 className="text-2xl font-bold text-gray-900">정기 오피스아워</h1>
-            <p className="text-sm text-muted-foreground mt-1">
+            <h1 className="text-2xl font-semibold text-slate-900">정기 오피스아워</h1>
+            <p className="mt-1 text-sm text-slate-500">
               매주 정해진 시간에 진행되는 오피스아워를 신청하세요
-            </p>
-            <p className="text-xs text-muted-foreground mt-1">
-              컨설턴트는 수락 후 확정됩니다.
             </p>
           </div>
           <div className="flex gap-2">

@@ -20,6 +20,7 @@ const DEFAULT_INVESTMENTS: InvestmentInput[] = [
 type SaveType = "draft" | "final"
 
 const FIELD_LABELS: Record<keyof CompanyInfoForm, string> = {
+  companyType: "기업 형태",
   companyInfo: "기업정보",
   representativeSolution: "대표 솔루션",
   sdgPriority1: "UN SDGs 우선순위 1위",
@@ -30,6 +31,11 @@ const FIELD_LABELS: Record<keyof CompanyInfoForm, string> = {
   ceoAge: "대표자 나이",
   ceoGender: "대표자 성별",
   ceoNationality: "대표자 국적",
+  hasCoRepresentative: "공동대표 여부",
+  coRepresentativeName: "공동대표 성명",
+  coRepresentativeBirthDate: "공동대표 생년월일",
+  coRepresentativeGender: "공동대표 성별",
+  coRepresentativeTitle: "공동대표 직책",
   founderSerialNumber: "이전 창업 횟수",
   website: "회사 홈페이지",
   foundedAt: "법인 설립일자",
@@ -219,28 +225,53 @@ export function useCompanyInfoForm(companyId: string) {
     Partial<Record<keyof CompanyInfoForm, boolean>>
   >({})
 
+  const isPreStartup = form.companyType === "예비창업"
+  const corporateRequiredKeys = useMemo<(keyof CompanyInfoForm)[]>(
+    () =>
+      isPreStartup
+        ? []
+        : [
+            "foundedAt",
+            "businessNumber",
+            "primaryBusiness",
+            "primaryIndustry",
+            "headOffice",
+            "workforceFullTime",
+            "workforceContract",
+            "revenue2025",
+            "revenue2026",
+            "capitalTotal",
+            "certification",
+            "tipsLipsHistory",
+          ],
+    [isPreStartup]
+  )
+  const coRepresentativeRequiredKeys = useMemo<(keyof CompanyInfoForm)[]>(
+    () =>
+      form.hasCoRepresentative === "예"
+        ? [
+            "coRepresentativeName",
+            "coRepresentativeBirthDate",
+            "coRepresentativeGender",
+            "coRepresentativeTitle",
+          ]
+        : [],
+    [form.hasCoRepresentative]
+  )
   const requiredKeys = useMemo<(keyof CompanyInfoForm)[]>(
     () => [
+      "companyType",
       "companyInfo",
       "ceoName",
       "ceoEmail",
       "ceoPhone",
-      "foundedAt",
-      "businessNumber",
-      "primaryBusiness",
-      "primaryIndustry",
-      "headOffice",
-      "workforceFullTime",
-      "workforceContract",
-      "revenue2025",
-      "revenue2026",
-      "capitalTotal",
-      "certification",
-      "tipsLipsHistory",
+      "sdgPriority1",
       "desiredInvestment2026",
       "desiredPreValue",
+      ...corporateRequiredKeys,
+      ...coRepresentativeRequiredKeys,
     ],
-    []
+    [coRepresentativeRequiredKeys, corporateRequiredKeys]
   )
 
   const missingRequiredFields = useMemo(
@@ -294,6 +325,7 @@ export function useCompanyInfoForm(companyId: string) {
         setHasSavedData(true)
         setHasFinalSavedData(data.metadata?.saveType !== "draft")
         const nextForm: CompanyInfoForm = {
+          companyType: data.basic?.companyType ?? "법인",
           companyInfo: data.basic?.companyInfo ?? "",
           representativeSolution: data.basic?.representativeSolution ?? "",
           sdgPriority1: data.impact?.sdgPriority1 ?? "",
@@ -305,6 +337,16 @@ export function useCompanyInfoForm(companyId: string) {
             data.basic?.ceo?.age != null ? String(data.basic.ceo.age) : "",
           ceoGender: data.basic?.ceo?.gender ?? "",
           ceoNationality: data.basic?.ceo?.nationality ?? "",
+          hasCoRepresentative:
+            data.basic?.ceo?.coRepresentative?.enabled === true ? "예" : "아니요",
+          coRepresentativeName:
+            data.basic?.ceo?.coRepresentative?.name ?? "",
+          coRepresentativeBirthDate:
+            data.basic?.ceo?.coRepresentative?.birthDate ?? "",
+          coRepresentativeGender:
+            data.basic?.ceo?.coRepresentative?.gender ?? "",
+          coRepresentativeTitle:
+            data.basic?.ceo?.coRepresentative?.title ?? "",
           founderSerialNumber:
             data.basic?.founderSerialNumber != null
               ? String(data.basic.founderSerialNumber)
@@ -363,15 +405,18 @@ export function useCompanyInfoForm(companyId: string) {
   }, [companyId])
 
   function addInvestmentRow() {
-    setInvestmentRows((prev) => [
-      ...prev,
-      {
-        stage: "",
-        date: "",
-        postMoney: "",
-        majorShareholder: "",
-      },
-    ])
+    setInvestmentRows((prev) => {
+      if (prev.length >= 3) return prev
+      return [
+        ...prev,
+        {
+          stage: "",
+          date: "",
+          postMoney: "",
+          majorShareholder: "",
+        },
+      ]
+    })
   }
 
   function removeInvestmentRow(target: number) {
@@ -402,8 +447,11 @@ export function useCompanyInfoForm(companyId: string) {
   }
 
   function buildCompanyInfo(saveType: SaveType): CompanyInfoRecord {
+    const hasCoRepresentative = form.hasCoRepresentative === "예"
+    const isCorporate = form.companyType !== "예비창업"
     const companyInfo: CompanyInfoRecord = {
       basic: {
+        companyType: form.companyType,
         companyInfo: form.companyInfo,
         representativeSolution: form.representativeSolution,
         ceo: {
@@ -413,32 +461,39 @@ export function useCompanyInfoForm(companyId: string) {
           age: toNumber(form.ceoAge),
           gender: form.ceoGender,
           nationality: form.ceoNationality,
+          coRepresentative: {
+            enabled: hasCoRepresentative,
+            name: hasCoRepresentative ? form.coRepresentativeName : "",
+            birthDate: hasCoRepresentative ? form.coRepresentativeBirthDate : "",
+            gender: hasCoRepresentative ? form.coRepresentativeGender : "",
+            title: hasCoRepresentative ? form.coRepresentativeTitle : "",
+          },
         },
         founderSerialNumber: toNumber(form.founderSerialNumber),
         website: form.website,
-        foundedAt: form.foundedAt,
-        businessNumber: form.businessNumber,
-        primaryBusiness: form.primaryBusiness,
-        primaryIndustry: form.primaryIndustry,
+        foundedAt: isCorporate ? form.foundedAt : "",
+        businessNumber: isCorporate ? form.businessNumber : "",
+        primaryBusiness: isCorporate ? form.primaryBusiness : "",
+        primaryIndustry: isCorporate ? form.primaryIndustry : "",
       },
       locations: {
-        headOffice: form.headOffice,
-        branchOrLab: form.branchOffice,
+        headOffice: isCorporate ? form.headOffice : "",
+        branchOrLab: isCorporate ? form.branchOffice : "",
       },
       workforce: {
-        fullTime: toNumber(form.workforceFullTime),
-        contract: toNumber(form.workforceContract),
+        fullTime: isCorporate ? toNumber(form.workforceFullTime) : null,
+        contract: isCorporate ? toNumber(form.workforceContract) : null,
       },
       finance: {
         revenue: {
-          y2025: toDecimalNumber(form.revenue2025),
-          y2026: toDecimalNumber(form.revenue2026),
+          y2025: isCorporate ? toDecimalNumber(form.revenue2025) : null,
+          y2026: isCorporate ? toDecimalNumber(form.revenue2026) : null,
         },
-        capitalTotal: toNumber(form.capitalTotal),
+        capitalTotal: isCorporate ? toNumber(form.capitalTotal) : null,
       },
       certifications: {
-        designation: form.certification,
-        tipsLipsHistory: form.tipsLipsHistory,
+        designation: isCorporate ? form.certification : "",
+        tipsLipsHistory: isCorporate ? form.tipsLipsHistory : "",
       },
       impact: {
         sdgPriority1: form.sdgPriority1,
@@ -448,19 +503,21 @@ export function useCompanyInfoForm(companyId: string) {
       globalExpansion: {
         targetCountries: toTargetCountries(form.targetCountries),
       },
-      investments: investmentRows.map((row) => ({
-        stage: normalizeInvestmentStageValue(row.stage),
-        date: toIsoDate(row.date),
-        postMoney: toDecimalNumber(row.postMoney),
-        majorShareholder: row.majorShareholder,
-      })),
+      investments: isCorporate
+        ? investmentRows.map((row) => ({
+            stage: normalizeInvestmentStageValue(row.stage),
+            date: toIsoDate(row.date),
+            postMoney: toDecimalNumber(row.postMoney),
+            majorShareholder: row.majorShareholder,
+          }))
+        : [],
       vouchers: {
-        exportVoucherHeld: form.exportVoucherHeld,
-        exportVoucherAmount: form.exportVoucherAmount,
-        exportVoucherUsageRate: form.exportVoucherUsageRate,
-        innovationVoucherHeld: form.innovationVoucherHeld,
-        innovationVoucherAmount: form.innovationVoucherAmount,
-        innovationVoucherUsageRate: form.innovationVoucherUsageRate,
+        exportVoucherHeld: isCorporate ? form.exportVoucherHeld : "",
+        exportVoucherAmount: isCorporate ? form.exportVoucherAmount : "",
+        exportVoucherUsageRate: isCorporate ? form.exportVoucherUsageRate : "",
+        innovationVoucherHeld: isCorporate ? form.innovationVoucherHeld : "",
+        innovationVoucherAmount: isCorporate ? form.innovationVoucherAmount : "",
+        innovationVoucherUsageRate: isCorporate ? form.innovationVoucherUsageRate : "",
       },
       fundingPlan: {
         desiredAmount2026: toDecimalNumber(form.desiredInvestment2026),
@@ -558,6 +615,43 @@ export function useCompanyInfoForm(companyId: string) {
     markTouched: (field: keyof CompanyInfoForm) =>
       setTouched((prev) => ({ ...prev, [field]: true })),
     isFieldInvalid: (field: keyof CompanyInfoForm) => {
+      if (
+        form.companyType === "예비창업"
+        && (
+          field === "foundedAt"
+          || field === "businessNumber"
+          || field === "primaryBusiness"
+          || field === "primaryIndustry"
+          || field === "headOffice"
+          || field === "branchOffice"
+          || field === "workforceFullTime"
+          || field === "workforceContract"
+          || field === "revenue2025"
+          || field === "revenue2026"
+          || field === "capitalTotal"
+          || field === "certification"
+          || field === "tipsLipsHistory"
+          || field === "exportVoucherHeld"
+          || field === "exportVoucherAmount"
+          || field === "exportVoucherUsageRate"
+          || field === "innovationVoucherHeld"
+          || field === "innovationVoucherAmount"
+          || field === "innovationVoucherUsageRate"
+        )
+      ) {
+        return false
+      }
+      if (
+        form.hasCoRepresentative !== "예"
+        && (
+          field === "coRepresentativeName"
+          || field === "coRepresentativeBirthDate"
+          || field === "coRepresentativeGender"
+          || field === "coRepresentativeTitle"
+        )
+      ) {
+        return false
+      }
       if (!touched[field]) return false
       const value = form[field] ?? ""
       if (!isFilled(value)) return true
@@ -567,6 +661,43 @@ export function useCompanyInfoForm(companyId: string) {
       return false
     },
     isFieldValid: (field: keyof CompanyInfoForm) => {
+      if (
+        form.companyType === "예비창업"
+        && (
+          field === "foundedAt"
+          || field === "businessNumber"
+          || field === "primaryBusiness"
+          || field === "primaryIndustry"
+          || field === "headOffice"
+          || field === "branchOffice"
+          || field === "workforceFullTime"
+          || field === "workforceContract"
+          || field === "revenue2025"
+          || field === "revenue2026"
+          || field === "capitalTotal"
+          || field === "certification"
+          || field === "tipsLipsHistory"
+          || field === "exportVoucherHeld"
+          || field === "exportVoucherAmount"
+          || field === "exportVoucherUsageRate"
+          || field === "innovationVoucherHeld"
+          || field === "innovationVoucherAmount"
+          || field === "innovationVoucherUsageRate"
+        )
+      ) {
+        return true
+      }
+      if (
+        form.hasCoRepresentative !== "예"
+        && (
+          field === "coRepresentativeName"
+          || field === "coRepresentativeBirthDate"
+          || field === "coRepresentativeGender"
+          || field === "coRepresentativeTitle"
+        )
+      ) {
+        return true
+      }
       const value = form[field] ?? ""
       if (!isFilled(value)) return false
       if (field === "ceoEmail") return isEmail(value)
@@ -575,6 +706,43 @@ export function useCompanyInfoForm(companyId: string) {
       return true
     },
     isSavedFieldValid: (field: keyof CompanyInfoForm) => {
+      if (
+        savedForm.companyType === "예비창업"
+        && (
+          field === "foundedAt"
+          || field === "businessNumber"
+          || field === "primaryBusiness"
+          || field === "primaryIndustry"
+          || field === "headOffice"
+          || field === "branchOffice"
+          || field === "workforceFullTime"
+          || field === "workforceContract"
+          || field === "revenue2025"
+          || field === "revenue2026"
+          || field === "capitalTotal"
+          || field === "certification"
+          || field === "tipsLipsHistory"
+          || field === "exportVoucherHeld"
+          || field === "exportVoucherAmount"
+          || field === "exportVoucherUsageRate"
+          || field === "innovationVoucherHeld"
+          || field === "innovationVoucherAmount"
+          || field === "innovationVoucherUsageRate"
+        )
+      ) {
+        return true
+      }
+      if (
+        savedForm.hasCoRepresentative !== "예"
+        && (
+          field === "coRepresentativeName"
+          || field === "coRepresentativeBirthDate"
+          || field === "coRepresentativeGender"
+          || field === "coRepresentativeTitle"
+        )
+      ) {
+        return true
+      }
       const value = savedForm[field] ?? ""
       if (!isFilled(value)) return false
       if (field === "ceoEmail") return isEmail(value)

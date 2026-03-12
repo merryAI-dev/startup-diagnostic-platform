@@ -6,6 +6,7 @@ export type InvestmentInput = {
 }
 
 export type CompanyInfoForm = {
+  companyType: string
   companyInfo: string
   representativeSolution: string
   sdgPriority1: string
@@ -16,6 +17,11 @@ export type CompanyInfoForm = {
   ceoAge: string
   ceoGender: string
   ceoNationality: string
+  hasCoRepresentative: string
+  coRepresentativeName: string
+  coRepresentativeBirthDate: string
+  coRepresentativeGender: string
+  coRepresentativeTitle: string
   founderSerialNumber: string
   website: string
   foundedAt: string
@@ -45,6 +51,7 @@ export type CompanyInfoForm = {
 
 export type CompanyInfoRecord = {
   basic: {
+    companyType: string
     companyInfo: string
     representativeSolution: string
     ceo: {
@@ -54,6 +61,13 @@ export type CompanyInfoRecord = {
       age: number | null
       gender: string
       nationality: string
+      coRepresentative: {
+        enabled: boolean
+        name: string
+        birthDate: string
+        gender: string
+        title: string
+      }
     }
     founderSerialNumber: number | null
     website: string
@@ -115,6 +129,7 @@ export type CompanyInfoRecord = {
 }
 
 export const DEFAULT_FORM: CompanyInfoForm = {
+  companyType: "법인",
   companyInfo: "",
   representativeSolution: "",
   sdgPriority1: "",
@@ -125,6 +140,11 @@ export const DEFAULT_FORM: CompanyInfoForm = {
   ceoAge: "",
   ceoGender: "",
   ceoNationality: "",
+  hasCoRepresentative: "",
+  coRepresentativeName: "",
+  coRepresentativeBirthDate: "",
+  coRepresentativeGender: "",
+  coRepresentativeTitle: "",
   founderSerialNumber: "",
   website: "",
   foundedAt: "",

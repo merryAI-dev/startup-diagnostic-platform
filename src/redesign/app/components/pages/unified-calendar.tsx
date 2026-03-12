@@ -137,6 +137,7 @@ export function UnifiedCalendar({
   const [actionType, setActionType] = useState<"accept" | "reject">("accept");
   const [rejectReason, setRejectReason] = useState("");
   const [selectedPendingApplicationId, setSelectedPendingApplicationId] = useState<string | null>(null);
+  const [selectedScheduledApplicationId, setSelectedScheduledApplicationId] = useState<string | null>(null);
   const [newEvent, setNewEvent] = useState({
     title: "",
     date: "",
@@ -345,6 +346,10 @@ export function UnifiedCalendar({
     if (!selectedPendingApplicationId) return null;
     return applications.find((app) => app.id === selectedPendingApplicationId) ?? null;
   }, [applications, selectedPendingApplicationId]);
+  const selectedScheduledApplication = useMemo(() => {
+    if (!selectedScheduledApplicationId) return null;
+    return applications.find((app) => app.id === selectedScheduledApplicationId) ?? null;
+  }, [applications, selectedScheduledApplicationId]);
 
   const openAcceptDialog = (event: Application) => {
     setActionType("accept");
@@ -375,6 +380,13 @@ export function UnifiedCalendar({
   };
   const openPendingDetailModal = (applicationId: string) => {
     setSelectedPendingApplicationId(applicationId);
+  };
+  const openScheduledDetail = (applicationId: string) => {
+    if (isConsultant && onUpdateStatus && onUpdateApplication) {
+      setSelectedScheduledApplicationId(applicationId);
+      return;
+    }
+    onNavigateToApplication?.(applicationId);
   };
 
   const renderDayContent = (props: DayContentProps) => {
@@ -759,7 +771,7 @@ export function UnifiedCalendar({
                                     ? "#3b82f6"
                                     : getProgramColor(event.programId),
                               }}
-                              onClick={() => onNavigateToApplication?.(event.id)}
+                              onClick={() => openScheduledDetail(event.id)}
                             >
                               <div className="flex items-start justify-between mb-2">
                                 <h4 className="font-medium text-sm text-[#0A2540] flex-1">
@@ -1034,7 +1046,7 @@ export function UnifiedCalendar({
                                     ? "4px solid #3b82f6"
                                     : undefined,
                               }}
-                              onClick={() => onNavigateToApplication?.(event.id)}
+                              onClick={() => openScheduledDetail(event.id)}
                             >
                               <div className="flex items-start gap-4">
                                 <div
@@ -1118,6 +1130,20 @@ export function UnifiedCalendar({
           onRequestApplication={onRequestApplication}
           readOnly={true}
           allowStatusActions={isConsultant}
+          currentConsultantName={currentConsultantName}
+        />
+      )}
+      {selectedScheduledApplication && onUpdateStatus && onUpdateApplication && (
+        <AdminApplicationDetailModal
+          application={selectedScheduledApplication}
+          onClose={() => setSelectedScheduledApplicationId(null)}
+          onUpdateStatus={onUpdateStatus}
+          onUpdateApplication={onUpdateApplication}
+          onConfirmApplication={onConfirmApplication}
+          onRejectApplication={onRejectApplication}
+          onRequestApplication={onRequestApplication}
+          readOnly={true}
+          allowStatusActions={false}
           currentConsultantName={currentConsultantName}
         />
       )}

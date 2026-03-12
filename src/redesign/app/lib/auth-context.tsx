@@ -66,16 +66,39 @@ function toDecimalNumber(value: string) {
 function buildCompanyInfoRecord(form: CompanyInfoForm): CompanyInfoRecord {
   return {
     basic: {
+      companyType: form.companyType,
       companyInfo: form.companyInfo,
+      representativeSolution: form.representativeSolution,
       ceo: {
         name: form.ceoName,
         email: form.ceoEmail,
         phone: form.ceoPhone,
+        age: toNumber(form.ceoAge),
+        gender: form.ceoGender,
+        nationality: form.ceoNationality,
+        coRepresentative: {
+          enabled: form.hasCoRepresentative === "예",
+          name:
+            form.hasCoRepresentative === "예" ? form.coRepresentativeName : "",
+          birthDate:
+            form.hasCoRepresentative === "예"
+              ? form.coRepresentativeBirthDate
+              : "",
+          gender:
+            form.hasCoRepresentative === "예"
+              ? form.coRepresentativeGender
+              : "",
+          title:
+            form.hasCoRepresentative === "예" ? form.coRepresentativeTitle : "",
+        },
       },
+      founderSerialNumber: toNumber(form.founderSerialNumber),
       foundedAt: form.foundedAt,
-      businessNumber: form.businessNumber,
+      businessNumber:
+        form.companyType === "예비창업" ? "" : form.businessNumber,
       primaryBusiness: form.primaryBusiness,
       primaryIndustry: form.primaryIndustry,
+      website: form.website,
     },
     locations: {
       headOffice: form.headOffice,
@@ -96,7 +119,23 @@ function buildCompanyInfoRecord(form: CompanyInfoForm): CompanyInfoRecord {
       designation: form.certification,
       tipsLipsHistory: form.tipsLipsHistory,
     },
+    impact: {
+      sdgPriority1: form.sdgPriority1,
+      sdgPriority2: form.sdgPriority2,
+      myscExpectation: form.myscExpectation,
+    },
+    globalExpansion: {
+      targetCountries: [],
+    },
     investments: [],
+    vouchers: {
+      exportVoucherHeld: form.exportVoucherHeld,
+      exportVoucherAmount: form.exportVoucherAmount,
+      exportVoucherUsageRate: form.exportVoucherUsageRate,
+      innovationVoucherHeld: form.innovationVoucherHeld,
+      innovationVoucherAmount: form.innovationVoucherAmount,
+      innovationVoucherUsageRate: form.innovationVoucherUsageRate,
+    },
     fundingPlan: {
       desiredAmount2026: toDecimalNumber(form.desiredInvestment2026),
       preValue: toDecimalNumber(form.desiredPreValue),

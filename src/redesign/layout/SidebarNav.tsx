@@ -87,7 +87,7 @@ export function SidebarNav({ basePath, userRole = "company" }: SidebarNavProps) 
   }
 
   return (
-    <div className="flex h-full w-64 flex-col border-r bg-white">
+    <div className="flex h-full w-64 flex-col border-r border-slate-300 bg-slate-200">
       <nav className="flex-1 space-y-1 p-4">
         {isAdminUser ? (
           <>
@@ -109,12 +109,6 @@ export function SidebarNav({ basePath, userRole = "company" }: SidebarNavProps) 
         )}
       </nav>
 
-      <div className="border-t p-4">
-        <div className="rounded-lg bg-blue-50 p-3">
-          <p className="mb-1 text-xs text-blue-900">도움이 필요하신가요?</p>
-          <span className="text-xs text-primary">사용 가이드 보기</span>
-        </div>
-      </div>
     </div>
   )
 }
