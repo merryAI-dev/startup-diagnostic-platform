@@ -17,6 +17,51 @@ const DEFAULT_INVESTMENTS: InvestmentInput[] = [
   },
 ]
 
+const CORPORATE_ONLY_FIELDS: (keyof CompanyInfoForm)[] = [
+  "foundedAt",
+  "businessNumber",
+  "website",
+  "primaryBusiness",
+  "primaryIndustry",
+  "headOffice",
+  "branchOffice",
+  "targetCountries",
+  "workforceFullTime",
+  "workforceContract",
+  "revenue2025",
+  "revenue2026",
+  "capitalTotal",
+  "certification",
+  "tipsLipsHistory",
+  "exportVoucherHeld",
+  "exportVoucherAmount",
+  "exportVoucherUsageRate",
+  "innovationVoucherHeld",
+  "innovationVoucherAmount",
+  "innovationVoucherUsageRate",
+]
+
+const CO_REPRESENTATIVE_FIELDS: (keyof CompanyInfoForm)[] = [
+  "coRepresentativeName",
+  "coRepresentativeBirthDate",
+  "coRepresentativeGender",
+  "coRepresentativeTitle",
+]
+
+const EXPORT_VOUCHER_DETAIL_FIELDS: (keyof CompanyInfoForm)[] = [
+  "exportVoucherAmount",
+  "exportVoucherUsageRate",
+]
+
+const INNOVATION_VOUCHER_DETAIL_FIELDS: (keyof CompanyInfoForm)[] = [
+  "innovationVoucherAmount",
+  "innovationVoucherUsageRate",
+]
+
+const MIN_LENGTH_RULES: Partial<Record<keyof CompanyInfoForm, number>> = {
+  representativeSolution: 20,
+}
+
 type SaveType = "draft" | "final"
 
 const FIELD_LABELS: Record<keyof CompanyInfoForm, string> = {
@@ -184,6 +229,16 @@ function isBusinessNumber(value: string) {
   return /^\d{3}-\d{2}-\d{5}$/.test(value)
 }
 
+function hasNumber(value: string) {
+  return value.replace(/[^\d]/g, "").length > 0
+}
+
+function meetsMinLength(field: keyof CompanyInfoForm, value: string) {
+  const minLength = MIN_LENGTH_RULES[field]
+  if (!minLength) return true
+  return value.trim().length >= minLength
+}
+
 function normalizeInvestmentStageValue(value: unknown) {
   if (Array.isArray(value)) {
     return value
@@ -233,9 +288,12 @@ export function useCompanyInfoForm(companyId: string) {
         : [
             "foundedAt",
             "businessNumber",
+            "website",
             "primaryBusiness",
             "primaryIndustry",
             "headOffice",
+            "branchOffice",
+            "targetCountries",
             "workforceFullTime",
             "workforceContract",
             "revenue2025",
@@ -243,36 +301,116 @@ export function useCompanyInfoForm(companyId: string) {
             "capitalTotal",
             "certification",
             "tipsLipsHistory",
+            "exportVoucherHeld",
+            "innovationVoucherHeld",
           ],
     [isPreStartup]
   )
   const coRepresentativeRequiredKeys = useMemo<(keyof CompanyInfoForm)[]>(
     () =>
       form.hasCoRepresentative === "예"
-        ? [
-            "coRepresentativeName",
-            "coRepresentativeBirthDate",
-            "coRepresentativeGender",
-            "coRepresentativeTitle",
-          ]
+        ? CO_REPRESENTATIVE_FIELDS
         : [],
     [form.hasCoRepresentative]
+  )
+  const exportVoucherRequiredKeys = useMemo<(keyof CompanyInfoForm)[]>(
+    () =>
+      !isPreStartup && form.exportVoucherHeld === "예"
+        ? EXPORT_VOUCHER_DETAIL_FIELDS
+        : [],
+    [form.exportVoucherHeld, isPreStartup]
+  )
+  const innovationVoucherRequiredKeys = useMemo<(keyof CompanyInfoForm)[]>(
+    () =>
+      !isPreStartup && form.innovationVoucherHeld === "예"
+        ? INNOVATION_VOUCHER_DETAIL_FIELDS
+        : [],
+    [form.innovationVoucherHeld, isPreStartup]
   )
   const requiredKeys = useMemo<(keyof CompanyInfoForm)[]>(
     () => [
       "companyType",
       "companyInfo",
+      "representativeSolution",
+      "sdgPriority2",
       "ceoName",
       "ceoEmail",
       "ceoPhone",
+      "ceoAge",
+      "ceoGender",
+      "ceoNationality",
+      "hasCoRepresentative",
+      "founderSerialNumber",
       "sdgPriority1",
       "desiredInvestment2026",
       "desiredPreValue",
+      "myscExpectation",
       ...corporateRequiredKeys,
       ...coRepresentativeRequiredKeys,
+      ...exportVoucherRequiredKeys,
+      ...innovationVoucherRequiredKeys,
     ],
-    [coRepresentativeRequiredKeys, corporateRequiredKeys]
+    [
+      coRepresentativeRequiredKeys,
+      corporateRequiredKeys,
+      exportVoucherRequiredKeys,
+      innovationVoucherRequiredKeys,
+    ]
   )
+
+  function shouldSkipFieldValidation(
+    targetForm: CompanyInfoForm,
+    field: keyof CompanyInfoForm
+  ) {
+    if (
+      targetForm.companyType === "예비창업"
+      && CORPORATE_ONLY_FIELDS.includes(field)
+    ) {
+      return true
+    }
+    if (
+      targetForm.hasCoRepresentative !== "예"
+      && CO_REPRESENTATIVE_FIELDS.includes(field)
+    ) {
+      return true
+    }
+    if (
+      targetForm.exportVoucherHeld !== "예"
+      && EXPORT_VOUCHER_DETAIL_FIELDS.includes(field)
+    ) {
+      return true
+    }
+    if (
+      targetForm.innovationVoucherHeld !== "예"
+      && INNOVATION_VOUCHER_DETAIL_FIELDS.includes(field)
+    ) {
+      return true
+    }
+    return false
+  }
+
+  const investmentRowsComplete = useMemo(() => {
+    if (isPreStartup) return true
+    const meaningfulRows = investmentRows.filter((row) => {
+      return (
+        isFilled(row.stage)
+        || isFilled(row.date)
+        || hasNumber(row.postMoney)
+        || isFilled(row.majorShareholder)
+      )
+    })
+
+    return (
+      meaningfulRows.length > 0
+      && meaningfulRows.every(
+        (row) =>
+          isFilled(row.stage)
+          && isFilled(row.date)
+          && hasNumber(row.postMoney)
+          && isFilled(row.majorShareholder)
+      )
+    )
+  }, [investmentRows, isPreStartup])
 
   const missingRequiredFields = useMemo(
     () => requiredKeys.filter((key) => !isFilled(form[key] ?? "")),
@@ -284,6 +422,7 @@ export function useCompanyInfoForm(companyId: string) {
       requiredKeys.filter((key) => {
         const value = form[key] ?? ""
         if (!isFilled(value)) return false
+        if (!meetsMinLength(key, value)) return true
         if (key === "ceoEmail") return !isEmail(value)
         if (key === "ceoPhone") return !isPhone(value)
         if (key === "businessNumber") return !isBusinessNumber(value)
@@ -292,7 +431,7 @@ export function useCompanyInfoForm(companyId: string) {
     [requiredKeys, form]
   )
 
-  const missingRequired = missingRequiredFields.length
+  const missingRequired = missingRequiredFields.length + (investmentRowsComplete ? 0 : 1)
   const invalidRequired = invalidRequiredFields.length
   const canSubmit = missingRequired === 0 && invalidRequired === 0
 
@@ -603,7 +742,10 @@ export function useCompanyInfoForm(companyId: string) {
     canSubmit,
     missingRequired,
     invalidRequired,
-    missingRequiredLabels: missingRequiredFields.map((field) => FIELD_LABELS[field]),
+    missingRequiredLabels: [
+      ...missingRequiredFields.map((field) => FIELD_LABELS[field]),
+      ...(!investmentRowsComplete ? ["투자이력"] : []),
+    ],
     invalidRequiredLabels: invalidRequiredFields.map((field) => FIELD_LABELS[field]),
     hasSavedData,
     hasFinalSavedData,
@@ -615,136 +757,37 @@ export function useCompanyInfoForm(companyId: string) {
     markTouched: (field: keyof CompanyInfoForm) =>
       setTouched((prev) => ({ ...prev, [field]: true })),
     isFieldInvalid: (field: keyof CompanyInfoForm) => {
-      if (
-        form.companyType === "예비창업"
-        && (
-          field === "foundedAt"
-          || field === "businessNumber"
-          || field === "primaryBusiness"
-          || field === "primaryIndustry"
-          || field === "headOffice"
-          || field === "branchOffice"
-          || field === "workforceFullTime"
-          || field === "workforceContract"
-          || field === "revenue2025"
-          || field === "revenue2026"
-          || field === "capitalTotal"
-          || field === "certification"
-          || field === "tipsLipsHistory"
-          || field === "exportVoucherHeld"
-          || field === "exportVoucherAmount"
-          || field === "exportVoucherUsageRate"
-          || field === "innovationVoucherHeld"
-          || field === "innovationVoucherAmount"
-          || field === "innovationVoucherUsageRate"
-        )
-      ) {
-        return false
-      }
-      if (
-        form.hasCoRepresentative !== "예"
-        && (
-          field === "coRepresentativeName"
-          || field === "coRepresentativeBirthDate"
-          || field === "coRepresentativeGender"
-          || field === "coRepresentativeTitle"
-        )
-      ) {
+      if (shouldSkipFieldValidation(form, field)) {
         return false
       }
       if (!touched[field]) return false
       const value = form[field] ?? ""
       if (!isFilled(value)) return true
+      if (!meetsMinLength(field, value)) return true
       if (field === "ceoEmail") return !isEmail(value)
       if (field === "ceoPhone") return !isPhone(value)
       if (field === "businessNumber") return !isBusinessNumber(value)
       return false
     },
     isFieldValid: (field: keyof CompanyInfoForm) => {
-      if (
-        form.companyType === "예비창업"
-        && (
-          field === "foundedAt"
-          || field === "businessNumber"
-          || field === "primaryBusiness"
-          || field === "primaryIndustry"
-          || field === "headOffice"
-          || field === "branchOffice"
-          || field === "workforceFullTime"
-          || field === "workforceContract"
-          || field === "revenue2025"
-          || field === "revenue2026"
-          || field === "capitalTotal"
-          || field === "certification"
-          || field === "tipsLipsHistory"
-          || field === "exportVoucherHeld"
-          || field === "exportVoucherAmount"
-          || field === "exportVoucherUsageRate"
-          || field === "innovationVoucherHeld"
-          || field === "innovationVoucherAmount"
-          || field === "innovationVoucherUsageRate"
-        )
-      ) {
-        return true
-      }
-      if (
-        form.hasCoRepresentative !== "예"
-        && (
-          field === "coRepresentativeName"
-          || field === "coRepresentativeBirthDate"
-          || field === "coRepresentativeGender"
-          || field === "coRepresentativeTitle"
-        )
-      ) {
+      if (shouldSkipFieldValidation(form, field)) {
         return true
       }
       const value = form[field] ?? ""
       if (!isFilled(value)) return false
+      if (!meetsMinLength(field, value)) return false
       if (field === "ceoEmail") return isEmail(value)
       if (field === "ceoPhone") return isPhone(value)
       if (field === "businessNumber") return isBusinessNumber(value)
       return true
     },
     isSavedFieldValid: (field: keyof CompanyInfoForm) => {
-      if (
-        savedForm.companyType === "예비창업"
-        && (
-          field === "foundedAt"
-          || field === "businessNumber"
-          || field === "primaryBusiness"
-          || field === "primaryIndustry"
-          || field === "headOffice"
-          || field === "branchOffice"
-          || field === "workforceFullTime"
-          || field === "workforceContract"
-          || field === "revenue2025"
-          || field === "revenue2026"
-          || field === "capitalTotal"
-          || field === "certification"
-          || field === "tipsLipsHistory"
-          || field === "exportVoucherHeld"
-          || field === "exportVoucherAmount"
-          || field === "exportVoucherUsageRate"
-          || field === "innovationVoucherHeld"
-          || field === "innovationVoucherAmount"
-          || field === "innovationVoucherUsageRate"
-        )
-      ) {
-        return true
-      }
-      if (
-        savedForm.hasCoRepresentative !== "예"
-        && (
-          field === "coRepresentativeName"
-          || field === "coRepresentativeBirthDate"
-          || field === "coRepresentativeGender"
-          || field === "coRepresentativeTitle"
-        )
-      ) {
+      if (shouldSkipFieldValidation(savedForm, field)) {
         return true
       }
       const value = savedForm[field] ?? ""
       if (!isFilled(value)) return false
+      if (!meetsMinLength(field, value)) return false
       if (field === "ceoEmail") return isEmail(value)
       if (field === "ceoPhone") return isPhone(value)
       if (field === "businessNumber") return isBusinessNumber(value)

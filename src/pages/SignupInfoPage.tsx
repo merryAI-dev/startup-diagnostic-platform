@@ -410,8 +410,10 @@ function CompanySignupInfo({
   const [touched, setTouched] = useState<Partial<Record<keyof CompanyInfoForm, boolean>>>({})
   const [saving, setSaving] = useState(false)
   const [activeInvestmentStageRow, setActiveInvestmentStageRow] = useState<number | null>(null)
+  const [certificationDropdownOpen, setCertificationDropdownOpen] = useState(false)
   const [programDropdownOpen, setProgramDropdownOpen] = useState(false)
   const investmentStageDropdownRefs = useRef<Record<number, HTMLDivElement | null>>({})
+  const certificationDropdownRef = useRef<HTMLDivElement | null>(null)
   const programDropdownRef = useRef<HTMLDivElement | null>(null)
   const signupSectionRefs = useRef<Record<string, HTMLElement | null>>({})
   const [consentOpen, setConsentOpen] = useState(false)
@@ -510,6 +512,46 @@ function CompanySignupInfo({
   const YES_NO_OPTIONS = ["예", "아니요"] as const
   const COMPANY_TYPE_OPTIONS = ["예비창업", "법인"] as const
   const REPRESENTATIVE_SOLUTION_MAX_LENGTH = 50
+  const REPRESENTATIVE_SOLUTION_MIN_LENGTH = 20
+  const MYSC_EXPECTATION_MAX_LENGTH = 20
+
+  const CORPORATE_ONLY_FIELDS: (keyof CompanyInfoForm)[] = [
+    "foundedAt",
+    "businessNumber",
+    "website",
+    "primaryBusiness",
+    "primaryIndustry",
+    "headOffice",
+    "branchOffice",
+    "targetCountries",
+    "workforceFullTime",
+    "workforceContract",
+    "revenue2025",
+    "revenue2026",
+    "capitalTotal",
+    "certification",
+    "tipsLipsHistory",
+    "exportVoucherHeld",
+    "exportVoucherAmount",
+    "exportVoucherUsageRate",
+    "innovationVoucherHeld",
+    "innovationVoucherAmount",
+    "innovationVoucherUsageRate",
+  ]
+  const CO_REPRESENTATIVE_FIELDS: (keyof CompanyInfoForm)[] = [
+    "coRepresentativeName",
+    "coRepresentativeBirthDate",
+    "coRepresentativeGender",
+    "coRepresentativeTitle",
+  ]
+  const EXPORT_VOUCHER_DETAIL_FIELDS: (keyof CompanyInfoForm)[] = [
+    "exportVoucherAmount",
+    "exportVoucherUsageRate",
+  ]
+  const INNOVATION_VOUCHER_DETAIL_FIELDS: (keyof CompanyInfoForm)[] = [
+    "innovationVoucherAmount",
+    "innovationVoucherUsageRate",
+  ]
 
   type AddressFieldKey = "headOffice" | "branchOffice"
   type DaumPostcodeAddress = {
@@ -595,14 +637,18 @@ function CompanySignupInfo({
 
   const isPreStartup = form.companyType === "예비창업"
   const representativeSolutionLength = form.representativeSolution.length
+  const myscExpectationLength = form.myscExpectation.length
   const corporateRequiredKeys: (keyof CompanyInfoForm)[] = isPreStartup
     ? []
     : [
         "foundedAt",
         "businessNumber",
+        "website",
         "primaryBusiness",
         "primaryIndustry",
         "headOffice",
+        "branchOffice",
+        "targetCountries",
         "workforceFullTime",
         "workforceContract",
         "revenue2025",
@@ -610,27 +656,42 @@ function CompanySignupInfo({
         "capitalTotal",
         "certification",
         "tipsLipsHistory",
+        "exportVoucherHeld",
+        "innovationVoucherHeld",
       ]
   const coRepresentativeRequiredKeys: (keyof CompanyInfoForm)[] =
     form.hasCoRepresentative === "예"
-      ? [
-          "coRepresentativeName",
-          "coRepresentativeBirthDate",
-          "coRepresentativeGender",
-          "coRepresentativeTitle",
-        ]
+      ? CO_REPRESENTATIVE_FIELDS
+      : []
+  const exportVoucherRequiredKeys: (keyof CompanyInfoForm)[] =
+    !isPreStartup && form.exportVoucherHeld === "예"
+      ? EXPORT_VOUCHER_DETAIL_FIELDS
+      : []
+  const innovationVoucherRequiredKeys: (keyof CompanyInfoForm)[] =
+    !isPreStartup && form.innovationVoucherHeld === "예"
+      ? INNOVATION_VOUCHER_DETAIL_FIELDS
       : []
   const requiredKeys: (keyof CompanyInfoForm)[] = [
     "companyType",
     "companyInfo",
+    "representativeSolution",
+    "sdgPriority2",
     "ceoName",
     "ceoEmail",
     "ceoPhone",
+    "ceoAge",
+    "ceoGender",
+    "ceoNationality",
+    "hasCoRepresentative",
+    "founderSerialNumber",
     "sdgPriority1",
     "desiredInvestment2026",
     "desiredPreValue",
+    "myscExpectation",
     ...corporateRequiredKeys,
     ...coRepresentativeRequiredKeys,
+    ...exportVoucherRequiredKeys,
+    ...innovationVoucherRequiredKeys,
   ]
 
   const FIELD_LABELS: Record<keyof CompanyInfoForm, string> = {
@@ -656,11 +717,11 @@ function CompanySignupInfo({
     businessNumber: "사업자등록번호",
     primaryBusiness: "주업태",
     primaryIndustry: "주업종",
-    headOffice: "본점 소재지",
-    branchOffice: "지점 또는 연구소 소재지",
+    headOffice: "본점 소재지 (법인등기부등본 기준)",
+    branchOffice: "지점 또는 연구소 소재지 (법인등기부등본 기준)",
     targetCountries: "해외 지사 또는 진출 희망국가",
-    workforceFullTime: "종업원수 (정규)",
-    workforceContract: "종업원수 (계약)",
+    workforceFullTime: "종업원수 (정규, 4대보험 가입자 수 기준)",
+    workforceContract: "종업원수 (계약, 4대보험 가입자 수 기준)",
     revenue2025: "매출액 (2025년, 원)",
     revenue2026: "매출액 (2026년, 원)",
     capitalTotal: "자본총계 (원)",
@@ -691,6 +752,23 @@ function CompanySignupInfo({
 
   function isBusinessNumber(value: string) {
     return /^\d{3}-\d{2}-\d{5}$/.test(value)
+  }
+
+  function hasNumber(value: string) {
+    return value.replace(/[^\d]/g, "").length > 0
+  }
+
+  function meetsMinLength(field: keyof CompanyInfoForm, value: string) {
+    if (field !== "representativeSolution") return true
+    return value.trim().length >= REPRESENTATIVE_SOLUTION_MIN_LENGTH
+  }
+
+  function shouldSkipFieldValidation(field: keyof CompanyInfoForm) {
+    if (isPreStartup && CORPORATE_ONLY_FIELDS.includes(field)) return true
+    if (form.hasCoRepresentative !== "예" && CO_REPRESENTATIVE_FIELDS.includes(field)) return true
+    if (form.exportVoucherHeld !== "예" && EXPORT_VOUCHER_DETAIL_FIELDS.includes(field)) return true
+    if (form.innovationVoucherHeld !== "예" && INNOVATION_VOUCHER_DETAIL_FIELDS.includes(field)) return true
+    return false
   }
 
   function formatNumberInput(value: string) {
@@ -777,15 +855,42 @@ function CompanySignupInfo({
   const invalidRequiredFields = requiredKeys.filter((key) => {
     const value = form[key] ?? ""
     if (!isFilled(value)) return false
+    if (!meetsMinLength(key, value)) return true
     if (key === "ceoEmail") return !isEmail(value)
     if (key === "ceoPhone") return !isPhone(value)
     if (key === "businessNumber") return !isBusinessNumber(value)
     return false
   })
-  const canSubmit = missingRequiredFields.length === 0 && invalidRequiredFields.length === 0
-  const missingRequired = missingRequiredFields.length
+  const meaningfulInvestmentRows = investmentRows.filter((row) => {
+    return (
+      parseInvestmentStages(row.stage).length > 0
+      || isFilled(row.date)
+      || hasNumber(row.postMoney)
+      || isFilled(row.majorShareholder)
+    )
+  })
+  const investmentRowsComplete =
+    isPreStartup
+    || (
+      meaningfulInvestmentRows.length > 0
+      && meaningfulInvestmentRows.every(
+        (row) =>
+          parseInvestmentStages(row.stage).length > 0
+          && isFilled(row.date)
+          && hasNumber(row.postMoney)
+          && isFilled(row.majorShareholder)
+      )
+    )
+  const canSubmit =
+    missingRequiredFields.length === 0
+    && invalidRequiredFields.length === 0
+    && investmentRowsComplete
+  const missingRequired = missingRequiredFields.length + (investmentRowsComplete ? 0 : 1)
   const invalidRequired = invalidRequiredFields.length
-  const missingRequiredLabels = missingRequiredFields.map((field) => FIELD_LABELS[field])
+  const missingRequiredLabels = [
+    ...missingRequiredFields.map((field) => FIELD_LABELS[field]),
+    ...(!investmentRowsComplete ? ["투자이력"] : []),
+  ]
   const invalidRequiredLabels = invalidRequiredFields.map((field) => FIELD_LABELS[field])
 
   function markTouched(field: keyof CompanyInfoForm) {
@@ -793,13 +898,26 @@ function CompanySignupInfo({
   }
 
   function isFieldInvalid(field: keyof CompanyInfoForm) {
+    if (shouldSkipFieldValidation(field)) return false
     if (!touched[field]) return false
     const value = form[field] ?? ""
     if (!isFilled(value)) return true
+    if (!meetsMinLength(field, value)) return true
     if (field === "ceoEmail") return !isEmail(value)
     if (field === "ceoPhone") return !isPhone(value)
     if (field === "businessNumber") return !isBusinessNumber(value)
     return false
+  }
+
+  function isFieldValid(field: keyof CompanyInfoForm) {
+    if (shouldSkipFieldValidation(field)) return true
+    const value = form[field] ?? ""
+    if (!isFilled(value)) return false
+    if (!meetsMinLength(field, value)) return false
+    if (field === "ceoEmail") return isEmail(value)
+    if (field === "ceoPhone") return isPhone(value)
+    if (field === "businessNumber") return isBusinessNumber(value)
+    return true
   }
 
   function addInvestmentRow() {
@@ -840,6 +958,22 @@ function CompanySignupInfo({
   }, [activeInvestmentStageRow])
 
   useEffect(() => {
+    if (!certificationDropdownOpen) return
+
+    function handleOutsideClick(event: MouseEvent) {
+      const current = certificationDropdownRef.current
+      if (!current) return
+      if (event.target instanceof Node && current.contains(event.target)) return
+      setCertificationDropdownOpen(false)
+    }
+
+    document.addEventListener("mousedown", handleOutsideClick)
+    return () => {
+      document.removeEventListener("mousedown", handleOutsideClick)
+    }
+  }, [certificationDropdownOpen])
+
+  useEffect(() => {
     if (!programDropdownOpen) return
 
     function handleOutsideClick(event: MouseEvent) {
@@ -873,15 +1007,35 @@ function CompanySignupInfo({
     )
   }
 
-  function parseInvestmentStages(value: string) {
+  function parseDelimitedSelections(value: unknown) {
+    if (Array.isArray(value)) {
+      return value
+        .map((item) => (typeof item === "string" ? item.trim() : ""))
+        .filter(Boolean)
+    }
+    if (typeof value !== "string") {
+      return []
+    }
     return value
       .split(",")
       .map((item) => item.trim())
       .filter(Boolean)
   }
 
-  function serializeInvestmentStages(values: string[]) {
+  function parseInvestmentStages(value: unknown) {
+    return parseDelimitedSelections(value)
+  }
+
+  function parseCertificationSelections(value: unknown) {
+    return parseDelimitedSelections(value)
+  }
+
+  function serializeDelimitedSelections(values: string[]) {
     return values.join(", ")
+  }
+
+  function serializeInvestmentStages(values: string[]) {
+    return serializeDelimitedSelections(values)
   }
 
   function toggleProgram(programId: string) {
@@ -907,6 +1061,32 @@ function CompanySignupInfo({
     const currentStages = parseInvestmentStages(investmentRows[index]?.stage ?? "")
     const nextStages = currentStages.filter((item) => item !== stage)
     updateInvestmentRow(index, "stage", serializeInvestmentStages(nextStages))
+  }
+
+  function toggleCertification(option: string) {
+    const normalized = option.trim()
+    if (!normalized) return
+    const currentSelections = parseCertificationSelections(form.certification)
+    const exists = currentSelections.includes(normalized)
+    const nextSelections = exists
+      ? currentSelections.filter((item) => item !== normalized)
+      : [...currentSelections, normalized]
+    setForm((prev) => ({
+      ...prev,
+      certification: serializeDelimitedSelections(nextSelections),
+    }))
+    markTouched("certification")
+  }
+
+  function removeCertification(option: string) {
+    const nextSelections = parseCertificationSelections(form.certification).filter(
+      (item) => item !== option
+    )
+    setForm((prev) => ({
+      ...prev,
+      certification: serializeDelimitedSelections(nextSelections),
+    }))
+    markTouched("certification")
   }
 
   async function handleSubmit() {
@@ -956,13 +1136,16 @@ function CompanySignupInfo({
     }
   }
 
-  function inputClass(invalid?: boolean) {
+  function inputClass(invalid?: boolean, extra?: string) {
     return [
       "mt-1 w-full rounded-lg border bg-white px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-1 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-400 disabled:placeholder:text-slate-300",
       invalid
         ? "border-rose-300 bg-rose-50 text-rose-900 placeholder:text-rose-300 focus:border-rose-400 focus:ring-rose-200/60"
         : "border-slate-200 focus:border-slate-300 focus:ring-slate-200/60",
-    ].join(" ")
+      extra,
+    ]
+      .filter(Boolean)
+      .join(" ")
   }
 
   function segmentedToggleClass(active: boolean, disabled = false) {
@@ -992,10 +1175,12 @@ function CompanySignupInfo({
         companyType: nextType,
         foundedAt: "",
         businessNumber: "",
+        website: "",
         primaryBusiness: "",
         primaryIndustry: "",
         headOffice: "",
         branchOffice: "",
+        targetCountries: "",
         workforceFullTime: "",
         workforceContract: "",
         revenue2025: "",
@@ -1042,71 +1227,98 @@ function CompanySignupInfo({
 
   const signupSections = useMemo(
     () => [
-      { key: "company-service", label: "회사/서비스 정보" },
-      { key: "representative", label: "대표자 정보" },
-      { key: "co-representative", label: "공동대표 정보" },
+      { key: "company-service", label: "회사/서비스" },
+      { key: "representative", label: "대표자" },
       ...(!isPreStartup
         ? [
-            { key: "corporate-info", label: "법인 기본 정보" },
-            { key: "location", label: "소재지" },
-            { key: "finance", label: "재무 및 투자이력" },
-            { key: "certification", label: "인증 및 이력" },
+            { key: "finance-investment", label: "재무 및 투자이력" },
+            { key: "certification-voucher", label: "인증 및 바우처" },
           ]
         : []),
-      { key: "funding", label: "투자 희망" },
+      { key: "funding", label: "투자희망" },
     ],
     [isPreStartup]
   )
   const signupSectionCompletion = useMemo(() => {
-    const isComplete = (fields: (keyof CompanyInfoForm)[]) =>
-      fields.every((field) => {
-        const value = form[field] ?? ""
-        if (!isFilled(value)) return false
-        if (field === "ceoEmail") return isEmail(value)
-        if (field === "ceoPhone") return isPhone(value)
-        if (field === "businessNumber") return isBusinessNumber(value)
-        return true
-      })
+    const companyServiceFields: (keyof CompanyInfoForm)[] = [
+      "companyType",
+      "companyInfo",
+      "representativeSolution",
+      "sdgPriority1",
+      "sdgPriority2",
+    ]
+    if (!isPreStartup) {
+      companyServiceFields.push(
+        "foundedAt",
+        "businessNumber",
+        "website",
+        "primaryBusiness",
+        "primaryIndustry",
+        "headOffice",
+        "branchOffice",
+        "targetCountries",
+        "workforceFullTime",
+        "workforceContract",
+      )
+    }
+
+    const representativeFields: (keyof CompanyInfoForm)[] = [
+      "ceoName",
+      "ceoAge",
+      "ceoEmail",
+      "ceoPhone",
+      "ceoGender",
+      "ceoNationality",
+      "founderSerialNumber",
+      "hasCoRepresentative",
+    ]
+    if (form.hasCoRepresentative === "예") {
+      representativeFields.push(
+        "coRepresentativeName",
+        "coRepresentativeBirthDate",
+        "coRepresentativeGender",
+        "coRepresentativeTitle",
+      )
+    }
+
+    const financeFields: (keyof CompanyInfoForm)[] = [
+      "revenue2025",
+      "revenue2026",
+      "capitalTotal",
+    ]
+    const certificationFields: (keyof CompanyInfoForm)[] = [
+      "certification",
+      "tipsLipsHistory",
+      "exportVoucherHeld",
+      "innovationVoucherHeld",
+    ]
+    if (form.exportVoucherHeld === "예") {
+      certificationFields.push("exportVoucherAmount", "exportVoucherUsageRate")
+    }
+    if (form.innovationVoucherHeld === "예") {
+      certificationFields.push(
+        "innovationVoucherAmount",
+        "innovationVoucherUsageRate"
+      )
+    }
+    const fundingFields: (keyof CompanyInfoForm)[] = [
+      "desiredInvestment2026",
+      "desiredPreValue",
+      "myscExpectation",
+    ]
 
     return {
-      "company-service": isComplete(["companyInfo", "sdgPriority1"]),
-      representative: isComplete(["ceoName", "ceoEmail", "ceoPhone"]),
-      "co-representative":
-        form.hasCoRepresentative === "예"
-          ? isComplete([
-              "coRepresentativeName",
-              "coRepresentativeBirthDate",
-              "coRepresentativeGender",
-              "coRepresentativeTitle",
-            ])
-          : form.hasCoRepresentative === "아니요",
-      "corporate-info": isPreStartup
+      "company-service": companyServiceFields.every(isFieldValid),
+      representative: representativeFields.every(isFieldValid),
+      "finance-investment": isPreStartup
         ? true
-        : isComplete([
-            "foundedAt",
-            "businessNumber",
-            "primaryBusiness",
-            "primaryIndustry",
-            "workforceFullTime",
-            "workforceContract",
-          ]),
-      location: isPreStartup ? true : isComplete(["headOffice"]),
-      finance: isPreStartup
+        : financeFields.every(isFieldValid) && investmentRowsComplete,
+      "certification-voucher": isPreStartup
         ? true
-        : isComplete(["revenue2025", "revenue2026", "capitalTotal"]),
-      certification:
-        isPreStartup
-          ? true
-          : isComplete(["certification", "tipsLipsHistory"])
-            && form.exportVoucherHeld.length > 0
-            && form.innovationVoucherHeld.length > 0
-            && (form.exportVoucherHeld !== "예"
-              || isComplete(["exportVoucherAmount", "exportVoucherUsageRate"]))
-            && (form.innovationVoucherHeld !== "예"
-              || isComplete(["innovationVoucherAmount", "innovationVoucherUsageRate"])),
-      funding: isComplete(["desiredInvestment2026", "desiredPreValue"]),
+        : certificationFields.every(isFieldValid),
+      funding: fundingFields.every(isFieldValid),
     } as Record<string, boolean>
-  }, [form, isPreStartup])
+  }, [form, investmentRowsComplete, isPreStartup])
 
   useEffect(() => {
     if (signupSections.some((section) => section.key === activeSignupSection)) return
@@ -1882,7 +2094,19 @@ function CompanySignupInfo({
                   </label>
                 </div>
                 <div className="mt-5 space-y-3">
-                  <div className="text-xs font-semibold text-slate-600">투자이력 (지분율 상위 3명 기준)</div>
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="text-xs font-semibold text-slate-600">
+                      투자이력 (지분율 상위 3명 기준)
+                    </div>
+                    <button
+                      type="button"
+                      className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-slate-700 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                      onClick={addInvestmentRow}
+                      disabled={investmentRows.length >= 3}
+                    >
+                      {investmentRows.length >= 3 ? "최대 3개" : "+ 투자이력 추가"}
+                    </button>
+                  </div>
                   {investmentRows.map((row, idx) => {
                     const selectedStages = parseInvestmentStages(row.stage)
                     return (
@@ -2019,14 +2243,6 @@ function CompanySignupInfo({
                       </div>
                     )
                   })}
-                  <button
-                    type="button"
-                    className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
-                    onClick={addInvestmentRow}
-                    disabled={investmentRows.length >= 3}
-                  >
-                    {investmentRows.length >= 3 ? "최대 3개까지 입력 가능" : "+ 투자이력 추가"}
-                  </button>
                 </div>
               </section>
 
@@ -2039,27 +2255,80 @@ function CompanySignupInfo({
                 <div className="text-sm font-semibold text-slate-900">인증 및 이력</div>
                 <div className="mt-4 grid gap-3 md:grid-cols-2">
                   <label className="text-xs text-slate-500">
-                    인증/지정 여부
-                    <div className="relative">
-                      <select
-                        className={`${inputClass(isFieldInvalid("certification"))} appearance-none pr-10`}
-                        value={form.certification}
-                        onChange={(e) =>
-                          setForm((prev) => ({ ...prev, certification: e.target.value }))
-                        }
-                        onBlur={() => markTouched("certification")}
+                    <span className="block whitespace-nowrap">
+                      인증/지정 여부 (다중선택)
+                    </span>
+                    <div className="relative" ref={certificationDropdownRef}>
+                      <div
+                        tabIndex={0}
+                        className={inputClass(
+                          isFieldInvalid("certification"),
+                          "min-h-[40px] cursor-pointer rounded-lg pr-9"
+                        )}
+                        onMouseDown={(event) => {
+                          event.preventDefault()
+                          event.stopPropagation()
+                          setCertificationDropdownOpen((prev) => !prev)
+                        }}
                       >
-                        <option value="">선택</option>
-                        {CERTIFICATION_OPTIONS.map((option) => (
-                          <option key={option} value={option}>
-                            {option}
-                          </option>
-                        ))}
-                      </select>
+                        {parseCertificationSelections(form.certification).length > 0 ? (
+                          <div className="flex items-center gap-1 overflow-x-auto whitespace-nowrap pr-1">
+                            {parseCertificationSelections(form.certification).map((option) => (
+                              <span
+                                key={option}
+                                className="inline-flex h-5 items-center gap-1 rounded-full border border-slate-300 bg-slate-100 px-1.5 text-[9px] font-medium text-slate-700"
+                              >
+                                <span>{option}</span>
+                                <button
+                                  type="button"
+                                  className="text-slate-500 hover:text-slate-800"
+                                  onMouseDown={(event) => {
+                                    event.preventDefault()
+                                    event.stopPropagation()
+                                    removeCertification(option)
+                                  }}
+                                >
+                                  ×
+                                </button>
+                              </span>
+                            ))}
+                          </div>
+                        ) : (
+                          <span className="text-sm text-slate-400">
+                            인증/지정 여부를 선택하세요
+                          </span>
+                        )}
+                      </div>
                       <ChevronDown
                         className="pointer-events-none absolute right-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400"
                         aria-hidden="true"
                       />
+                      {certificationDropdownOpen ? (
+                        <div className="absolute z-20 mt-1 max-h-44 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg">
+                          {CERTIFICATION_OPTIONS.map((option) => {
+                            const isSelected = parseCertificationSelections(
+                              form.certification
+                            ).includes(option)
+                            return (
+                              <button
+                                key={option}
+                                type="button"
+                                className={`w-full px-3 py-2 text-left text-xs hover:bg-slate-50 ${
+                                  isSelected
+                                    ? "font-semibold text-slate-900"
+                                    : "text-slate-700"
+                                }`}
+                                onMouseDown={(event) => {
+                                  event.preventDefault()
+                                  toggleCertification(option)
+                                }}
+                              >
+                                {isSelected ? `✓ ${option}` : option}
+                              </button>
+                            )
+                          })}
+                        </div>
+                      ) : null}
                     </div>
                   </label>
                   <label className="text-xs text-slate-500">
