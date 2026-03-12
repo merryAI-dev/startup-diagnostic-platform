@@ -1963,6 +1963,40 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     })
   }, [user, scopedApplications, reports, officeHourSlotList])
 
+  const openReportFormForApplication = (applicationId: string) => {
+    if (applicationId === "irregular-manual") {
+      const now = new Date()
+      const today = now.toISOString().slice(0, 10)
+      const manualApp: Application = {
+        id: `manual-${Date.now()}`,
+        type: "irregular",
+        status: "completed",
+        officeHourTitle: "비정기 오피스아워 (수동)",
+        consultant: currentConsultant?.name ?? "컨설턴트",
+        consultantId: currentConsultant?.id ?? "",
+        sessionFormat: "online",
+        agenda: "비정기 오피스아워",
+        requestContent: "",
+        scheduledDate: today,
+        createdAt: now,
+        updatedAt: now,
+      }
+      setReportFormApplication(manualApp)
+      setReportFormOpen(true)
+      setReportBeingEdited(null)
+      setReportFormIsManual(true)
+      return
+    }
+
+    const app = scopedApplications.find((value) => value.id === applicationId)
+    if (!app) return
+
+    setReportFormApplication(app)
+    setReportFormOpen(true)
+    setReportBeingEdited(null)
+    setReportFormIsManual(false)
+  }
+
   const handleNavigate = (page: AppPage, id?: string) => {
     if (disabledPages.has(page)) return
 
@@ -4413,10 +4447,12 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
                 currentUser={scopedUser}
                 applications={scopedApplications}
                 programs={scopedProgramList}
+                reports={reports}
                 agendas={agendaList}
                 currentConsultantAgendaIds={currentConsultant?.agendaIds ?? []}
                 currentConsultantAvailability={currentConsultant?.availability ?? []}
                 allowManualEventCreate={false}
+                onCreateReport={openReportFormForApplication}
                 onNavigateToApplication={(id) => {
                   handleNavigate("application", id)
                 }}
@@ -4589,38 +4625,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
                 consultants={consultants}
                 currentUser={scopedUser}
                 currentConsultantName={currentConsultant?.name ?? null}
-                onCreateReport={(applicationId) => {
-                  if (applicationId === "irregular-manual") {
-                    const now = new Date()
-                    const today = now.toISOString().slice(0, 10)
-                    const manualApp: Application = {
-                      id: `manual-${Date.now()}`,
-                      type: "irregular",
-                      status: "completed",
-                      officeHourTitle: "비정기 오피스아워 (수동)",
-                      consultant: currentConsultant?.name ?? "컨설턴트",
-                      consultantId: currentConsultant?.id ?? "",
-                      sessionFormat: "online",
-                      agenda: "비정기 오피스아워",
-                      requestContent: "",
-                      scheduledDate: today,
-                      createdAt: now,
-                      updatedAt: now,
-                    }
-                    setReportFormApplication(manualApp)
-                    setReportFormOpen(true)
-                    setReportBeingEdited(null)
-                    setReportFormIsManual(true)
-                    return
-                  }
-                  const app = scopedApplications.find((a) => a.id === applicationId)
-                  if (app) {
-                    setReportFormApplication(app)
-                    setReportFormOpen(true)
-                    setReportBeingEdited(null)
-                    setReportFormIsManual(false)
-                  }
-                }}
+                onCreateReport={openReportFormForApplication}
                 onEditReport={(report) => {
                   const app = scopedApplications.find((a) => a.id === report.applicationId)
                   if (!app && report.applicationId.startsWith("manual-")) {

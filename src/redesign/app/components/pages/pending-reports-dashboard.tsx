@@ -130,7 +130,7 @@ export function PendingReportsDashboard({
   const pageTitleClassName = "text-2xl font-semibold text-slate-900";
   const pageDescriptionClassName = "mt-1 text-sm text-slate-500";
   const pageContainerClassName = isConsultantUser
-    ? "mx-auto w-full max-w-6xl"
+    ? "mx-auto w-full max-w-[1440px]"
     : "mx-auto w-full max-w-7xl";
   const [reportDateRange, setReportDateRange] = useState<DateRange | undefined>();
   const [reportPage, setReportPage] = useState(1);
@@ -1070,136 +1070,142 @@ export function PendingReportsDashboard({
       <Dialog open={!!selectedReportItem} onOpenChange={(open) => {
         if (!open) setSelectedReportItem(null);
       }}>
-        <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto overflow-x-hidden">
+        <DialogContent className="flex max-h-[85vh] max-w-3xl flex-col overflow-hidden p-0">
           {selectedReportItem && (
-            <div className="space-y-6">
-              <DialogHeader>
+            <div className="flex min-h-0 flex-1 flex-col">
+              <DialogHeader className="shrink-0 border-b px-6 py-5">
                 <DialogTitle>오피스아워 일지 상세</DialogTitle>
               </DialogHeader>
-              <div className="grid grid-cols-2 gap-4 text-sm">
-                <div>
-                  <div className="text-xs text-muted-foreground">사업</div>
-                  <div className="font-medium">{selectedReportItem.programName}</div>
-                </div>
-                <div>
-                  <div className="text-xs text-muted-foreground">컨설턴트</div>
-                  <div className="font-medium">
-                    {selectedReportItem.report.consultantName || selectedReportItem.application.consultant}
+
+              <div className="min-h-0 flex-1 space-y-6 overflow-y-auto px-6 py-6">
+                <div className="grid grid-cols-2 gap-4 text-sm">
+                  <div>
+                    <div className="text-xs text-muted-foreground">사업</div>
+                    <div className="font-medium">{selectedReportItem.programName}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-muted-foreground">컨설턴트</div>
+                    <div className="font-medium">
+                      {selectedReportItem.report.consultantName || selectedReportItem.application.consultant}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-muted-foreground">오피스아워</div>
+                    <div className="font-medium">{selectedReportItem.application.officeHourTitle}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-muted-foreground">진행일</div>
+                    <div className="font-medium">
+                      {selectedReportItem.application.scheduledDate
+                        ? format(
+                          parseLocalDate(selectedReportItem.application.scheduledDate)
+                            ?? new Date(selectedReportItem.application.scheduledDate),
+                          "yyyy년 M월 d일",
+                          { locale: ko }
+                        )
+                        : "-"}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-muted-foreground">작성일</div>
+                    <div className="font-medium">
+                      {selectedReportItem.report.date
+                        ? format(
+                          parseLocalDate(selectedReportItem.report.date)
+                            ?? new Date(selectedReportItem.report.date),
+                          "yyyy년 M월 d일",
+                          { locale: ko }
+                        )
+                        : "-"}
+                    </div>
                   </div>
                 </div>
                 <div>
-                  <div className="text-xs text-muted-foreground">오피스아워</div>
-                  <div className="font-medium">{selectedReportItem.application.officeHourTitle}</div>
-                </div>
-                <div>
-                  <div className="text-xs text-muted-foreground">진행일</div>
-                  <div className="font-medium">
-                    {selectedReportItem.application.scheduledDate
-                      ? format(
-                        parseLocalDate(selectedReportItem.application.scheduledDate)
-                          ?? new Date(selectedReportItem.application.scheduledDate),
-                        "yyyy년 M월 d일",
-                        { locale: ko }
-                      )
-                      : "-"}
+                  <div className="text-xs text-muted-foreground mb-1">주제</div>
+                  <div className="rounded-lg border px-3 py-2 text-sm break-all">
+                    {selectedReportItem.report.topic || "-"}
                   </div>
                 </div>
                 <div>
-                  <div className="text-xs text-muted-foreground">작성일</div>
-                  <div className="font-medium">
-                    {selectedReportItem.report.date
-                      ? format(
-                        parseLocalDate(selectedReportItem.report.date)
-                          ?? new Date(selectedReportItem.report.date),
-                        "yyyy년 M월 d일",
-                        { locale: ko }
-                      )
-                      : "-"}
+                  <div className="text-xs text-muted-foreground mb-1">참여자</div>
+                  <div className="rounded-lg border px-3 py-2 text-sm break-all">
+                    {(selectedReportItem.report.participants ?? []).join(", ") || "-"}
                   </div>
                 </div>
-              </div>
-              <div>
-                <div className="text-xs text-muted-foreground mb-1">주제</div>
-                <div className="rounded-lg border px-3 py-2 text-sm break-all">
-                  {selectedReportItem.report.topic || "-"}
-                </div>
-              </div>
-              <div>
-                <div className="text-xs text-muted-foreground mb-1">참여자</div>
-                <div className="rounded-lg border px-3 py-2 text-sm break-all">
-                  {(selectedReportItem.report.participants ?? []).join(", ") || "-"}
-                </div>
-              </div>
-              <div>
-                <div className="text-xs text-muted-foreground mb-1">기업의 현황</div>
-                <div className="rounded-lg border px-3 py-2 text-sm whitespace-pre-wrap break-all">
-                  {selectedReportContent.companyStatus || "-"}
-                </div>
-              </div>
-              <div>
-                <div className="text-xs text-muted-foreground mb-1">자문내용</div>
-                <div className="rounded-lg border px-3 py-2 text-sm whitespace-pre-wrap break-all">
-                  {selectedReportContent.advisoryContent || "-"}
-                </div>
-              </div>
-              <div>
-                <div className="text-xs text-muted-foreground mb-1">팔로업</div>
-                <div className="rounded-lg border px-3 py-2 text-sm whitespace-pre-wrap break-all">
-                  {selectedReportItem.report.followUp || "-"}
-                </div>
-              </div>
-              {selectedReportItem.report.photos?.length > 0 && (
                 <div>
-                  <div className="text-xs text-muted-foreground mb-2">사진</div>
-                  <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                    {selectedReportItem.report.photos.map((url, idx) => (
-                      <img
-                        key={`${url}-${idx}`}
-                        src={url}
-                        alt="report"
-                        className="rounded-lg border object-cover h-32 w-full"
-                      />
-                    ))}
+                  <div className="text-xs text-muted-foreground mb-1">기업의 현황</div>
+                  <div className="rounded-lg border px-3 py-2 text-sm whitespace-pre-wrap break-all">
+                    {selectedReportContent.companyStatus || "-"}
                   </div>
                 </div>
-              )}
-              <div className="flex justify-end gap-2">
-                <Button
-                  variant="outline"
-                  onClick={() =>
-                    openReportPrintView({
-                      report: selectedReportItem.report,
-                      application: selectedReportItem.application,
-                      programName: selectedReportItem.programName,
-                    })
-                  }
-                >
-                  PDF 보기
-                </Button>
-                <Button
-                  variant="destructive"
-                  onClick={() => {
-                    const confirmed = window.confirm(
-                      "보고서를 삭제하시겠습니까? 첨부 사진도 Storage에서 함께 삭제됩니다."
-                    );
-                    if (!confirmed) return;
-                    onDeleteReport(selectedReportItem.report);
-                    setSelectedReportItem(null);
-                  }}
-                >
-                  삭제
-                </Button>
-                <Button
-                  onClick={() => {
-                    onEditReport(selectedReportItem.report);
-                    setSelectedReportItem(null);
-                  }}
-                >
-                  수정
-                </Button>
-                <Button variant="outline" onClick={() => setSelectedReportItem(null)}>
-                  닫기
-                </Button>
+                <div>
+                  <div className="text-xs text-muted-foreground mb-1">자문내용</div>
+                  <div className="rounded-lg border px-3 py-2 text-sm whitespace-pre-wrap break-all">
+                    {selectedReportContent.advisoryContent || "-"}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs text-muted-foreground mb-1">팔로업</div>
+                  <div className="rounded-lg border px-3 py-2 text-sm whitespace-pre-wrap break-all">
+                    {selectedReportItem.report.followUp || "-"}
+                  </div>
+                </div>
+                {selectedReportItem.report.photos?.length > 0 && (
+                  <div>
+                    <div className="text-xs text-muted-foreground mb-2">사진</div>
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                      {selectedReportItem.report.photos.map((url, idx) => (
+                        <img
+                          key={`${url}-${idx}`}
+                          src={url}
+                          alt="report"
+                          className="rounded-lg border object-cover h-32 w-full"
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="shrink-0 border-t px-6 py-4">
+                <div className="flex justify-end gap-2">
+                  <Button
+                    variant="outline"
+                    onClick={() =>
+                      openReportPrintView({
+                        report: selectedReportItem.report,
+                        application: selectedReportItem.application,
+                        programName: selectedReportItem.programName,
+                      })
+                    }
+                  >
+                    PDF 보기
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    onClick={() => {
+                      const confirmed = window.confirm(
+                        "보고서를 삭제하시겠습니까? 첨부 사진도 Storage에서 함께 삭제됩니다."
+                      );
+                      if (!confirmed) return;
+                      onDeleteReport(selectedReportItem.report);
+                      setSelectedReportItem(null);
+                    }}
+                  >
+                    삭제
+                  </Button>
+                  <Button
+                    onClick={() => {
+                      onEditReport(selectedReportItem.report);
+                      setSelectedReportItem(null);
+                    }}
+                  >
+                    수정
+                  </Button>
+                  <Button variant="outline" onClick={() => setSelectedReportItem(null)}>
+                    닫기
+                  </Button>
+                </div>
               </div>
             </div>
           )}

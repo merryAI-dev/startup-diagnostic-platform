@@ -1,9 +1,11 @@
 import { useState, useMemo } from "react";
+import { addDays, differenceInDays } from "date-fns";
 import {
   Agenda,
   Application,
   ApplicationStatus,
   ConsultantAvailability,
+  OfficeHourReport,
   Program,
   User,
 } from "@/redesign/app/lib/types";
@@ -12,6 +14,7 @@ import { Button } from "@/redesign/app/components/ui/button";
 import { Badge } from "@/redesign/app/components/ui/badge";
 import { Calendar } from "@/redesign/app/components/ui/calendar";
 import {
+  AlertCircle,
   Calendar as CalendarIcon, ChevronLeft, ChevronRight, Grid3x3,
   List, Download, Share2, Plus, Clock, MapPin, Video, Users,
   Database, Wifi, WifiOff
@@ -31,6 +34,7 @@ import { Input } from "@/redesign/app/components/ui/input";
 import { Label } from "@/redesign/app/components/ui/label";
 import { Textarea } from "@/redesign/app/components/ui/textarea";
 import { AdminApplicationDetailModal } from "@/redesign/app/components/pages/admin-application-detail-modal";
+import { cn } from "@/redesign/app/components/ui/utils";
 import { toast } from "sonner";
 import type { DayContentProps } from "react-day-picker";
 
@@ -38,11 +42,13 @@ interface UnifiedCalendarProps {
   currentUser: User;
   applications: Application[];
   programs: Program[];
+  reports?: OfficeHourReport[];
   agendas?: Agenda[];
   currentConsultantAgendaIds?: string[];
   currentConsultantAvailability?: ConsultantAvailability[];
   allowManualEventCreate?: boolean;
   onNavigateToApplication?: (id: string) => void;
+  onCreateReport?: (applicationId: string) => void;
   onRequestApplication?: (id: string) => void;
   onRejectApplication?: (id: string, reason: string) => void;
   onConfirmApplication?: (id: string) => void;
@@ -112,11 +118,13 @@ export function UnifiedCalendar({
   currentUser,
   applications,
   programs,
+  reports = [],
   agendas = [],
   currentConsultantAgendaIds = [],
   currentConsultantAvailability = [],
   allowManualEventCreate = true,
   onNavigateToApplication,
+  onCreateReport,
   onRequestApplication,
   onRejectApplication,
   onConfirmApplication,
@@ -342,6 +350,61 @@ export function UnifiedCalendar({
       });
   }, [applications, isConsultant, matchesConsultantAgenda, currentConsultantAvailability]);
 
+  const pendingOfficeHourReports = useMemo(() => {
+    if (!isConsultant) return [];
+
+    const now = new Date();
+    const reportedAppIds = new Set(reports.map((report) => report.applicationId));
+
+    return applications
+      .filter(
+        (app) =>
+          (app.status === "confirmed" || app.status === "completed")
+          && app.scheduledDate
+          && isAssignedToCurrentConsultant(app)
+          && !reportedAppIds.has(app.id),
+      )
+      .map((app) => {
+        const sessionEnd = getSessionEndTime(app);
+        if (!sessionEnd || now < sessionEnd) return null;
+
+        const deadline = addDays(sessionEnd, 3);
+        const daysLeft = Math.max(0, differenceInDays(deadline, now));
+        const overdueDays = Math.max(0, differenceInDays(now, deadline));
+        const isOverdue = now > deadline;
+        const program = programs.find((item) => item.id === app.programId);
+
+        return {
+          application: app,
+          programName: program?.name || "프로그램 미지정",
+          sessionEnd,
+          deadline,
+          daysLeft,
+          overdueDays,
+          isOverdue,
+        };
+      })
+      .filter(
+        (
+          item,
+        ): item is {
+          application: Application;
+          programName: string;
+          sessionEnd: Date;
+          deadline: Date;
+          daysLeft: number;
+          overdueDays: number;
+          isOverdue: boolean;
+        } => item !== null,
+      )
+      .sort((a, b) => {
+        if (a.isOverdue !== b.isOverdue) return a.isOverdue ? -1 : 1;
+        if (a.isOverdue && b.isOverdue) return b.overdueDays - a.overdueDays;
+        if (a.daysLeft !== b.daysLeft) return a.daysLeft - b.daysLeft;
+        return a.deadline.getTime() - b.deadline.getTime();
+      });
+  }, [applications, isConsultant, programs, reports, currentConsultantId, currentConsultantName]);
+
   const selectedPendingApplication = useMemo(() => {
     if (!selectedPendingApplicationId) return null;
     return applications.find((app) => app.id === selectedPendingApplicationId) ?? null;
@@ -448,9 +511,193 @@ export function UnifiedCalendar({
     return time.substring(0, 5);
   };
 
+  const countBadgeClassName =
+    "h-7 rounded-full border-slate-300 bg-slate-100 px-3 text-xs font-semibold text-slate-700";
+
+  const renderPendingOfficeHourReportsCard = () => (
+    <Card className="flex max-h-[560px] min-h-0 flex-col p-5">
+      <div className="mb-3 flex shrink-0 items-center justify-between">
+        <div>
+          <h3 className="font-semibold text-[#0A2540]">미작성 오피스아워</h3>
+          <p className="mt-1 text-xs text-slate-500">
+            종료된 내 세션 중 일지 작성이 필요한 항목입니다
+          </p>
+        </div>
+        <Badge variant="outline" className={countBadgeClassName}>
+          {pendingOfficeHourReports.length}건
+        </Badge>
+      </div>
+
+      {pendingOfficeHourReports.length === 0 ? (
+        <div className="flex flex-1 items-center justify-center py-5 text-center">
+          <AlertCircle className="mx-auto mb-2 size-8 text-slate-300" />
+          <p className="text-sm text-slate-500">바로 작성할 미작성 일지가 없습니다</p>
+        </div>
+      ) : (
+        <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+          <div className="space-y-2.5">
+            {pendingOfficeHourReports.map((item) => {
+              const dueLabel = item.isOverdue
+                ? `기한 초과 ${item.overdueDays}일`
+                : item.daysLeft === 0
+                  ? "오늘 마감"
+                  : `D-${item.daysLeft}`;
+
+              return (
+                <div
+                  key={item.application.id}
+                  className="cursor-pointer rounded-lg border border-slate-200 bg-white p-2.5 transition-shadow hover:shadow-sm"
+                  onClick={() => onCreateReport?.(item.application.id)}
+                >
+                  <div className="mb-2 flex flex-wrap items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-[#0A2540]">
+                        {item.application.officeHourTitle}
+                      </p>
+                      <p className="mt-1 text-xs text-slate-500">
+                        {item.application.companyName ?? "기업 미입력"} · {item.programName}
+                      </p>
+                    </div>
+                    <Badge
+                      variant="outline"
+                      className={cn(
+                        "shrink-0 whitespace-nowrap",
+                        item.isOverdue
+                          ? "border-rose-200 bg-rose-50 text-rose-700"
+                          : "border-amber-200 bg-amber-50 text-amber-700",
+                      )}
+                    >
+                      {dueLabel}
+                    </Badge>
+                  </div>
+
+                  <div className="space-y-1 text-xs text-slate-600">
+                    <div className="flex items-center gap-2">
+                      <Clock className="size-3" />
+                      <span>
+                        {item.application.scheduledDate}
+                        {item.application.scheduledTime ? ` ${formatTime(item.application.scheduledTime)}` : ""}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <CalendarIcon className="size-3" />
+                      <span>
+                        작성 마감 {item.deadline.toLocaleDateString("ko-KR")}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="mt-2 flex justify-end">
+                    <Button
+                      size="sm"
+                      className="h-8 px-3 text-xs"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onCreateReport?.(item.application.id);
+                      }}
+                    >
+                      일지 작성
+                    </Button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </Card>
+  );
+
+  const renderPendingRequestsCard = () => (
+    <Card className="flex max-h-[560px] min-h-0 flex-col p-5">
+      <div className="mb-3 flex shrink-0 items-center justify-between">
+        <div>
+          <h3 className="font-semibold text-[#0A2540]">수락 대기 요청</h3>
+          <p className="mt-1 text-xs text-slate-500">
+            아젠다 매칭된 요청 중에서 수락할 항목을 선택하세요
+          </p>
+        </div>
+        <Badge variant="outline" className={countBadgeClassName}>
+          {pendingRequests.length}건
+        </Badge>
+      </div>
+
+      <div className="mb-3 flex shrink-0 items-center justify-between">
+        <span className="text-sm font-semibold text-slate-700">수락 대기</span>
+        <span className="text-xs font-medium text-slate-500">{pendingRequests.length}건</span>
+      </div>
+
+      {pendingRequests.length === 0 ? (
+        <div className="flex flex-1 items-center justify-center py-5 text-center">
+          <p className="text-sm text-slate-500">수락 요청 가능한 항목이 없습니다</p>
+        </div>
+      ) : (
+        <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+          <div className="space-y-2.5">
+            {pendingRequests.map((event) => {
+              const actionHandler = onRequestApplication;
+              return (
+                <div
+                  key={event.id}
+                  className="cursor-pointer rounded-lg border border-slate-200 bg-white p-2.5 transition-shadow hover:shadow-sm"
+                  onClick={() => openPendingDetailModal(event.id)}
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-[#0A2540]">
+                        {event.officeHourTitle}
+                      </p>
+                      <p className="mt-1 text-xs text-slate-500">
+                        {event.companyName ?? "기업 미입력"} · {event.agenda}
+                      </p>
+                      <p className="mt-1 text-xs text-slate-500">
+                        {event.scheduledDate
+                          ? `${event.scheduledDate} ${event.scheduledTime ?? ""}`.trim()
+                          : event.periodFrom
+                            ? `${event.periodFrom} ~ ${event.periodTo ?? ""}`.trim()
+                            : "일정 미정"}
+                      </p>
+                    </div>
+                    <div className="flex shrink-0 flex-wrap items-center gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-8 px-3 text-xs"
+                        onClick={(clickEvent) => {
+                          clickEvent.stopPropagation();
+                          openRejectDialog(event);
+                        }}
+                      >
+                        거절
+                      </Button>
+                      <Button
+                        size="sm"
+                        className="h-8 px-3 text-xs"
+                        onClick={(clickEvent) => {
+                          clickEvent.stopPropagation();
+                          if (!actionHandler) return;
+                          openAcceptDialog(event);
+                        }}
+                        disabled={!actionHandler}
+                      >
+                        수락
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </Card>
+  );
+
   const pageTitleClassName = "text-2xl font-semibold text-slate-900";
   const pageDescriptionClassName = "mt-1 text-sm text-slate-500";
-  const pageContainerClassName = isConsultant ? "mx-auto w-full max-w-6xl" : "mx-auto w-full max-w-7xl";
+  const pageContainerClassName = isConsultant
+    ? "mx-auto w-full max-w-[1440px]"
+    : "mx-auto w-full max-w-7xl";
   const pageTitle = isConsultant ? "내 일정 캘린더" : "통합 캘린더";
   const pageDescription = isConsultant
     ? "배정된 오피스아워와 개인 일정을 한눈에 확인합니다"
@@ -460,7 +707,7 @@ export function UnifiedCalendar({
     <div className="h-full flex flex-col bg-slate-50">
       {/* 헤더 */}
       <div className="border-b bg-white px-6 py-5">
-        <div className={`${pageContainerClassName} mb-4 flex items-center justify-between`}>
+        <div className={`${pageContainerClassName} flex items-center justify-between`}>
           <div>
             <h1 className={pageTitleClassName}>{pageTitle}</h1>
             <p className={pageDescriptionClassName}>{pageDescription}</p>
@@ -636,32 +883,34 @@ export function UnifiedCalendar({
                 </Select>
               )}
 
-              <div className="flex gap-1 bg-slate-100 rounded-lg p-1">
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => setViewMode("month")}
-                  className={
-                    viewMode === "month"
-                      ? "bg-slate-900 text-white shadow-sm hover:bg-slate-900"
-                      : "bg-transparent text-slate-600 hover:bg-white hover:text-slate-900"
-                  }
-                >
-                  <Grid3x3 className="size-4" />
-                </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => setViewMode("list")}
-                  className={
-                    viewMode === "list"
-                      ? "bg-slate-900 text-white shadow-sm hover:bg-slate-900"
-                      : "bg-transparent text-slate-600 hover:bg-white hover:text-slate-900"
-                  }
-                >
-                  <List className="size-4" />
-                </Button>
-              </div>
+              {!isConsultant && (
+                <div className="flex gap-1 rounded-lg bg-slate-100 p-1">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => setViewMode("month")}
+                    className={
+                      viewMode === "month"
+                        ? "bg-slate-900 text-white shadow-sm hover:bg-slate-900"
+                        : "bg-transparent text-slate-600 hover:bg-white hover:text-slate-900"
+                    }
+                  >
+                    <Grid3x3 className="size-4" />
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => setViewMode("list")}
+                    className={
+                      viewMode === "list"
+                        ? "bg-slate-900 text-white shadow-sm hover:bg-slate-900"
+                        : "bg-transparent text-slate-600 hover:bg-white hover:text-slate-900"
+                    }
+                  >
+                    <List className="size-4" />
+                  </Button>
+                </div>
+              )}
 
 
           </div>
@@ -671,9 +920,22 @@ export function UnifiedCalendar({
       <div className="flex-1 overflow-auto">
         <div className={`${pageContainerClassName} p-5`}>
           {viewMode === "month" ? (
-            <div className="grid md:grid-cols-3 gap-4">
+            <div
+              className={cn(
+                "grid gap-4",
+                isConsultant
+                  ? "xl:grid-cols-[320px_minmax(0,1.35fr)_320px] 2xl:grid-cols-[340px_minmax(0,1.5fr)_340px]"
+                  : "md:grid-cols-3",
+              )}
+            >
+              {isConsultant && (
+                <div className="flex flex-col gap-4">
+                  {renderPendingOfficeHourReportsCard()}
+                </div>
+              )}
+
               {/* 캘린더 */}
-              <div className="md:col-span-2">
+              <div className={cn(isConsultant ? "min-w-0" : "md:col-span-2")}>
                 <Card className="p-6">
                   <div className="flex items-center justify-between mb-6">
                     <h2 className="text-lg font-semibold text-[#0A2540]">
@@ -725,7 +987,14 @@ export function UnifiedCalendar({
                     </div>
                   </div>
 
-                  <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
+                  <div
+                    className={cn(
+                      isConsultant ? "grid gap-3" : "grid gap-4",
+                      isConsultant
+                        ? "xl:grid-cols-[minmax(0,1.35fr)_340px] 2xl:grid-cols-[minmax(0,1.45fr)_360px]"
+                        : "lg:grid-cols-[minmax(0,1.3fr)_280px] xl:grid-cols-[minmax(0,1.45fr)_300px]",
+                    )}
+                  >
                     <Calendar
                       key={`${calendarMonth.getFullYear()}-${calendarMonth.getMonth()}`}
                       mode="single"
@@ -781,11 +1050,11 @@ export function UnifiedCalendar({
                               }}
                               onClick={() => openScheduledDetail(event.id)}
                             >
-                              <div className="flex items-start justify-between mb-2">
-                                <h4 className="font-medium text-sm text-[#0A2540] flex-1">
+                              <div className="mb-2 flex flex-wrap items-start justify-between gap-2">
+                                <h4 className="min-w-0 flex-1 text-sm font-medium text-[#0A2540]">
                                   {event.officeHourTitle}
                                 </h4>
-                                <Badge variant="outline" className="text-xs">
+                                <Badge variant="outline" className="shrink-0 whitespace-nowrap text-xs">
                                   {event.status === "completed" ? "완료" : "예정"}
                                 </Badge>
                               </div>
@@ -795,12 +1064,12 @@ export function UnifiedCalendar({
                                   <Clock className="size-3" />
                                   <span>{formatTime(event.scheduledTime)}</span>
                                 </div>
-                                <div className="flex items-center gap-2">
+                                <div className="flex flex-wrap items-center gap-2">
                                   <Users className="size-3" />
                                   <span>{event.consultant}</span>
                                   {isConsultant && (
                                     <Badge
-                                      className={`text-[10px] ${
+                                      className={`shrink-0 whitespace-nowrap text-[10px] ${
                                         isMyEvent(event)
                                           ? "bg-blue-100 text-blue-700 border-blue-200"
                                           : "bg-slate-100 text-slate-600 border-slate-200"
@@ -834,93 +1103,7 @@ export function UnifiedCalendar({
               {/* 선택된 날짜의 일정 */}
               <div className="flex flex-col gap-4 md:col-span-1">
                 {isConsultant && (
-                  <Card className="p-6">
-                    <div className="flex items-center justify-between mb-4">
-                      <div>
-                        <h3 className="font-semibold text-[#0A2540]">수락 대기 요청</h3>
-                        <p className="text-xs text-slate-500 mt-1">
-                          아젠다 매칭된 요청 중에서 수락할 항목을 선택하세요
-                        </p>
-                      </div>
-                      <Badge variant="outline" className="text-xs">
-                        {pendingRequests.length}건
-                      </Badge>
-                    </div>
-
-                    <div className="space-y-6">
-                      <div>
-                        <div className="flex items-center justify-between mb-3">
-                          <span className="text-sm font-semibold text-slate-700">수락 대기</span>
-                          <span className="text-xs text-slate-400">{pendingRequests.length}건</span>
-                        </div>
-                        {pendingRequests.length === 0 ? (
-                          <p className="text-sm text-slate-500 text-center py-4">
-                            수락 요청 가능한 항목이 없습니다
-                          </p>
-                        ) : (
-                          <div className="space-y-3">
-                            {pendingRequests.slice(0, 5).map((event) => {
-                              const actionLabel = "수락";
-                              const actionHandler = onRequestApplication;
-                              return (
-                              <div
-                                key={event.id}
-                                className="rounded-lg border border-slate-200 bg-white p-3 transition-shadow hover:shadow-sm cursor-pointer"
-                                onClick={() => openPendingDetailModal(event.id)}
-                              >
-                                <div className="flex items-start justify-between gap-3">
-                                  <div className="min-w-0">
-                                    <p className="text-sm font-semibold text-[#0A2540] truncate">
-                                      {event.officeHourTitle}
-                                    </p>
-                                    <p className="text-xs text-slate-500 mt-1">
-                                      {event.companyName ?? "기업 미입력"} · {event.agenda}
-                                    </p>
-                                    <p className="text-xs text-slate-500 mt-1">
-                                      {event.scheduledDate
-                                        ? `${event.scheduledDate} ${event.scheduledTime ?? ""}`.trim()
-                                        : event.periodFrom
-                                          ? `${event.periodFrom} ~ ${event.periodTo ?? ""}`.trim()
-                                          : "일정 미정"}
-                                    </p>
-                                  </div>
-                                  <div className="flex items-center gap-2 shrink-0">
-                                    <Button
-                                      size="sm"
-                                      variant="outline"
-                                      onClick={(clickEvent) => {
-                                        clickEvent.stopPropagation();
-                                        openRejectDialog(event);
-                                      }}
-                                    >
-                                      거절
-                                    </Button>
-                                    <Button
-                                      size="sm"
-                                      onClick={(clickEvent) => {
-                                        clickEvent.stopPropagation();
-                                        if (!actionHandler) return;
-                                        openAcceptDialog(event);
-                                      }}
-                                      disabled={!actionHandler}
-                                    >
-                                      {actionLabel}
-                                    </Button>
-                                  </div>
-                                </div>
-                              </div>
-                            );
-                            })}
-                            {pendingRequests.length > 5 && (
-                              <p className="text-xs text-slate-500 text-center">
-                                외 {pendingRequests.length - 5}건
-                              </p>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </Card>
+                  renderPendingRequestsCard()
                 )}
 
               </div>
@@ -929,93 +1112,10 @@ export function UnifiedCalendar({
             /* 리스트 뷰 */
             <div className="space-y-6">
               {isConsultant && (
-                <Card className="p-6">
-                  <div className="flex items-center justify-between mb-4">
-                    <div>
-                      <h3 className="font-semibold text-[#0A2540]">수락 대기 요청</h3>
-                      <p className="text-xs text-slate-500 mt-1">
-                        아젠다 매칭된 요청 중에서 수락할 항목을 선택하세요
-                      </p>
-                    </div>
-                    <Badge variant="outline" className="text-xs">
-                      {pendingRequests.length}건
-                    </Badge>
-                  </div>
-
-                  <div className="space-y-6">
-                    <div>
-                      <div className="flex items-center justify-between mb-3">
-                        <span className="text-sm font-semibold text-slate-700">수락 대기</span>
-                        <span className="text-xs text-slate-400">{pendingRequests.length}건</span>
-                      </div>
-                      {pendingRequests.length === 0 ? (
-                        <p className="text-sm text-slate-500 text-center py-4">
-                          수락 요청 가능한 항목이 없습니다
-                        </p>
-                      ) : (
-                        <div className="space-y-3">
-                          {pendingRequests.slice(0, 5).map((event) => {
-                            const actionLabel = "수락";
-                            const actionHandler = onRequestApplication;
-                            return (
-                            <div
-                              key={event.id}
-                              className="rounded-lg border border-slate-200 bg-white p-3 transition-shadow hover:shadow-sm cursor-pointer"
-                              onClick={() => openPendingDetailModal(event.id)}
-                            >
-                              <div className="flex items-start justify-between gap-3">
-                                <div className="min-w-0">
-                                  <p className="text-sm font-semibold text-[#0A2540] truncate">
-                                    {event.officeHourTitle}
-                                  </p>
-                                  <p className="text-xs text-slate-500 mt-1">
-                                    {event.companyName ?? "기업 미입력"} · {event.agenda}
-                                  </p>
-                                  <p className="text-xs text-slate-500 mt-1">
-                                    {event.scheduledDate
-                                      ? `${event.scheduledDate} ${event.scheduledTime ?? ""}`.trim()
-                                      : event.periodFrom
-                                        ? `${event.periodFrom} ~ ${event.periodTo ?? ""}`.trim()
-                                        : "일정 미정"}
-                                  </p>
-                                </div>
-                                <div className="flex items-center gap-2 shrink-0">
-                                  <Button
-                                    size="sm"
-                                    variant="outline"
-                                    onClick={(clickEvent) => {
-                                      clickEvent.stopPropagation();
-                                      openRejectDialog(event);
-                                    }}
-                                  >
-                                    거절
-                                  </Button>
-                                  <Button
-                                    size="sm"
-                                    onClick={(clickEvent) => {
-                                      clickEvent.stopPropagation();
-                                      if (!actionHandler) return;
-                                      openAcceptDialog(event);
-                                    }}
-                                    disabled={!actionHandler}
-                                  >
-                                    {actionLabel}
-                                  </Button>
-                                </div>
-                              </div>
-                            </div>
-                          );
-                          })}
-                          {pendingRequests.length > 5 && (
-                            <p className="text-xs text-slate-500 text-center">
-                              외 {pendingRequests.length - 5}건
-                            </p>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </Card>
+                <div className="grid gap-4 xl:grid-cols-2">
+                  {renderPendingOfficeHourReportsCard()}
+                  {renderPendingRequestsCard()}
+                </div>
               )}
 
               <Card className="p-6">
