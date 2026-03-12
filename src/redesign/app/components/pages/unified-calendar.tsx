@@ -448,14 +448,22 @@ export function UnifiedCalendar({
     return time.substring(0, 5);
   };
 
+  const pageTitleClassName = "text-2xl font-semibold text-slate-900";
+  const pageDescriptionClassName = "mt-1 text-sm text-slate-500";
+  const pageContainerClassName = isConsultant ? "mx-auto w-full max-w-6xl" : "mx-auto w-full max-w-7xl";
+  const pageTitle = isConsultant ? "내 일정 캘린더" : "통합 캘린더";
+  const pageDescription = isConsultant
+    ? "배정된 오피스아워와 개인 일정을 한눈에 확인합니다"
+    : "모든 오피스아워 일정을 한눈에 확인하세요";
+
   return (
     <div className="h-full flex flex-col bg-slate-50">
       {/* 헤더 */}
-      <div className="bg-white border-b px-8 py-6">
-        <div className="flex items-center justify-between mb-4">
+      <div className="border-b bg-white px-6 py-5">
+        <div className={`${pageContainerClassName} mb-4 flex items-center justify-between`}>
           <div>
-            <h1 className="text-2xl font-bold text-[#0A2540] mb-1">통합 캘린더</h1>
-            <p className="text-slate-600">모든 오피스아워 일정을 한눈에 확인하세요</p>
+            <h1 className={pageTitleClassName}>{pageTitle}</h1>
+            <p className={pageDescriptionClassName}>{pageDescription}</p>
           </div>
 
           <div className="flex items-center gap-2">
@@ -661,7 +669,7 @@ export function UnifiedCalendar({
       </div>
 
       <div className="flex-1 overflow-auto">
-        <div className="max-w-7xl mx-auto p-6">
+        <div className={`${pageContainerClassName} p-5`}>
           {viewMode === "month" ? (
             <div className="grid md:grid-cols-3 gap-4">
               {/* 캘린더 */}

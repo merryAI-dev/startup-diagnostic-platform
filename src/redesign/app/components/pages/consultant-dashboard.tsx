@@ -21,6 +21,9 @@ export function ConsultantDashboard({
   programs, 
   currentUser 
 }: ConsultantDashboardProps) {
+  const pageTitleClassName = "text-2xl font-semibold text-slate-900";
+  const pageDescriptionClassName = "mt-1 text-sm text-slate-500";
+  const pageContainerClassName = "mx-auto w-full max-w-6xl";
   const [selectedView, setSelectedView] = useState<"companies" | "topics" | "monthly" | "growth">("companies");
   const toDate = (value: Date | string) =>
     value instanceof Date ? value : new Date(value);
@@ -224,17 +227,18 @@ export function ConsultantDashboard({
   return (
     <div className="h-full flex flex-col bg-gray-50">
       {/* Header */}
-      <div className="bg-white border-b px-8 py-6">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">담당 사업 현황</h1>
-          <p className="text-sm text-muted-foreground mt-1">
+      <div className="bg-white border-b px-6 py-5">
+        <div className={pageContainerClassName}>
+          <h1 className={pageTitleClassName}>담당 사업 현황</h1>
+          <p className={pageDescriptionClassName}>
             {accessiblePrograms.map(p => p.name).join(", ")} 사업의 스타트업 활동을 분석합니다
           </p>
         </div>
       </div>
 
       {/* Stats Cards */}
-      <div className="px-8 py-6 grid grid-cols-4 gap-4">
+      <div className="px-6 py-5">
+        <div className={`${pageContainerClassName} grid grid-cols-4 gap-4`}>
         <div className="bg-white rounded-lg border p-5">
           <div className="flex items-center justify-between mb-2">
             <span className="text-sm text-muted-foreground">총 세션</span>
@@ -272,11 +276,12 @@ export function ConsultantDashboard({
           </div>
           <p className="text-xs text-muted-foreground mt-1">완료율</p>
         </div>
+        </div>
       </div>
 
       {/* View Selector */}
-      <div className="px-8 pb-4">
-        <div className="flex gap-2">
+      <div className="px-6 pb-4">
+        <div className={`${pageContainerClassName} flex gap-2`}>
           <Button
             variant={selectedView === "companies" ? "default" : "outline"}
             size="sm"
@@ -309,7 +314,8 @@ export function ConsultantDashboard({
       </div>
 
       {/* Charts */}
-      <div className="flex-1 px-8 pb-6">
+      <div className="flex-1 px-6 pb-6">
+        <div className={pageContainerClassName}>
         {selectedView === "companies" && (
           <div className="bg-white rounded-lg border p-5">
             <h3 className="font-semibold text-gray-900 mb-4">스타트업별 오피스아워 활동</h3>
@@ -378,6 +384,7 @@ export function ConsultantDashboard({
             </ResponsiveContainer>
           </div>
         )}
+        </div>
       </div>
     </div>
   );

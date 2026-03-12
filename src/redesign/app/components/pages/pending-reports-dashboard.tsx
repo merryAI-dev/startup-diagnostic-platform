@@ -127,6 +127,11 @@ export function PendingReportsDashboard({
   const PAGE_SIZE = 10;
   const isConsultantUser = currentUser.role === "consultant";
   const isAdminUser = currentUser.role === "admin";
+  const pageTitleClassName = "text-2xl font-semibold text-slate-900";
+  const pageDescriptionClassName = "mt-1 text-sm text-slate-500";
+  const pageContainerClassName = isConsultantUser
+    ? "mx-auto w-full max-w-6xl"
+    : "mx-auto w-full max-w-7xl";
   const [reportDateRange, setReportDateRange] = useState<DateRange | undefined>();
   const [reportPage, setReportPage] = useState(1);
   const [selectedReportItem, setSelectedReportItem] = useState<{
@@ -662,32 +667,6 @@ export function PendingReportsDashboard({
     return pendingReports.filter((item) => item.application.type === "irregular");
   }, [pendingReports]);
 
-  // 사업별 통계
-  const statsByProgram = useMemo(() => {
-    const stats: Record<
-      string,
-      { name: string; color: string; pending: number; overdue: number }
-    > = {};
-
-    pendingReports.forEach((item) => {
-      const programId = item.application.programId || "unknown";
-      if (!stats[programId]) {
-        stats[programId] = {
-          name: item.programName,
-          color: item.programColor,
-          pending: 0,
-          overdue: 0,
-        };
-      }
-      stats[programId].pending++;
-      if (item.isOverdue) {
-        stats[programId].overdue++;
-      }
-    });
-
-    return Object.entries(stats).map(([id, data]) => ({ id, ...data }));
-  }, [pendingReports]);
-
   const overdueCount = pendingReports.filter((p) => p.isOverdue).length;
   const submittedReports = useMemo(() => {
     const appMap = new Map(applications.map((app) => [app.id, app]));
@@ -825,93 +804,65 @@ export function PendingReportsDashboard({
     }
   }, [filteredReportRows.length, reportPage]);
 
+  const pageTitle = isConsultantUser ? "오피스아워 일지" : "미작성 보고서";
+  const pageDescription = isConsultantUser
+    ? "배정된 세션의 오피스아워 일지 작성 현황을 확인합니다"
+    : "세션 완료 후 3일 이내 보고서 작성 현황을 관리합니다";
+
   return (
     <div className="flex h-full min-h-0 flex-col bg-gray-50">
       {/* Header */}
-      <div className="bg-white border-b px-8 py-6">
-        <div className="flex items-center justify-between mb-4">
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900">
-              미작성 보고서 관리
-            </h1>
-            <p className="text-sm text-muted-foreground mt-1">
-              세션 완료 후 3일 이내 보고서를 작성해주세요
-            </p>
+      <div className="bg-white border-b px-6 py-5">
+        <div className={pageContainerClassName}>
+          <div className="mb-4 flex items-center justify-between">
+            <div>
+              <h1 className={pageTitleClassName}>{pageTitle}</h1>
+              <p className={pageDescriptionClassName}>{pageDescription}</p>
+            </div>
           </div>
-        </div>
 
         {/* Stats */}
-        <div className="grid grid-cols-3 gap-4">
-          <div className="bg-gray-50 rounded-lg border p-4">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-sm text-muted-foreground">전체 미작성</span>
-              <FileText className="w-4 h-4 text-blue-500" />
+        <div className="grid grid-cols-3 gap-3">
+          <div className="rounded-lg border bg-gray-50 px-4 py-3">
+            <div className="mb-1.5 flex items-center justify-between">
+              <span className="text-xs text-muted-foreground">전체 미작성</span>
+              <FileText className="h-3.5 w-3.5 text-blue-500" />
             </div>
-            <div className="text-3xl font-bold text-gray-900">
+            <div className="text-2xl font-bold text-gray-900">
               {pendingReports.length}건
             </div>
           </div>
 
-          <div className="bg-red-50 rounded-lg border border-red-200 p-4">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-sm text-red-700">기한 초과</span>
-              <AlertCircle className="w-4 h-4 text-red-500" />
+          <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3">
+            <div className="mb-1.5 flex items-center justify-between">
+              <span className="text-xs text-red-700">기한 초과</span>
+              <AlertCircle className="h-3.5 w-3.5 text-red-500" />
             </div>
-            <div className="text-3xl font-bold text-red-600">
+            <div className="text-2xl font-bold text-red-600">
               {overdueCount}건
             </div>
-            <p className="text-xs text-red-600 mt-1">3일 이상 지난 보고서</p>
+            <p className="mt-0.5 text-[11px] text-red-600">3일 이상 지난 보고서</p>
           </div>
 
-          <div className="bg-amber-50 rounded-lg border border-amber-200 p-4">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-sm text-amber-700">곧 마감</span>
-              <Clock className="w-4 h-4 text-amber-500" />
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
+            <div className="mb-1.5 flex items-center justify-between">
+              <span className="text-xs text-amber-700">곧 마감</span>
+              <Clock className="h-3.5 w-3.5 text-amber-500" />
             </div>
-            <div className="text-3xl font-bold text-amber-600">
+            <div className="text-2xl font-bold text-amber-600">
               {pendingReports.filter((p) => !p.isOverdue && p.daysLeft <= 1).length}건
             </div>
-            <p className="text-xs text-amber-600 mt-1">마감 1일 이내</p>
+            <p className="mt-0.5 text-[11px] text-amber-600">마감 1일 이내</p>
           </div>
+        </div>
         </div>
       </div>
 
       {/* Content */}
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-8 py-6">
-        <div className="shrink-0 grid grid-cols-3 gap-6 mb-6">
-          {/* 사업별 통계 */}
-          <div className="col-span-3 bg-white rounded-lg border p-6">
-            <h3 className="font-semibold text-gray-900 mb-4">사업별 미작성 현황</h3>
-            <div className="space-y-3">
-              {statsByProgram.map((program) => (
-                <div
-                  key={program.id}
-                  className="flex items-center justify-between p-3 rounded-lg border"
-                >
-                  <div className="flex items-center gap-3">
-                    <div
-                      className="w-3 h-3 rounded-full"
-                      style={{ backgroundColor: program.color }}
-                    />
-                    <span className="font-medium text-gray-900">{program.name}</span>
-                  </div>
-                  <div className="flex items-center gap-4">
-                    <span className="text-sm text-muted-foreground">
-                      미작성 {program.pending}건
-                    </span>
-                    {program.overdue > 0 && (
-                      <Badge variant="destructive">초과 {program.overdue}건</Badge>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-        </div>
-
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-6 py-5">
+        <div className={`${pageContainerClassName} flex min-h-0 flex-1 flex-col`}>
         {/* 오피스아워 보고서 현황 */}
-        <div className="mt-6 flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border bg-white">
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border bg-white">
           <div className="shrink-0 border-b p-6 space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="font-semibold text-gray-900">오피스아워 보고서 현황</h3>
@@ -1110,9 +1061,10 @@ export function PendingReportsDashboard({
               pageSize={PAGE_SIZE}
               totalItems={filteredReportRows.length}
               onPageChange={setReportPage}
-              className="justify-end"
+              alwaysShow
             />
           </div>
+        </div>
         </div>
       </div>
       <Dialog open={!!selectedReportItem} onOpenChange={(open) => {

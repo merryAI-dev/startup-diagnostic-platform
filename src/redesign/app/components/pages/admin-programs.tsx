@@ -1,15 +1,7 @@
 import { type FormEvent, useEffect, useMemo, useState } from "react"
-import {
-  CalendarDays,
-  CheckCircle2,
-  Clock3,
-  Plus,
-  Target,
-  Users,
-  X,
-  XCircle,
-} from "lucide-react"
+import { CalendarDays, CheckCircle2, Clock3, Plus, Target, Users, X, XCircle } from "lucide-react"
 import { Agenda, Application, Program } from "@/redesign/app/lib/types"
+import { getCompletedHoursByProgram } from "@/redesign/app/lib/program-metrics"
 import { StatusChip } from "@/redesign/app/components/status-chip"
 import { Badge } from "@/redesign/app/components/ui/badge"
 import { Button } from "@/redesign/app/components/ui/button"
@@ -39,6 +31,7 @@ import {
   TableRow,
 } from "@/redesign/app/components/ui/table"
 import { Textarea } from "@/redesign/app/components/ui/textarea"
+import { PaginationControls } from "@/redesign/app/components/ui/pagination-controls"
 
 interface AdminProgramsProps {
   programs: Program[]
@@ -65,6 +58,7 @@ type ProgramFormState = {
 
 type ProgramStats = {
   program: Program
+  completedHours: number
   totalSessions: number
   completedSessions: number
   pendingSessions: number
@@ -73,6 +67,8 @@ type ProgramStats = {
   uniqueCompanies: number
   achievementRate: number
 }
+
+const PAGE_SIZE = 10
 
 function createDefaultProgramForm(): ProgramFormState {
   return {
@@ -154,14 +150,13 @@ export function AdminPrograms({
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
   const [form, setForm] = useState<ProgramFormState>(() => createDefaultProgramForm())
-  const [detailForm, setDetailForm] = useState<ProgramFormState>(() =>
-    createDefaultProgramForm()
-  )
+  const [detailForm, setDetailForm] = useState<ProgramFormState>(() => createDefaultProgramForm())
   const [selectedProgramId, setSelectedProgramId] = useState<string | null>(null)
   const [editingProgramId, setEditingProgramId] = useState<string | null>(null)
   const [companySearch, setCompanySearch] = useState("")
   const [selectedAvailableIds, setSelectedAvailableIds] = useState<string[]>([])
   const [selectedCompanyIds, setSelectedCompanyIds] = useState<string[]>([])
+  const [page, setPage] = useState(1)
 
   const applicationsByProgram = useMemo(() => {
     const grouped = new Map<string, Application[]>()
@@ -193,71 +188,75 @@ export function AdminPrograms({
     return map
   }, [companies, programs])
 
+  const completedHoursByProgram = useMemo(
+    () => getCompletedHoursByProgram(applications),
+    [applications],
+  )
+
   const programStats = useMemo<ProgramStats[]>(() => {
     return programs.map((program) => {
       const programApplications = applicationsByProgram.get(program.id) ?? []
+      const completedHours = completedHoursByProgram.get(program.id) ?? 0
       const companySet = new Set(
-        programApplications.map((app) => app.companyName?.trim() || "미지정 회사")
+        programApplications.map((app) => app.companyName?.trim() || "미지정 회사"),
       )
 
       const completedSessions = programApplications.filter(
-        (app) => app.status === "completed"
+        (app) => app.status === "completed",
       ).length
       const pendingSessions = programApplications.filter(
-        (app) => app.status === "pending" || app.status === "review"
+        (app) => app.status === "pending" || app.status === "review",
       ).length
       const confirmedSessions = programApplications.filter(
-        (app) => app.status === "confirmed"
+        (app) => app.status === "confirmed",
       ).length
       const cancelledSessions = programApplications.filter(
-        (app) => app.status === "cancelled"
+        (app) => app.status === "cancelled",
       ).length
 
       const mappedCompanyIds = companyIdsByProgram.get(program.id) ?? []
       const mappedCompanies =
-        mappedCompanyIds.length > 0
-          ? mappedCompanyIds.length
-          : companySet.size
+        mappedCompanyIds.length > 0 ? mappedCompanyIds.length : companySet.size
       return {
         program,
+        completedHours,
         totalSessions: programApplications.length,
         completedSessions,
         pendingSessions,
         confirmedSessions,
         cancelledSessions,
         uniqueCompanies: mappedCompanies,
-        achievementRate: getProgressRate(program.completedHours, program.targetHours),
+        achievementRate: getProgressRate(completedHours, program.targetHours),
       }
     })
-  }, [applicationsByProgram, companyIdsByProgram, programs])
+  }, [applicationsByProgram, companyIdsByProgram, completedHoursByProgram, programs])
 
   const summaryStats = useMemo(() => {
     const totalPrograms = programs.length
     const totalTargetHours = programs.reduce((sum, program) => sum + (program.targetHours || 0), 0)
-    const totalCompletedHours = programs.reduce((sum, program) => sum + (program.completedHours || 0), 0)
+    const totalCompletedHours = programStats.reduce((sum, item) => sum + item.completedHours, 0)
     const avgAchievement =
       totalPrograms === 0
         ? 0
         : Math.round(
-          programs.reduce((sum, program) => sum + getProgressRate(program.completedHours, program.targetHours), 0)
-          / totalPrograms
-        )
+            programStats.reduce((sum, item) => sum + item.achievementRate, 0) / totalPrograms,
+          )
     return {
       totalPrograms,
       totalTargetHours,
       totalCompletedHours,
       avgAchievement,
     }
-  }, [programs])
+  }, [programStats, programs])
 
   const selectedProgram = useMemo(
     () => programs.find((program) => program.id === selectedProgramId) ?? null,
-    [programs, selectedProgramId]
+    [programs, selectedProgramId],
   )
 
   const selectedStats = useMemo(
     () => programStats.find((item) => item.program.id === selectedProgramId) ?? null,
-    [programStats, selectedProgramId]
+    [programStats, selectedProgramId],
   )
 
   const selectedApplications = useMemo(() => {
@@ -267,17 +266,22 @@ export function AdminPrograms({
     return [...items].sort((a, b) => getTimeValue(b.createdAt) - getTimeValue(a.createdAt))
   }, [applicationsByProgram, selectedProgram])
 
+  const paginatedProgramStats = useMemo(() => {
+    const startIndex = (page - 1) * PAGE_SIZE
+    return programStats.slice(startIndex, startIndex + PAGE_SIZE)
+  }, [page, programStats])
+
   const editingProgram = useMemo(
     () => programs.find((program) => program.id === editingProgramId) ?? null,
-    [editingProgramId, programs]
+    [editingProgramId, programs],
   )
   const sortedCompanies = useMemo(
     () => [...companies].sort((a, b) => a.name.localeCompare(b.name)),
-    [companies]
+    [companies],
   )
   const companyById = useMemo(
     () => new Map(sortedCompanies.map((company) => [company.id, company])),
-    [sortedCompanies]
+    [sortedCompanies],
   )
   const companySearchQuery = companySearch.trim().toLowerCase()
   const editingProgramCompanyIds = useMemo(() => {
@@ -286,8 +290,9 @@ export function AdminPrograms({
   }, [companyIdsByProgram, editingProgram])
   const selectedCompanies = useMemo(() => {
     if (!editingProgram) return []
-    return editingProgramCompanyIds
-      .map((id) => companyById.get(id) || { id, name: "회사명 미입력" })
+    return editingProgramCompanyIds.map(
+      (id) => companyById.get(id) || { id, name: "회사명 미입력" },
+    )
   }, [companyById, editingProgram, editingProgramCompanyIds])
   const availableCompanies = useMemo(() => {
     if (!editingProgram) return []
@@ -326,6 +331,17 @@ export function AdminPrograms({
     setSelectedAvailableIds([])
     setSelectedCompanyIds([])
   }, [editingProgram])
+
+  useEffect(() => {
+    setPage(1)
+  }, [programs.length])
+
+  useEffect(() => {
+    const totalPages = Math.max(1, Math.ceil(programStats.length / PAGE_SIZE))
+    if (page > totalPages) {
+      setPage(totalPages)
+    }
+  }, [page, programStats.length])
 
   function handleSubmitProgram(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -393,7 +409,6 @@ export function AdminPrograms({
     setIsEditDialogOpen(true)
   }
 
-
   function addCompanyToProgram(companyId: string) {
     if (!editingProgram) return
     const currentIds = editingProgramCompanyIds
@@ -432,163 +447,174 @@ export function AdminPrograms({
   const pageDescription = isManagementMode
     ? "사업 목록을 관리하고, 상세보기에서 사업 정보를 수정할 수 있습니다."
     : "사업명, 시수 진행률, 신청 횟수를 확인하고 사업을 클릭해 신청내역과 상세 통계를 볼 수 있습니다."
+  const pageTitleClassName = "text-2xl font-semibold text-slate-900"
+  const pageDescriptionClassName = "mt-1 text-sm text-slate-500"
 
   return (
-    <div className="p-8 space-y-6 max-w-7xl mx-auto">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">{pageTitle}</h1>
-          <p className="text-sm text-muted-foreground mt-1">{pageDescription}</p>
-        </div>
-
-        {isManagementMode && (
-          <div className="flex items-center gap-2">
-            <Button onClick={() => setIsAddDialogOpen(true)}>
-              <Plus className="w-4 h-4 mr-2" />
-              사업 생성
-            </Button>
+    <div className="flex h-full min-h-0 flex-col bg-slate-50">
+      <div className="shrink-0 border-b bg-white px-6 py-5">
+        <div className="mx-auto flex w-full max-w-7xl items-start justify-between gap-4">
+          <div>
+            <h1 className={pageTitleClassName}>{pageTitle}</h1>
+            <p className={pageDescriptionClassName}>{pageDescription}</p>
           </div>
-        )}
+
+          {isManagementMode && (
+            <div className="flex items-center gap-2">
+              <Button onClick={() => setIsAddDialogOpen(true)}>
+                <Plus className="w-4 h-4 mr-2" />
+                사업 생성
+              </Button>
+            </div>
+          )}
+        </div>
       </div>
 
-      {isManagementMode ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>사업 목록</CardTitle>
-            <CardDescription>
-              상세보기를 누르면 수정 모달이 열리고, 상단 버튼에서 새 사업을 만들 수 있습니다.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="p-0 overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>사업명</TableHead>
-                  <TableHead>기간</TableHead>
-                  <TableHead>시수 진행률</TableHead>
-                  <TableHead>신청 횟수</TableHead>
-                  <TableHead className="text-right">작업</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {programStats.length === 0 && (
-                  <TableRow>
-                    <TableCell colSpan={5} className="h-24 text-center text-sm text-muted-foreground">
-                      등록된 사업이 없습니다.
-                    </TableCell>
-                  </TableRow>
-                )}
+      <div className="flex min-h-0 flex-1 flex-col px-6 pb-6 pt-5">
+        <div className="mx-auto flex min-h-0 w-full max-w-7xl flex-1 flex-col">
+          {isManagementMode ? (
+            <Card className="flex min-h-0 flex-1 flex-col overflow-hidden bg-white">
+              <CardHeader className="shrink-0 border-b bg-white">
+                <CardTitle>사업 목록</CardTitle>
+              </CardHeader>
+              <div className="min-h-0 flex-1 overflow-auto">
+                <Table>
+                  <TableHeader className="[&_tr]:sticky [&_tr]:top-0 [&_tr]:z-10 [&_tr]:bg-white">
+                    <TableRow className="hover:bg-white">
+                      <TableHead className="bg-white">사업명</TableHead>
+                      <TableHead className="bg-white">기간</TableHead>
+                      <TableHead className="bg-white">시수 진행률</TableHead>
+                      <TableHead className="bg-white">신청 횟수</TableHead>
+                      <TableHead className="bg-white text-right">작업</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {programStats.length === 0 && (
+                      <TableRow>
+                        <TableCell
+                          colSpan={5}
+                          className="h-24 text-center text-sm text-muted-foreground"
+                        >
+                          등록된 사업이 없습니다.
+                        </TableCell>
+                      </TableRow>
+                    )}
 
-                {programStats.map((item) => (
-                  <TableRow key={item.program.id}>
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        <div
-                          className="w-2.5 h-2.5 rounded-full"
-                          style={{ backgroundColor: item.program.color }}
-                        />
-                        <span className="font-medium">{item.program.name}</span>
-                      </div>
-                    </TableCell>
-                    <TableCell className="text-sm text-muted-foreground">
-                      {prettyDateRange(item.program.periodStart, item.program.periodEnd)}
-                    </TableCell>
-                    <TableCell>
-                      <div className="space-y-1 min-w-40">
-                        <div className="text-xs text-muted-foreground">
-                          {item.program.completedHours}h / {item.program.targetHours}h
-                        </div>
-                        <Progress value={item.achievementRate} className="h-1.5" />
-                        <div className="text-xs font-medium">{item.achievementRate}%</div>
-                      </div>
-                    </TableCell>
-                    <TableCell>{item.totalSessions}건</TableCell>
-                    <TableCell className="text-right">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => openEditDialog(item.program.id)}
-                      >
-                        상세보기
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
-      ) : (
-        <>
-          <Card className="border border-slate-200">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base">전체 요약</CardTitle>
-              <CardDescription>
-                전체 사업 수와 시수 진행 상황을 빠르게 확인합니다.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="pt-0">
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                <div className="rounded-xl border border-slate-200 bg-white p-5">
-                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <Users className="w-3.5 h-3.5 text-slate-500" />
-                    전체 사업 수
-                  </div>
-                  <p className="text-2xl font-semibold text-slate-900 mt-3">
-                    {summaryStats.totalPrograms}개
-                  </p>
-                </div>
-                <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-5">
-                  <div className="flex items-center gap-2 text-xs text-amber-700">
-                    <Target className="w-3.5 h-3.5" />
-                    목표 시수 (전체)
-                  </div>
-                  <p className="text-2xl font-semibold text-amber-900 mt-3">
-                    {summaryStats.totalTargetHours}h
-                  </p>
-                </div>
-                <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-5">
-                  <div className="flex items-center gap-2 text-xs text-emerald-700">
-                    <CheckCircle2 className="w-3.5 h-3.5" />
-                    완료 시수
-                  </div>
-                  <p className="text-2xl font-semibold text-emerald-900 mt-3">
-                    {summaryStats.totalCompletedHours}h
-                  </p>
-                </div>
-                <div className="rounded-xl border border-blue-200 bg-blue-50/60 p-5">
-                  <div className="flex items-center gap-2 text-xs text-blue-700">
-                    <Clock3 className="w-3.5 h-3.5" />
-                    평균 달성률
-                  </div>
-                  <p className="text-2xl font-semibold text-blue-900 mt-3">
-                    {summaryStats.avgAchievement}%
-                  </p>
-                  <Progress value={summaryStats.avgAchievement} className="h-2 mt-3" />
-                </div>
+                    {paginatedProgramStats.map((item) => (
+                      <TableRow key={item.program.id}>
+                        <TableCell>
+                          <div className="flex items-center gap-2">
+                            <div
+                              className="w-2.5 h-2.5 rounded-full"
+                              style={{ backgroundColor: item.program.color }}
+                            />
+                            <span className="font-medium">{item.program.name}</span>
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-sm text-muted-foreground">
+                          {prettyDateRange(item.program.periodStart, item.program.periodEnd)}
+                        </TableCell>
+                        <TableCell>
+                          <div className="space-y-1 min-w-40">
+                            <div className="text-xs text-muted-foreground">
+                              {item.completedHours}h / {item.program.targetHours}h
+                            </div>
+                            <Progress value={item.achievementRate} className="h-1.5" />
+                            <div className="text-xs font-medium">{item.achievementRate}%</div>
+                          </div>
+                        </TableCell>
+                        <TableCell>{item.totalSessions}건</TableCell>
+                        <TableCell className="text-right">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => openEditDialog(item.program.id)}
+                          >
+                            상세보기
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
               </div>
-            </CardContent>
-          </Card>
+              <div className="shrink-0 border-t bg-white px-4 py-3">
+                <PaginationControls
+                  page={page}
+                  pageSize={PAGE_SIZE}
+                  totalItems={programStats.length}
+                  onPageChange={setPage}
+                  alwaysShow
+                />
+              </div>
+            </Card>
+          ) : (
+            <div className="min-h-0 flex-1 space-y-6 overflow-y-auto pr-1">
+              <Card className="border border-slate-200">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base">전체 요약</CardTitle>
+                  <CardDescription>전체 사업 수와 시수 진행 상황을 빠르게 확인합니다.</CardDescription>
+                </CardHeader>
+                <CardContent className="pt-0">
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    <div className="rounded-xl border border-slate-200 bg-white p-5">
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <Users className="w-3.5 h-3.5 text-slate-500" />
+                        전체 사업 수
+                      </div>
+                      <p className="text-2xl font-semibold text-slate-900 mt-3">
+                        {summaryStats.totalPrograms}개
+                      </p>
+                    </div>
+                    <div className="rounded-xl border border-amber-200 bg-amber-50/60 p-5">
+                      <div className="flex items-center gap-2 text-xs text-amber-700">
+                        <Target className="w-3.5 h-3.5" />
+                        목표 시수 (전체)
+                      </div>
+                      <p className="text-2xl font-semibold text-amber-900 mt-3">
+                        {summaryStats.totalTargetHours}h
+                      </p>
+                    </div>
+                    <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-5">
+                      <div className="flex items-center gap-2 text-xs text-emerald-700">
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        완료 시수
+                      </div>
+                      <p className="text-2xl font-semibold text-emerald-900 mt-3">
+                        {summaryStats.totalCompletedHours}h
+                      </p>
+                    </div>
+                    <div className="rounded-xl border border-blue-200 bg-blue-50/60 p-5">
+                      <div className="flex items-center gap-2 text-xs text-blue-700">
+                        <Clock3 className="w-3.5 h-3.5" />
+                        평균 달성률
+                      </div>
+                      <p className="text-2xl font-semibold text-blue-900 mt-3">
+                        {summaryStats.avgAchievement}%
+                      </p>
+                      <Progress value={summaryStats.avgAchievement} className="h-2 mt-3" />
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>사업별 요약</CardTitle>
-              <CardDescription>
-                사업별 진행률과 신청 현황을 카드로 확인하세요.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              {programStats.length === 0 ? (
-                <div className="h-24 text-center text-sm text-muted-foreground flex items-center justify-center">
-                  등록된 사업이 없습니다.
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-                  {programStats.map((item) => {
-                    const isSelected = selectedProgramId === item.program.id
-                    return (
-                      <button
+              <Card>
+                <CardHeader>
+                  <CardTitle>사업별 요약</CardTitle>
+                  <CardDescription>사업별 진행률과 신청 현황을 카드로 확인하세요.</CardDescription>
+                </CardHeader>
+                <CardContent>
+                  {programStats.length === 0 ? (
+                    <div className="flex h-24 items-center justify-center text-center text-sm text-muted-foreground">
+                      등록된 사업이 없습니다.
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                      {programStats.map((item) => {
+                        const isSelected = selectedProgramId === item.program.id
+                        return (
+                          <button
                         key={item.program.id}
                         type="button"
                         onClick={() => setSelectedProgramId(item.program.id)}
@@ -620,7 +646,7 @@ export function AdminPrograms({
 
                         <div className="mt-4 space-y-2">
                           <div className="text-xs text-muted-foreground">
-                            {item.program.completedHours}h / {item.program.targetHours}h
+                            {item.completedHours}h / {item.program.targetHours}h
                           </div>
                           <Progress value={item.achievementRate} className="h-2" />
                           <div className="text-sm font-semibold text-slate-900">
@@ -639,183 +665,191 @@ export function AdminPrograms({
                             취소 {item.cancelledSessions}건
                           </div>
                         </div>
-                      </button>
-                    )
-                  })}
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          {selectedProgram && selectedStats && (
-            <>
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <span
-                      className="inline-block h-3 w-3 rounded-full"
-                      style={{ backgroundColor: selectedProgram.color }}
-                    />
-                    {selectedProgram.name} 상세 통계
-                  </CardTitle>
-                  <CardDescription>
-                    선택한 사업의 운영 상태와 신청 현황을 확인할 수 있습니다.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-5">
-                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-3">
-                    <div className="rounded-lg border p-3">
-                      <div className="text-xs text-muted-foreground flex items-center gap-1">
-                        <CalendarDays className="w-3 h-3" />
-                        신청 횟수
-                      </div>
-                      <div className="text-lg font-semibold mt-1">{selectedStats.totalSessions}건</div>
+                          </button>
+                        )
+                      })}
                     </div>
-                    <div className="rounded-lg border p-3">
-                      <div className="text-xs text-muted-foreground flex items-center gap-1">
-                        <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-                        완료
-                      </div>
-                      <div className="text-lg font-semibold mt-1 text-emerald-600">
-                        {selectedStats.completedSessions}건
-                      </div>
-                    </div>
-                    <div className="rounded-lg border p-3">
-                      <div className="text-xs text-muted-foreground flex items-center gap-1">
-                        <Clock3 className="w-3 h-3 text-amber-600" />
-                        진행중
-                      </div>
-                      <div className="text-lg font-semibold mt-1 text-amber-600">
-                        {selectedStats.pendingSessions + selectedStats.confirmedSessions}건
-                      </div>
-                    </div>
-                    <div className="rounded-lg border p-3">
-                      <div className="text-xs text-muted-foreground flex items-center gap-1">
-                        <XCircle className="w-3 h-3 text-rose-600" />
-                        취소
-                      </div>
-                      <div className="text-lg font-semibold mt-1 text-rose-600">
-                        {selectedStats.cancelledSessions}건
-                      </div>
-                    </div>
-                    <div className="rounded-lg border p-3">
-                      <div className="text-xs text-muted-foreground flex items-center gap-1">
-                        <Users className="w-3 h-3" />
-                        참여 기업
-                      </div>
-                      <div className="text-lg font-semibold mt-1">
-                        {selectedStats.uniqueCompanies}개사
-                        {selectedProgram.companyLimit && selectedProgram.companyLimit > 0
-                          ? ` / ${selectedProgram.companyLimit}개`
-                          : ""}
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="rounded-lg border p-4 space-y-2">
-                    <div className="text-sm font-medium flex items-center gap-1">
-                      <Target className="w-4 h-4" />
-                      시수 진행률
-                    </div>
-                    <div className="text-sm text-muted-foreground">
-                      {selectedProgram.completedHours}h / {selectedProgram.targetHours}h ({selectedStats.achievementRate}%)
-                    </div>
-                    <Progress value={selectedStats.achievementRate} className="h-2" />
-                    <p className="text-xs text-muted-foreground">
-                      기간: {prettyDateRange(selectedProgram.periodStart, selectedProgram.periodEnd)}
-                    </p>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <div className="text-sm font-medium mb-2">적용 아젠다 (활성)</div>
-                      <div className="flex flex-wrap gap-1.5">
-                        {agendas.filter((agenda) => agenda.active !== false).length > 0 ? (
-                          agendas
-                            .filter((agenda) => agenda.active !== false)
-                            .map((agenda) => (
-                              <Badge key={agenda.id} variant="outline">
-                                {agenda.name}
-                              </Badge>
-                            ))
-                        ) : (
-                          <span className="text-xs text-muted-foreground">활성 아젠다가 없습니다.</span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
+                  )}
                 </CardContent>
               </Card>
 
-              <Card>
-                <CardHeader className="flex flex-row items-start justify-between gap-4">
-                  <div>
-                    <CardTitle>{selectedProgram.name} 신청 내역</CardTitle>
-                    <CardDescription className="mt-1">
-                      선택한 사업의 신청 기록을 최신순으로 확인할 수 있습니다.
-                    </CardDescription>
-                  </div>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={!onNavigate}
-                    onClick={() => onNavigate?.("admin-applications")}
-                  >
-                    신청 관리로 이동
-                  </Button>
-                </CardHeader>
+              {selectedProgram && selectedStats && (
+                <>
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center gap-2">
+                        <span
+                          className="inline-block h-3 w-3 rounded-full"
+                          style={{ backgroundColor: selectedProgram.color }}
+                        />
+                        {selectedProgram.name} 상세 통계
+                      </CardTitle>
+                      <CardDescription>
+                        선택한 사업의 운영 상태와 신청 현황을 확인할 수 있습니다.
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-5">
+                      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-3">
+                        <div className="rounded-lg border p-3">
+                          <div className="text-xs text-muted-foreground flex items-center gap-1">
+                            <CalendarDays className="w-3 h-3" />
+                            신청 횟수
+                          </div>
+                          <div className="text-lg font-semibold mt-1">
+                            {selectedStats.totalSessions}건
+                          </div>
+                        </div>
+                        <div className="rounded-lg border p-3">
+                          <div className="text-xs text-muted-foreground flex items-center gap-1">
+                            <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                            완료
+                          </div>
+                          <div className="text-lg font-semibold mt-1 text-emerald-600">
+                            {selectedStats.completedSessions}건
+                          </div>
+                        </div>
+                        <div className="rounded-lg border p-3">
+                          <div className="text-xs text-muted-foreground flex items-center gap-1">
+                            <Clock3 className="w-3 h-3 text-amber-600" />
+                            진행중
+                          </div>
+                          <div className="text-lg font-semibold mt-1 text-amber-600">
+                            {selectedStats.pendingSessions + selectedStats.confirmedSessions}건
+                          </div>
+                        </div>
+                        <div className="rounded-lg border p-3">
+                          <div className="text-xs text-muted-foreground flex items-center gap-1">
+                            <XCircle className="w-3 h-3 text-rose-600" />
+                            취소
+                          </div>
+                          <div className="text-lg font-semibold mt-1 text-rose-600">
+                            {selectedStats.cancelledSessions}건
+                          </div>
+                        </div>
+                        <div className="rounded-lg border p-3">
+                          <div className="text-xs text-muted-foreground flex items-center gap-1">
+                            <Users className="w-3 h-3" />
+                            참여 기업
+                          </div>
+                          <div className="text-lg font-semibold mt-1">
+                            {selectedStats.uniqueCompanies}개사
+                            {selectedProgram.companyLimit && selectedProgram.companyLimit > 0
+                              ? ` / ${selectedProgram.companyLimit}개`
+                              : ""}
+                          </div>
+                        </div>
+                      </div>
 
-                <CardContent className="p-0 overflow-x-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>신청일</TableHead>
-                        <TableHead>상태</TableHead>
-                        <TableHead>기업명</TableHead>
-                        <TableHead>주제</TableHead>
-                        <TableHead>컨설턴트</TableHead>
-                        <TableHead>예정 일정</TableHead>
-                        <TableHead>신청자</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {selectedApplications.length === 0 && (
-                        <TableRow>
-                          <TableCell
-                            colSpan={7}
-                            className="h-24 text-center text-sm text-muted-foreground"
-                          >
-                            신청 내역이 없습니다.
-                          </TableCell>
-                        </TableRow>
-                      )}
+                      <div className="rounded-lg border p-4 space-y-2">
+                        <div className="text-sm font-medium flex items-center gap-1">
+                          <Target className="w-4 h-4" />
+                          시수 진행률
+                        </div>
+                        <div className="text-sm text-muted-foreground">
+                          {selectedStats.completedHours}h / {selectedProgram.targetHours}h (
+                          {selectedStats.achievementRate}%)
+                        </div>
+                        <Progress value={selectedStats.achievementRate} className="h-2" />
+                        <p className="text-xs text-muted-foreground">
+                          기간:{" "}
+                          {prettyDateRange(selectedProgram.periodStart, selectedProgram.periodEnd)}
+                        </p>
+                      </div>
 
-                      {selectedApplications.map((application) => (
-                        <TableRow key={application.id}>
-                          <TableCell>{formatDateLabel(application.createdAt)}</TableCell>
-                          <TableCell>
-                            <StatusChip status={application.status} size="sm" />
-                          </TableCell>
-                          <TableCell>{application.companyName ?? "-"}</TableCell>
-                          <TableCell>{application.agenda || application.officeHourTitle}</TableCell>
-                          <TableCell>{application.consultant}</TableCell>
-                          <TableCell>
-                            {formatScheduleLabel(
-                              application.scheduledDate,
-                              application.scheduledTime
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                          <div className="text-sm font-medium mb-2">적용 아젠다 (활성)</div>
+                          <div className="flex flex-wrap gap-1.5">
+                            {agendas.filter((agenda) => agenda.active !== false).length > 0 ? (
+                              agendas
+                                .filter((agenda) => agenda.active !== false)
+                                .map((agenda) => (
+                                  <Badge key={agenda.id} variant="outline">
+                                    {agenda.name}
+                                  </Badge>
+                                ))
+                            ) : (
+                              <span className="text-xs text-muted-foreground">
+                                활성 아젠다가 없습니다.
+                              </span>
                             )}
-                          </TableCell>
-                          <TableCell>{application.applicantName ?? "-"}</TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </CardContent>
-              </Card>
-            </>
+                          </div>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  <Card>
+                    <CardHeader className="flex flex-row items-start justify-between gap-4">
+                      <div>
+                        <CardTitle>{selectedProgram.name} 신청 내역</CardTitle>
+                        <CardDescription className="mt-1">
+                          선택한 사업의 신청 기록을 최신순으로 확인할 수 있습니다.
+                        </CardDescription>
+                      </div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={!onNavigate}
+                        onClick={() => onNavigate?.("admin-applications")}
+                      >
+                        신청 관리로 이동
+                      </Button>
+                    </CardHeader>
+
+                    <CardContent className="p-0 overflow-x-auto">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>신청일</TableHead>
+                            <TableHead>상태</TableHead>
+                            <TableHead>기업명</TableHead>
+                            <TableHead>주제</TableHead>
+                            <TableHead>컨설턴트</TableHead>
+                            <TableHead>예정 일정</TableHead>
+                            <TableHead>신청자</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {selectedApplications.length === 0 && (
+                            <TableRow>
+                              <TableCell
+                                colSpan={7}
+                                className="h-24 text-center text-sm text-muted-foreground"
+                              >
+                                신청 내역이 없습니다.
+                              </TableCell>
+                            </TableRow>
+                          )}
+
+                          {selectedApplications.map((application) => (
+                            <TableRow key={application.id}>
+                              <TableCell>{formatDateLabel(application.createdAt)}</TableCell>
+                              <TableCell>
+                                <StatusChip status={application.status} size="sm" />
+                              </TableCell>
+                              <TableCell>{application.companyName ?? "-"}</TableCell>
+                              <TableCell>{application.agenda || application.officeHourTitle}</TableCell>
+                              <TableCell>{application.consultant}</TableCell>
+                              <TableCell>
+                                {formatScheduleLabel(
+                                  application.scheduledDate,
+                                  application.scheduledTime,
+                                )}
+                              </TableCell>
+                              <TableCell>{application.applicantName ?? "-"}</TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </CardContent>
+                  </Card>
+                </>
+              )}
+            </div>
           )}
-        </>
-      )}
+        </div>
+      </div>
 
       <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
         <DialogContent className="max-h-[92vh] overflow-y-auto p-8 sm:max-w-5xl">
@@ -835,9 +869,7 @@ export function AdminPrograms({
                 <Label>사업명</Label>
                 <Input
                   value={form.name}
-                  onChange={(event) =>
-                    setForm((prev) => ({ ...prev, name: event.target.value }))
-                  }
+                  onChange={(event) => setForm((prev) => ({ ...prev, name: event.target.value }))}
                   placeholder="예: 2026 상반기 농식품 프로그램"
                   required
                 />
@@ -875,9 +907,7 @@ export function AdminPrograms({
                     setForm((prev) => ({ ...prev, periodEnd: event.target.value }))
                   }
                 />
-                <p className="text-xs text-muted-foreground">
-                  요일은 화/목 고정입니다.
-                </p>
+                <p className="text-xs text-muted-foreground">요일은 화/목 고정입니다.</p>
               </div>
             </div>
 
@@ -961,8 +991,8 @@ export function AdminPrograms({
           }
         }}
       >
-        <DialogContent className="max-h-[92vh] overflow-y-auto p-8 sm:max-w-5xl">
-          <DialogHeader>
+        <DialogContent className="flex max-h-[92vh] flex-col overflow-hidden p-0 sm:max-w-5xl">
+          <DialogHeader className="shrink-0 border-b px-8 py-6 pr-14">
             <DialogTitle>사업 상세보기 / 수정</DialogTitle>
             <DialogDescription>
               입력 여백과 폭을 늘려 수정하기 편하게 조정했습니다.
@@ -970,15 +1000,17 @@ export function AdminPrograms({
           </DialogHeader>
 
           {editingProgram ? (
-            <div className="space-y-6 mt-2">
-              <div className="rounded-lg border p-4 bg-slate-50/60">
-                <div className="text-sm font-medium">{editingProgram.name}</div>
-                <p className="text-xs text-muted-foreground mt-1">
-                  기간: {prettyDateRange(editingProgram.periodStart, editingProgram.periodEnd)}
-                </p>
-              </div>
+            <>
+              <div className="min-h-0 flex-1 overflow-y-auto px-8 py-6">
+                <div className="space-y-6">
+                  <div className="rounded-lg border p-4 bg-slate-50/60">
+                    <div className="text-sm font-medium">{editingProgram.name}</div>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      기간: {prettyDateRange(editingProgram.periodStart, editingProgram.periodEnd)}
+                    </p>
+                  </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="space-y-2">
                   <Label>사업명</Label>
                   <Input
@@ -1022,9 +1054,9 @@ export function AdminPrograms({
                     }
                   />
                 </div>
-              </div>
+                  </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
                 <div className="space-y-2">
                   <Label>내부 티켓 수</Label>
                   <Input
@@ -1080,9 +1112,9 @@ export function AdminPrograms({
                     }
                   />
                 </div>
-              </div>
+                  </div>
 
-              <div className="rounded-lg border p-4 space-y-3">
+                  <div className="rounded-lg border p-4 space-y-3">
                 <div className="flex items-center justify-between">
                   <div className="text-sm font-medium flex items-center gap-2">
                     <Users className="w-4 h-4" />
@@ -1148,9 +1180,9 @@ export function AdminPrograms({
                       variant="outline"
                       className="bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
                       disabled={
-                        selectedAvailableIds.length === 0
-                        || ((editingProgram.companyLimit ?? 0) > 0
-                          && selectedCompanies.length >= (editingProgram.companyLimit ?? 0))
+                        selectedAvailableIds.length === 0 ||
+                        ((editingProgram.companyLimit ?? 0) > 0 &&
+                          selectedCompanies.length >= (editingProgram.companyLimit ?? 0))
                       }
                       onClick={addSelectedCompanies}
                     >
@@ -1209,13 +1241,15 @@ export function AdminPrograms({
                           )
                         })
                       )}
-                    </div>
-                  </div>
-                </div>
-              </div>
+	                    </div>
+	                  </div>
+	                </div>
+	                </div>
+	              </div>
+	              </div>
 
-              <div className="flex justify-end items-center gap-2 pt-2">
-                <div className="flex items-center gap-2">
+	              <div className="shrink-0 border-t px-8 py-4">
+                <div className="flex justify-end items-center gap-2">
                   <Button
                     type="button"
                     variant="outline"
@@ -1231,9 +1265,11 @@ export function AdminPrograms({
                   </Button>
                 </div>
               </div>
-            </div>
+            </>
           ) : (
-            <p className="text-sm text-muted-foreground mt-2">사업 정보를 불러오는 중입니다.</p>
+            <div className="px-8 py-6">
+              <p className="text-sm text-muted-foreground">사업 정보를 불러오는 중입니다.</p>
+            </div>
           )}
         </DialogContent>
       </Dialog>

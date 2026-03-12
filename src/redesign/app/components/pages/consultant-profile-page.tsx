@@ -92,6 +92,8 @@ export function ConsultantProfilePage({
   onSaveSchedule,
   onSubmit,
 }: ConsultantProfilePageProps) {
+  const pageTitleClassName = "text-2xl font-semibold text-slate-900";
+  const pageDescriptionClassName = "mt-1 text-sm text-slate-500";
   const [formValues, setFormValues] = useState<ConsultantProfileFormValues>(() =>
     buildInitialValues(consultant, defaultEmail)
   );
@@ -235,29 +237,45 @@ export function ConsultantProfilePage({
   const hasSchedulePanel = Boolean(onSaveSchedule);
 
   return (
-    <div className={embedded ? "h-full" : "mx-auto max-w-7xl p-8"}>
+    <div className={embedded ? "h-full" : "mx-auto max-w-7xl px-6 py-5"}>
+      {!embedded && (
+        <div className="mb-5">
+          <h1 className={pageTitleClassName}>내 정보 입력</h1>
+          <p className={pageDescriptionClassName}>
+            프로필과 정기 오피스아워 가능 시간을 관리합니다.
+          </p>
+        </div>
+      )}
       <div
         className={cn(
           "grid gap-6",
-          hasSchedulePanel ? "lg:grid-cols-10" : "mx-auto max-w-3xl"
+          hasSchedulePanel
+            ? "mx-auto lg:grid-cols-[minmax(0,1.18fr)_minmax(360px,0.82fr)]"
+            : "mx-auto max-w-3xl"
         )}
       >
         <Card
           className={cn(
-            hasSchedulePanel ? "lg:col-span-4" : "w-full",
+            "w-full",
             embedded && "border-0 shadow-none"
           )}
         >
         <CardHeader className={cardHeaderClassName}>
-          <CardTitle>내 정보 입력</CardTitle>
-          {!hideDescription && (
-            <CardDescription>
-              관리자 계정 생성 시 사용하는 필드와 동일합니다. 저장하면 내 프로필에 반영됩니다.
+          <CardTitle className="text-xl font-semibold text-slate-900">
+            {embedded ? "내 정보 입력" : "기본 정보"}
+          </CardTitle>
+          {embedded || hideDescription ? null : (
+            <CardDescription className="text-sm text-slate-500">
+              컨설턴트 프로필과 기본 연락처를 입력합니다.
             </CardDescription>
           )}
         </CardHeader>
         <CardContent className={cardContentClassName}>
-          <form id="consultant-profile-form" onSubmit={handleSubmit} className="grid grid-cols-2 gap-4">
+          <form
+            id="consultant-profile-form"
+            onSubmit={handleSubmit}
+            className="grid grid-cols-2 gap-3"
+          >
             <div>
               <Label className="mb-2 block" htmlFor="consultant-name">
                 컨설턴트명
@@ -420,10 +438,12 @@ export function ConsultantProfilePage({
       </Card>
 
       {onSaveSchedule && (
-        <Card className={cn("lg:col-span-6", embedded && "border-0 shadow-none")}>
+        <Card className={cn("w-full", embedded && "border-0 shadow-none")}>
           <CardHeader className={cardHeaderClassName}>
-            <CardTitle>내 스케줄 설정</CardTitle>
-            <CardDescription>
+            <CardTitle className="text-xl font-semibold text-slate-900">
+              내 스케줄 설정
+            </CardTitle>
+            <CardDescription className="text-xs">
               화/목 기준으로 가능한 시간을 선택하세요.
             </CardDescription>
           </CardHeader>
