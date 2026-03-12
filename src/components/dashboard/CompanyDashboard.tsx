@@ -34,6 +34,7 @@ import { useSelfAssessmentForm } from "@/hooks/useSelfAssessmentForm"
 import { db, storage } from "@/firebase/client"
 import type { CompanyInfoForm } from "@/types/company"
 import { SelfAssessmentForm } from "@/components/dashboard/SelfAssessmentForm"
+import { MIN_SELF_ASSESSMENT_REASON_LENGTH } from "@/utils/selfAssessment"
 
 type CompanyDashboardProps = {
   onLogout: () => void
@@ -1129,7 +1130,7 @@ export function CompanyDashboard({
                 title={
                   assessmentComplete
                     ? undefined
-                    : "모든 문항의 답변과 근거를 입력해야 저장할 수 있습니다."
+                    : `모든 문항의 답변과 근거를 ${MIN_SELF_ASSESSMENT_REASON_LENGTH}자 이상 입력해야 저장할 수 있습니다.`
                 }
               >
                 <div className="rounded-xl border border-slate-900 bg-slate-900 px-4 py-2 text-sm font-semibold text-white shadow-sm">

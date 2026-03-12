@@ -4,10 +4,12 @@ import type {
   SelfAssessmentSections,
 } from "@/types/selfAssessment"
 
-function isSelfAssessmentAnswerComplete(answer?: SelfAssessmentAnswer) {
+export const MIN_SELF_ASSESSMENT_REASON_LENGTH = 20
+
+export function isSelfAssessmentAnswerComplete(answer?: SelfAssessmentAnswer) {
   return answer?.answer !== null
     && answer?.answer !== undefined
-    && (answer?.reason ?? "").trim().length >= 1
+    && (answer?.reason ?? "").trim().length >= MIN_SELF_ASSESSMENT_REASON_LENGTH
 }
 
 export function isSelfAssessmentComplete(

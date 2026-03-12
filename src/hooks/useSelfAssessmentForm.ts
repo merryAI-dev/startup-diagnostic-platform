@@ -8,6 +8,10 @@ import type {
   SelfAssessmentState,
 } from "@/types/selfAssessment"
 import { SELF_ASSESSMENT_SECTIONS } from "@/data/selfAssessment"
+import {
+  isSelfAssessmentAnswerComplete,
+  MIN_SELF_ASSESSMENT_REASON_LENGTH,
+} from "@/utils/selfAssessment"
 
 const DEFAULT_ANSWER: SelfAssessmentAnswer = {
   answer: null,
@@ -93,11 +97,6 @@ function fromLegacyAnswers(
   return base.sections
 }
 
-function isQuestionInputComplete(answer?: SelfAssessmentAnswer) {
-  return answer?.answer !== null && answer?.answer !== undefined
-    && (answer?.reason ?? "").trim().length >= 1
-}
-
 export function useSelfAssessmentForm(companyId: string) {
   const [state, setState] = useState<SelfAssessmentState>(buildInitialState)
   const [loading, setLoading] = useState(true)
@@ -159,7 +158,7 @@ export function useSelfAssessmentForm(companyId: string) {
               question.storageKey
             ]
           nextTotalQuestionCount += 1
-          if (isQuestionInputComplete(answer)) {
+          if (isSelfAssessmentAnswerComplete(answer)) {
             nextAnsweredCount += 1
           }
         })
@@ -233,7 +232,9 @@ export function useSelfAssessmentForm(companyId: string) {
   async function saveSelfAssessmentByType(saveType: SaveType) {
     setSaveStatus(null)
     if (saveType === "final" && !isComplete) {
-      setSaveStatus("모든 문항의 답변과 근거를 입력해주세요.")
+      setSaveStatus(
+        `모든 문항의 답변과 근거를 ${MIN_SELF_ASSESSMENT_REASON_LENGTH}자 이상 입력해주세요.`
+      )
       return false
     }
     setSaving(true)
