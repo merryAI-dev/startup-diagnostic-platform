@@ -10,7 +10,11 @@
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "migrate:officehour:created-by-uid": "node scripts/backfill-office-hour-created-by-uid.mjs",
-    "report:created-by-uid": "node scripts/report-created-by-uid.mjs"
+    "report:created-by-uid": "node scripts/report-created-by-uid.mjs",
+    "report:consultant-auth-integrity": "node scripts/report-consultant-auth-integrity.mjs",
+    "report:consultant-reference-usage": "node scripts/report-consultant-reference-usage.mjs",
+    "report:company-profile-integrity": "node scripts/report-company-profile-integrity.mjs",
+    "cleanup:orphaned-auth-data": "node scripts/cleanup-orphaned-auth-data.mjs"
   },
   "dependencies": {
     "@emotion/react": "11.14.0",
