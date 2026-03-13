@@ -283,40 +283,40 @@ export function OfficeHourReportForm({
     <Dialog open={open} onOpenChange={(nextOpen) => {
       if (!nextOpen) onClose();
     }}>
-      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto overflow-x-hidden">
-        <DialogHeader>
+      <DialogContent className="flex max-h-[90vh] max-w-3xl flex-col overflow-hidden p-0">
+        <DialogHeader className="shrink-0 border-b px-6 py-5">
           <div className="flex items-center justify-between gap-4">
-          <div>
-            <DialogTitle className="text-2xl whitespace-nowrap overflow-hidden text-ellipsis">
-              {initialReport ? "오피스아워 보고서 수정" : "오피스아워 보고서 작성"}
-            </DialogTitle>
-            <p className="text-sm text-muted-foreground mt-1">
-              {application.officeHourTitle}
-            </p>
-            {!initialReport && (
-              <p className="text-xs text-amber-700 mt-1">
-                세션 종료 후 3일 이내 보고서를 작성해야 합니다.
+            <div>
+              <DialogTitle className="text-2xl whitespace-nowrap overflow-hidden text-ellipsis">
+                {initialReport ? "오피스아워 보고서 수정" : "오피스아워 보고서 작성"}
+              </DialogTitle>
+              <p className="text-sm text-muted-foreground mt-1">
+                {application.officeHourTitle}
               </p>
-            )}
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="flex items-center gap-2 bg-amber-50 text-amber-700 px-3 py-1.5 rounded-lg border border-amber-200">
-              <AlertCircle className="w-4 h-4" />
-              <span className="text-sm font-medium whitespace-nowrap">
+              {!initialReport && (
+                <p className="text-xs text-amber-700 mt-1">
+                  세션 종료 후 3일 이내 보고서를 작성해야 합니다.
+                </p>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 bg-amber-50 text-amber-700 px-3 py-1.5 rounded-lg border border-amber-200">
+                <AlertCircle className="w-4 h-4" />
+                <span className="text-sm font-medium whitespace-nowrap">
                   {deadlineInfo
                     ? deadlineInfo.isOverdue
                       ? `기한 초과 ${deadlineInfo.overdueDays}일`
                       : `D-${Math.max(0, deadlineInfo.daysLeft)}`
                     : "작성 필수"}
                 </span>
+              </div>
             </div>
           </div>
-        </div>
         </DialogHeader>
 
         {deadlineInfo && !initialReport && (
           <div
-            className={`mt-4 rounded-lg border px-4 py-3 text-sm ${
+            className={`mx-6 mt-4 shrink-0 rounded-lg border px-4 py-3 text-sm ${
               deadlineInfo.isOverdue
                 ? "border-red-200 bg-red-50 text-red-700"
                 : deadlineInfo.daysLeft <= 1
@@ -330,201 +330,204 @@ export function OfficeHourReportForm({
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="space-y-6 mt-4 min-w-0">
-          {/* 일시 */}
-          <div className="space-y-2">
-            <Label htmlFor="date">일시 *</Label>
-            <Input
-              id="date"
-              type="date"
-              value={formData.date}
-              onChange={(e) => setFormData({ ...formData, date: e.target.value })}
-              required
-            />
-          </div>
-
-          {/* 장소 */}
-          <div className="space-y-2">
-            <Label htmlFor="location">장소 *</Label>
-            <Input
-              id="location"
-              value={formData.location}
-              onChange={(e) => setFormData({ ...formData, location: e.target.value })}
-              placeholder="예: 온라인 (Zoom), MYSC 오피스, 카페"
-              required
-            />
-          </div>
-
-          {/* 주제 */}
-          <div className="space-y-2">
-            <Label htmlFor="topic">주제 *</Label>
-            <Input
-              id="topic"
-              value={formData.topic}
-              onChange={(e) => setFormData({ ...formData, topic: e.target.value })}
-              placeholder="세션의 주요 주제"
-              required
-            />
-          </div>
-
-          {/* 참석자 */}
-          <div className="space-y-2">
-            <Label>참석자 *</Label>
-            {formData.participants.map((participant, index) => (
-              <div key={index} className="flex gap-2">
-                <Input
-                  value={participant}
-                  onChange={(e) => handleParticipantChange(index, e.target.value)}
-                  placeholder="참석자 이름"
-                  required
-                />
-                {formData.participants.length > 1 && (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleRemoveParticipant(index)}
-                  >
-                    <X className="w-4 h-4" />
-                  </Button>
-                )}
-              </div>
-            ))}
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={handleAddParticipant}
-            >
-              + 참석자 추가
-            </Button>
-          </div>
-
-          {/* 진행 시간 */}
-          <div className="space-y-2">
-            <Label htmlFor="duration">실제 진행 시간 (시간) *</Label>
-            <Input
-              id="duration"
-              type="number"
-              step="0.5"
-              min="0.5"
-              max="8"
-              value={formData.duration}
-              onChange={(e) => setFormData({ ...formData, duration: parseFloat(e.target.value) })}
-              required
-            />
-          </div>
-
-          {/* 기업의 현황 */}
-          <div className="space-y-2">
-            <Label htmlFor="content">기업의 현황 *</Label>
-            <Textarea
-              id="content"
-              value={formData.content}
-              onChange={(e) => setFormData({ ...formData, content: e.target.value })}
-              placeholder="기업의 현재 상황, 진행 상태, 핵심 이슈를 구체적으로 작성해주세요"
-              rows={6}
-              required
-              className="resize-none min-w-0 w-full [field-sizing:fixed] overflow-x-hidden [overflow-wrap:anywhere]"
-            />
-            <p className={`text-xs ${isContentValid ? "text-emerald-600" : "text-rose-600"}`}>
-              {contentLength}/{MIN_REPORT_SECTION_LENGTH}자
-            </p>
-          </div>
-
-          {/* 자문내용 */}
-          <div className="space-y-2">
-            <Label htmlFor="advisoryContent">자문내용 *</Label>
-            <Textarea
-              id="advisoryContent"
-              value={formData.advisoryContent}
-              onChange={(e) => setFormData({ ...formData, advisoryContent: e.target.value })}
-              placeholder="자문 시 전달한 핵심 피드백, 제안, 실행 가이드를 작성해주세요"
-              rows={6}
-              required
-              className="resize-none min-w-0 w-full [field-sizing:fixed] overflow-x-hidden [overflow-wrap:anywhere]"
-            />
-            <p className={`text-xs ${isAdvisoryContentValid ? "text-emerald-600" : "text-rose-600"}`}>
-              {advisoryContentLength}/{MIN_REPORT_SECTION_LENGTH}자
-            </p>
-          </div>
-
-          {/* 팔로업 계획 */}
-          <div className="space-y-2">
-            <Label htmlFor="followUp">팔로업 계획 *</Label>
-            <Textarea
-              id="followUp"
-              value={formData.followUp}
-              onChange={(e) => setFormData({ ...formData, followUp: e.target.value })}
-              placeholder="후속 조치, 기업에서 해야 할 액션 아이템, 다음 세션 계획 등을 작성해주세요"
-              rows={4}
-              required
-              className="resize-none min-w-0 w-full [field-sizing:fixed] overflow-x-hidden [overflow-wrap:anywhere]"
-            />
-            <p className={`text-xs ${isFollowUpValid ? "text-emerald-600" : "text-rose-600"}`}>
-              {followUpLength}/{MIN_REPORT_SECTION_LENGTH}자
-            </p>
-          </div>
-
-          {/* 사진 업로드 */}
-          <div className="space-y-2">
-            <Label>세션 사진 (선택)</Label>
-            <div className="border-2 border-dashed rounded-lg p-6">
-              <input
-                type="file"
-                id="photos"
-                accept="image/*"
-                multiple
-                onChange={handlePhotoUpload}
-                className="hidden"
+        <form onSubmit={handleSubmit} className="mt-4 flex min-h-0 flex-1 flex-col min-w-0">
+          <div className="min-h-0 flex-1 space-y-6 overflow-y-auto px-6 pb-6">
+            {/* 일시 */}
+            <div className="space-y-2">
+              <Label htmlFor="date">일시 *</Label>
+              <Input
+                id="date"
+                type="date"
+                value={formData.date}
+                onChange={(e) => setFormData({ ...formData, date: e.target.value })}
+                required
               />
-              <label
-                htmlFor="photos"
-                className="flex flex-col items-center cursor-pointer"
-              >
-                <Upload className="w-8 h-8 text-muted-foreground mb-2" />
-                <span className="text-sm text-muted-foreground">
-                  클릭하여 사진 업로드
-                </span>
-              </label>
             </div>
 
-            {photos.length > 0 && (
-              <div className="grid grid-cols-4 gap-3 mt-3">
-                {photos.map((photo, index) => (
-                  <div key={index} className="relative group">
-                    <img
-                      src={photo}
-                      alt={`Session ${index + 1}`}
-                      className="w-full h-24 object-cover rounded-lg"
-                    />
-                    <button
+            {/* 장소 */}
+            <div className="space-y-2">
+              <Label htmlFor="location">장소 *</Label>
+              <Input
+                id="location"
+                value={formData.location}
+                onChange={(e) => setFormData({ ...formData, location: e.target.value })}
+                placeholder="예: 온라인 (Zoom), MYSC 오피스, 카페"
+                required
+              />
+            </div>
+
+            {/* 주제 */}
+            <div className="space-y-2">
+              <Label htmlFor="topic">주제 *</Label>
+              <Input
+                id="topic"
+                value={formData.topic}
+                onChange={(e) => setFormData({ ...formData, topic: e.target.value })}
+                placeholder="세션의 주요 주제"
+                required
+              />
+            </div>
+
+            {/* 참석자 */}
+            <div className="space-y-2">
+              <Label>참석자 *</Label>
+              {formData.participants.map((participant, index) => (
+                <div key={index} className="flex gap-2">
+                  <Input
+                    value={participant}
+                    onChange={(e) => handleParticipantChange(index, e.target.value)}
+                    placeholder="참석자 이름"
+                    required
+                  />
+                  {formData.participants.length > 1 && (
+                    <Button
                       type="button"
-                      onClick={() => handleRemovePhoto(index)}
-                      className="absolute top-1 right-1 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handleRemoveParticipant(index)}
                     >
-                      <X className="w-3 h-3" />
-                    </button>
-                  </div>
-                ))}
+                      <X className="w-4 h-4" />
+                    </Button>
+                  )}
+                </div>
+              ))}
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleAddParticipant}
+              >
+                + 참석자 추가
+              </Button>
+            </div>
+
+            {/* 진행 시간 */}
+            <div className="space-y-2">
+              <Label htmlFor="duration">실제 진행 시간 (시간) *</Label>
+              <Input
+                id="duration"
+                type="number"
+                step="0.5"
+                min="0.5"
+                max="8"
+                value={formData.duration}
+                onChange={(e) => setFormData({ ...formData, duration: parseFloat(e.target.value) })}
+                required
+              />
+            </div>
+
+            {/* 기업의 현황 */}
+            <div className="space-y-2">
+              <Label htmlFor="content">기업의 현황 *</Label>
+              <Textarea
+                id="content"
+                value={formData.content}
+                onChange={(e) => setFormData({ ...formData, content: e.target.value })}
+                placeholder="기업의 현재 상황, 진행 상태, 핵심 이슈를 구체적으로 작성해주세요"
+                rows={6}
+                required
+                className="resize-none min-w-0 w-full [field-sizing:fixed] overflow-x-hidden [overflow-wrap:anywhere]"
+              />
+              <p className={`text-xs ${isContentValid ? "text-emerald-600" : "text-rose-600"}`}>
+                {contentLength}/{MIN_REPORT_SECTION_LENGTH}자
+              </p>
+            </div>
+
+            {/* 자문내용 */}
+            <div className="space-y-2">
+              <Label htmlFor="advisoryContent">자문내용 *</Label>
+              <Textarea
+                id="advisoryContent"
+                value={formData.advisoryContent}
+                onChange={(e) => setFormData({ ...formData, advisoryContent: e.target.value })}
+                placeholder="자문 시 전달한 핵심 피드백, 제안, 실행 가이드를 작성해주세요"
+                rows={6}
+                required
+                className="resize-none min-w-0 w-full [field-sizing:fixed] overflow-x-hidden [overflow-wrap:anywhere]"
+              />
+              <p className={`text-xs ${isAdvisoryContentValid ? "text-emerald-600" : "text-rose-600"}`}>
+                {advisoryContentLength}/{MIN_REPORT_SECTION_LENGTH}자
+              </p>
+            </div>
+
+            {/* 팔로업 계획 */}
+            <div className="space-y-2">
+              <Label htmlFor="followUp">팔로업 계획 *</Label>
+              <Textarea
+                id="followUp"
+                value={formData.followUp}
+                onChange={(e) => setFormData({ ...formData, followUp: e.target.value })}
+                placeholder="후속 조치, 기업에서 해야 할 액션 아이템, 다음 세션 계획 등을 작성해주세요"
+                rows={4}
+                required
+                className="resize-none min-w-0 w-full [field-sizing:fixed] overflow-x-hidden [overflow-wrap:anywhere]"
+              />
+              <p className={`text-xs ${isFollowUpValid ? "text-emerald-600" : "text-rose-600"}`}>
+                {followUpLength}/{MIN_REPORT_SECTION_LENGTH}자
+              </p>
+            </div>
+
+            {/* 사진 업로드 */}
+            <div className="space-y-2">
+              <Label>세션 사진 (선택)</Label>
+              <div className="border-2 border-dashed rounded-lg p-6">
+                <input
+                  type="file"
+                  id="photos"
+                  accept="image/*"
+                  multiple
+                  onChange={handlePhotoUpload}
+                  className="hidden"
+                />
+                <label
+                  htmlFor="photos"
+                  className="flex flex-col items-center cursor-pointer"
+                >
+                  <Upload className="w-8 h-8 text-muted-foreground mb-2" />
+                  <span className="text-sm text-muted-foreground">
+                    클릭하여 사진 업로드
+                  </span>
+                </label>
               </div>
-            )}
+
+              {photos.length > 0 && (
+                <div className="grid grid-cols-4 gap-3 mt-3">
+                  {photos.map((photo, index) => (
+                    <div key={index} className="relative group">
+                      <img
+                        src={photo}
+                        alt={`Session ${index + 1}`}
+                        className="w-full h-24 object-cover rounded-lg"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => handleRemovePhoto(index)}
+                        className="absolute top-1 right-1 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
 
-          {/* Submit Buttons */}
-          <div className="flex gap-3 pt-4 border-t">
-            <Button
-              type="submit"
-              disabled={isSubmitting || !isContentValid || !isAdvisoryContentValid || !isFollowUpValid}
-              className="flex-1"
-            >
-              {isSubmitting ? "저장 중..." : (submitLabel ?? "보고서 제출")}
-            </Button>
-          </div>
+          <div className="shrink-0 border-t px-6 py-4">
+            <div className="flex gap-3">
+              <Button
+                type="submit"
+                disabled={isSubmitting || !isContentValid || !isAdvisoryContentValid || !isFollowUpValid}
+                className="flex-1"
+              >
+                {isSubmitting ? "저장 중..." : (submitLabel ?? "보고서 제출")}
+              </Button>
+            </div>
 
-          <p className="text-xs text-center text-muted-foreground">
-            * 표시된 항목은 필수 입력 사항입니다
-          </p>
+            <p className="mt-3 text-center text-xs text-muted-foreground">
+              * 표시된 항목은 필수 입력 사항입니다
+            </p>
+          </div>
         </form>
       </DialogContent>
     </Dialog>
