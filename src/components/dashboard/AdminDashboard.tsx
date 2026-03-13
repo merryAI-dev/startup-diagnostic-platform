@@ -27,6 +27,13 @@ type CompanySummary = {
   ownerUid: string
 }
 
+type ProfileSummary = {
+  role?: string | null
+  active?: boolean
+  approvedAt?: unknown
+  companyId?: string | null
+}
+
 type ProgramSummary = {
   id: string
   name: string
@@ -82,22 +89,40 @@ export function AdminDashboard({
     async function loadCompanies() {
       setLoadingCompanies(true)
       try {
-        const snapshot = await getDocs(collection(db, "companies"))
+        const [profileSnapshot, companySnapshot] = await Promise.all([
+          getDocs(collection(db, "profiles")),
+          getDocs(collection(db, "companies")),
+        ])
+        const liveCompanyIds = new Set(
+          profileSnapshot.docs
+            .map((docSnap) => docSnap.data() as ProfileSummary)
+            .filter(
+              (data) =>
+                data.role === "company" &&
+                (data.active === true || !!data.approvedAt) &&
+                typeof data.companyId === "string" &&
+                data.companyId.trim().length > 0,
+            )
+            .map((data) => data.companyId!.trim()),
+        )
         if (!mounted) return
-        const list = snapshot.docs.map((docSnap) => {
-          const data = docSnap.data() as {
-            name?: string | null
-            ownerUid?: string
-          }
-          return {
-            id: docSnap.id,
-            name: data.name ?? "회사명 미정",
-            ownerUid: data.ownerUid ?? "",
-          }
-        })
+        const list = companySnapshot.docs
+          .filter((docSnap) => liveCompanyIds.has(docSnap.id))
+          .map((docSnap) => {
+            const data = docSnap.data() as {
+              name?: string | null
+              ownerUid?: string
+            }
+            return {
+              id: docSnap.id,
+              name: data.name?.trim() || "회사명 미정",
+              ownerUid: data.ownerUid ?? "",
+            }
+          })
+          .sort((a, b) => (a.name ?? "").localeCompare(b.name ?? "", "ko-KR"))
         setCompanies(list)
         const first = list[0]
-        if (!selectedCompanyId && first) {
+        if ((!selectedCompanyId || !list.some((company) => company.id === selectedCompanyId)) && first) {
           setSelectedCompanyId(first.id)
         }
       } finally {

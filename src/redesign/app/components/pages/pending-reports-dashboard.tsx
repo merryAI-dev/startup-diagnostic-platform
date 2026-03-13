@@ -150,20 +150,12 @@ export function PendingReportsDashboard({
 
   const resolveConsultantEmail = (application?: Application | null, report?: OfficeHourReport | null) => {
     const consultantId = report?.consultantId || application?.consultantId || "";
-    const consultantName = report?.consultantName || application?.consultant || "";
 
     if (consultantId) {
       const byId = consultants.find((consultant) => consultant.id === consultantId);
       if (byId?.email) return byId.email;
     }
-
-    const normalizedName = normalizeConsultantName(consultantName);
-    if (!normalizedName) return "";
-
-    const byName = consultants.find(
-      (consultant) => normalizeConsultantName(consultant.name) === normalizedName
-    );
-    return byName?.email ?? "";
+    return "";
   };
 
   const handleSendReminderEmail = (row: ReportRow) => {
@@ -576,14 +568,10 @@ export function PendingReportsDashboard({
 
   const isForCurrentConsultant = (application?: Application | null, report?: OfficeHourReport | null) => {
     if (!isConsultantUser) return true;
-    if (currentConsultantId) {
-      if (report?.consultantId) return report.consultantId === currentConsultantId;
-      if (application?.consultantId) return application.consultantId === currentConsultantId;
-    }
-    const appName = normalizeConsultantName(application?.consultant);
-    const reportName = normalizeConsultantName(report?.consultantName);
-    const currentName = normalizeConsultantName(currentConsultantName);
-    return Boolean(currentName) && (appName === currentName || reportName === currentName);
+    if (!currentConsultantId) return false;
+    if (report?.consultantId) return report.consultantId === currentConsultantId;
+    if (application?.consultantId) return application.consultantId === currentConsultantId;
+    return false;
   };
 
   const getSessionEndTime = (app: Application) => {

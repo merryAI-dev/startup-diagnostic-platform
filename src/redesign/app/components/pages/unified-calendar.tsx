@@ -239,12 +239,9 @@ export function UnifiedCalendar({
   };
 
   const isConsultant = currentUser.role === "consultant";
-  const normalizedCurrentConsultantName = normalizeConsultantDisplayName(currentConsultantName);
   const isMyEvent = (event: Application) => {
     if (!isConsultant) return false;
-    if (currentConsultantId && event.consultantId === currentConsultantId) return true;
-    if (currentConsultantName && event.consultant === currentConsultantName) return true;
-    return false;
+    return Boolean(currentConsultantId) && event.consultantId === currentConsultantId;
   };
   const consultantAgendaNameSet = useMemo(() => {
     if (!isConsultant) return new Set<string>();
@@ -271,9 +268,7 @@ export function UnifiedCalendar({
   };
   const isAssignedToCurrentConsultant = (app: Application) => {
     if (!isConsultant) return false;
-    if (currentConsultantId && app.consultantId) return app.consultantId === currentConsultantId;
-    if (app.consultantId && !currentConsultantId) return false;
-    return normalizeConsultantDisplayName(app.consultant) === normalizedCurrentConsultantName;
+    return Boolean(currentConsultantId) && app.consultantId === currentConsultantId;
   };
   const isCurrentConsultantAvailableAt = (app: Application) => {
     if (!isConsultant) return true;

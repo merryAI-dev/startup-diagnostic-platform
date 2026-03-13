@@ -35,15 +35,15 @@ service cloud.firestore {
     }
 
     match /profiles/{userId} {
-      allow create: if isSignedIn()
-        && request.auth.uid == userId
-        && request.resource.data.role == "company"
+      allow create: if isAdmin()
+        && request.resource.data.role in ["admin", "company", "consultant"]
         && (
           request.resource.data.requestedRole == null
           || request.resource.data.requestedRole in ["admin", "company", "consultant"]
         )
         && request.resource.data.active is bool
-        && request.resource.data.active == false;
+        && request.resource.data.active == true
+        && request.resource.data.approvedByUid == request.auth.uid;
 
       allow read: if isSignedIn()
         && request.auth.uid == userId;

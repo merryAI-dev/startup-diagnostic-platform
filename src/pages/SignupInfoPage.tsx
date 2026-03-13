@@ -14,7 +14,7 @@ import {
   Trash2,
 } from "lucide-react"
 import { toast } from "sonner"
-import { createUserProfile, getUserProfile } from "@/firebase/profile"
+import { createSignupRequest, getSignupRequest, getUserProfile } from "@/firebase/profile"
 import type { CompanyInfoForm, InvestmentInput } from "@/types/company"
 import { DEFAULT_FORM } from "@/types/company"
 import { InputSuffix } from "@/components/ui/InputSuffix"
@@ -129,14 +129,22 @@ export function SignupInfoPage() {
     authUser: FirebaseUser,
     nextRequestedRole: Role
   ) {
-    const existingProfile = await getUserProfile(authUser.uid)
-    if (!existingProfile) return true
+    const [existingProfile, existingSignupRequest] = await Promise.all([
+      getUserProfile(authUser.uid),
+      getSignupRequest(authUser.uid),
+    ])
+    if (!existingProfile && !existingSignupRequest) return true
 
-    const existingRequestedRole = existingProfile.requestedRole ?? existingProfile.role
+    const existingRequestedRole =
+      existingSignupRequest?.requestedRole ??
+      existingSignupRequest?.role ??
+      existingProfile?.requestedRole ??
+      existingProfile?.role ??
+      nextRequestedRole
     const existingRoleLabel = getRoleLabel(existingRequestedRole)
     const requestedRoleLabel = getRoleLabel(nextRequestedRole)
 
-    if (existingProfile.active === true) {
+    if (existingProfile?.active === true) {
       if (existingRequestedRole !== nextRequestedRole) {
         toast.error(`이미 승인된 ${existingRoleLabel} 계정입니다. ${requestedRoleLabel} 역할로는 가입할 수 없습니다.`)
       } else {
@@ -235,7 +243,7 @@ export function SignupInfoPage() {
               if (!authUser) return
               const canProceed = await guardExistingProfile(authUser, requestedRole)
               if (!canProceed) return
-              await createUserProfile(
+              await createSignupRequest(
                 authUser.uid,
                 "company",
                 requestedRole,
@@ -327,7 +335,7 @@ function ConsultantSignupInfo({
       if (!authUser) return
       const canProceed = await guardExistingProfile(authUser, requestedRole)
       if (!canProceed) return
-      await createUserProfile(
+      await createSignupRequest(
         authUser.uid,
         "company",
         requestedRole,
@@ -1097,7 +1105,7 @@ function CompanySignupInfo({
       if (!canProceed) return
       setSaving(true)
       const userAgent = typeof navigator !== "undefined" ? navigator.userAgent : null
-      await createUserProfile(
+      await createSignupRequest(
         authUser.uid,
         "company",
         requestedRole,

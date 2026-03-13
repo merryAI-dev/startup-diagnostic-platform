@@ -35,24 +35,28 @@ export function SignupPage() {
   const [loadingEmail, setLoadingEmail] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const navigate = useNavigate()
-  const { user, profile, loading } = useAuth()
+  const { user, profile, signupRequest, loading } = useAuth()
   const isBusy = loadingEmail
 
   useEffect(() => {
-    if (loading || !user || !profile) return
-    if (profile.active === false) {
-      navigate(`/pending?role=${profile.requestedRole ?? profile.role}`, {
+    if (loading || !user) return
+    if (profile?.active === true) {
+      navigate(
+        profile.role === "admin" || profile.role === "consultant"
+          ? "/admin"
+          : "/company",
+        { replace: true }
+      )
+      return
+    }
+    if (profile?.active === false || signupRequest) {
+      navigate(`/pending?role=${signupRequest?.requestedRole ?? signupRequest?.role ?? profile?.requestedRole ?? profile?.role}`, {
         replace: true,
       })
       return
     }
-    navigate(
-      profile.role === "admin" || profile.role === "consultant"
-        ? "/admin"
-        : "/company",
-      { replace: true }
-    )
-  }, [loading, navigate, profile, user])
+    if (!profile) return
+  }, [loading, navigate, profile, signupRequest, user])
 
   function savePendingSignup(payload: PendingSignupDraft) {
     sessionStorage.setItem(PENDING_SIGNUP_KEY, JSON.stringify(payload))

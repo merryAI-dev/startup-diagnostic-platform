@@ -106,16 +106,9 @@ export function ApplicationDetail({
     && !isSessionEnded;
   const shouldShowConsultant = (consultant?: string) =>
     Boolean(consultant && consultant !== "담당자 배정 중");
-  const normalizeConsultantName = (value?: string | null) =>
-    (value ?? "").replace(/\s*컨설턴트\s*$/u, "").trim().toLowerCase();
   const isAssignedToCurrentConsultant = () => {
     if (!isConsultantUser) return false;
-    if (currentConsultantId && application.consultantId) {
-      return currentConsultantId === application.consultantId;
-    }
-    const appName = normalizeConsultantName(application.consultant);
-    const currentName = normalizeConsultantName(currentConsultantName);
-    return appName !== "" && currentName !== "" && appName === currentName;
+    return Boolean(currentConsultantId) && currentConsultantId === application.consultantId;
   };
   const isUnassigned =
     !application.consultantId

@@ -5,7 +5,7 @@ import { useAuth } from "@/context/AuthContext"
 import type { Role } from "@/types/auth"
 
 export function PendingPage() {
-  const { profile } = useAuth()
+  const { profile, signupRequest } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
 
@@ -31,7 +31,7 @@ export function PendingPage() {
     <div className="h-full overflow-hidden bg-gray-50 p-6">
       <div className="mx-auto flex h-full w-full max-w-4xl items-center justify-center">
         <PendingApproval
-          role={profile?.requestedRole ?? profile?.role ?? roleFromQuery}
+          role={signupRequest?.requestedRole ?? signupRequest?.role ?? profile?.requestedRole ?? profile?.role ?? roleFromQuery}
           onBack={() => navigate("/login")}
         />
       </div>

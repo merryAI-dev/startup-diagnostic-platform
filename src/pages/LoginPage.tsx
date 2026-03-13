@@ -2,7 +2,7 @@ import { useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { AuthCard } from "@/components/auth/AuthCard"
 import { useAuth } from "@/context/AuthContext"
-import { getUserProfile } from "@/firebase/profile"
+import { getSignupRequest, getUserProfile } from "@/firebase/profile"
 import { signInWithEmail, signOutUser } from "@/firebase/auth"
 import type { Role } from "@/types/auth"
 
@@ -15,8 +15,9 @@ export function LoginPage() {
 
   async function routeAfterLogin(uid: string): Promise<boolean> {
     let profile = null
+    let signupRequest = null
     try {
-      profile = await getUserProfile(uid)
+      ;[profile, signupRequest] = await Promise.all([getUserProfile(uid), getSignupRequest(uid)])
     } catch (error: any) {
       const code = error?.code ?? ""
       if (code === "permission-denied") {
@@ -28,22 +29,29 @@ export function LoginPage() {
       return false
     }
 
-    if (!profile) {
+    if (!profile && !signupRequest) {
       navigate("/signup")
       return true
     }
 
-    if (profile.active === false) {
-      await signOutUser()
-      navigate(`/pending?role=${profile.requestedRole ?? profile.role}`)
+    if (profile?.active === true) {
+      navigate(
+        profile.role === "admin" || profile.role === "consultant"
+          ? "/admin"
+          : "/company"
+      )
       return true
     }
 
-    navigate(
-      profile.role === "admin" || profile.role === "consultant"
-        ? "/admin"
-        : "/company"
-    )
+    if (profile?.active === false || signupRequest) {
+      await signOutUser()
+      navigate(
+        `/pending?role=${signupRequest?.requestedRole ?? signupRequest?.role ?? profile?.requestedRole ?? profile?.role}`,
+      )
+      return true
+    }
+
+    navigate("/signup")
     return true
   }
 

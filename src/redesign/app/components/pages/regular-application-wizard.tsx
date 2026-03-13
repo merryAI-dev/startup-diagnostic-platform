@@ -145,7 +145,6 @@ export function RegularApplicationWizard({
     : [];
   const consultantBusySlots = useMemo(() => {
     const byId = new Map<string, Set<string>>();
-    const byName = new Map<string, Set<string>>();
 
     applications.forEach((application) => {
       if (
@@ -167,18 +166,9 @@ export function RegularApplicationWizard({
           byId.set(application.consultantId, new Set([slotKey]));
         }
       }
-
-      const consultantNameKey = normalizeConsultantDisplayName(application.consultant);
-      if (!consultantNameKey) return;
-      const nameSet = byName.get(consultantNameKey);
-      if (nameSet) {
-        nameSet.add(slotKey);
-      } else {
-        byName.set(consultantNameKey, new Set([slotKey]));
-      }
     });
 
-    return { byId, byName };
+    return { byId };
   }, [applications]);
   const programOfficeHours = officeHour.programId
     ? officeHours.filter((item) => item.programId === officeHour.programId)
@@ -253,14 +243,6 @@ export function RegularApplicationWizard({
         if (!availableInSchedule) return false;
 
         if (consultantBusySlots.byId.get(consultant.id)?.has(slotKey)) return false;
-
-        const consultantNameKey = normalizeConsultantDisplayName(consultant.name);
-        if (
-          consultantNameKey
-          && consultantBusySlots.byName.get(consultantNameKey)?.has(slotKey)
-        ) {
-          return false;
-        }
 
         return true;
       });

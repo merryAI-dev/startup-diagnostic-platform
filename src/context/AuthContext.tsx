@@ -1,12 +1,13 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react"
 import { onAuthStateChanged, type User } from "firebase/auth"
 import { auth } from "@/firebase/client"
-import { getUserProfile } from "@/firebase/profile"
-import type { UserProfile } from "@/types/auth"
+import { getSignupRequest, getUserProfile } from "@/firebase/profile"
+import type { SignupRequest, UserProfile } from "@/types/auth"
 
 type AuthState = {
   user: User | null
   profile: UserProfile | null
+  signupRequest: SignupRequest | null
   loading: boolean
   refreshProfile: () => Promise<void>
 }
@@ -16,18 +17,25 @@ const AuthContext = createContext<AuthState | undefined>(undefined)
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [profile, setProfile] = useState<UserProfile | null>(null)
+  const [signupRequest, setSignupRequest] = useState<SignupRequest | null>(null)
   const [loading, setLoading] = useState(true)
 
   async function refreshProfile() {
     if (!auth.currentUser) {
       setProfile(null)
+      setSignupRequest(null)
       return
     }
     try {
-      const nextProfile = await getUserProfile(auth.currentUser.uid)
+      const [nextProfile, nextSignupRequest] = await Promise.all([
+        getUserProfile(auth.currentUser.uid),
+        getSignupRequest(auth.currentUser.uid),
+      ])
       setProfile(nextProfile)
+      setSignupRequest(nextSignupRequest)
     } catch {
       setProfile(null)
+      setSignupRequest(null)
     }
   }
 
@@ -36,13 +44,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setUser(nextUser)
       if (nextUser) {
         try {
-          const nextProfile = await getUserProfile(nextUser.uid)
+          const [nextProfile, nextSignupRequest] = await Promise.all([
+            getUserProfile(nextUser.uid),
+            getSignupRequest(nextUser.uid),
+          ])
           setProfile(nextProfile)
+          setSignupRequest(nextSignupRequest)
         } catch {
           setProfile(null)
+          setSignupRequest(null)
         }
       } else {
         setProfile(null)
+        setSignupRequest(null)
       }
       setLoading(false)
     })
@@ -50,8 +64,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [])
 
   const value = useMemo(
-    () => ({ user, profile, loading, refreshProfile }),
-    [user, profile, loading]
+    () => ({ user, profile, signupRequest, loading, refreshProfile }),
+    [user, profile, signupRequest, loading]
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

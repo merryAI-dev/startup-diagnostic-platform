@@ -18,6 +18,11 @@ import {
   CACHE_SIZE_UNLIMITED,
   connectFirestoreEmulator,
 } from "firebase/firestore";
+import {
+  connectFunctionsEmulator,
+  Functions,
+  getFunctions,
+} from "firebase/functions";
 import { getStorage, FirebaseStorage } from "firebase/storage";
 
 // ──────────────────────────────────────────────
@@ -49,6 +54,7 @@ let app: FirebaseApp | null = null;
 let auth: Auth | null = null;
 let db: Firestore | null = null;
 let storage: FirebaseStorage | null = null;
+let functions: Functions | null = null;
 let googleProvider: GoogleAuthProvider | null = null;
 
 if (isFirebaseConfigured) {
@@ -83,8 +89,18 @@ if (isFirebaseConfigured) {
     // ── Storage ──
     storage = getStorage(app);
 
+    // ── Functions ──
+    functions = getFunctions(
+      app,
+      import.meta.env.VITE_FIREBASE_FUNCTIONS_REGION || "asia-northeast3"
+    );
+
     // ── Google Auth Provider ──
     googleProvider = new GoogleAuthProvider();
+
+    if (import.meta.env.VITE_USE_FIREBASE_EMULATOR === "true") {
+      connectFunctionsEmulator(functions, "localhost", 5001);
+    }
 
     console.log("✅ Firebase initialized (Offline persistence + Multi-tab)");
   } catch (error) {
@@ -132,5 +148,5 @@ export const RECOMMENDED_INDEXES = [
   { collection: "goals", fields: ["status", "priority"] },
 ];
 
-export { app, auth, db, storage, googleProvider, isFirebaseConfigured };
+export { app, auth, db, storage, functions, googleProvider, isFirebaseConfigured };
 export default app;
