@@ -77,15 +77,11 @@ export function Topbar({
               </div>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
-            {user.role !== "user" ? (
+            {user.role === "consultant" ? (
               <>
                 <DropdownMenuItem
                   onClick={() => {
-                    if (user.role === "consultant") {
-                      onNavigate?.("consultant-profile");
-                    } else {
-                      onNavigate?.("settings");
-                    }
+                    onNavigate?.("consultant-profile");
                   }}
                 >
                   프로필 설정

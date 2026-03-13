@@ -47,6 +47,7 @@ export function AdminUsers({
 }: AdminUsersProps) {
   const pageTitleClassName = "text-2xl font-semibold text-slate-900"
   const pageDescriptionClassName = "mt-1 text-sm text-slate-500"
+  const pageContainerClassName = "mx-auto w-full max-w-7xl"
   const [searchQuery, setSearchQuery] = useState("")
   const [statusFilter, setStatusFilter] = useState<string>("all")
   const [roleFilter, setRoleFilter] = useState<string>("all")
@@ -177,14 +178,16 @@ export function AdminUsers({
   return (
     <div className="flex h-full min-h-0 flex-col bg-slate-50">
       <div className="shrink-0 border-b bg-white px-6 py-5">
-        <h1 className={pageTitleClassName}>사용자 관리</h1>
-        <p className={pageDescriptionClassName}>
-          가입 승인과 사용자 계정 상태를 한 화면에서 관리합니다
-        </p>
+        <div className={pageContainerClassName}>
+          <h1 className={pageTitleClassName}>사용자 관리</h1>
+          <p className={pageDescriptionClassName}>
+            가입 승인과 사용자 계정 상태를 한 화면에서 관리합니다
+          </p>
+        </div>
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col px-6 pb-6 pt-5">
-        <div className="flex min-h-0 flex-1 flex-col gap-6 lg:flex-row">
+        <div className={`${pageContainerClassName} flex min-h-0 flex-1 flex-col gap-6 lg:flex-row`}>
           <section className="flex min-h-0 flex-col overflow-hidden rounded-xl border bg-white lg:w-[30%]">
             <div className="shrink-0 border-b p-4">
               <div className="flex items-start justify-between gap-3">
@@ -244,17 +247,6 @@ export function AdminUsers({
                             <p className="truncate text-sm font-medium text-slate-900">
                               {pending.email || "-"}
                             </p>
-                            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
-                              <Badge variant="outline" className="h-6 px-2 text-[11px]">
-                                현재 역할 {currentRoleLabel}
-                              </Badge>
-                              <Badge
-                                variant="secondary"
-                                className="h-6 bg-sky-50 px-2 text-[11px] text-sky-700"
-                              >
-                                신청 역할 {requestedRoleLabel}
-                              </Badge>
-                            </div>
                             <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                               {pending.role !== requestedRole && (
                                 <span>
