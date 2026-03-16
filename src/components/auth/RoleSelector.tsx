@@ -11,6 +11,7 @@ export function RoleSelector({ role, setRole }: RoleSelectorProps) {
       <div className="text-xs font-semibold text-slate-500">가입 역할 선택</div>
       <div className="grid grid-cols-3 gap-2 rounded-xl border border-slate-200 p-2">
         <button
+          data-testid="signup-role-company"
           className={`flex-1 rounded-lg px-3 py-2 text-xs font-semibold ${
             role === "company"
               ? "bg-slate-900 text-white"
@@ -21,6 +22,7 @@ export function RoleSelector({ role, setRole }: RoleSelectorProps) {
           스타트업
         </button>
         <button
+          data-testid="signup-role-admin"
           className={`flex-1 rounded-lg px-3 py-2 text-xs font-semibold ${
             role === "admin"
               ? "bg-slate-900 text-white"
@@ -31,6 +33,7 @@ export function RoleSelector({ role, setRole }: RoleSelectorProps) {
           관리자
         </button>
         <button
+          data-testid="signup-role-consultant"
           className={`flex-1 rounded-lg px-3 py-2 text-xs font-semibold ${
             role === "consultant"
               ? "bg-slate-900 text-white"

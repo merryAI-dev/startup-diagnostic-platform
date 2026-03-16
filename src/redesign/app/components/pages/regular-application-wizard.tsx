@@ -248,9 +248,17 @@ export function RegularApplicationWizard({
       });
     };
 
+    const assignableConsultantIds = new Set(consultantPool.map((consultant) => consultant.id));
+    const byTime = new Map<string, { hasOpen: boolean; slotId?: string }>();
     if (slotsForDate.length > 0) {
-      const byTime = new Map<string, { hasOpen: boolean; slotId?: string }>();
       slotsForDate.forEach((slot) => {
+        const matchesAgenda =
+          !selectedAgendaId || !slot.agendaIds || slot.agendaIds.includes(selectedAgendaId);
+        const matchesConsultant =
+          !slot.consultantId || assignableConsultantIds.has(slot.consultantId);
+        if (!matchesAgenda || !matchesConsultant) {
+          return;
+        }
         const existing = byTime.get(slot.startTime);
         const isOpen = slot.status === "open";
         if (!existing) {
@@ -263,41 +271,27 @@ export function RegularApplicationWizard({
         });
       });
 
-      return Array.from(byTime.entries())
-        .sort(([a], [b]) => a.localeCompare(b))
-        .map(([time, meta]) => {
-          const blockedByAgenda = blockedAgendaTimes.has(time);
-          const consultantAssignable = hasAssignableConsultantAt(time);
-          const available = meta.hasOpen && !blockedByAgenda && consultantAssignable;
-          return {
-            time,
-            available,
-            reason: available
-              ? undefined
-              : blockedByAgenda
-                ? "이미 예약된 시간입니다"
-                : !consultantAssignable
-                  ? "해당 시간에 배정 가능한 컨설턴트가 없습니다"
-                  : meta.hasOpen
-                    ? undefined
-                    : "예약 불가한 시간입니다",
-            slotId: meta.slotId,
-          };
-        });
     }
 
     return getTimeSlots(selectedDate.toISOString()).map((slot) => {
+      const meta = byTime.get(slot.time);
       const blockedByAgenda = blockedAgendaTimes.has(slot.time);
       const consultantAssignable = hasAssignableConsultantAt(slot.time);
+      const openBySlotState = meta ? meta.hasOpen : slot.available;
+      const available = openBySlotState && !blockedByAgenda && consultantAssignable;
       return {
         ...slot,
-        available: slot.available && !blockedByAgenda && consultantAssignable,
-        reason: blockedByAgenda
-          ? "이미 예약된 시간입니다"
-          : !consultantAssignable
-            ? "해당 시간에 배정 가능한 컨설턴트가 없습니다"
-            : slot.reason,
-        slotId: undefined,
+        available,
+        reason: available
+          ? undefined
+          : blockedByAgenda
+            ? "이미 예약된 시간입니다"
+            : !consultantAssignable
+              ? "해당 시간에 배정 가능한 컨설턴트가 없습니다"
+              : meta && !meta.hasOpen
+                ? "예약 불가한 시간입니다"
+                : slot.reason,
+        slotId: meta?.slotId,
       };
     });
   })() : [];
@@ -420,7 +414,7 @@ export function RegularApplicationWizard({
                     }}
                     disabled={activeAgendas.length === 0}
                   >
-                    <SelectTrigger>
+                    <SelectTrigger data-testid="regular-agenda-trigger">
                       <SelectValue placeholder="아젠다를 선택하세요" />
                     </SelectTrigger>
                     <SelectContent>
@@ -484,6 +478,7 @@ export function RegularApplicationWizard({
                         {timeSlots.map((slot) => (
                           <button
                             key={slot.time}
+                            data-testid={`regular-time-slot-${slot.time.replace(":", "-")}`}
                             disabled={!slot.available}
                             onClick={() => {
                               setSelectedTime(slot.time);
@@ -595,6 +590,7 @@ export function RegularApplicationWizard({
                     <div key={key} className="space-y-2">
                       <Label>{label}</Label>
                       <Textarea
+                        data-testid={`regular-request-${key}`}
                         value={requestSections[key]}
                         onChange={(e) =>
                           setRequestSections((prev) => ({ ...prev, [key]: e.target.value }))
@@ -711,6 +707,7 @@ export function RegularApplicationWizard({
           {/* Navigation buttons */}
           <div className="flex justify-between mt-8 pt-6 border-t">
             <Button
+              data-testid="regular-wizard-back"
               variant="outline"
               onClick={handleBack}
               disabled={currentStep === 1}
@@ -718,11 +715,19 @@ export function RegularApplicationWizard({
               이전
             </Button>
             {currentStep < steps.length ? (
-              <Button onClick={handleNext} disabled={!isStepValid()}>
+              <Button
+                data-testid="regular-wizard-next"
+                onClick={handleNext}
+                disabled={!isStepValid()}
+              >
                 다음
               </Button>
             ) : (
-              <Button onClick={handleSubmit} disabled={isSubmitting}>
+              <Button
+                data-testid="regular-wizard-submit"
+                onClick={handleSubmit}
+                disabled={isSubmitting}
+              >
                 {isSubmitting ? "제출 중..." : "신청 제출"}
               </Button>
             )}

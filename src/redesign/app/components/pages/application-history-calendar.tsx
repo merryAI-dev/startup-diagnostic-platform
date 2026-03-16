@@ -92,7 +92,7 @@ export function ApplicationHistoryCalendar({ applications, onNavigate }: Applica
   };
 
   return (
-    <div className="h-full flex flex-col bg-gray-50">
+    <div className="flex h-full min-h-0 flex-col bg-gray-50">
       {/* Header */}
       <div className="bg-white border-b px-8 py-6">
         <div className="flex items-center justify-between mb-4">
@@ -249,8 +249,8 @@ export function ApplicationHistoryCalendar({ applications, onNavigate }: Applica
 
       {/* Calendar View */}
       {viewMode === "calendar" && (
-        <div className="flex-1 flex overflow-hidden">
-          <div className="flex-1 p-6 overflow-y-auto">
+        <div className="flex min-h-0 flex-1 overflow-hidden">
+          <div className="min-h-0 min-w-0 flex-1 overflow-y-auto p-6">
             <div className="bg-white rounded-lg border">
               {/* Calendar Header */}
               <div className="border-b px-6 py-4">

@@ -1,5 +1,4 @@
 import {
-  addDoc,
   collection,
   doc,
   getDoc,
@@ -225,15 +224,20 @@ export async function createSignupRequest(
     if (consentEntries.length > 0) {
       await Promise.all(
         consentEntries.map(([type, value]) =>
-          addDoc(collection(db, "consents"), {
-            userId: uid,
-            type,
-            consented: value?.consented ?? false,
-            version: value?.version ?? "v1.0",
-            method: value?.method ?? "unknown",
-            userAgent: value?.userAgent ?? null,
-            createdAt: serverTimestamp(),
-          })
+          setDoc(
+            doc(db, "consents", `${uid}_${type}`),
+            {
+              userId: uid,
+              type,
+              consented: value?.consented ?? false,
+              version: value?.version ?? "v1.0",
+              method: value?.method ?? "unknown",
+              userAgent: value?.userAgent ?? null,
+              createdAt: serverTimestamp(),
+              updatedAt: serverTimestamp(),
+            },
+            { merge: true }
+          )
         )
       )
     }

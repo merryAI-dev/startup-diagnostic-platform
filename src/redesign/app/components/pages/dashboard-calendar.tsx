@@ -491,7 +491,7 @@ export function DashboardCalendar({
   };
 
   return (
-    <div className="h-full flex flex-col bg-gray-50">
+    <div className="flex h-full min-h-0 flex-col bg-gray-50">
       {/* Header */}
       <div className="border-b border-slate-200/80 bg-white/80 px-8 py-4 backdrop-blur-sm">
         <div className="flex flex-wrap items-start justify-between gap-3">
@@ -512,7 +512,7 @@ export function DashboardCalendar({
         </div>
       </div>
 
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex min-h-0 flex-1 overflow-hidden">
         {/* Left Sidebar - Ticket Summary */}
         <div className="w-80 bg-white border-r p-6 overflow-y-auto">
           <h2 className="text-sm font-semibold text-gray-900 mb-4">티켓 현황</h2>
@@ -712,7 +712,7 @@ export function DashboardCalendar({
         </div>
 
         {/* Main Calendar */}
-        <div className="flex-1 flex flex-col bg-white overflow-hidden">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-white">
           {/* Calendar Header */}
           <div className="border-b px-6 py-4">
             <div className="flex items-center justify-between">
@@ -758,7 +758,7 @@ export function DashboardCalendar({
           </div>
 
           {/* Calendar Grid */}
-          <div className="flex-1 overflow-y-auto p-6">
+          <div className="min-h-0 flex-1 overflow-y-auto p-6">
             <div className="grid grid-cols-7 gap-px bg-gray-200 border border-gray-200 rounded-lg overflow-hidden">
               {/* Week days header */}
               {weekDays.map((day) => (

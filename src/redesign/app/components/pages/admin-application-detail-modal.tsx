@@ -438,6 +438,7 @@ export function AdminApplicationDetailModal({
                   <div className="flex gap-2 flex-wrap">
                     {application.status === "pending" && !isSessionEnded && (
                       <Button
+                        data-testid="application-accept"
                         size="sm"
                         variant="default"
                         onClick={() => handleOpenAction("confirm")}
@@ -449,6 +450,7 @@ export function AdminApplicationDetailModal({
                     )}
                     {application.status === "pending" && (
                       <Button
+                        data-testid="application-reject"
                         size="sm"
                         variant="destructive"
                         onClick={() => handleOpenAction("reject")}
@@ -1323,6 +1325,7 @@ export function AdminApplicationDetailModal({
               취소
             </Button>
             <Button
+              data-testid="application-action-confirm"
               onClick={handleConfirmAction}
               disabled={actionType === "reject" && rejectReason.trim().length === 0}
             >

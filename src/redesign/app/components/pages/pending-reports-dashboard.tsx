@@ -798,7 +798,7 @@ export function PendingReportsDashboard({
     : "세션 완료 후 3일 이내 보고서 작성 현황을 관리합니다";
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-gray-50">
+    <div className="flex min-h-0 flex-1 flex-col bg-gray-50">
       {/* Header */}
       <div className="bg-white border-b px-6 py-5">
         <div className={pageContainerClassName}>
@@ -871,7 +871,7 @@ export function PendingReportsDashboard({
               </div>
             </div>
           </div>
-          <div className="min-h-0 flex-1 divide-y overflow-hidden">
+          <div className="flex min-h-0 flex-1 flex-col divide-y overflow-hidden">
             {filteredReportRows.length === 0 ? (
               <div className="p-12 text-center">
                 <FileText className="w-12 h-12 text-slate-300 mx-auto mb-3" />

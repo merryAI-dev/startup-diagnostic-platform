@@ -90,9 +90,8 @@ import {
   useFirestoreDocument,
 } from "@/redesign/app/hooks/use-firestore"
 import {
+  approvePendingUserViaFunction,
   cancelApplicationViaFunction,
-  isServerApplicationTransitionEnabled,
-  isServerRegularApplicationSubmitEnabled,
   submitRegularApplicationViaFunction,
   transitionApplicationStatusViaFunction,
 } from "@/redesign/app/lib/functions"
@@ -106,9 +105,7 @@ import {
   mockGoals,
   mockTeamMembers,
 } from "@/redesign/app/lib/advanced-mock-data"
-import { buildCompanyInfoRecord } from "@/firebase/profile"
 import {
-  DEFAULT_FORM,
   type CompanyInfoForm,
   type CompanyInfoRecord,
   type InvestmentInput,
@@ -253,70 +250,6 @@ function toTrimmedString(value: unknown): string {
   return typeof value === "string" ? value.trim() : ""
 }
 
-function toPendingCompanyForm(value: unknown): CompanyInfoForm {
-  if (!value || typeof value !== "object") {
-    return DEFAULT_FORM
-  }
-  const source = value as Partial<CompanyInfoForm>
-  return {
-    ...DEFAULT_FORM,
-    companyType: toTrimmedString(source.companyType) || DEFAULT_FORM.companyType,
-    companyInfo: toTrimmedString(source.companyInfo),
-    representativeSolution: toTrimmedString(source.representativeSolution),
-    sdgPriority1: toTrimmedString(source.sdgPriority1),
-    sdgPriority2: toTrimmedString(source.sdgPriority2),
-    ceoName: toTrimmedString(source.ceoName),
-    ceoEmail: toTrimmedString(source.ceoEmail),
-    ceoPhone: toTrimmedString(source.ceoPhone),
-    ceoAge: toTrimmedString(source.ceoAge),
-    ceoGender: toTrimmedString(source.ceoGender),
-    ceoNationality: toTrimmedString(source.ceoNationality),
-    hasCoRepresentative: toTrimmedString(source.hasCoRepresentative),
-    coRepresentativeName: toTrimmedString(source.coRepresentativeName),
-    coRepresentativeBirthDate: toTrimmedString(source.coRepresentativeBirthDate),
-    coRepresentativeGender: toTrimmedString(source.coRepresentativeGender),
-    coRepresentativeTitle: toTrimmedString(source.coRepresentativeTitle),
-    founderSerialNumber: toTrimmedString(source.founderSerialNumber),
-    website: toTrimmedString(source.website),
-    foundedAt: toTrimmedString(source.foundedAt),
-    businessNumber: toTrimmedString(source.businessNumber),
-    primaryBusiness: toTrimmedString(source.primaryBusiness),
-    primaryIndustry: toTrimmedString(source.primaryIndustry),
-    headOffice: toTrimmedString(source.headOffice),
-    branchOffice: toTrimmedString(source.branchOffice),
-    targetCountries: toTrimmedString(source.targetCountries),
-    workforceFullTime: toTrimmedString(source.workforceFullTime),
-    workforceContract: toTrimmedString(source.workforceContract),
-    revenue2025: toTrimmedString(source.revenue2025),
-    revenue2026: toTrimmedString(source.revenue2026),
-    capitalTotal: toTrimmedString(source.capitalTotal),
-    certification: toTrimmedString(source.certification),
-    tipsLipsHistory: toTrimmedString(source.tipsLipsHistory),
-    exportVoucherHeld: toTrimmedString(source.exportVoucherHeld),
-    exportVoucherAmount: toTrimmedString(source.exportVoucherAmount),
-    exportVoucherUsageRate: toTrimmedString(source.exportVoucherUsageRate),
-    innovationVoucherHeld: toTrimmedString(source.innovationVoucherHeld),
-    innovationVoucherAmount: toTrimmedString(source.innovationVoucherAmount),
-    innovationVoucherUsageRate: toTrimmedString(source.innovationVoucherUsageRate),
-    myscExpectation: toTrimmedString(source.myscExpectation),
-    desiredInvestment2026: toTrimmedString(source.desiredInvestment2026),
-    desiredPreValue: toTrimmedString(source.desiredPreValue),
-  }
-}
-
-function toPendingInvestmentRows(value: unknown): InvestmentInput[] {
-  if (!Array.isArray(value)) return []
-  return value.map((item) => {
-    const source = item as Partial<InvestmentInput>
-    return {
-      stage: toTrimmedString(source.stage),
-      date: toTrimmedString(source.date),
-      postMoney: toTrimmedString(source.postMoney),
-      majorShareholder: toTrimmedString(source.majorShareholder),
-    }
-  })
-}
-
 function buildDefaultConsultantAvailability(): Consultant["availability"] {
   const scheduleDays = [
     { value: 2, label: "화" },
@@ -448,28 +381,155 @@ function getWeekdayNumbers(weekdays?: Program["weekdays"]): number[] {
   return numbers
 }
 
+function sortOfficeHourSlots(slots: OfficeHourSlot[]): OfficeHourSlot[] {
+  return [...slots].sort((a, b) => {
+    const dateComp = a.date.localeCompare(b.date)
+    if (dateComp !== 0) return dateComp
+    const startComp = a.startTime.localeCompare(b.startTime)
+    if (startComp !== 0) return startComp
+    return a.consultantName.localeCompare(b.consultantName)
+  })
+}
+
+function buildRegularSlotId(
+  programId: string,
+  consultantId: string,
+  dateKey: string,
+  startTime: string,
+): string {
+  return ["regular", programId, consultantId, dateKey, normalizeTimeKey(startTime)]
+    .join("_")
+    .replace(/:/g, "-")
+}
+
+function buildManagedRegularSlots(
+  programs: Program[],
+  consultants: Consultant[],
+  agendas: Agenda[],
+  existingSlots: OfficeHourSlot[],
+) {
+  const activeAgendaIds = agendas
+    .filter((agenda) => agenda.active !== false)
+    .map((agenda) => agenda.id)
+  const linkedConsultants = consultants.filter((consultant) => {
+    if (consultant.status !== "active") return false
+    const consultantAgendaIds = consultant.agendaIds ?? []
+    return consultantAgendaIds.some((agendaId) => activeAgendaIds.includes(agendaId))
+  })
+  const existingSlotsById = new Map(existingSlots.map((slot) => [slot.id, slot]))
+  const desiredSlots: OfficeHourSlot[] = []
+
+  programs.forEach((program) => {
+    const normalizedStart = normalizeDateKey(program.periodStart)
+    const normalizedEnd = normalizeDateKey(program.periodEnd)
+    if (!normalizedStart || !normalizedEnd) {
+      return
+    }
+
+    const startDate = parseDateKey(normalizedStart)
+    const endDate = parseDateKey(normalizedEnd)
+    if (startDate.getTime() > endDate.getTime()) {
+      return
+    }
+
+    const weekdays = new Set(getWeekdayNumbers(program.weekdays))
+    const targetDates: string[] = []
+    const cursor = new Date(startDate)
+    while (cursor.getTime() <= endDate.getTime()) {
+      if (weekdays.has(cursor.getDay())) {
+        targetDates.push(formatDateKey(cursor))
+      }
+      cursor.setDate(cursor.getDate() + 1)
+    }
+
+    const baseTitle = `${program.name} 정기 오피스아워`
+    const baseDescription = program.description?.trim() || `${program.name} 사업`
+
+    linkedConsultants.forEach((consultant) => {
+      targetDates.forEach((dateKey) => {
+        const dayOfWeek = parseDateKey(dateKey).getDay()
+        const dayAvailability = consultant.availability.find(
+          (availability) => availability.dayOfWeek === dayOfWeek,
+        )
+        if (!dayAvailability) return
+        dayAvailability.slots
+          .filter((slot) => slot.available)
+          .forEach((slot) => {
+            const slotId = buildRegularSlotId(program.id, consultant.id, dateKey, slot.start)
+            const existing = existingSlotsById.get(slotId)
+
+            desiredSlots.push({
+              id: slotId,
+              type: "regular",
+              programId: program.id,
+              consultantId: consultant.id,
+              consultantName: consultant.name,
+              title: baseTitle,
+              description: baseDescription,
+              date: dateKey,
+              startTime: slot.start,
+              endTime: slot.end,
+              agendaIds: consultant.agendaIds ?? [],
+              status: existing?.status === "booked" ? "booked" : "open",
+            })
+          })
+      })
+    })
+  })
+
+  const managedProgramIds = new Set(programs.map((program) => program.id))
+  const desiredSlotIds = new Set(desiredSlots.map((slot) => slot.id))
+  const mergedMap = new Map(existingSlots.map((slot) => [slot.id, slot]))
+  desiredSlots.forEach((slot) => {
+    mergedMap.set(slot.id, slot)
+  })
+
+  const closedSlots: OfficeHourSlot[] = []
+  existingSlots.forEach((slot) => {
+    if (slot.type !== "regular" || !slot.programId || !managedProgramIds.has(slot.programId)) {
+      return
+    }
+    if (desiredSlotIds.has(slot.id) || slot.status === "booked") {
+      return
+    }
+    const closedSlot =
+      slot.status === "closed"
+        ? slot
+        : {
+            ...slot,
+            status: "closed" as const,
+          }
+    mergedMap.set(slot.id, closedSlot)
+    closedSlots.push(closedSlot)
+  })
+
+  return {
+    desiredSlots: sortOfficeHourSlots(desiredSlots),
+    closedSlots: sortOfficeHourSlots(closedSlots),
+    mergedSlots: sortOfficeHourSlots(Array.from(mergedMap.values())),
+  }
+}
+
 function groupSlotsToRegularOfficeHours(slots: OfficeHourSlot[]): RegularOfficeHour[] {
   const grouped = new Map<string, RegularOfficeHour>()
 
   slots.forEach((slot) => {
     if (!isDateKey(slot.date)) return
+    const isOpenSlot = slot.status === "open"
     const month = slot.date.slice(0, 7)
     const groupKey = [slot.programId ?? "no-program", month].join(":")
     const slotTitle = typeof slot.title === "string" ? slot.title.trim() : ""
     const officeHourTitle =
       slotTitle.length > 0 ? slotTitle : `${month.replace("-", "년 ")}월 정기 오피스아워`
-    const consultantName = "담당자 배정 중"
-
     const existing = grouped.get(groupKey)
     if (!existing) {
       grouped.set(groupKey, {
         id: groupKey,
         title: officeHourTitle,
-        consultant: consultantName,
-        consultantId: slot.consultantId,
+        consultant: "담당자 배정 중",
         programId: slot.programId,
         month,
-        availableDates: [slot.date],
+        availableDates: isOpenSlot ? [slot.date] : [],
         description: slot.description?.trim() || "정기 오피스아워",
         slots: [
           {
@@ -477,6 +537,9 @@ function groupSlotsToRegularOfficeHours(slots: OfficeHourSlot[]): RegularOfficeH
             date: slot.date,
             startTime: slot.startTime,
             endTime: slot.endTime,
+            consultantId: slot.consultantId,
+            consultantName: slot.consultantName,
+            agendaIds: slot.agendaIds,
             status: slot.status,
           },
         ],
@@ -485,13 +548,18 @@ function groupSlotsToRegularOfficeHours(slots: OfficeHourSlot[]): RegularOfficeH
     }
 
     const nextDates = new Set(existing.availableDates)
-    nextDates.add(slot.date)
+    if (isOpenSlot) {
+      nextDates.add(slot.date)
+    }
     const nextSlots = [...(existing.slots ?? [])]
     nextSlots.push({
       id: slot.id,
       date: slot.date,
       startTime: slot.startTime,
       endTime: slot.endTime,
+      consultantId: slot.consultantId,
+      consultantName: slot.consultantName,
+      agendaIds: slot.agendaIds,
       status: slot.status,
     })
 
@@ -1107,6 +1175,9 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
 
   const resolvedApplications = useMemo(() => {
     const slotTitleById = new Map(officeHourSlotList.map((slot) => [slot.id, slot.title]))
+    const slotProgramIdById = new Map(
+      officeHourSlotList.flatMap((slot) => (slot.programId ? [[slot.id, slot.programId] as const] : [])),
+    )
     const officeHourById = new Map(
       regularOfficeHourList.map((officeHour) => [officeHour.id, officeHour]),
     )
@@ -1123,8 +1194,8 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
         if (application.officeHourId && application.officeHourId.includes(":")) {
           return application.officeHourId.split(":")[0]
         }
-        if (application.officeHourSlotId && application.officeHourSlotId.includes("_")) {
-          return application.officeHourSlotId.split("_")[0]
+        if (application.officeHourSlotId && slotProgramIdById.has(application.officeHourSlotId)) {
+          return slotProgramIdById.get(application.officeHourSlotId)
         }
         return undefined
       })()
@@ -1199,6 +1270,15 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       return []
     }
     return resolvedApplications.filter((application) => {
+      if (application.consultantId) {
+        return consultantIdCandidates.has(application.consultantId)
+      }
+      if (application.officeHourSlotId) {
+        const reservedSlot = officeHourSlotList.find((slot) => slot.id === application.officeHourSlotId)
+        if (reservedSlot?.consultantId) {
+          return consultantIdCandidates.has(reservedSlot.consultantId)
+        }
+      }
       if (application.agendaId && consultantAgendaIds.has(application.agendaId)) {
         return true
       }
@@ -1212,8 +1292,10 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     resolvedApplications,
     resolvedRole,
     user.id,
+    consultantIdCandidates,
     consultantAgendaIds,
     consultantAgendaNames,
+    officeHourSlotList,
   ])
 
   const agendaScopeById = useMemo(
@@ -1270,7 +1352,14 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
   const scopedRegularOfficeHourList = useMemo(() => {
     if (resolvedRole === "consultant") {
       return resolvedRegularOfficeHourList.filter((officeHour) => {
-        return !!officeHour.consultantId && consultantIdCandidates.has(officeHour.consultantId)
+        return (
+          (officeHour.consultantId && consultantIdCandidates.has(officeHour.consultantId)) ||
+          Boolean(
+            officeHour.slots?.some(
+              (slot) => slot.consultantId && consultantIdCandidates.has(slot.consultantId),
+            ),
+          )
+        )
       })
     }
     if (resolvedRole === "user") {
@@ -1665,6 +1754,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
   const rejectApplicationsAsExpired = async (targets: Application[], updatedAt = new Date()) => {
     const eligible = targets.filter((app) => app.status === "pending")
     if (eligible.length === 0) return false
+    if (isFirebaseConfigured) return false
 
     const rejectionById = new Map(
       eligible.map((app) => [
@@ -1689,32 +1779,6 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     setApplications(nextApplications)
 
     const slotIdsToOpen = collectReleasableSlotIds(eligible, nextApplications)
-
-    if (isFirebaseConfigured) {
-      const applicationOps = eligible.map((app) => {
-        const meta = rejectionById.get(app.id)!
-        return {
-          type: "update" as const,
-          collection: COLLECTIONS.OFFICE_HOUR_APPLICATIONS,
-          docId: app.id,
-          data: {
-            status: "rejected",
-            rejectionReason: meta.rejectionReason,
-            updatedAt: meta.updatedAt,
-          },
-        }
-      })
-
-      const applicationsUpdated = await officeHourApplicationCrud.batchUpdate(applicationOps)
-      if (!applicationsUpdated) {
-        toast.error("만료 신청 자동 거절 저장에 실패했습니다")
-        return false
-      }
-
-      await releaseSlots(slotIdsToOpen)
-      return true
-    }
-
     await releaseSlots(slotIdsToOpen)
     return true
   }
@@ -1744,7 +1808,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
   // 2) 진행 시간이 지난 confirmed는 completed로 자동 전환
   useEffect(() => {
     if (!needsApplications || !canAutoTransitionApplications) return
-    if (isFirebaseConfigured && isServerApplicationTransitionEnabled) return
+    if (isFirebaseConfigured) return
     let isRunning = false
     const runAutoStatusTransitions = async () => {
       if (isRunning) return
@@ -1816,7 +1880,6 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     needsApplications,
     canAutoTransitionApplications,
     isFirebaseConfigured,
-    isServerApplicationTransitionEnabled,
     officeHourApplicationCrud,
     officeHourSlotList,
     officeHourSlotCrud,
@@ -2045,6 +2108,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     if (!slotId) return []
     const baseSlot = officeHourSlotList.find((slot) => slot.id === slotId)
     if (!baseSlot) return [slotId]
+    if (baseSlot.consultantId) return [slotId]
     if (!baseSlot.programId || !baseSlot.date || !baseSlot.startTime) {
       return [slotId]
     }
@@ -2206,7 +2270,11 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       const selectedSlot = data.slotId
         ? officeHourSlotList.find((slot) => slot.id === data.slotId)
         : officeHour.slots?.find(
-            (slot) => slot.date === scheduledDate && slot.startTime === data.time,
+            (slot) =>
+              slot.date === scheduledDate &&
+              slot.startTime === data.time &&
+              slot.status === "open" &&
+              (!slot.agendaIds || slot.agendaIds.includes(data.agendaId)),
           )
 
       if (selectedSlot && selectedSlot.status !== "open") {
@@ -2323,79 +2391,33 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
           toast.error("로그인 정보를 확인한 뒤 다시 시도해주세요")
           return
         }
-        if (isServerRegularApplicationSubmitEnabled) {
-          try {
-            await submitRegularApplicationViaFunction({
-              officeHourId: data.officeHourId,
-              officeHourSlotId: selectedSlot?.id ?? data.slotId ?? null,
-              officeHourTitle: officeHour.title,
-              programId: officeHour.programId ?? null,
-              agendaId: data.agendaId,
-              scheduledDate,
-              scheduledTime: data.time,
-              sessionFormat: data.sessionFormat,
-              requestContent: data.requestContent,
-              attachmentNames,
-              attachmentUrls: uploadedAttachmentUrls,
-            })
-          } catch (error) {
-            await removeApplicationAttachmentsFromStorage(uploadedAttachmentUrls)
-            const message =
-              error instanceof Error && error.message
-                ? error.message
-                : "신청 저장에 실패했습니다"
-            toast.error(message)
-            return
-          }
-        } else {
-          const payload = omitId(newApplication)
-          const createdId = await officeHourApplicationCrud.create(payload)
-          if (!createdId) {
-            await removeApplicationAttachmentsFromStorage(uploadedAttachmentUrls)
-            toast.error("신청 저장에 실패했습니다")
-            return
-          }
-
-          if (payload.officeHourSlotId && selectedSlot) {
-            const matchingSlots = officeHourSlotList.filter(
-              (slot) =>
-                slot.type === "regular" &&
-                slot.programId === payload.programId &&
-                slot.date === selectedSlot.date &&
-                slot.startTime === selectedSlot.startTime,
-            )
-            const updates = matchingSlots.map((slot) => ({
-              type: "update" as const,
-              collection: COLLECTIONS.OFFICE_HOUR_SLOTS,
-              docId: slot.id,
-              data: { status: "booked" },
-            }))
-            const slotUpdated =
-              updates.length > 0
-                ? await officeHourSlotCrud.batchUpdate(updates)
-                : await officeHourSlotCrud.update(payload.officeHourSlotId, {
-                    status: "booked",
-                  })
-            if (!slotUpdated) {
-              toast.error("신청은 저장됐지만 슬롯 상태 업데이트에 실패했습니다")
-            }
-          }
+        try {
+          await submitRegularApplicationViaFunction({
+            officeHourId: data.officeHourId,
+            officeHourSlotId: selectedSlot?.id ?? data.slotId ?? null,
+            officeHourTitle: officeHour.title,
+            programId: officeHour.programId ?? null,
+            agendaId: data.agendaId,
+            scheduledDate,
+            scheduledTime: data.time,
+            sessionFormat: data.sessionFormat,
+            requestContent: data.requestContent,
+            attachmentNames,
+            attachmentUrls: uploadedAttachmentUrls,
+          })
+        } catch (error) {
+          await removeApplicationAttachmentsFromStorage(uploadedAttachmentUrls)
+          const message =
+            error instanceof Error && error.message
+              ? error.message
+              : "신청 저장에 실패했습니다"
+          toast.error(message)
+          return
         }
       } else {
         setApplications((prev) => [...prev, newApplication])
-        if (newApplication.officeHourSlotId && selectedSlot) {
-          const matchingSlots = officeHourSlotList.filter(
-            (slot) =>
-              slot.type === "regular" &&
-              slot.programId === newApplication.programId &&
-              slot.date === selectedSlot.date &&
-              slot.startTime === selectedSlot.startTime,
-          )
-          if (matchingSlots.length > 0) {
-            matchingSlots.forEach((slot) => applyLocalSlotStatus(slot.id, "booked"))
-          } else {
-            applyLocalSlotStatus(newApplication.officeHourSlotId, "booked")
-          }
+        if (newApplication.officeHourSlotId) {
+          applyLocalSlotStatus(newApplication.officeHourSlotId, "booked")
         }
       }
 
@@ -2535,7 +2557,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
   const handleCancelApplication = async (id: string) => {
     const targetApplication = applications.find((app) => app.id === id)
     if (!targetApplication) return
-    if (isFirebaseConfigured && isServerApplicationTransitionEnabled) {
+    if (isFirebaseConfigured) {
       try {
         const result = await cancelApplicationViaFunction(id)
         if (result.outcome === "deleted") {
@@ -2593,6 +2615,10 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
   const handleUpdateApplicationStatus = async (id: string, status: ApplicationStatus) => {
     const targetApplication = applications.find((app) => app.id === id)
     if (!targetApplication) return
+    if (isFirebaseConfigured) {
+      toast.error("상태 변경은 서버 함수 경유로만 처리할 수 있습니다")
+      return
+    }
     const now = new Date()
     const expired = hasSessionEnded(targetApplication, now)
 
@@ -2698,7 +2724,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
 
     const targetApplication = applications.find((app) => app.id === id)
     if (!targetApplication) return
-    if (isFirebaseConfigured && isServerApplicationTransitionEnabled) {
+    if (isFirebaseConfigured) {
       try {
         await transitionApplicationStatusViaFunction({
           applicationId: id,
@@ -2731,6 +2757,16 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       : consultantAgendaNames.has(targetApplication.agenda)
     if (!agendaOk) {
       toast.error("배정된 아젠다와 일치하지 않습니다")
+      return
+    }
+    const reservedSlot = targetApplication.officeHourSlotId
+      ? officeHourSlotList.find((slot) => slot.id === targetApplication.officeHourSlotId)
+      : undefined
+    if (
+      reservedSlot?.consultantId &&
+      reservedSlot.consultantId !== currentConsultant.id
+    ) {
+      toast.error("배정된 컨설턴트만 이 신청을 처리할 수 있습니다")
       return
     }
 
@@ -2805,7 +2841,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       toast.error("거절 사유를 입력해주세요")
       return
     }
-    if (isFirebaseConfigured && isServerApplicationTransitionEnabled) {
+    if (isFirebaseConfigured) {
       try {
         await transitionApplicationStatusViaFunction({
           applicationId: id,
@@ -2826,6 +2862,17 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       !targetApplication.consultantId &&
       (!targetApplication.consultant || targetApplication.consultant === "담당자 배정 중")
     const isAssignedToCurrent = targetApplication.consultantId === currentConsultant.id
+    const reservedSlot = targetApplication.officeHourSlotId
+      ? officeHourSlotList.find((slot) => slot.id === targetApplication.officeHourSlotId)
+      : undefined
+
+    if (
+      reservedSlot?.consultantId &&
+      reservedSlot.consultantId !== currentConsultant.id
+    ) {
+      toast.error("배정된 컨설턴트만 이 신청을 처리할 수 있습니다")
+      return
+    }
 
     if (!isAcceptableStatus || !(isUnassigned || isAssignedToCurrent)) {
       toast.error("거절할 수 있는 상태가 아닙니다")
@@ -2874,7 +2921,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
 
     const targetApplication = applications.find((app) => app.id === id)
     if (!targetApplication) return
-    if (isFirebaseConfigured && isServerApplicationTransitionEnabled) {
+    if (isFirebaseConfigured) {
       try {
         await transitionApplicationStatusViaFunction({
           applicationId: id,
@@ -2896,7 +2943,12 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
 
     const isPending = targetApplication.status === "pending"
     const isRequester = targetApplication.consultantId === currentConsultant.id
-    if (!isPending || !isRequester) {
+    const reservedSlot = targetApplication.officeHourSlotId
+      ? officeHourSlotList.find((slot) => slot.id === targetApplication.officeHourSlotId)
+      : undefined
+    const isReservedToCurrent =
+      !reservedSlot?.consultantId || reservedSlot.consultantId === currentConsultant.id
+    if (!isPending || !isRequester || !isReservedToCurrent) {
       toast.error("확정할 수 있는 상태가 아닙니다")
       return
     }
@@ -3182,6 +3234,52 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     return true
   }
 
+  const syncManagedRegularSlots = async (nextConsultants: Consultant[]) => {
+    const { desiredSlots, closedSlots, mergedSlots } = buildManagedRegularSlots(
+      programList,
+      nextConsultants,
+      agendaList,
+      officeHourSlotList,
+    )
+
+    if (isFirebaseConfigured) {
+      const operations = [
+        ...desiredSlots.map((slot) => ({
+          type: "set" as const,
+          collection: COLLECTIONS.OFFICE_HOUR_SLOTS,
+          docId: slot.id,
+          data: omitId(slot),
+        })),
+        ...closedSlots.map((slot) => ({
+          type: "update" as const,
+          collection: COLLECTIONS.OFFICE_HOUR_SLOTS,
+          docId: slot.id,
+          data: { status: "closed" as const },
+        })),
+      ]
+
+      if (operations.length > 0) {
+        const synced = await officeHourSlotCrud.batchUpdate(operations)
+        if (!synced) {
+          toast.error("정기 오피스아워 슬롯 동기화에 실패했습니다")
+          return false
+        }
+      }
+    }
+
+    setOfficeHourSlotList(mergedSlots)
+    const slotGroups = groupSlotsToRegularOfficeHours(mergedSlots)
+    const programGroups = groupProgramsToRegularOfficeHours(programList)
+    const programIdsWithSlots = new Set(
+      slotGroups.map((group) => group.programId).filter(Boolean) as string[],
+    )
+    setRegularOfficeHourList([
+      ...slotGroups,
+      ...programGroups.filter((group) => !programIdsWithSlots.has(group.programId ?? "")),
+    ])
+    return true
+  }
+
   const handleSaveConsultantProfile = async (values: ConsultantProfileFormValues) => {
     const name = values.name.trim()
     const email = values.email.trim()
@@ -3334,16 +3432,31 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
           toast.error("스케줄 저장에 실패했습니다")
           return
         }
-        saveConsultantToState({
+        const syncedConsultant = {
           ...nextConsultant,
           id: authUid,
           email: authEmail,
           ...(preservedSecondaryEmail ? { secondaryEmail: preservedSecondaryEmail } : {}),
-        })
+        }
+        saveConsultantToState(syncedConsultant)
+        const nextConsultants = consultants.some((consultant) => consultant.id === syncedConsultant.id)
+          ? consultants.map((consultant) =>
+              consultant.id === syncedConsultant.id ? syncedConsultant : consultant,
+            )
+          : [...consultants, syncedConsultant]
+        const slotsSynced = await syncManagedRegularSlots(nextConsultants)
+        if (!slotsSynced) return
         toast.success("내 스케줄이 저장되었습니다")
         return
       }
       saveConsultantToState(nextConsultant)
+      const nextConsultants = consultants.some((consultant) => consultant.id === nextConsultant.id)
+        ? consultants.map((consultant) =>
+            consultant.id === nextConsultant.id ? nextConsultant : consultant,
+          )
+        : [...consultants, nextConsultant]
+      const slotsSynced = await syncManagedRegularSlots(nextConsultants)
+      if (!slotsSynced) return
       toast.success("내 스케줄이 저장되었습니다")
       return
     }
@@ -3353,6 +3466,13 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       toast.error("스케줄 저장에 실패했습니다")
       return
     }
+    const nextConsultants = consultants.some((consultant) => consultant.id === nextConsultant.id)
+      ? consultants.map((consultant) =>
+          consultant.id === nextConsultant.id ? nextConsultant : consultant,
+        )
+      : [...consultants, nextConsultant]
+    const slotsSynced = await syncManagedRegularSlots(nextConsultants)
+    if (!slotsSynced) return
     toast.success("내 스케줄이 저장되었습니다")
   }
 
@@ -3396,6 +3516,19 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
           }),
         )
       }
+    }
+
+    if (
+      nextConsultantStatus === "active" ||
+      nextConsultantStatus === "inactive" ||
+      data.agendaIds !== undefined ||
+      data.availability !== undefined
+    ) {
+      const nextConsultants = consultants.map((consultant) =>
+        consultant.id === id ? { ...consultant, ...data } : consultant,
+      )
+      const slotsSynced = await syncManagedRegularSlots(nextConsultants)
+      if (!slotsSynced) return
     }
 
     toast.success("컨설턴트 정보가 업데이트되었습니다")
@@ -3921,154 +4054,24 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       toast.error("Firebase 연결 후 승인할 수 있습니다")
       return
     }
-
-    const approvedRole = pendingProfile.requestedRole ?? pendingProfile.role
-    const profileSnapshot = profileList.find((item) => item.id === pendingProfile.id) ?? null
-    const signupRequest = await firestoreService.getDocument<SignupRequestDoc>(
-      "signupRequests",
-      pendingProfile.id,
-    )
-    const fallbackEmail =
-      toTrimmedString(signupRequest?.email) || toTrimmedString(pendingProfile.email)
-
-    if (approvedRole === "consultant") {
-      const source =
-        signupRequest?.consultantInfo ??
-        (
-          profileSnapshot as {
-            pendingConsultantInfo?: Partial<ConsultantProfileFormValues> | null
-          } | null
-        )?.pendingConsultantInfo ??
-        null
-      const phone = toTrimmedString(source?.phone)
-      const organization = toTrimmedString(source?.organization)
-      const secondaryEmail = toTrimmedString(source?.secondaryEmail)
-      const secondaryPhone = toTrimmedString(source?.secondaryPhone)
-      const fixedMeetingLink = toTrimmedString(source?.fixedMeetingLink)
-      const consultantName =
-        toTrimmedString(source?.name) || fallbackEmail.split("@")[0] || "컨설턴트"
-      const consultantEmail =
-        fallbackEmail || toTrimmedString(source?.email) || `${pendingProfile.id}@pending.local`
-      const consultantExpertise = toTrimmedString(source?.expertise)
-        .split(",")
-        .map((item) => item.trim())
-        .filter(Boolean)
-      const consultantPayload: Omit<Consultant, "id"> = {
-        name: consultantName,
-        title: "컨설턴트",
-        email: consultantEmail,
-        expertise: consultantExpertise,
-        bio: toTrimmedString(source?.bio) || `${consultantName} 컨설턴트`,
-        status: "active",
-        joinedDate: new Date(),
-        availability: buildDefaultConsultantAvailability(),
-        ...(phone ? { phone } : {}),
-        ...(organization ? { organization } : {}),
-        ...(secondaryEmail ? { secondaryEmail } : {}),
-        ...(secondaryPhone ? { secondaryPhone } : {}),
-        ...(fixedMeetingLink ? { fixedMeetingLink } : {}),
-      }
-      const consultantSaved = await consultantCrud.set(pendingProfile.id, consultantPayload)
-      if (!consultantSaved) {
-        toast.error("컨설턴트 프로필 생성에 실패했습니다")
-        return
-      }
-    }
-
-    let approvedCompanyId: string | null = null
-    if (approvedRole === "company") {
-      approvedCompanyId =
-        toTrimmedString(signupRequest?.companyId) ||
-        toTrimmedString(profileSnapshot?.companyId) ||
-        toTrimmedString(pendingProfile.companyId) ||
-        pendingProfile.id
-      const pendingCompanyForm = toPendingCompanyForm(
-        signupRequest?.companyInfo ??
-          (profileSnapshot as { pendingCompanyInfo?: Partial<CompanyInfoForm> | null } | null)
-            ?.pendingCompanyInfo,
-      )
-      const pendingInvestmentRows = toPendingInvestmentRows(
-        signupRequest?.investmentRows ??
-          (profileSnapshot as { pendingInvestmentRows?: InvestmentInput[] | null } | null)
-            ?.pendingInvestmentRows,
-      )
-      const companyInfoRecord = buildCompanyInfoRecord(pendingCompanyForm, pendingInvestmentRows)
-      const companyName = toTrimmedString(pendingCompanyForm.companyInfo) || null
-
-      const companySaved = await firestoreService.setDocument(
-        "companies",
-        approvedCompanyId,
-        {
-          ownerUid: pendingProfile.id,
-          name: companyName,
-          programs: Array.isArray(signupRequest?.programIds)
-            ? signupRequest.programIds.filter((value): value is string => typeof value === "string")
-            : [],
-          createdAt: new Date(),
-        },
-        true,
-      )
-      if (!companySaved) {
-        toast.error("회사 기본 정보 생성에 실패했습니다")
-        return
-      }
-
-      const companyInfoSaved = await firestoreService.setDocument(
-        `companies/${approvedCompanyId}/companyInfo`,
-        "info",
-        {
-          ...companyInfoRecord,
-          metadata: {
-            ...companyInfoRecord.metadata,
-            createdAt: new Date(),
-          },
-        },
-        true,
-      )
-      if (!companyInfoSaved) {
-        toast.error("회사 상세 정보 생성에 실패했습니다")
-        return
-      }
-    }
-
-    const ok = await profileCrud.set(
-      pendingProfile.id,
-      {
-        role: approvedRole,
-        requestedRole: approvedRole,
-        active: true,
-        email: fallbackEmail || null,
-        companyId: approvedRole === "company" ? approvedCompanyId : null,
-        ...(signupRequest?.consents ? { consents: signupRequest.consents } : {}),
-        activatedAt: new Date(),
-        approvedAt: new Date(),
-        approvedByUid: firebaseUser?.uid ?? null,
-        createdAt: profileSnapshot?.createdAt ?? signupRequest?.createdAt ?? new Date(),
-      },
-      true,
-    )
-    if (!ok) {
-      toast.error("계정 승인에 실패했습니다")
+    let result: { role: PendingProfileApproval["role"]; companyId?: string | null }
+    try {
+      result = await approvePendingUserViaFunction(pendingProfile.id)
+    } catch (error) {
+      toast.error(getFunctionErrorMessage(error, "계정 승인에 실패했습니다"))
       return
-    }
-
-    if (signupRequest) {
-      const removed = await firestoreService.deleteDocument("signupRequests", pendingProfile.id)
-      if (!removed) {
-        toast.error("승인 요청 정리에 실패했습니다. 다시 시도해주세요.")
-      }
     }
 
     toast.success("계정 승인이 완료되었습니다")
     setProfileList((prev) => {
       const nextProfile = {
-        ...(profileSnapshot ?? { id: pendingProfile.id }),
+        ...(prev.find((item) => item.id === pendingProfile.id) ?? { id: pendingProfile.id }),
         id: pendingProfile.id,
-        email: fallbackEmail || null,
-        role: approvedRole,
-        requestedRole: approvedRole,
+        email: pendingProfile.email || null,
+        role: result.role,
+        requestedRole: result.role,
         active: true,
-        companyId: approvedRole === "company" ? approvedCompanyId : null,
+        companyId: result.role === "company" ? result.companyId ?? pendingProfile.id : null,
         activatedAt: new Date(),
         approvedAt: new Date(),
       }
@@ -4129,7 +4132,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
   }
 
   return (
-    <div className="h-screen flex flex-col">
+    <div className="flex h-screen min-h-0 flex-col">
       <Topbar
         user={scopedUser}
         displayName={
@@ -4156,7 +4159,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
           toast.success("로그아웃되었습니다")
         }}
       />
-      <div className="flex-1 flex overflow-hidden">
+      <div className="flex min-h-0 flex-1 overflow-hidden">
         <SidebarNav
           currentPage={currentPage}
           onNavigate={handleNavigateLoose}
@@ -4164,7 +4167,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
           disabledPages={disabledPages}
         />
         <main
-          className={`flex-1 bg-gray-50 ${
+          className={`flex min-h-0 min-w-0 flex-1 flex-col bg-gray-50 ${
             currentPage === "admin-applications" ||
             currentPage === "admin-consultants" ||
             currentPage === "pending-reports"

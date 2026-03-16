@@ -213,6 +213,7 @@ export function RegularOfficeHoursCalendar({
                           {sessions.slice(0, 2).map((session, sessionIdx) => (
                             <div
                               key={session.id + sessionIdx}
+                              data-testid={`regular-calendar-session-${session.id}`}
                               onClick={(e) => {
                                 e.stopPropagation();
                                 onSelectOfficeHour(session.id);
@@ -255,6 +256,7 @@ export function RegularOfficeHoursCalendar({
                 {getOfficeHoursForDate(selectedDate).map((session) => (
                   <div
                     key={session.id + session.date}
+                    data-testid={`regular-calendar-session-${session.id}`}
                     onClick={() => onSelectOfficeHour(session.id)}
                     className="group relative overflow-hidden rounded-md border border-slate-200 bg-slate-50/60 px-3 py-2.5 hover:border-primary/40 hover:bg-white hover:shadow-sm cursor-pointer transition-all"
                   >

@@ -2,11 +2,6 @@ import { httpsCallable } from "firebase/functions";
 import { functions, isFirebaseConfigured } from "@/redesign/app/lib/firebase";
 import type { ApplicationStatus, SessionFormat } from "@/redesign/app/lib/types";
 
-export const isServerRegularApplicationSubmitEnabled =
-  import.meta.env.VITE_USE_SERVER_REGULAR_APPLICATION_SUBMIT === "true";
-export const isServerApplicationTransitionEnabled =
-  import.meta.env.VITE_USE_SERVER_APPLICATION_TRANSITIONS === "true";
-
 export type SubmitRegularApplicationPayload = {
   officeHourId: string;
   officeHourSlotId?: string | null;
@@ -54,6 +49,12 @@ type RunApplicationMaintenanceResult = {
   rejectedCount: number;
   completedCount: number;
   slotCount: number;
+};
+
+type ApprovePendingUserResult = {
+  userId: string;
+  role: "admin" | "company" | "consultant";
+  companyId?: string | null;
 };
 
 export async function submitRegularApplicationViaFunction(
@@ -113,5 +114,19 @@ export async function runApplicationMaintenanceViaFunction() {
   );
 
   const result = await callable({});
+  return result.data;
+}
+
+export async function approvePendingUserViaFunction(userId: string) {
+  if (!isFirebaseConfigured || !functions) {
+    throw new Error("Firebase Functions is not configured");
+  }
+
+  const callable = httpsCallable<{ userId: string }, ApprovePendingUserResult>(
+    functions,
+    "approvePendingUser"
+  );
+
+  const result = await callable({ userId });
   return result.data;
 }

@@ -200,7 +200,7 @@ export function AdminConsultants({
   }
 
   return (
-    <div className="flex h-[calc(100vh-4rem)] min-h-0 flex-col bg-slate-50">
+    <div className="flex h-full min-h-0 flex-col bg-slate-50">
       <div className="shrink-0 border-b border-slate-200/80 bg-white/80 px-8 py-4 backdrop-blur-sm">
         <div className="mx-auto w-full max-w-7xl">
           <h1 className={pageTitleClassName}>컨설턴트 관리</h1>
@@ -280,7 +280,7 @@ export function AdminConsultants({
 
           <Card className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
             <CardContent className="min-h-0 flex-1 p-0">
-              <div className="h-full overflow-auto">
+              <div className="min-h-0 h-full overflow-auto">
                 <Table className="min-w-[900px]">
                   <TableHeader className="[&_tr]:sticky [&_tr]:top-0 [&_tr]:z-10 [&_tr]:bg-white">
                     <TableRow className="hover:bg-white">

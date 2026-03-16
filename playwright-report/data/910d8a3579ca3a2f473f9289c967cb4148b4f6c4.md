@@ -1,0 +1,105 @@
+# Page snapshot
+
+```yaml
+- generic [ref=e2]:
+  - generic [ref=e3]:
+    - generic [ref=e4]:
+      - generic [ref=e7]:
+        - heading "MYSC 기업육성플랫폼" [level=2] [ref=e8]
+        - paragraph [ref=e9]: MYSC EMA
+      - button "자가진단표 미완료" [ref=e11]:
+        - img
+        - generic "자가진단표 미완료" [ref=e12]
+    - generic [ref=e13]:
+      - navigation [ref=e15]:
+        - button "대시보드" [ref=e16]:
+          - img [ref=e17]
+          - generic [ref=e22]: 대시보드
+        - button "정기 오피스아워" [ref=e23]:
+          - img [ref=e24]
+          - generic [ref=e26]: 정기 오피스아워
+        - button "기업 정보 입력" [ref=e27]:
+          - img [ref=e28]
+          - generic [ref=e31]: 기업 정보 입력
+      - main [ref=e32]:
+        - generic [ref=e33]:
+          - generic [ref=e35]:
+            - generic [ref=e36]:
+              - heading "정기 오피스아워" [level=1] [ref=e37]
+              - paragraph [ref=e38]: 매주 정해진 시간에 진행되는 오피스아워를 신청하세요
+            - generic [ref=e39]:
+              - button "캘린더" [ref=e40]:
+                - img
+                - text: 캘린더
+              - button "리스트" [ref=e41]:
+                - img
+                - text: 리스트
+          - generic [ref=e42]:
+            - generic [ref=e44]:
+              - generic [ref=e46]:
+                - generic [ref=e47]:
+                  - heading "2026년 3월" [level=2] [ref=e48]
+                  - generic [ref=e49]:
+                    - button [ref=e50]:
+                      - img
+                    - button "오늘" [ref=e51]
+                    - button [ref=e52]:
+                      - img
+                - generic [ref=e53]:
+                  - text: 이번 달 예약 가능 일정
+                  - generic [ref=e55]: 0건
+              - generic [ref=e57]:
+                - generic [ref=e58]: 일
+                - generic [ref=e59]: 월
+                - generic [ref=e60]: 화
+                - generic [ref=e61]: 수
+                - generic [ref=e62]: 목
+                - generic [ref=e63]: 금
+                - generic [ref=e64]: 토
+                - generic [ref=e67] [cursor=pointer]: "1"
+                - generic [ref=e74] [cursor=pointer]: "2"
+                - generic [ref=e81] [cursor=pointer]: "3"
+                - generic [ref=e88] [cursor=pointer]: "4"
+                - generic [ref=e95] [cursor=pointer]: "5"
+                - generic [ref=e102] [cursor=pointer]: "6"
+                - generic [ref=e109] [cursor=pointer]: "7"
+                - generic [ref=e116] [cursor=pointer]: "8"
+                - generic [ref=e123] [cursor=pointer]: "9"
+                - generic [ref=e130] [cursor=pointer]: "10"
+                - generic [ref=e137] [cursor=pointer]: "11"
+                - generic [ref=e144] [cursor=pointer]: "12"
+                - generic [ref=e151] [cursor=pointer]: "13"
+                - generic [ref=e158] [cursor=pointer]: "14"
+                - generic [ref=e165] [cursor=pointer]: "15"
+                - generic [ref=e172] [cursor=pointer]: "16"
+                - generic [ref=e179] [cursor=pointer]: "17"
+                - generic [ref=e186] [cursor=pointer]: "18"
+                - generic [ref=e193] [cursor=pointer]: "19"
+                - generic [ref=e200] [cursor=pointer]: "20"
+                - generic [ref=e207] [cursor=pointer]: "21"
+                - generic [ref=e214] [cursor=pointer]: "22"
+                - generic [ref=e221] [cursor=pointer]: "23"
+                - generic [ref=e228] [cursor=pointer]: "24"
+                - generic [ref=e235] [cursor=pointer]: "25"
+                - generic [ref=e242] [cursor=pointer]: "26"
+                - generic [ref=e249] [cursor=pointer]: "27"
+                - generic [ref=e256] [cursor=pointer]: "28"
+                - generic [ref=e263] [cursor=pointer]: "29"
+                - generic [ref=e270] [cursor=pointer]: "30"
+                - generic [ref=e277] [cursor=pointer]: "31"
+                - generic [ref=e284] [cursor=pointer]: "1"
+                - generic [ref=e291] [cursor=pointer]: "2"
+                - generic [ref=e298] [cursor=pointer]: "3"
+                - generic [ref=e305] [cursor=pointer]: "4"
+                - generic [ref=e312] [cursor=pointer]: "5"
+                - generic [ref=e319] [cursor=pointer]: "6"
+                - generic [ref=e326] [cursor=pointer]: "7"
+                - generic [ref=e333] [cursor=pointer]: "8"
+                - generic [ref=e340] [cursor=pointer]: "9"
+                - generic [ref=e347] [cursor=pointer]: "10"
+                - generic [ref=e354] [cursor=pointer]: "11"
+            - generic [ref=e360]:
+              - heading "3월 16일 (월)" [level=2] [ref=e361]
+              - paragraph [ref=e362]: 예정된 세션이 없습니다
+  - region "Notifications alt+T"
+```

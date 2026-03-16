@@ -71,7 +71,11 @@ export function RegularOfficeHourDetail({
                     아래 버튼을 클릭하여 오피스아워 신청을 시작하세요. 날짜/시간,
                     진행 형태, 요청 내용 입력 순서로 진행됩니다.
                   </p>
-                  <Button onClick={onStartApplication} disabled={!hasFutureAvailableDate}>
+                  <Button
+                    data-testid="regular-start-application"
+                    onClick={onStartApplication}
+                    disabled={!hasFutureAvailableDate}
+                  >
                     신청 시작하기
                   </Button>
                   {!hasFutureAvailableDate && (

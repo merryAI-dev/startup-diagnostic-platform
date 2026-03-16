@@ -72,6 +72,7 @@ export function SignupInfoPage() {
   const navigate = useNavigate()
   const [hydratingProfile, setHydratingProfile] = useState(false)
   const [creatingAccount, setCreatingAccount] = useState(false)
+  const adminSubmitLockRef = useRef(false)
 
   const pendingSignup = useMemo(() => {
     try {
@@ -238,6 +239,8 @@ export function SignupInfoPage() {
         <button
           className="rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white"
           onClick={async () => {
+            if (adminSubmitLockRef.current) return
+            adminSubmitLockRef.current = true
             try {
               const authUser = await ensureAuthUser()
               if (!authUser) return
@@ -257,6 +260,8 @@ export function SignupInfoPage() {
                   ? `승인 요청에 실패했습니다. (${code})`
                   : "승인 요청에 실패했습니다. 다시 시도해주세요."
               )
+            } finally {
+              adminSubmitLockRef.current = false
             }
           }}
           type="button"
@@ -318,6 +323,8 @@ function ConsultantSignupInfo({
   onComplete: () => Promise<void>
   onCancel: () => void
 }) {
+  const submitLockRef = useRef(false)
+
   async function handleSubmit(values: {
     name: string
     organization: string
@@ -330,6 +337,8 @@ function ConsultantSignupInfo({
     bio: string
   }) {
     if (!db) return
+    if (submitLockRef.current) return
+    submitLockRef.current = true
     try {
       const authUser = await ensureAuthUser()
       if (!authUser) return
@@ -350,6 +359,8 @@ function ConsultantSignupInfo({
           ? `승인 요청에 실패했습니다. (${code})`
           : "승인 요청에 실패했습니다. 다시 시도해주세요."
       )
+    } finally {
+      submitLockRef.current = false
     }
   }
 
@@ -427,6 +438,7 @@ function CompanySignupInfo({
   const [consentOpen, setConsentOpen] = useState(false)
   const [consentPrivacy, setConsentPrivacy] = useState(false)
   const [consentMarketing, setConsentMarketing] = useState(false)
+  const submitLockRef = useRef(false)
   const [consentError, setConsentError] = useState<string | null>(null)
   const [activeSignupSection, setActiveSignupSection] = useState("company-service")
   const CONSENT_VERSION = "v1.0"
@@ -1098,6 +1110,8 @@ function CompanySignupInfo({
   }
 
   async function handleSubmit() {
+    if (submitLockRef.current) return
+    submitLockRef.current = true
     try {
       const authUser = await ensureAuthUser()
       if (!authUser) return
@@ -1140,6 +1154,7 @@ function CompanySignupInfo({
           : "승인 요청에 실패했습니다. 다시 시도해주세요."
       )
     } finally {
+      submitLockRef.current = false
       setSaving(false)
     }
   }
@@ -1357,6 +1372,7 @@ function CompanySignupInfo({
             </button>
             <button
               type="button"
+              data-testid="company-signup-submit-mobile"
               onClick={() => {
                 if (!canSubmit || saving) return
                 if (!consentPrivacy) {
@@ -1412,6 +1428,7 @@ function CompanySignupInfo({
                     <button
                       key={option}
                       type="button"
+                      data-testid={`company-type-${option === "예비창업" ? "prestartup" : "corporation"}`}
                       className={segmentedToggleClass(active)}
                       onClick={() => applyCompanyType(option)}
                     >
@@ -1448,6 +1465,7 @@ function CompanySignupInfo({
                 <div className="flex justify-end">
                   <button
                     type="button"
+                    data-testid="company-signup-submit"
                     onClick={() => {
                       if (!canSubmit || saving) return
                       if (!consentPrivacy) {
@@ -1480,6 +1498,7 @@ function CompanySignupInfo({
                   <label className="text-xs text-slate-500 md:col-span-3">
                     기업/팀명
                     <input
+                      data-testid="company-signup-name"
                       className={inputClass(isFieldInvalid("companyInfo"))}
                       placeholder={
                         isPreStartup
@@ -1500,6 +1519,7 @@ function CompanySignupInfo({
                     2026년 MYSC 참여사업
                     <div className="relative mt-1" ref={programDropdownRef}>
                       <div
+                        data-testid="company-program-trigger"
                         tabIndex={0}
                         className={inputClass(false, "cursor-pointer pr-9 text-left")}
                         onMouseDown={(event) => {
@@ -1533,6 +1553,7 @@ function CompanySignupInfo({
                                 <button
                                   key={program.id}
                                   type="button"
+                                  data-testid={`company-program-option-${program.id}`}
                                   className={`flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-xs ${
                                     isSelected
                                       ? "bg-slate-100 font-semibold text-slate-900"
@@ -1933,6 +1954,7 @@ function CompanySignupInfo({
                           <button
                             key={option}
                             type="button"
+                            data-testid={`company-ceo-gender-${option === "남" ? "male" : "female"}`}
                             className={segmentedToggleClass(active)}
                             onClick={() => {
                               setForm((prev) => ({
@@ -1998,6 +2020,7 @@ function CompanySignupInfo({
                             <button
                               key={option}
                               type="button"
+                              data-testid={`company-corep-${option === "예" ? "yes" : "no"}`}
                               className={segmentedToggleClass(active)}
                               onClick={() => {
                                 setForm((prev) => ({
@@ -2701,6 +2724,7 @@ function CompanySignupInfo({
               <label className="flex items-start gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
                 <input
                   type="checkbox"
+                  data-testid="company-consent-privacy"
                   className="mt-1"
                   checked={consentPrivacy}
                   onChange={(e) => {
@@ -2770,6 +2794,7 @@ function CompanySignupInfo({
               </button>
               <button
                 type="button"
+                data-testid="company-consent-confirm"
                 className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white"
                 onClick={() => {
                   if (!consentPrivacy) {

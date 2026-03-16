@@ -13,6 +13,50 @@ const ACTIVE_APPLICATION_STATUSES = new Set(["pending", "confirmed", "completed"
 const RESERVED_APPLICATION_STATUSES = new Set(["pending", "confirmed"]);
 const SLOT_BLOCKING_APPLICATION_STATUSES = new Set(["pending", "confirmed", "completed"]);
 const AUTO_REJECT_REASON = "진행 예정 시간이 지나 자동 거절되었습니다.";
+const APPROVAL_ROLE_VALUES = new Set(["admin", "company", "consultant"]);
+const DEFAULT_COMPANY_FORM = {
+  companyType: "법인",
+  companyInfo: "",
+  representativeSolution: "",
+  sdgPriority1: "",
+  sdgPriority2: "",
+  ceoName: "",
+  ceoEmail: "",
+  ceoPhone: "",
+  ceoAge: "",
+  ceoGender: "",
+  ceoNationality: "",
+  hasCoRepresentative: "",
+  coRepresentativeName: "",
+  coRepresentativeBirthDate: "",
+  coRepresentativeGender: "",
+  coRepresentativeTitle: "",
+  founderSerialNumber: "",
+  website: "",
+  foundedAt: "",
+  businessNumber: "",
+  primaryBusiness: "",
+  primaryIndustry: "",
+  headOffice: "",
+  branchOffice: "",
+  targetCountries: "",
+  workforceFullTime: "",
+  workforceContract: "",
+  revenue2025: "",
+  revenue2026: "",
+  capitalTotal: "",
+  certification: "",
+  tipsLipsHistory: "",
+  exportVoucherHeld: "",
+  exportVoucherAmount: "",
+  exportVoucherUsageRate: "",
+  innovationVoucherHeld: "",
+  innovationVoucherAmount: "",
+  innovationVoucherUsageRate: "",
+  myscExpectation: "",
+  desiredInvestment2026: "",
+  desiredPreValue: "",
+};
 
 function normalizeString(value) {
   return typeof value === "string" ? value.trim() : "";
@@ -22,6 +66,11 @@ function normalizeApplicationStatus(value) {
   const normalized = normalizeString(value);
   if (normalized === "review") return "pending";
   return normalized || "pending";
+}
+
+function normalizeApprovalRole(value, fallback = "company") {
+  const normalized = normalizeString(value);
+  return APPROVAL_ROLE_VALUES.has(normalized) ? normalized : fallback;
 }
 
 function normalizeTimeKey(value) {
@@ -38,8 +87,251 @@ function normalizeConsultantDisplayName(value) {
   return normalizeString(value).replace(/\s*컨설턴트\s*$/u, "").toLowerCase();
 }
 
+function toNumber(value) {
+  const digits = normalizeString(value).replace(/[^\d]/g, "");
+  if (!digits) return null;
+  return Number(digits);
+}
+
+function toDecimalNumber(value) {
+  const normalized = normalizeString(value).replace(/,/g, "");
+  if (!normalized) return null;
+  const parsed = Number(normalized);
+  if (Number.isNaN(parsed)) return null;
+  return Math.round(parsed * 10) / 10;
+}
+
+function toIsoDate(value) {
+  const digits = normalizeString(value).replace(/[^\d]/g, "").slice(0, 8);
+  if (digits.length !== 8) return normalizeString(value);
+  return `${digits.slice(0, 4)}-${digits.slice(4, 6)}-${digits.slice(6, 8)}`;
+}
+
+function toTargetCountries(value) {
+  return normalizeString(value)
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .slice(0, 3);
+}
+
+function toPendingCompanyForm(value) {
+  if (!value || typeof value !== "object") {
+    return { ...DEFAULT_COMPANY_FORM };
+  }
+
+  const source = value;
+  return {
+    ...DEFAULT_COMPANY_FORM,
+    companyType: normalizeString(source.companyType) || DEFAULT_COMPANY_FORM.companyType,
+    companyInfo: normalizeString(source.companyInfo),
+    representativeSolution: normalizeString(source.representativeSolution),
+    sdgPriority1: normalizeString(source.sdgPriority1),
+    sdgPriority2: normalizeString(source.sdgPriority2),
+    ceoName: normalizeString(source.ceoName),
+    ceoEmail: normalizeString(source.ceoEmail),
+    ceoPhone: normalizeString(source.ceoPhone),
+    ceoAge: normalizeString(source.ceoAge),
+    ceoGender: normalizeString(source.ceoGender),
+    ceoNationality: normalizeString(source.ceoNationality),
+    hasCoRepresentative: normalizeString(source.hasCoRepresentative),
+    coRepresentativeName: normalizeString(source.coRepresentativeName),
+    coRepresentativeBirthDate: normalizeString(source.coRepresentativeBirthDate),
+    coRepresentativeGender: normalizeString(source.coRepresentativeGender),
+    coRepresentativeTitle: normalizeString(source.coRepresentativeTitle),
+    founderSerialNumber: normalizeString(source.founderSerialNumber),
+    website: normalizeString(source.website),
+    foundedAt: normalizeString(source.foundedAt),
+    businessNumber: normalizeString(source.businessNumber),
+    primaryBusiness: normalizeString(source.primaryBusiness),
+    primaryIndustry: normalizeString(source.primaryIndustry),
+    headOffice: normalizeString(source.headOffice),
+    branchOffice: normalizeString(source.branchOffice),
+    targetCountries: normalizeString(source.targetCountries),
+    workforceFullTime: normalizeString(source.workforceFullTime),
+    workforceContract: normalizeString(source.workforceContract),
+    revenue2025: normalizeString(source.revenue2025),
+    revenue2026: normalizeString(source.revenue2026),
+    capitalTotal: normalizeString(source.capitalTotal),
+    certification: normalizeString(source.certification),
+    tipsLipsHistory: normalizeString(source.tipsLipsHistory),
+    exportVoucherHeld: normalizeString(source.exportVoucherHeld),
+    exportVoucherAmount: normalizeString(source.exportVoucherAmount),
+    exportVoucherUsageRate: normalizeString(source.exportVoucherUsageRate),
+    innovationVoucherHeld: normalizeString(source.innovationVoucherHeld),
+    innovationVoucherAmount: normalizeString(source.innovationVoucherAmount),
+    innovationVoucherUsageRate: normalizeString(source.innovationVoucherUsageRate),
+    myscExpectation: normalizeString(source.myscExpectation),
+    desiredInvestment2026: normalizeString(source.desiredInvestment2026),
+    desiredPreValue: normalizeString(source.desiredPreValue),
+  };
+}
+
+function toPendingInvestmentRows(value) {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => ({
+    stage: normalizeString(item?.stage),
+    date: normalizeString(item?.date),
+    postMoney: normalizeString(item?.postMoney),
+    majorShareholder: normalizeString(item?.majorShareholder),
+  }));
+}
+
+function buildCompanyInfoRecord(form, investmentRows) {
+  return {
+    basic: {
+      companyType: form.companyType,
+      companyInfo: form.companyInfo,
+      representativeSolution: form.representativeSolution,
+      ceo: {
+        name: form.ceoName,
+        email: form.ceoEmail,
+        phone: form.ceoPhone,
+        age: toNumber(form.ceoAge),
+        gender: form.ceoGender,
+        nationality: form.ceoNationality,
+        coRepresentative: {
+          enabled: form.hasCoRepresentative === "예",
+          name: form.hasCoRepresentative === "예" ? form.coRepresentativeName : "",
+          birthDate: form.hasCoRepresentative === "예" ? form.coRepresentativeBirthDate : "",
+          gender: form.hasCoRepresentative === "예" ? form.coRepresentativeGender : "",
+          title: form.hasCoRepresentative === "예" ? form.coRepresentativeTitle : "",
+        },
+      },
+      founderSerialNumber: toNumber(form.founderSerialNumber),
+      website: form.website,
+      foundedAt: form.foundedAt,
+      businessNumber: form.companyType === "예비창업" ? "" : form.businessNumber,
+      primaryBusiness: form.primaryBusiness,
+      primaryIndustry: form.primaryIndustry,
+    },
+    locations: {
+      headOffice: form.headOffice,
+      branchOrLab: form.branchOffice,
+    },
+    workforce: {
+      fullTime: toNumber(form.workforceFullTime),
+      contract: toNumber(form.workforceContract),
+    },
+    finance: {
+      revenue: {
+        y2025: toDecimalNumber(form.revenue2025),
+        y2026: toDecimalNumber(form.revenue2026),
+      },
+      capitalTotal: toNumber(form.capitalTotal),
+    },
+    certifications: {
+      designation: form.certification,
+      tipsLipsHistory: form.tipsLipsHistory,
+    },
+    impact: {
+      sdgPriority1: form.sdgPriority1,
+      sdgPriority2: form.sdgPriority2,
+      myscExpectation: form.myscExpectation,
+    },
+    globalExpansion: {
+      targetCountries: toTargetCountries(form.targetCountries),
+    },
+    investments: (investmentRows ?? []).map((row) => ({
+      stage: row.stage,
+      date: toIsoDate(row.date),
+      postMoney: toDecimalNumber(row.postMoney),
+      majorShareholder: row.majorShareholder,
+    })),
+    vouchers: {
+      exportVoucherHeld: form.exportVoucherHeld,
+      exportVoucherAmount: form.exportVoucherAmount,
+      exportVoucherUsageRate: form.exportVoucherUsageRate,
+      innovationVoucherHeld: form.innovationVoucherHeld,
+      innovationVoucherAmount: form.innovationVoucherAmount,
+      innovationVoucherUsageRate: form.innovationVoucherUsageRate,
+    },
+    fundingPlan: {
+      desiredAmount2026: toDecimalNumber(form.desiredInvestment2026),
+      preValue: toDecimalNumber(form.desiredPreValue),
+    },
+    metadata: {
+      updatedAt: FieldValue.serverTimestamp(),
+      saveType: "final",
+    },
+  };
+}
+
+function buildDefaultConsultantAvailability() {
+  const scheduleDays = [2, 4];
+  const timeSlots = Array.from({ length: 9 }, (_, index) => {
+    const startHour = 9 + index;
+    const endHour = startHour + 1;
+    return {
+      start: `${String(startHour).padStart(2, "0")}:00`,
+      end: `${String(endHour).padStart(2, "0")}:00`,
+    };
+  });
+
+  return scheduleDays.map((dayOfWeek) => ({
+    dayOfWeek,
+    slots: timeSlots.map((slot) => ({
+      start: slot.start,
+      end: slot.end,
+      available: false,
+    })),
+  }));
+}
+
 function isDateKey(value) {
   return /^\d{4}-\d{2}-\d{2}$/.test(normalizeString(value));
+}
+
+function parseDateKey(value) {
+  if (!isDateKey(value)) return null;
+  const parsed = new Date(`${normalizeString(value)}T00:00:00`);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function getProgramWeekdayNumbers(weekdays) {
+  const source = Array.isArray(weekdays) && weekdays.length > 0 ? weekdays : ["TUE", "THU"];
+  const numbers = [];
+  source.forEach((weekday) => {
+    if (weekday === "TUE") numbers.push(2);
+    if (weekday === "THU") numbers.push(4);
+  });
+  return numbers;
+}
+
+function isProgramDateAvailable(programDoc, dateKey) {
+  const targetDate = parseDateKey(dateKey);
+  const startDate = parseDateKey(normalizeString(programDoc?.periodStart));
+  const endDate = parseDateKey(normalizeString(programDoc?.periodEnd));
+  if (!targetDate || !startDate || !endDate) {
+    return false;
+  }
+  if (targetDate.getTime() < startDate.getTime() || targetDate.getTime() > endDate.getTime()) {
+    return false;
+  }
+  return getProgramWeekdayNumbers(programDoc?.weekdays).includes(targetDate.getDay());
+}
+
+function buildRegularSlotId(programId, consultantId, dateKey, timeKey) {
+  return [
+    "regular",
+    normalizeString(programId),
+    normalizeString(consultantId),
+    normalizeString(dateKey),
+    normalizeTimeKey(timeKey),
+  ]
+    .join("_")
+    .replace(/:/g, "-");
+}
+
+function getDefaultEndTime(startTime) {
+  const normalized = normalizeTimeKey(startTime);
+  if (!normalized) return "";
+  const [hourRaw, minuteRaw] = normalized.split(":");
+  const hour = Number(hourRaw);
+  const minute = Number(minuteRaw);
+  if (Number.isNaN(hour) || Number.isNaN(minute)) return "";
+  const endHour = hour + 1;
+  return `${String(endHour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
 }
 
 function isSessionFormat(value) {
@@ -121,6 +413,7 @@ async function getRelatedRegularSlotSnapshots(transaction, slotSnap) {
 
   const slotDoc = slotSnap.data() || {};
   const programId = normalizeString(slotDoc.programId);
+  const consultantId = normalizeString(slotDoc.consultantId);
   const dateKey = normalizeString(slotDoc.date);
   const startTime = normalizeTimeKey(slotDoc.startTime);
 
@@ -130,6 +423,10 @@ async function getRelatedRegularSlotSnapshots(transaction, slotSnap) {
     !dateKey ||
     !startTime
   ) {
+    return [slotSnap];
+  }
+
+  if (consultantId) {
     return [slotSnap];
   }
 
@@ -202,6 +499,17 @@ function normalizeConsultantDoc(consultantSnap) {
     id: consultantSnap.id,
     ...(consultantSnap.data() || {}),
   };
+}
+
+function isSlotReservedForConsultant(slotDoc, consultant) {
+  const slotConsultantId = normalizeString(slotDoc?.consultantId);
+  if (slotConsultantId) {
+    return slotConsultantId === consultant.id;
+  }
+
+  const slotConsultantName = normalizeConsultantDisplayName(slotDoc?.consultantName);
+  const consultantName = normalizeConsultantDisplayName(consultant?.name);
+  return slotConsultantName !== "" && consultantName !== "" && slotConsultantName === consultantName;
 }
 
 function isApplicationAssignedToConsultant(application, consultant) {
@@ -449,45 +757,6 @@ exports.submitRegularApplication = onCall(
         throw new HttpsError("failed-precondition", "비활성 아젠다는 신청할 수 없습니다.");
       }
 
-      let slotSnap = null;
-      if (officeHourSlotId) {
-        const slotRef = db.collection("officeHourSlots").doc(officeHourSlotId);
-        slotSnap = await transaction.get(slotRef);
-      } else {
-        const slotQuery = db
-          .collection("officeHourSlots")
-          .where("type", "==", "regular")
-          .where("date", "==", scheduledDate)
-          .where("startTime", "==", scheduledTime)
-          .where("status", "==", "open");
-        const candidateSlots = await transaction.get(slotQuery);
-        slotSnap =
-          candidateSlots.docs.find((doc) => {
-            const data = doc.data() || {};
-            if (programId && normalizeString(data.programId) !== programId) return false;
-            return true;
-          }) ?? null;
-      }
-
-      if (!slotSnap || !slotSnap.exists) {
-        throw new HttpsError("failed-precondition", "선택한 시간이 이미 마감되었거나 존재하지 않습니다.");
-      }
-
-      const slotDoc = slotSnap.data() || {};
-      if (slotDoc.status !== "open") {
-        throw new HttpsError("failed-precondition", "선택한 시간이 이미 마감되었습니다.");
-      }
-      if (normalizeString(slotDoc.type || "regular") !== "regular") {
-        throw new HttpsError("failed-precondition", "정기 오피스아워 슬롯만 신청할 수 있습니다.");
-      }
-      if (normalizeString(slotDoc.date) !== scheduledDate || normalizeTimeKey(slotDoc.startTime) !== scheduledTime) {
-        throw new HttpsError("failed-precondition", "선택한 슬롯 정보가 일치하지 않습니다.");
-      }
-      if (programId && normalizeString(slotDoc.programId) !== programId) {
-        throw new HttpsError("failed-precondition", "선택한 사업 슬롯 정보가 일치하지 않습니다.");
-      }
-
-      const relatedSlotSnaps = await getRelatedRegularSlotSnapshots(transaction, slotSnap);
       const companyRef = db.collection("companies").doc(companyId);
       const companySnap = await transaction.get(companyRef);
       const companyDoc = companySnap.exists ? companySnap.data() || {} : {};
@@ -495,7 +764,7 @@ exports.submitRegularApplication = onCall(
       const programIdsFromCompany = Array.isArray(companyDoc.programs)
         ? companyDoc.programs.map((item) => normalizeString(item)).filter(Boolean)
         : [];
-      const effectiveProgramId = normalizeString(slotDoc.programId || programId);
+      const effectiveProgramId = normalizeString(programId);
       let candidateProgramIds = programIdsFromCompany;
 
       if (candidateProgramIds.length === 0 && effectiveProgramId) {
@@ -514,6 +783,17 @@ exports.submitRegularApplication = onCall(
 
       if (effectiveProgramId && !programDocs.some((program) => program.id === effectiveProgramId)) {
         throw new HttpsError("failed-precondition", "기업에 연결되지 않은 사업입니다.");
+      }
+      if (!effectiveProgramId) {
+        throw new HttpsError("failed-precondition", "신청할 사업 정보를 확인할 수 없습니다.");
+      }
+
+      const targetProgramDoc = programDocs.find((program) => program.id === effectiveProgramId);
+      if (!targetProgramDoc) {
+        throw new HttpsError("failed-precondition", "신청할 사업 정보를 찾을 수 없습니다.");
+      }
+      if (!isProgramDateAvailable(targetProgramDoc, scheduledDate)) {
+        throw new HttpsError("failed-precondition", "사업 운영일이 아니어서 신청할 수 없습니다.");
       }
 
       const agendaScope = getAgendaScope(agendaDoc);
@@ -600,6 +880,110 @@ exports.submitRegularApplication = onCall(
         );
       }
 
+      const explicitSlotSnap = officeHourSlotId
+        ? await transaction.get(db.collection("officeHourSlots").doc(officeHourSlotId))
+        : null;
+      const explicitSlotDoc = explicitSlotSnap?.exists ? explicitSlotSnap.data() || {} : null;
+      if (explicitSlotDoc) {
+        if (normalizeString(explicitSlotDoc.type || "regular") !== "regular") {
+          throw new HttpsError("failed-precondition", "정기 오피스아워 슬롯만 신청할 수 있습니다.");
+        }
+        if (
+          normalizeString(explicitSlotDoc.date) !== scheduledDate ||
+          normalizeTimeKey(explicitSlotDoc.startTime) !== scheduledTime
+        ) {
+          throw new HttpsError("failed-precondition", "선택한 슬롯 정보가 일치하지 않습니다.");
+        }
+        if (
+          normalizeString(explicitSlotDoc.programId || effectiveProgramId) !== effectiveProgramId
+        ) {
+          throw new HttpsError("failed-precondition", "선택한 사업 슬롯 정보가 일치하지 않습니다.");
+        }
+      }
+
+      const assignableConsultantEntries = assignableConsultants
+        .map((doc) => normalizeConsultantDoc(doc))
+        .sort((a, b) => a.id.localeCompare(b.id));
+      const explicitConsultantId = normalizeString(explicitSlotDoc?.consultantId);
+      if (explicitConsultantId) {
+        assignableConsultantEntries.sort((a, b) => {
+          const aPreferred = a.id === explicitConsultantId ? -1 : 0;
+          const bPreferred = b.id === explicitConsultantId ? -1 : 0;
+          if (aPreferred !== bPreferred) {
+            return aPreferred - bPreferred;
+          }
+          return a.id.localeCompare(b.id);
+        });
+      }
+
+      const targetDate = parseDateKey(scheduledDate);
+      let selectedConsultant = null;
+      let slotRef = null;
+      let slotSnap = null;
+      let slotDoc = null;
+
+      for (const consultant of assignableConsultantEntries) {
+        const candidateSlotRef = db
+          .collection("officeHourSlots")
+          .doc(buildRegularSlotId(effectiveProgramId, consultant.id, scheduledDate, scheduledTime));
+        const candidateSlotSnap = await transaction.get(candidateSlotRef);
+        const candidateSlotDoc = candidateSlotSnap.exists ? candidateSlotSnap.data() || {} : null;
+
+        if (candidateSlotDoc) {
+          if (normalizeString(candidateSlotDoc.type || "regular") !== "regular") {
+            continue;
+          }
+          if (
+            normalizeString(candidateSlotDoc.date) !== scheduledDate ||
+            normalizeTimeKey(candidateSlotDoc.startTime) !== scheduledTime
+          ) {
+            continue;
+          }
+          if (
+            normalizeString(candidateSlotDoc.programId || effectiveProgramId) !== effectiveProgramId
+          ) {
+            continue;
+          }
+          if (!isSlotReservedForConsultant(candidateSlotDoc, consultant)) {
+            continue;
+          }
+          if (normalizeString(candidateSlotDoc.status) === "booked") {
+            continue;
+          }
+        }
+
+        selectedConsultant = consultant;
+        slotRef = candidateSlotRef;
+        slotSnap = candidateSlotSnap.exists ? candidateSlotSnap : null;
+        slotDoc = candidateSlotDoc;
+        break;
+      }
+
+      if (!selectedConsultant || !slotRef) {
+        throw new HttpsError(
+          "failed-precondition",
+          "선택한 시간에 현재 배정 가능한 컨설턴트가 없어 신청할 수 없습니다."
+        );
+      }
+
+      const endTime =
+        (() => {
+          if (!targetDate) {
+            return normalizeTimeKey(slotDoc?.endTime) || getDefaultEndTime(scheduledTime);
+          }
+          const dayAvailability = Array.isArray(selectedConsultant.availability)
+            ? selectedConsultant.availability.find((item) => item?.dayOfWeek === targetDate.getDay())
+            : null;
+          const matchedSlot = Array.isArray(dayAvailability?.slots)
+            ? dayAvailability.slots.find(
+                (slot) => normalizeTimeKey(slot?.start) === scheduledTime && slot?.available === true
+              )
+            : null;
+          return normalizeTimeKey(matchedSlot?.end) ||
+            normalizeTimeKey(slotDoc?.endTime) ||
+            getDefaultEndTime(scheduledTime);
+        })();
+
       const applicationRef = db.collection("officeHourApplications").doc();
       const createdAt = FieldValue.serverTimestamp();
       const companyName =
@@ -611,10 +995,13 @@ exports.submitRegularApplication = onCall(
         type: "regular",
         status: "pending",
         officeHourId,
-        officeHourSlotId: slotSnap.id,
+        officeHourSlotId: slotRef.id,
         companyId,
         programId: effectiveProgramId || null,
-        officeHourTitle: officeHourTitle || normalizeString(slotDoc.title) || "오피스아워 신청",
+        officeHourTitle:
+          officeHourTitle ||
+          normalizeString(slotDoc?.title) ||
+          `${normalizeString(targetProgramDoc.name) || "사업"} 정기 오피스아워`,
         agendaId,
         companyName,
         consultant: "담당자 배정 중",
@@ -632,11 +1019,36 @@ exports.submitRegularApplication = onCall(
         updatedAt: createdAt,
       });
 
-      updateSlotSnapshots(transaction, relatedSlotSnaps, "booked");
+      transaction.set(
+        slotRef,
+        {
+          type: "regular",
+          programId: effectiveProgramId,
+          consultantId: selectedConsultant.id,
+          consultantName: normalizeString(selectedConsultant.name) || "컨설턴트",
+          agendaIds: Array.isArray(selectedConsultant.agendaIds)
+            ? selectedConsultant.agendaIds.map((item) => normalizeString(item)).filter(Boolean)
+            : [],
+          title:
+            officeHourTitle ||
+            normalizeString(slotDoc?.title) ||
+            `${normalizeString(targetProgramDoc.name) || "사업"} 정기 오피스아워`,
+          description:
+            normalizeString(slotDoc?.description) ||
+            normalizeString(targetProgramDoc.description) ||
+            `${normalizeString(targetProgramDoc.name) || "사업"} 사업`,
+          date: scheduledDate,
+          startTime: scheduledTime,
+          endTime,
+          status: "booked",
+          updatedAt: createdAt,
+        },
+        { merge: true }
+      );
 
       return {
         applicationId: applicationRef.id,
-        slotId: slotSnap.id,
+        slotId: slotRef.id,
       };
     });
 
@@ -748,6 +1160,196 @@ exports.cancelApplication = onCall(
         applicationId,
         outcome: "deleted",
         slotIdsUpdated: Array.from(relatedSlotIds),
+      };
+    });
+  }
+);
+
+exports.approvePendingUser = onCall(
+  {
+    region: REGION,
+    timeoutSeconds: 30,
+    memory: "256MiB",
+  },
+  async (request) => {
+    if (!request.auth?.uid) {
+      throw new HttpsError("unauthenticated", "로그인이 필요합니다.");
+    }
+
+    const adminUid = request.auth.uid;
+    const targetUserId = normalizeString(request.data?.userId);
+
+    if (!targetUserId) {
+      throw new HttpsError("invalid-argument", "승인할 사용자 식별자가 필요합니다.");
+    }
+
+    return db.runTransaction(async (transaction) => {
+      const adminProfileRef = db.collection("profiles").doc(adminUid);
+      const profileRef = db.collection("profiles").doc(targetUserId);
+      const signupRequestRef = db.collection("signupRequests").doc(targetUserId);
+
+      const [adminProfileSnap, profileSnap, signupRequestSnap] = await Promise.all([
+        transaction.get(adminProfileRef),
+        transaction.get(profileRef),
+        transaction.get(signupRequestRef),
+      ]);
+
+      if (!adminProfileSnap.exists) {
+        throw new HttpsError("failed-precondition", "관리자 프로필을 찾을 수 없습니다.");
+      }
+
+      const adminProfile = adminProfileSnap.data() || {};
+      if (normalizeString(adminProfile.role) !== "admin" || adminProfile.active !== true) {
+        throw new HttpsError("permission-denied", "계정 승인 권한이 없습니다.");
+      }
+
+      if (!profileSnap.exists && !signupRequestSnap.exists) {
+        throw new HttpsError("not-found", "승인 대상 정보를 찾을 수 없습니다.");
+      }
+
+      const profile = profileSnap.exists ? profileSnap.data() || {} : {};
+      const signupRequest = signupRequestSnap.exists ? signupRequestSnap.data() || {} : {};
+      const approvedRole = normalizeApprovalRole(
+        signupRequest.requestedRole || profile.requestedRole || signupRequest.role || profile.role,
+        "company"
+      );
+      const fallbackEmail =
+        normalizeString(signupRequest.email) || normalizeString(profile.email) || null;
+
+      let approvedCompanyId = null;
+
+      if (approvedRole === "consultant") {
+        const consultantRef = db.collection("consultants").doc(targetUserId);
+        const consultantSnap = await transaction.get(consultantRef);
+        const existingConsultant = consultantSnap.exists ? consultantSnap.data() || {} : {};
+        const source =
+          (signupRequest.consultantInfo && typeof signupRequest.consultantInfo === "object"
+            ? signupRequest.consultantInfo
+            : null) ||
+          (profile.pendingConsultantInfo && typeof profile.pendingConsultantInfo === "object"
+            ? profile.pendingConsultantInfo
+            : null) ||
+          {};
+
+        const phone = normalizeString(source.phone);
+        const organization = normalizeString(source.organization);
+        const secondaryEmail = normalizeString(source.secondaryEmail);
+        const secondaryPhone = normalizeString(source.secondaryPhone);
+        const fixedMeetingLink = normalizeString(source.fixedMeetingLink);
+        const consultantName =
+          normalizeString(source.name) ||
+          (fallbackEmail ? fallbackEmail.split("@")[0] : "") ||
+          "컨설턴트";
+        const consultantEmail =
+          fallbackEmail ||
+          normalizeString(source.email) ||
+          `${targetUserId}@pending.local`;
+        const consultantExpertise = normalizeString(source.expertise)
+          .split(",")
+          .map((item) => item.trim())
+          .filter(Boolean);
+
+        transaction.set(
+          consultantRef,
+          {
+            name: consultantName,
+            title: "컨설턴트",
+            email: consultantEmail,
+            expertise: consultantExpertise,
+            bio: normalizeString(source.bio) || `${consultantName} 컨설턴트`,
+            status: "active",
+            joinedDate: existingConsultant.joinedDate || FieldValue.serverTimestamp(),
+            availability: Array.isArray(existingConsultant.availability)
+              ? existingConsultant.availability
+              : buildDefaultConsultantAvailability(),
+            ...(phone ? { phone } : {}),
+            ...(organization ? { organization } : {}),
+            ...(secondaryEmail ? { secondaryEmail } : {}),
+            ...(secondaryPhone ? { secondaryPhone } : {}),
+            ...(fixedMeetingLink ? { fixedMeetingLink } : {}),
+            updatedAt: FieldValue.serverTimestamp(),
+          },
+          { merge: true }
+        );
+      }
+
+      if (approvedRole === "company") {
+        approvedCompanyId =
+          normalizeString(signupRequest.companyId) ||
+          normalizeString(profile.companyId) ||
+          targetUserId;
+
+        const pendingCompanyForm = toPendingCompanyForm(
+          signupRequest.companyInfo && typeof signupRequest.companyInfo === "object"
+            ? signupRequest.companyInfo
+            : profile.pendingCompanyInfo
+        );
+        const pendingInvestmentRows = toPendingInvestmentRows(
+          Array.isArray(signupRequest.investmentRows)
+            ? signupRequest.investmentRows
+            : profile.pendingInvestmentRows
+        );
+        const companyInfoRecord = buildCompanyInfoRecord(pendingCompanyForm, pendingInvestmentRows);
+        const companyName = normalizeString(pendingCompanyForm.companyInfo) || null;
+        const approvedProgramIds = Array.isArray(signupRequest.programIds)
+          ? signupRequest.programIds.map((value) => normalizeString(value)).filter(Boolean)
+          : [];
+        const companyRef = db.collection("companies").doc(approvedCompanyId);
+        const companyInfoRef = db
+          .collection("companies")
+          .doc(approvedCompanyId)
+          .collection("companyInfo")
+          .doc("info");
+
+        transaction.set(
+          companyRef,
+          {
+            ownerUid: targetUserId,
+            name: companyName,
+            programs: approvedProgramIds,
+            createdAt: profile.createdAt || signupRequest.createdAt || FieldValue.serverTimestamp(),
+            updatedAt: FieldValue.serverTimestamp(),
+          },
+          { merge: true }
+        );
+        transaction.set(
+          companyInfoRef,
+          {
+            ...companyInfoRecord,
+            metadata: {
+              ...companyInfoRecord.metadata,
+              createdAt: FieldValue.serverTimestamp(),
+            },
+          },
+          { merge: true }
+        );
+      }
+
+      transaction.set(
+        profileRef,
+        {
+          role: approvedRole,
+          requestedRole: approvedRole,
+          active: true,
+          email: fallbackEmail,
+          companyId: approvedRole === "company" ? approvedCompanyId : null,
+          ...(signupRequest.consents ? { consents: signupRequest.consents } : {}),
+          activatedAt: FieldValue.serverTimestamp(),
+          approvedAt: FieldValue.serverTimestamp(),
+          approvedByUid: adminUid,
+          createdAt: profile.createdAt || signupRequest.createdAt || FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
+
+      if (signupRequestSnap.exists) {
+        transaction.delete(signupRequestRef);
+      }
+
+      return {
+        userId: targetUserId,
+        role: approvedRole,
+        companyId: approvedRole === "company" ? approvedCompanyId : null,
       };
     });
   }
@@ -867,6 +1469,9 @@ exports.transitionApplicationStatus = onCall(
         const consultant = normalizeConsultantDoc(consultantSnap);
         if (normalizeString(consultant.status || "active") !== "active") {
           throw new HttpsError("failed-precondition", "비활성 컨설턴트는 처리할 수 없습니다.");
+        }
+        if (assignedSlotDoc && !isSlotReservedForConsultant(assignedSlotDoc, consultant)) {
+          throw new HttpsError("permission-denied", "배정된 컨설턴트만 이 신청을 처리할 수 있습니다.");
         }
 
         const isUnassigned =

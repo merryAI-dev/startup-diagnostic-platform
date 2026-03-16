@@ -5,16 +5,23 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:live": "vite --mode production",
     "build": "tsc -p tsconfig.json && vite build",
     "preview": "vite preview",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
+    "test:e2e": "playwright test",
+    "test:e2e:headed": "playwright test --headed",
+    "deploy:functions": "firebase deploy --only functions",
+    "deploy:functions:core": "firebase deploy --only functions:submitRegularApplication,functions:cancelApplication,functions:approvePendingUser,functions:transitionApplicationStatus,functions:runApplicationMaintenance,functions:scheduledApplicationMaintenance",
+    "deploy:rules": "firebase deploy --only firestore:rules,storage",
     "migrate:officehour:created-by-uid": "node scripts/backfill-office-hour-created-by-uid.mjs",
     "report:created-by-uid": "node scripts/report-created-by-uid.mjs",
     "report:consultant-auth-integrity": "node scripts/report-consultant-auth-integrity.mjs",
     "report:consultant-reference-usage": "node scripts/report-consultant-reference-usage.mjs",
     "report:company-profile-integrity": "node scripts/report-company-profile-integrity.mjs",
-    "cleanup:orphaned-auth-data": "node scripts/cleanup-orphaned-auth-data.mjs"
+    "cleanup:orphaned-auth-data": "node scripts/cleanup-orphaned-auth-data.mjs",
+    "cleanup:test-accounts": "node scripts/cleanup-test-accounts.mjs"
   },
   "dependencies": {
     "@emotion/react": "11.14.0",
@@ -81,6 +88,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.2",
+    "@playwright/test": "^1.58.2",
     "@tailwindcss/vite": "^4.1.18",
     "@types/react": "18.2.66",
     "@types/react-dom": "18.2.22",

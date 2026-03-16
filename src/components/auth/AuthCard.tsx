@@ -120,6 +120,7 @@ export function AuthCard({
             <label className="block text-sm text-slate-600">
               이메일
               <input
+                data-testid="auth-email"
                 className={`mt-1 w-full rounded-xl border px-4 py-2 text-sm focus:outline-none ${showEmailError
                     ? "border-rose-300 focus:border-rose-400"
                     : "border-slate-200 focus:border-slate-400"
@@ -143,6 +144,7 @@ export function AuthCard({
               비밀번호
               <div className="relative mt-1">
                 <input
+                  data-testid="auth-password"
                   type={showPassword ? "text" : "password"}
                   className={`w-full rounded-xl border px-4 py-2 pr-10 text-sm focus:outline-none ${showPasswordError
                       ? "border-rose-300 focus:border-rose-400"
@@ -226,6 +228,7 @@ export function AuthCard({
 
           {showEmailForm ? (
             <button
+              data-testid="auth-submit"
               className="w-full rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
               onClick={handleSubmit}
               disabled={isBusy}
@@ -256,6 +259,7 @@ export function AuthCard({
         <div className="mt-6 text-center text-sm text-slate-500">
           {swapLabel}이 필요하신가요?{" "}
           <button
+            data-testid="auth-swap"
             className="font-semibold text-slate-900 hover:text-slate-700"
             onClick={onSwap}
           >
