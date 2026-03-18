@@ -63,6 +63,7 @@
     "embla-carousel-react": "8.6.0",
     "exceljs": "^4.4.0",
     "firebase": "^12.8.0",
+    "firebase-admin": "^13.7.0",
     "gapi-script": "1.2.0",
     "input-otp": "1.4.2",
     "lucide-react": "0.487.0",

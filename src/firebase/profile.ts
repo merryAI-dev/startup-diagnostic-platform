@@ -214,32 +214,4 @@ export async function createSignupRequest(
   }
 
   await setDoc(doc(db, "signupRequests", uid), signupRequestData, { merge: true })
-
-  if (options?.consents) {
-    const consentEntries = ([
-      ["privacy", options.consents.privacy],
-      ["marketing", options.consents.marketing],
-    ] as const).filter(([, value]) => Boolean(value))
-
-    if (consentEntries.length > 0) {
-      await Promise.all(
-        consentEntries.map(([type, value]) =>
-          setDoc(
-            doc(db, "consents", `${uid}_${type}`),
-            {
-              userId: uid,
-              type,
-              consented: value?.consented ?? false,
-              version: value?.version ?? "v1.0",
-              method: value?.method ?? "unknown",
-              userAgent: value?.userAgent ?? null,
-              createdAt: serverTimestamp(),
-              updatedAt: serverTimestamp(),
-            },
-            { merge: true }
-          )
-        )
-      )
-    }
-  }
 }

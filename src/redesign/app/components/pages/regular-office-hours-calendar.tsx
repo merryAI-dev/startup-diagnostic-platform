@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight, Calendar, List } from "lucide-react";
 import { RegularOfficeHour } from "@/redesign/app/lib/types";
 import { Button } from "@/redesign/app/components/ui/button";
@@ -18,7 +18,7 @@ export function RegularOfficeHoursCalendar({
   onSelectOfficeHour,
 }: RegularOfficeHoursCalendarProps) {
   const [currentMonth, setCurrentMonth] = useState(new Date());
-  const [selectedDate, setSelectedDate] = useState<Date | null>(new Date());
+  const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>("calendar");
 
   // 캘린더 날짜 생성
@@ -49,12 +49,39 @@ export function RegularOfficeHoursCalendar({
     .filter((officeHour) => officeHour.availableDates.length > 0);
 
   // 날짜별로 오피스아워를 펼쳐서 배열로 만들기
-  const expandedSessions = filteredOfficeHours.flatMap(oh => 
+  const expandedSessions = filteredOfficeHours.flatMap(oh =>
     oh.availableDates.map(date => ({
       ...oh,
       date: date,
     }))
   );
+  const availableDateKeys = useMemo(
+    () => new Set(expandedSessions.map((session) => format(parseISO(session.date), "yyyy-MM-dd"))),
+    [expandedSessions]
+  );
+  const firstExpandedSession = expandedSessions[0];
+  const firstAvailableDate = firstExpandedSession ? parseISO(firstExpandedSession.date) : null;
+
+  useEffect(() => {
+    if (!selectedDate) {
+      setSelectedDate(firstAvailableDate);
+      return;
+    }
+    const selectedKey = format(selectedDate, "yyyy-MM-dd");
+    if (!availableDateKeys.has(selectedKey)) {
+      setSelectedDate(firstAvailableDate);
+    }
+  }, [availableDateKeys, firstAvailableDate, selectedDate]);
+
+  useEffect(() => {
+    if (!firstAvailableDate) return;
+    const currentMonthHasSession = expandedSessions.some((session) =>
+      isSameMonth(parseISO(session.date), currentMonth)
+    );
+    if (!currentMonthHasSession) {
+      setCurrentMonth(firstAvailableDate);
+    }
+  }, [currentMonth, expandedSessions, firstAvailableDate]);
 
   // 특정 날짜의 오피스아워
   const getOfficeHoursForDate = (date: Date) => {
@@ -172,6 +199,7 @@ export function RegularOfficeHoursCalendar({
                   {/* Calendar days */}
                   {calendarDays.map((day, idx) => {
                     const sessions = getOfficeHoursForDate(day);
+                    const hasSessions = sessions.length > 0;
                     const isCurrentMonth = isSameMonth(day, currentMonth);
                     const isSelected = selectedDate && isSameDay(day, selectedDate);
                     const isTodayDate = isToday(day);
@@ -179,13 +207,16 @@ export function RegularOfficeHoursCalendar({
                     return (
                       <div
                         key={idx}
-                        onClick={() => setSelectedDate(day)}
+                        onClick={() => {
+                          if (!hasSessions) return;
+                          setSelectedDate(day);
+                        }}
                         className={`
-                          bg-white h-[104px] p-1.5 cursor-pointer transition-all
+                          bg-white h-[104px] p-1.5 transition-all
                           ${!isCurrentMonth ? "bg-gray-50 text-gray-400" : "text-gray-900"}
+                          ${hasSessions ? "cursor-pointer hover:bg-gray-50" : "cursor-default bg-slate-50/50"}
                           ${isSelected ? "ring-2 ring-primary ring-inset" : ""}
-                          ${isTodayDate && !isSelected ? "bg-blue-50" : ""}
-                          hover:bg-gray-50
+                          ${isTodayDate && !isSelected && hasSessions ? "bg-blue-50" : ""}
                         `}
                       >
                         <div className="flex items-center justify-between mb-2">
@@ -194,7 +225,9 @@ export function RegularOfficeHoursCalendar({
                               isTodayDate
                                 ? "bg-primary text-white rounded-full w-5 h-5 flex items-center justify-center text-[10px]"
                                 : isCurrentMonth
-                                  ? "inline-flex min-w-6 items-center justify-center px-1 text-[10px] font-semibold text-slate-700"
+                                  ? `inline-flex min-w-6 items-center justify-center px-1 text-[10px] font-semibold ${
+                                      hasSessions ? "text-slate-700" : "text-slate-400"
+                                    }`
                                   : "inline-flex min-w-6 items-center justify-center px-1 text-[10px] font-semibold text-slate-400"
                             }`}
                           >

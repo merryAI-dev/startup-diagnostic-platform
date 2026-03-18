@@ -64,6 +64,7 @@ export function AdminApplicationDetailModal({
   const [actionDialogOpen, setActionDialogOpen] = useState(false);
   const [actionType, setActionType] = useState<"confirm" | "reject">("confirm");
   const [rejectReason, setRejectReason] = useState("");
+  const [isActionPending, setIsActionPending] = useState(false);
   const [activeCompanyTab, setActiveCompanyTab] = useState<"info" | "assessment" | "report">(
     "info"
   );
@@ -106,6 +107,8 @@ export function AdminApplicationDetailModal({
     application.scheduledTime,
   ]);
   const isSessionEnded = Boolean(sessionEndTime && new Date() >= sessionEndTime);
+  const isPendingLike =
+    application.status === "pending" || application.status === "review";
   const attachmentItems = useMemo(() => {
     const names = application.attachments ?? [];
     const urls = application.attachmentUrls ?? [];
@@ -155,6 +158,8 @@ export function AdminApplicationDetailModal({
   };
 
   const handleConfirmAction = async () => {
+    if (isActionPending) return;
+    setIsActionPending(true);
     try {
       if (actionType === "reject") {
         const trimmed = rejectReason.trim();
@@ -176,7 +181,7 @@ export function AdminApplicationDetailModal({
         }
         const isUnassigned = !application.consultantId
           && (!application.consultant || application.consultant === "담당자 배정 중");
-        if (application.status === "pending"
+        if (isPendingLike
           && isUnassigned
           && onRequestApplication) {
           await onRequestApplication(application.id);
@@ -193,6 +198,8 @@ export function AdminApplicationDetailModal({
       setRejectReason("");
     } catch (error) {
       console.error("Failed to update application status:", error);
+    } finally {
+      setIsActionPending(false);
     }
   };
 
@@ -436,7 +443,7 @@ export function AdminApplicationDetailModal({
                 <div className="space-y-3">
                   <Label>상태 관리</Label>
                   <div className="flex gap-2 flex-wrap">
-                    {application.status === "pending" && !isSessionEnded && (
+                    {isPendingLike && !isSessionEnded && (
                       <Button
                         data-testid="application-accept"
                         size="sm"
@@ -448,7 +455,7 @@ export function AdminApplicationDetailModal({
                         수락
                       </Button>
                     )}
-                    {application.status === "pending" && (
+                    {isPendingLike && (
                       <Button
                         data-testid="application-reject"
                         size="sm"
@@ -1327,9 +1334,9 @@ export function AdminApplicationDetailModal({
             <Button
               data-testid="application-action-confirm"
               onClick={handleConfirmAction}
-              disabled={actionType === "reject" && rejectReason.trim().length === 0}
+              disabled={isActionPending || (actionType === "reject" && rejectReason.trim().length === 0)}
             >
-              확인
+              {isActionPending ? "처리 중..." : "확인"}
             </Button>
           </div>
         </DialogContent>

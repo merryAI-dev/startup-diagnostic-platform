@@ -13,6 +13,7 @@ const ACTIVE_APPLICATION_STATUSES = new Set(["pending", "confirmed", "completed"
 const RESERVED_APPLICATION_STATUSES = new Set(["pending", "confirmed"]);
 const SLOT_BLOCKING_APPLICATION_STATUSES = new Set(["pending", "confirmed", "completed"]);
 const AUTO_REJECT_REASON = "진행 예정 시간이 지나 자동 거절되었습니다.";
+const AUTO_UNASSIGNABLE_REASON = "해당 시간대에 배정 가능한 컨설턴트가 없어 자동 거절되었습니다.";
 const APPROVAL_ROLE_VALUES = new Set(["admin", "company", "consultant"]);
 const DEFAULT_COMPANY_FORM = {
   companyType: "법인",
@@ -81,6 +82,34 @@ function normalizeTimeKey(value) {
   const minute = Number(minuteRaw);
   if (Number.isNaN(hour) || Number.isNaN(minute)) return trimmed;
   return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+}
+
+function getCurrentSeoulDateTimeKeys(now = new Date()) {
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Seoul",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  });
+  const parts = formatter.formatToParts(now);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return {
+    dateKey: `${values.year}-${values.month}-${values.day}`,
+    timeKey: `${values.hour}:${values.minute}`,
+  };
+}
+
+function isPastScheduledStart(dateKey, timeKey, now = new Date()) {
+  const normalizedDate = normalizeString(dateKey);
+  const normalizedTime = normalizeTimeKey(timeKey);
+  if (!normalizedDate || !normalizedTime) return true;
+  const { dateKey: currentDateKey, timeKey: currentTimeKey } = getCurrentSeoulDateTimeKeys(now);
+  if (normalizedDate < currentDateKey) return true;
+  if (normalizedDate > currentDateKey) return false;
+  return normalizedTime < currentTimeKey;
 }
 
 function normalizeConsultantDisplayName(value) {
@@ -584,6 +613,156 @@ async function hasConsultantScheduleConflict(transaction, consultant, applicatio
   });
 }
 
+async function getAssignableConsultantsForApplication(
+  transaction,
+  application,
+  excludedApplicationId,
+  reservedConsultant = null
+) {
+  const scheduledDate = normalizeString(application?.scheduledDate);
+  const scheduledTime = normalizeTimeKey(application?.scheduledTime);
+  const agendaId = normalizeString(application?.agendaId);
+  if (!scheduledDate || !scheduledTime || !agendaId) {
+    return [];
+  }
+
+  const linkedConsultantsQuery = db
+    .collection("consultants")
+    .where("status", "==", "active")
+    .where("agendaIds", "array-contains", agendaId);
+  const [linkedConsultantsSnap, sameTimeApplicationsSnap, relatedSlotSnaps] = await Promise.all([
+    transaction.get(linkedConsultantsQuery),
+    transaction.get(
+      db
+        .collection("officeHourApplications")
+        .where("scheduledDate", "==", scheduledDate)
+        .where("scheduledTime", "==", scheduledTime)
+    ),
+    getRelatedSlotSnapshotsForApplication(transaction, application),
+  ]);
+
+  if (linkedConsultantsSnap.empty) {
+    return [];
+  }
+
+  const assignedSlotSnap =
+    relatedSlotSnaps.find((slotSnap) => slotSnap.id === normalizeString(application.officeHourSlotId)) ||
+    relatedSlotSnaps[0] ||
+    null;
+  const assignedSlotDoc = assignedSlotSnap?.data?.() || null;
+  const hasAssignedConsultant =
+    Boolean(normalizeString(application?.consultantId)) ||
+    Boolean(normalizeConsultantDisplayName(application?.consultant));
+
+  return linkedConsultantsSnap.docs
+    .map((doc) => normalizeConsultantDoc(doc))
+    .filter((consultant) => {
+      if (!isConsultantAvailableAt(consultant, scheduledDate, scheduledTime)) {
+        return false;
+      }
+      if (assignedSlotDoc && !isSlotReservedForConsultant(assignedSlotDoc, consultant)) {
+        return false;
+      }
+      if (hasAssignedConsultant && !isApplicationAssignedToConsultant(application, consultant)) {
+        return false;
+      }
+
+      const consultantNameKey = normalizeConsultantDisplayName(consultant?.name);
+      if (reservedConsultant?.id && reservedConsultant.id === consultant.id) {
+        return false;
+      }
+      if (
+        !reservedConsultant?.id &&
+        normalizeConsultantDisplayName(reservedConsultant?.name) !== "" &&
+        normalizeConsultantDisplayName(reservedConsultant?.name) === consultantNameKey
+      ) {
+        return false;
+      }
+
+      return !sameTimeApplicationsSnap.docs.some((doc) => {
+        if (doc.id === excludedApplicationId) return false;
+
+        const candidate = doc.data() || {};
+        const status = normalizeApplicationStatus(candidate.status);
+        if (status !== "confirmed" && status !== "completed") {
+          return false;
+        }
+
+        const consultantId = normalizeString(candidate.consultantId);
+        if (consultantId) {
+          return consultantId === consultant.id;
+        }
+
+        return (
+          consultantNameKey !== "" &&
+          normalizeConsultantDisplayName(candidate.consultant) === consultantNameKey
+        );
+      });
+    });
+}
+
+async function rejectUnassignableSameTimePendingApplications(
+  transaction,
+  application,
+  excludedApplicationId,
+  reservedConsultant = null
+) {
+  const scheduledDate = normalizeString(application?.scheduledDate);
+  const scheduledTime = normalizeTimeKey(application?.scheduledTime);
+  if (!scheduledDate || !scheduledTime) {
+    return [];
+  }
+
+  const sameTimeApplicationsSnap = await transaction.get(
+    db
+      .collection("officeHourApplications")
+      .where("scheduledDate", "==", scheduledDate)
+      .where("scheduledTime", "==", scheduledTime)
+  );
+
+  const rejectedIds = [];
+
+  for (const doc of sameTimeApplicationsSnap.docs) {
+    if (doc.id === excludedApplicationId) continue;
+
+    const candidate = doc.data() || {};
+    if (normalizeApplicationStatus(candidate.status) !== "pending") {
+      continue;
+    }
+
+    const assignableConsultants = await getAssignableConsultantsForApplication(
+      transaction,
+      candidate,
+      doc.id,
+      reservedConsultant
+    );
+    if (assignableConsultants.length > 0) {
+      continue;
+    }
+
+    const relatedSlotSnaps = await getRelatedSlotSnapshotsForApplication(transaction, candidate);
+    const relatedSlotIds = collectSlotIds(relatedSlotSnaps);
+    const hasBlockingApplication = await hasBlockingApplicationForSlotGroup(
+      transaction,
+      candidate,
+      doc.id,
+      relatedSlotIds
+    );
+
+    transaction.update(doc.ref, {
+      status: "rejected",
+      rejectionReason: AUTO_UNASSIGNABLE_REASON,
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+    if (!hasBlockingApplication) {
+      updateSlotSnapshots(transaction, relatedSlotSnaps, "open");
+    }
+    rejectedIds.push(doc.id);
+  }
+
+  return rejectedIds;
+}
+
 async function runApplicationMaintenanceCore() {
   const candidateSnap = await db
     .collection("officeHourApplications")
@@ -724,6 +903,9 @@ exports.submitRegularApplication = onCall(
     if (!requestContent) {
       throw new HttpsError("invalid-argument", "요청 내용을 입력해주세요.");
     }
+    if (isPastScheduledStart(scheduledDate, scheduledTime)) {
+      throw new HttpsError("failed-precondition", "이미 지난 시간은 신청할 수 없습니다.");
+    }
 
     const result = await db.runTransaction(async (transaction) => {
       const profileRef = db.collection("profiles").doc(uid);
@@ -812,6 +994,7 @@ exports.submitRegularApplication = onCall(
 
       companyApplicationsSnap.docs.forEach((doc) => {
         const data = doc.data() || {};
+        const normalizedStatus = normalizeApplicationStatus(data.status);
         let scope = null;
         if (data.type === "irregular" && typeof data.isInternal === "boolean") {
           scope = data.isInternal ? "internal" : "external";
@@ -821,9 +1004,9 @@ exports.submitRegularApplication = onCall(
           scope = null;
         }
         if (scope !== agendaScope) return;
-        if (data.status === "completed") {
+        if (normalizedStatus === "completed") {
           completedCount += 1;
-        } else if (RESERVED_APPLICATION_STATUSES.has(normalizeString(data.status || "pending"))) {
+        } else if (RESERVED_APPLICATION_STATUSES.has(normalizedStatus)) {
           reservedCount += 1;
         }
       });
@@ -852,6 +1035,20 @@ exports.submitRegularApplication = onCall(
         .where("scheduledDate", "==", scheduledDate)
         .where("scheduledTime", "==", scheduledTime);
       const sameTimeApplicationsSnap = await transaction.get(sameTimeApplicationsQuery);
+      const sameTimeSlotIds = Array.from(
+        new Set(
+          sameTimeApplicationsSnap.docs
+            .map((doc) => normalizeString(doc.data()?.officeHourSlotId))
+            .filter(Boolean)
+        )
+      );
+      const sameTimeSlotSnapEntries = await Promise.all(
+        sameTimeSlotIds.map(async (slotId) => {
+          const slotSnap = await transaction.get(db.collection("officeHourSlots").doc(slotId));
+          return [slotId, slotSnap.exists ? slotSnap.data() || {} : null];
+        })
+      );
+      const sameTimeSlotById = new Map(sameTimeSlotSnapEntries);
 
       const assignableConsultants = linkedConsultantsSnap.docs.filter((doc) => {
         const consultant = { id: doc.id, ...doc.data() };
@@ -862,10 +1059,16 @@ exports.submitRegularApplication = onCall(
         const consultantNameKey = normalizeConsultantDisplayName(consultant.name);
         return !sameTimeApplicationsSnap.docs.some((applicationDoc) => {
           const application = applicationDoc.data() || {};
-          if (!ACTIVE_APPLICATION_STATUSES.has(normalizeString(application.status || "pending"))) {
+          if (!ACTIVE_APPLICATION_STATUSES.has(normalizeApplicationStatus(application.status))) {
             return false;
           }
+          const reservedSlotId = normalizeString(application.officeHourSlotId);
+          const reservedSlotDoc = reservedSlotId ? sameTimeSlotById.get(reservedSlotId) : null;
+          const reservedSlotConsultantId = normalizeString(reservedSlotDoc?.consultantId);
           if (normalizeString(application.consultantId) === consultant.id) {
+            return true;
+          }
+          if (reservedSlotConsultantId === consultant.id) {
             return true;
           }
           return consultantNameKey !== "" &&
@@ -930,6 +1133,7 @@ exports.submitRegularApplication = onCall(
         const candidateSlotDoc = candidateSlotSnap.exists ? candidateSlotSnap.data() || {} : null;
 
         if (candidateSlotDoc) {
+          const candidateSlotStatus = normalizeString(candidateSlotDoc.status || "open");
           if (normalizeString(candidateSlotDoc.type || "regular") !== "regular") {
             continue;
           }
@@ -947,7 +1151,7 @@ exports.submitRegularApplication = onCall(
           if (!isSlotReservedForConsultant(candidateSlotDoc, consultant)) {
             continue;
           }
-          if (normalizeString(candidateSlotDoc.status) === "booked") {
+          if (candidateSlotStatus !== "open") {
             continue;
           }
         }
@@ -1452,7 +1656,39 @@ exports.transitionApplicationStatus = onCall(
         }
       }
 
-      if (action === "claim" || action === "confirm" || action === "reject") {
+      if (action === "reopen" && actorRole === "admin") {
+        if (!["confirmed", "rejected"].includes(currentStatus)) {
+          throw new HttpsError("failed-precondition", "수락 대기로 되돌릴 수 있는 상태가 아닙니다.");
+        }
+
+        const hasBlockingApplication = await hasBlockingApplicationForSlotGroup(
+          transaction,
+          application,
+          applicationId,
+          relatedSlotIds
+        );
+
+        transaction.update(applicationRef, {
+          status: "pending",
+          consultant: "담당자 배정 중",
+          consultantId: "",
+          rejectionReason: FieldValue.delete(),
+          updatedAt: FieldValue.serverTimestamp(),
+        });
+        if (!hasBlockingApplication) {
+          updateSlotSnapshots(transaction, relatedSlotSnaps, "open");
+        }
+
+        return {
+          applicationId,
+          status: "pending",
+          consultant: "담당자 배정 중",
+          consultantId: "",
+          slotIdsUpdated: Array.from(relatedSlotIds),
+        };
+      }
+
+      if (action === "claim" || action === "confirm" || action === "reject" || action === "reopen") {
         if (actorRole !== "consultant") {
           throw new HttpsError("permission-denied", "컨설턴트만 처리할 수 있습니다.");
         }
@@ -1502,6 +1738,13 @@ exports.transitionApplicationStatus = onCall(
             throw new HttpsError("failed-precondition", "컨설턴트 설정상 가능한 시간이 아닙니다.");
           }
 
+          const autoRejectedIds = await rejectUnassignableSameTimePendingApplications(
+            transaction,
+            application,
+            applicationId,
+            consultant
+          );
+
           transaction.update(applicationRef, {
             status: "confirmed",
             consultant: normalizeString(consultant.name) || "컨설턴트",
@@ -1517,6 +1760,7 @@ exports.transitionApplicationStatus = onCall(
             consultant: normalizeString(consultant.name) || "컨설턴트",
             consultantId: consultant.id,
             slotIdsUpdated: Array.from(relatedSlotIds),
+            autoRejectedIds,
           };
         }
 
@@ -1539,6 +1783,13 @@ exports.transitionApplicationStatus = onCall(
             throw new HttpsError("failed-precondition", "컨설턴트 설정상 가능한 시간이 아닙니다.");
           }
 
+          const autoRejectedIds = await rejectUnassignableSameTimePendingApplications(
+            transaction,
+            application,
+            applicationId,
+            consultant
+          );
+
           transaction.update(applicationRef, {
             status: "confirmed",
             consultant: normalizeString(consultant.name) || "컨설턴트",
@@ -1553,6 +1804,39 @@ exports.transitionApplicationStatus = onCall(
             status: "confirmed",
             consultant: normalizeString(consultant.name) || "컨설턴트",
             consultantId: consultant.id,
+            slotIdsUpdated: Array.from(relatedSlotIds),
+            autoRejectedIds,
+          };
+        }
+
+        if (action === "reopen") {
+          if (!["confirmed", "rejected"].includes(currentStatus) || !isAssignedToCurrent) {
+            throw new HttpsError("failed-precondition", "수락 대기로 되돌릴 수 있는 상태가 아닙니다.");
+          }
+
+          const hasBlockingApplication = await hasBlockingApplicationForSlotGroup(
+            transaction,
+            application,
+            applicationId,
+            relatedSlotIds
+          );
+
+          transaction.update(applicationRef, {
+            status: "pending",
+            consultant: "담당자 배정 중",
+            consultantId: "",
+            rejectionReason: FieldValue.delete(),
+            updatedAt: FieldValue.serverTimestamp(),
+          });
+          if (!hasBlockingApplication) {
+            updateSlotSnapshots(transaction, relatedSlotSnaps, "open");
+          }
+
+          return {
+            applicationId,
+            status: "pending",
+            consultant: "담당자 배정 중",
+            consultantId: "",
             slotIdsUpdated: Array.from(relatedSlotIds),
           };
         }

@@ -18,8 +18,8 @@ import { createSignupRequest, getSignupRequest, getUserProfile } from "@/firebas
 import type { CompanyInfoForm, InvestmentInput } from "@/types/company"
 import { DEFAULT_FORM } from "@/types/company"
 import { InputSuffix } from "@/components/ui/InputSuffix"
+import { PENDING_REQUEST_FLAG, PENDING_SIGNUP_KEY } from "@/constants/signup"
 
-const PENDING_SIGNUP_KEY = "pending-signup"
 type ProgramOption = {
   id: string
   name: string
@@ -83,6 +83,7 @@ export function SignupInfoPage() {
       return null
     }
   }, [])
+
   const requestedRole = useMemo(
     () => profile?.requestedRole ?? getRoleFromQuery(location.search) ?? pendingSignup?.role ?? null,
     [location.search, pendingSignup?.role, profile?.requestedRole]
@@ -122,6 +123,7 @@ export function SignupInfoPage() {
   }
 
   const handleComplete = async () => {
+    sessionStorage.setItem(PENDING_REQUEST_FLAG, "1")
     await signOutUser()
     navigate(`/pending?role=${requestedRole}`)
   }
@@ -134,6 +136,12 @@ export function SignupInfoPage() {
       getUserProfile(authUser.uid),
       getSignupRequest(authUser.uid),
     ])
+    console.log("guardExistingProfile", {
+      uid: authUser.uid,
+      nextRequestedRole,
+      existingProfile,
+      existingSignupRequest,
+    })
     if (!existingProfile && !existingSignupRequest) return true
 
     const existingRequestedRole =
@@ -324,6 +332,7 @@ function ConsultantSignupInfo({
   onCancel: () => void
 }) {
   const submitLockRef = useRef(false)
+  const [submitting, setSubmitting] = useState(false)
 
   async function handleSubmit(values: {
     name: string
@@ -339,6 +348,7 @@ function ConsultantSignupInfo({
     if (!db) return
     if (submitLockRef.current) return
     submitLockRef.current = true
+    setSubmitting(true)
     try {
       const authUser = await ensureAuthUser()
       if (!authUser) return
@@ -353,6 +363,7 @@ function ConsultantSignupInfo({
       )
       await onComplete()
     } catch (error) {
+      console.error("signup submit error", error)
       const code = getErrorCode(error)
       toast.error(
         code
@@ -361,6 +372,7 @@ function ConsultantSignupInfo({
       )
     } finally {
       submitLockRef.current = false
+      setSubmitting(false)
     }
   }
 
@@ -394,6 +406,7 @@ function ConsultantSignupInfo({
             submitClassName="rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white hover:bg-slate-800"
             hideReset
             hideDescription
+            saving={submitting}
             onSubmit={handleSubmit}
           />
         </div>
@@ -477,6 +490,15 @@ function CompanySignupInfo({
     }
   }, [])
 
+  const uniquePrograms = useMemo(() => {
+    const seen = new Set<string>()
+    return availablePrograms.filter((program) => {
+      if (seen.has(program.id)) return false
+      seen.add(program.id)
+      return true
+    })
+  }, [availablePrograms])
+
 
   const CERTIFICATION_OPTIONS = [
     "예비사회적기업",
@@ -533,7 +555,7 @@ function CompanySignupInfo({
   const COMPANY_TYPE_OPTIONS = ["예비창업", "법인"] as const
   const REPRESENTATIVE_SOLUTION_MAX_LENGTH = 50
   const REPRESENTATIVE_SOLUTION_MIN_LENGTH = 20
-  const MYSC_EXPECTATION_MAX_LENGTH = 20
+  const MYSC_EXPECTATION_MIN_LENGTH = 20
 
   const CORPORATE_ONLY_FIELDS: (keyof CompanyInfoForm)[] = [
     "foundedAt",
@@ -779,8 +801,9 @@ function CompanySignupInfo({
   }
 
   function meetsMinLength(field: keyof CompanyInfoForm, value: string) {
-    if (field !== "representativeSolution") return true
-    return value.trim().length >= REPRESENTATIVE_SOLUTION_MIN_LENGTH
+    if (field === "representativeSolution") return value.trim().length >= REPRESENTATIVE_SOLUTION_MIN_LENGTH
+    if (field === "myscExpectation") return value.trim().length >= MYSC_EXPECTATION_MIN_LENGTH
+    return true
   }
 
   function shouldSkipFieldValidation(field: keyof CompanyInfoForm) {
@@ -1529,10 +1552,10 @@ function CompanySignupInfo({
                       >
                         {selectedProgramIds.length > 0 ? (
                           <div className="truncate pr-2 text-sm text-slate-700">
-                            {availablePrograms
-                              .filter((program) => selectedProgramIds.includes(program.id))
-                              .map((program) => program.name)
-                              .join(", ")}
+                        {uniquePrograms
+                          .filter((program) => selectedProgramIds.includes(program.id))
+                          .map((program) => program.name)
+                          .join(", ")}
                           </div>
                         ) : (
                           <span className="text-sm text-slate-400">
@@ -1546,8 +1569,8 @@ function CompanySignupInfo({
                       />
                       {programDropdownOpen ? (
                         <div className="absolute z-20 mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white p-1 shadow-lg">
-                          {availablePrograms.length > 0 ? (
-                            availablePrograms.map((program) => {
+                          {uniquePrograms.length > 0 ? (
+                            uniquePrograms.map((program) => {
                               const isSelected = selectedProgramIds.includes(program.id)
                               return (
                                 <button
@@ -2330,7 +2353,7 @@ function CompanySignupInfo({
                               />
                             </InputSuffix>
                           </label>
-                          <div className="flex items-start gap-2 lg:self-start">
+                          <div className="flex items-start gap-2">
                             <label className="min-w-0 flex-1 text-xs text-slate-500">
                               <span className="block whitespace-nowrap">주주명(지분율 상위 3명)</span>
                               <input
@@ -2677,7 +2700,6 @@ function CompanySignupInfo({
                     MYSC에 가장 기대하는 점
                     <input
                       className={inputClass(isFieldInvalid("myscExpectation"))}
-                      maxLength={MYSC_EXPECTATION_MAX_LENGTH}
                       placeholder="MYSC에 기대하는 점을 입력하세요"
                       value={form.myscExpectation}
                       onChange={(e) =>
@@ -2689,7 +2711,7 @@ function CompanySignupInfo({
                       onBlur={() => markTouched("myscExpectation")}
                     />
                     <div className="mt-1 text-[11px] text-slate-400">
-                      {myscExpectationLength}/{MYSC_EXPECTATION_MAX_LENGTH}자
+                      {myscExpectationLength}/{MYSC_EXPECTATION_MIN_LENGTH}자 이상
                     </div>
                   </label>
                 </div>

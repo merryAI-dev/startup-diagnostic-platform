@@ -2,7 +2,7 @@ import { defineConfig, devices } from "@playwright/test";
 import { loadE2EEnv } from "./e2e/support/env";
 
 const env = loadE2EEnv();
-const baseURL = env.baseUrl || "http://127.0.0.1:4173";
+const baseURL = env.baseUrl || "http://127.0.0.1:4174";
 
 export default defineConfig({
   testDir: "./e2e",
@@ -23,7 +23,7 @@ export default defineConfig({
   webServer: env.baseUrl
     ? undefined
     : {
-        command: "npm run dev -- --host 127.0.0.1 --port 4173",
+        command: "npm run dev -- --host 0.0.0.0 --port 4174",
         url: baseURL,
         reuseExistingServer: true,
         timeout: 120_000,

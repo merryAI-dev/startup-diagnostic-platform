@@ -18,8 +18,22 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/redesign/app/components/ui/textarea";
 import { FileUpload } from "@/redesign/app/components/file-upload";
 import { Calendar } from "@/redesign/app/components/ui/calendar";
-import { Agenda, Application, Consultant, RegularOfficeHour, SessionFormat, FileItem } from "@/redesign/app/lib/types";
+import {
+  Agenda,
+  Application,
+  Consultant,
+  OfficeHourSlot,
+  RegularOfficeHour,
+  SessionFormat,
+  FileItem,
+  ProgramWeekday,
+} from "@/redesign/app/lib/types";
 import { getTimeSlots } from "@/redesign/app/lib/data";
+import {
+  getAssignableConsultantsAt,
+  normalizeApplicationStatus,
+  normalizeTimeKey,
+} from "@/redesign/app/lib/application-availability";
 import { format, isBefore, parseISO, startOfDay } from "date-fns";
 import { ko } from "date-fns/locale";
 import { cn } from "@/redesign/app/components/ui/utils";
@@ -30,6 +44,7 @@ interface RegularApplicationWizardProps {
   applications: Application[];
   consultants: Consultant[];
   agendas: Agenda[];
+  allowedWeekdays?: ProgramWeekday[];
   remainingInternalTickets: number;
   remainingExternalTickets: number;
   onBack: () => void;
@@ -81,20 +96,26 @@ const steps = [
   "최종 확인",
 ];
 
-function normalizeTimeKey(value?: string): string {
-  if (!value) return "";
-  const [hourRaw, minuteRaw] = value.trim().split(":");
-  const hour = Number(hourRaw);
-  const minute = Number(minuteRaw);
-  if (Number.isNaN(hour) || Number.isNaN(minute)) return value.trim();
-  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
-}
-
 function normalizeConsultantDisplayName(value?: string | null): string {
   return (value ?? "")
     .replace(/\s*컨설턴트\s*$/u, "")
     .trim()
     .toLowerCase();
+}
+
+function getCurrentLocalDateTimeKeys(now = new Date()) {
+  const dateKey = format(now, "yyyy-MM-dd");
+  const timeKey = format(now, "HH:mm");
+  return { dateKey, timeKey };
+}
+
+function isPastScheduledStart(dateKey: string, timeKey: string, now = new Date()) {
+  const normalizedTime = normalizeTimeKey(timeKey);
+  if (!dateKey || !normalizedTime) return true;
+  const { dateKey: todayKey, timeKey: currentTimeKey } = getCurrentLocalDateTimeKeys(now);
+  if (dateKey < todayKey) return true;
+  if (dateKey > todayKey) return false;
+  return normalizedTime < currentTimeKey;
 }
 
 export function RegularApplicationWizard({
@@ -103,6 +124,7 @@ export function RegularApplicationWizard({
   applications,
   consultants,
   agendas,
+  allowedWeekdays = ["TUE", "THU"],
   remainingInternalTickets,
   remainingExternalTickets,
   onBack,
@@ -124,7 +146,6 @@ export function RegularApplicationWizard({
   const [ticketAlertOpen, setTicketAlertOpen] = useState(false);
   const [ticketAlertMessage, setTicketAlertMessage] = useState("");
 
-  const blockedAgendaTimes = new Set<string>();
   const consultantsByAgendaId = useMemo(() => {
     const map = new Map<string, Consultant[]>();
     consultants.forEach((consultant) => {
@@ -143,33 +164,26 @@ export function RegularApplicationWizard({
   const consultantPool = selectedAgendaId
     ? consultantsByAgendaId.get(selectedAgendaId) ?? []
     : [];
-  const consultantBusySlots = useMemo(() => {
-    const byId = new Map<string, Set<string>>();
-
-    applications.forEach((application) => {
-      if (
-        application.status !== "pending"
-        && application.status !== "review"
-        && application.status !== "confirmed"
-        && application.status !== "completed"
-      ) {
-        return;
-      }
-      if (!application.scheduledDate || !application.scheduledTime) return;
-      const slotKey = `${application.scheduledDate}|${normalizeTimeKey(application.scheduledTime)}`;
-
-      if (application.consultantId) {
-        const idSet = byId.get(application.consultantId);
-        if (idSet) {
-          idSet.add(slotKey);
-        } else {
-          byId.set(application.consultantId, new Set([slotKey]));
-        }
-      }
-    });
-
-    return { byId };
-  }, [applications]);
+  const officeHourSlots = useMemo<OfficeHourSlot[]>(
+    () =>
+      officeHours.flatMap((item) =>
+        (item.slots ?? []).map((slot) => ({
+          id: slot.id,
+          type: "regular" as const,
+          programId: item.programId,
+          consultantId: slot.consultantId,
+          consultantName: slot.consultantName ?? "",
+          title: item.title,
+          description: item.description,
+          date: slot.date,
+          startTime: slot.startTime,
+          endTime: slot.endTime,
+          agendaIds: slot.agendaIds,
+          status: slot.status,
+        })),
+      ),
+    [officeHours],
+  );
   const programOfficeHours = officeHour.programId
     ? officeHours.filter((item) => item.programId === officeHour.programId)
     : [officeHour];
@@ -191,65 +205,94 @@ export function RegularApplicationWizard({
     .map(({ label, value }) => `${label}\n${value}`)
     .join("\n\n");
   const todayStart = startOfDay(new Date());
-  const availableDateKeys = new Set(
-    programOfficeHours
-      .flatMap((item) => item.availableDates ?? [])
-      .map((date) => format(parseISO(date), "yyyy-MM-dd"))
-  );
-  if (selectedAgenda && selectedDate) {
-    const selectedDateKey = format(selectedDate, "yyyy-MM-dd");
-    applications.forEach((application) => {
-      if (application.type !== "regular") return;
-      if (application.agendaId) {
-        if (application.agendaId !== selectedAgenda.id) return;
-      } else if (application.agenda !== selectedAgenda.name) {
-        return;
-      }
-      if (
-        application.status !== "pending"
-        && application.status !== "review"
-        && application.status !== "confirmed"
-        && application.status !== "completed"
-      ) {
-        return;
-      }
-      if (application.scheduledDate !== selectedDateKey) return;
-      if (application.scheduledTime) {
-        blockedAgendaTimes.add(application.scheduledTime);
-      }
-    });
-  }
+  const allowedWeekdayNumbers = useMemo(() => {
+    const source = allowedWeekdays.length > 0 ? allowedWeekdays : ["TUE", "THU"];
+    return new Set(
+      source.flatMap((weekday) => {
+        if (weekday === "TUE") return [2];
+        if (weekday === "THU") return [4];
+        return [];
+      })
+    );
+  }, [allowedWeekdays]);
+  const availableDateKeys = useMemo(() => {
+    const keys = new Set<string>();
 
+    programOfficeHours.forEach((item) => {
+      const slots = item.slots ?? [];
+      if (slots.length === 0) {
+        (item.availableDates ?? []).forEach((date) => {
+          const normalizedDate = format(parseISO(date), "yyyy-MM-dd");
+          const dayOfWeek = parseISO(normalizedDate).getDay();
+          if (!allowedWeekdayNumbers.has(dayOfWeek)) return;
+          if (selectedAgendaId) {
+            const hasAnyAssignableTime = getTimeSlots(parseISO(normalizedDate).toISOString()).some(
+              (timeSlot) =>
+                !isPastScheduledStart(normalizedDate, timeSlot.time) &&
+                getAssignableConsultantsAt({
+                  consultants,
+                  applications,
+                  officeHourSlots,
+                  agendaId: selectedAgendaId,
+                  dateKey: normalizedDate,
+                  time: timeSlot.time,
+                }).length > 0,
+            );
+            if (!hasAnyAssignableTime) return;
+          }
+          keys.add(normalizedDate);
+        });
+        return;
+      }
+
+      slots.forEach((slot) => {
+        const dateKey = format(parseISO(slot.date), "yyyy-MM-dd");
+        const dayOfWeek = parseISO(dateKey).getDay();
+        const matchesAgenda =
+          !selectedAgendaId || !slot.agendaIds || slot.agendaIds.includes(selectedAgendaId);
+        if (!allowedWeekdayNumbers.has(dayOfWeek) || !matchesAgenda) {
+          return;
+        }
+        if (slot.status !== "open") {
+          return;
+        }
+        if (isPastScheduledStart(dateKey, slot.startTime)) {
+          return;
+        }
+        if (
+          selectedAgendaId &&
+          getAssignableConsultantsAt({
+            consultants,
+            applications,
+            officeHourSlots,
+            agendaId: selectedAgendaId,
+            dateKey,
+            time: slot.startTime,
+            slotConsultantId: slot.consultantId,
+          }).length === 0
+        ) {
+          return;
+        }
+        keys.add(dateKey);
+      });
+    });
+
+    return keys;
+  }, [
+    allowedWeekdayNumbers,
+    applications,
+    consultants,
+    officeHourSlots,
+    programOfficeHours,
+    selectedAgendaId,
+  ]);
   const timeSlots = selectedDate ? (() => {
     const selectedDateKey = format(selectedDate, "yyyy-MM-dd");
     const slotsForDate = programOfficeHours.flatMap((item) =>
       item.slots?.filter((slot) => slot.date === selectedDateKey) ?? []
     );
-    const hasMatchedConsultant = consultantPool.length > 0;
-    const hasAssignableConsultantAt = (time: string) => {
-      if (!hasMatchedConsultant) return false;
-      const timeKey = normalizeTimeKey(time);
-      const slotKey = `${selectedDateKey}|${timeKey}`;
-      return consultantPool.some((consultant) => {
-        const dayAvailability = consultant.availability.find(
-          (day) => day.dayOfWeek === selectedDate.getDay()
-        );
-        const availableInSchedule = Boolean(
-          dayAvailability?.slots.some(
-            (slotAvailability) =>
-              normalizeTimeKey(slotAvailability.start) === timeKey && slotAvailability.available
-          )
-        );
-        if (!availableInSchedule) return false;
-
-        if (consultantBusySlots.byId.get(consultant.id)?.has(slotKey)) return false;
-
-        return true;
-      });
-    };
-
     const assignableConsultantIds = new Set(consultantPool.map((consultant) => consultant.id));
-    const byTime = new Map<string, { hasOpen: boolean; slotId?: string }>();
+    const byTime = new Map<string, { hasOpen: boolean; slotId?: string; slotConsultantId?: string }>();
     if (slotsForDate.length > 0) {
       slotsForDate.forEach((slot) => {
         const matchesAgenda =
@@ -262,12 +305,17 @@ export function RegularApplicationWizard({
         const existing = byTime.get(slot.startTime);
         const isOpen = slot.status === "open";
         if (!existing) {
-          byTime.set(slot.startTime, { hasOpen: isOpen, slotId: slot.id });
+          byTime.set(slot.startTime, {
+            hasOpen: isOpen,
+            slotId: slot.id,
+            slotConsultantId: slot.consultantId,
+          });
           return;
         }
         byTime.set(slot.startTime, {
           hasOpen: existing.hasOpen || isOpen,
           slotId: isOpen ? slot.id : existing.slotId ?? slot.id,
+          slotConsultantId: isOpen ? slot.consultantId : existing.slotConsultantId,
         });
       });
 
@@ -275,22 +323,34 @@ export function RegularApplicationWizard({
 
     return getTimeSlots(selectedDate.toISOString()).map((slot) => {
       const meta = byTime.get(slot.time);
-      const blockedByAgenda = blockedAgendaTimes.has(slot.time);
-      const consultantAssignable = hasAssignableConsultantAt(slot.time);
+      const assignableConsultants =
+        selectedAgendaId.length > 0
+          ? getAssignableConsultantsAt({
+              consultants,
+              applications,
+              officeHourSlots,
+              agendaId: selectedAgendaId,
+              dateKey: selectedDateKey,
+              time: slot.time,
+              slotConsultantId: meta?.slotConsultantId,
+            })
+          : [];
+      const consultantAssignable = assignableConsultants.length > 0;
+      const futureSchedulable = !isPastScheduledStart(selectedDateKey, slot.time);
       const openBySlotState = meta ? meta.hasOpen : slot.available;
-      const available = openBySlotState && !blockedByAgenda && consultantAssignable;
+      const available = openBySlotState && consultantAssignable && futureSchedulable;
       return {
         ...slot,
         available,
         reason: available
           ? undefined
-          : blockedByAgenda
-            ? "이미 예약된 시간입니다"
-            : !consultantAssignable
-              ? "해당 시간에 배정 가능한 컨설턴트가 없습니다"
-              : meta && !meta.hasOpen
-                ? "예약 불가한 시간입니다"
-                : slot.reason,
+          : !futureSchedulable
+            ? "이미 지난 시간은 신청할 수 없습니다"
+          : !consultantAssignable
+            ? "해당 시간에 배정 가능한 컨설턴트가 없습니다"
+            : meta && !meta.hasOpen
+              ? "예약 불가한 시간입니다"
+              : slot.reason,
         slotId: meta?.slotId,
       };
     });
@@ -464,6 +524,7 @@ export function RegularApplicationWizard({
                       }}
                       disabled={(date) => {
                         if (isBefore(date, todayStart)) return true;
+                        if (!allowedWeekdayNumbers.has(date.getDay())) return true;
                         const dateKey = format(date, "yyyy-MM-dd");
                         return !availableDateKeys.has(dateKey);
                       }}

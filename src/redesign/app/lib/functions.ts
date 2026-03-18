@@ -21,7 +21,7 @@ type SubmitRegularApplicationResult = {
   slotId: string;
 };
 
-export type TransitionApplicationAction = "claim" | "confirm" | "reject";
+export type TransitionApplicationAction = "claim" | "confirm" | "reject" | "reopen";
 
 export type TransitionApplicationPayload = {
   applicationId: string;

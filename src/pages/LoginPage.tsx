@@ -5,6 +5,7 @@ import { useAuth } from "@/context/AuthContext"
 import { getSignupRequest, getUserProfile } from "@/firebase/profile"
 import { signInWithEmail, signOutUser } from "@/firebase/auth"
 import type { Role } from "@/types/auth"
+import { PENDING_REQUEST_FLAG } from "@/constants/signup"
 
 export function LoginPage() {
   const [loadingEmail, setLoadingEmail] = useState(false)
@@ -45,6 +46,7 @@ export function LoginPage() {
 
     if (profile?.active === false || signupRequest) {
       await signOutUser()
+      sessionStorage.setItem(PENDING_REQUEST_FLAG, "1")
       navigate(
         `/pending?role=${signupRequest?.requestedRole ?? signupRequest?.role ?? profile?.requestedRole ?? profile?.role}`,
       )

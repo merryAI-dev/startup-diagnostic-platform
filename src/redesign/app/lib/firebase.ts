@@ -46,6 +46,8 @@ const isFirebaseConfigured =
   !!firebaseConfig.apiKey &&
   firebaseConfig.apiKey !== "" &&
   firebaseConfig.apiKey !== "your_api_key_here";
+const disableFirestorePersistence =
+  import.meta.env.VITE_DISABLE_FIRESTORE_PERSISTENCE === "true";
 
 // ──────────────────────────────────────────────
 // Initialize Firebase App
@@ -69,16 +71,20 @@ if (isFirebaseConfigured) {
     auth = getAuth(app);
 
     // ── Firestore (500-user optimized) ──
-    try {
-      db = initializeFirestore(app, {
-        localCache: persistentLocalCache({
-          tabManager: persistentMultipleTabManager(),
-          cacheSizeBytes: CACHE_SIZE_UNLIMITED,
-        }),
-      });
-    } catch {
-      // 이미 초기화된 경우 기존 인스턴스 사용
+    if (disableFirestorePersistence) {
       db = getFirestore(app);
+    } else {
+      try {
+        db = initializeFirestore(app, {
+          localCache: persistentLocalCache({
+            tabManager: persistentMultipleTabManager(),
+            cacheSizeBytes: CACHE_SIZE_UNLIMITED,
+          }),
+        });
+      } catch {
+        // 이미 초기화된 경우 기존 인스턴스 사용
+        db = getFirestore(app);
+      }
     }
 
     // Emulator 연결 (개발 모드)

@@ -388,7 +388,11 @@ export function DashboardCalendar({
       && user.role === "user"
       && onUpdateCompanyApplication
       && !hasSessionEnded(selectedApplication)
-      && (selectedApplication.status === "pending" || selectedApplication.status === "confirmed")
+      && (
+        selectedApplication.status === "pending" ||
+        selectedApplication.status === "review" ||
+        selectedApplication.status === "confirmed"
+      )
     );
 
   const selectedApplicationAttachments = useMemo(() => {

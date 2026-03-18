@@ -22,8 +22,17 @@ export function RegularOfficeHourDetail({
   onStartApplication,
   onViewApplication,
 }: RegularOfficeHourDetailProps) {
-  const hasFutureAvailableDate = officeHour.availableDates.some(
-    (date) => !isBefore(parseISO(date), startOfDay(new Date()))
+  const now = new Date();
+  const todayKey = format(now, "yyyy-MM-dd");
+  const currentTimeKey = format(now, "HH:mm");
+  const hasRequestableSlot = (officeHour.slots ?? []).some((slot) => {
+    if (slot.status !== "open") return false;
+    if (slot.date < todayKey) return false;
+    if (slot.date > todayKey) return true;
+    return slot.startTime >= currentTimeKey;
+  });
+  const hasFutureAvailableDate = hasRequestableSlot || officeHour.availableDates.some(
+    (date) => !isBefore(parseISO(date), startOfDay(now))
   );
   const myApplications = applications.filter(
     (app) => app.officeHourId === officeHour.id

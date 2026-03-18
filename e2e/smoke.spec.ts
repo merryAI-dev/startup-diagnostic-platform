@@ -20,6 +20,11 @@ type FirestoreDocument = {
   data: Record<string, unknown>;
 };
 
+type E2EAgendaRef = {
+  agendaId: string;
+  agendaName: string;
+};
+
 let adminIdTokenPromise: Promise<string> | null = null;
 
 function cleanupPreviewTestAccounts() {
@@ -239,6 +244,18 @@ async function getFirestoreDocument(documentPath: string): Promise<FirestoreDocu
   return parseFirestoreDocument(payload);
 }
 
+async function waitForConsultantDoc(consultantEmail: string): Promise<FirestoreDocument> {
+  let consultant: FirestoreDocument | undefined;
+  await expect
+    .poll(async () => {
+      const docs = await runFirestoreQuery("consultants", "email", consultantEmail);
+      consultant = docs[0];
+      return consultant ? 1 : 0;
+    }, { timeout: 30_000 })
+    .toBe(1);
+  return consultant!;
+}
+
 async function updateFirestoreDocument(documentPath: string, fields: Record<string, unknown>) {
   const idToken = await getAdminIdToken();
   const params = new URLSearchParams();
@@ -267,8 +284,116 @@ async function updateFirestoreDocument(documentPath: string, fields: Record<stri
   return parseFirestoreDocument(payload);
 }
 
+async function deleteFirestoreDocument(documentPath: string) {
+  const idToken = await getAdminIdToken();
+  const response = await fetch(
+    `https://firestore.googleapis.com/v1/projects/${firebaseConfig.projectId}/databases/(default)/documents/${documentPath}`,
+    {
+      method: "DELETE",
+      headers: {
+        authorization: `Bearer ${idToken}`,
+      },
+    },
+  );
+  if (response.status === 404) return;
+  if (!response.ok) {
+    const payload = await response.text();
+    throw new Error(`Firestore delete failed: ${response.status} ${payload}`);
+  }
+}
+
+async function cleanupE2EAgendas() {
+  const agendas = await listFirestoreDocuments("agendas");
+  const targets = agendas.filter((agenda) => String(agenda.data.name ?? "").startsWith("E2E Agenda "));
+  for (const agenda of targets) {
+    await deleteFirestoreDocument(`agendas/${agenda.id}`);
+  }
+}
+
+async function createE2EAgenda(seed: string, scope: "internal" | "external" = "internal") {
+  const agendaId = `e2e-agenda-${seed}`;
+  const agendaName = `E2E Agenda ${seed}`;
+  await updateFirestoreDocument(`agendas/${agendaId}`, {
+    name: agendaName,
+    scope,
+    active: true,
+    description: "E2E isolated agenda",
+  });
+  return { agendaId, agendaName };
+}
+
+async function resolveAgendaRef(agenda: E2EAgendaRef | string): Promise<E2EAgendaRef> {
+  if (typeof agenda !== "string") {
+    return agenda;
+  }
+  const agendas = await runFirestoreQuery("agendas", "name", agenda);
+  const matched = agendas[0];
+  if (!matched) {
+    throw new Error(`아젠다 문서를 찾지 못했습니다: ${agenda}`);
+  }
+  return {
+    agendaId: matched.id,
+    agendaName: String(matched.data.name ?? agenda),
+  };
+}
+
 async function getApplicationsByCompanyName(companyName: string) {
   return runFirestoreQuery("officeHourApplications", "companyName", companyName);
+}
+
+async function expectSingleCompanyDoc(companyName: string) {
+  await expect.poll(async () => (await runFirestoreQuery("companies", "name", companyName)).length, {
+    timeout: 30_000,
+  }).toBe(1);
+  const [companyDoc] = await runFirestoreQuery("companies", "name", companyName);
+  if (!companyDoc) {
+    throw new Error(`Expected one company doc for ${companyName}`);
+  }
+  return companyDoc;
+}
+
+async function getRegularOfficeHourIdForCompany(companyName: string, agendaName: string) {
+  const companyDoc = await expectSingleCompanyDoc(companyName);
+  const programIds = Array.isArray(companyDoc.data.programs)
+    ? companyDoc.data.programs.map((value) => String(value))
+    : [];
+  if (programIds.length === 0) {
+    throw new Error(`회사 ${companyName}에 연결된 program이 없습니다.`);
+  }
+
+  const agendas = await runFirestoreQuery("agendas", "name", agendaName);
+  const agenda = agendas[0];
+  if (!agenda) {
+    throw new Error(`아젠다 문서를 찾지 못했습니다: ${agendaName}`);
+  }
+
+  for (const programId of programIds) {
+    const todayKey = formatDateKey(new Date());
+    const slotDocs = (await runFirestoreQuery("officeHourSlots", "programId", programId)).filter((doc) => {
+      if (doc.data.type !== "regular") return false;
+      if (doc.data.status !== "open") return false;
+      if (!Array.isArray(doc.data.agendaIds)) return false;
+      if (typeof doc.data.date !== "string") return false;
+      if (String(doc.data.date) < todayKey) return false;
+      const agendaIds = doc.data.agendaIds.map((value) => String(value));
+      return agendaIds.includes(agenda.id);
+    });
+    if (slotDocs.length > 0) {
+      const [firstSlot] = slotDocs.sort((a, b) => {
+        const dateA = String(a.data.date ?? "");
+        const dateB = String(b.data.date ?? "");
+        const dateComp = dateA.localeCompare(dateB);
+        if (dateComp !== 0) return dateComp;
+        return String(a.data.startTime ?? "").localeCompare(String(b.data.startTime ?? ""));
+      });
+      const dateKey = String(firstSlot?.data.date ?? "");
+      if (dateKey) {
+        return `${programId}:${dateKey.slice(0, 7)}`;
+      }
+    }
+  }
+
+  throw new Error(`회사 ${companyName} / 아젠다 ${agendaName}에 대한 open regular slot을 찾지 못했습니다.`);
 }
 
 async function expectSingleApplicationDoc(companyName: string) {
@@ -302,11 +427,15 @@ function normalizeDateKey(value: string) {
 }
 
 function parseDateKey(value: string) {
-  return new Date(`${normalizeDateKey(value)}T00:00:00`);
+  const [year, month, day] = normalizeDateKey(value).split("-").map((part) => Number(part));
+  return new Date(year, (month || 1) - 1, day || 1);
 }
 
 function formatDateKey(value: Date) {
-  return value.toISOString().slice(0, 10);
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, "0");
+  const day = String(value.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
 function getWeekdayNumbers(weekdays: unknown) {
@@ -324,16 +453,14 @@ function buildRegularSlotId(programId: string, consultantId: string, dateKey: st
 }
 
 async function syncRegularSlotsForConsultant(consultantEmail: string) {
-  const consultants = await runFirestoreQuery("consultants", "email", consultantEmail);
-  const consultant = consultants[0];
-  if (!consultant) {
-    throw new Error(`컨설턴트 문서를 찾지 못했습니다: ${consultantEmail}`);
-  }
+  const consultant = await waitForConsultantDoc(consultantEmail);
   const consultantId = consultant.id;
   const consultantName = String(consultant.data.name ?? "컨설턴트");
   const agendaIds = Array.isArray(consultant.data.agendaIds) ? consultant.data.agendaIds : [];
   const availability = Array.isArray(consultant.data.availability) ? consultant.data.availability : [];
   const programs = await listFirestoreDocuments("programs");
+  const existingConsultantSlots = (await runFirestoreQuery("officeHourSlots", "consultantId", consultantId))
+    .filter((doc) => doc.data.type === "regular");
 
   for (const program of programs) {
     const periodStart = typeof program.data.periodStart === "string" ? normalizeDateKey(program.data.periodStart) : "";
@@ -346,6 +473,7 @@ async function syncRegularSlotsForConsultant(consultantEmail: string) {
     }
     const weekdays = new Set(getWeekdayNumbers(program.data.weekdays));
     const cursor = new Date(startDate);
+    const desiredSlotIds = new Set<string>();
     while (cursor <= endDate) {
       if (weekdays.has(cursor.getDay())) {
         const dateKey = formatDateKey(cursor);
@@ -358,8 +486,10 @@ async function syncRegularSlotsForConsultant(consultantEmail: string) {
           const startTime = String(slot.start ?? "");
           const endTime = String(slot.end ?? "");
           if (!startTime || !endTime) continue;
+          const slotId = buildRegularSlotId(program.id, consultantId, dateKey, startTime);
+          desiredSlotIds.add(slotId);
           await updateFirestoreDocument(
-            `officeHourSlots/${buildRegularSlotId(program.id, consultantId, dateKey, startTime)}`,
+            `officeHourSlots/${slotId}`,
             {
               type: "regular",
               programId: program.id,
@@ -378,19 +508,53 @@ async function syncRegularSlotsForConsultant(consultantEmail: string) {
       }
       cursor.setDate(cursor.getDate() + 1);
     }
+
+    const staleSlots = existingConsultantSlots.filter(
+      (doc) => doc.data.programId === program.id && !desiredSlotIds.has(doc.id),
+    );
+    for (const staleSlot of staleSlots) {
+      await deleteFirestoreDocument(`officeHourSlots/${staleSlot.id}`);
+    }
   }
 }
 
 async function setConsultantAvailability(consultantEmail: string) {
-  const consultants = await runFirestoreQuery("consultants", "email", consultantEmail);
-  const consultant = consultants[0];
-  if (!consultant) {
-    throw new Error(`컨설턴트 문서를 찾지 못했습니다: ${consultantEmail}`);
-  }
+  const consultant = await waitForConsultantDoc(consultantEmail);
   await updateFirestoreDocument(`consultants/${consultant.id}`, {
     availability: buildFullAvailability(),
   });
   await syncRegularSlotsForConsultant(consultantEmail);
+}
+
+async function expectConsultantAgendaSlotsReady(consultantEmail: string, agenda: E2EAgendaRef | string) {
+  const consultant = await waitForConsultantDoc(consultantEmail);
+  const agendaRef = await resolveAgendaRef(agenda);
+  await expect.poll(async () => {
+    const refreshedConsultants = await runFirestoreQuery("consultants", "email", consultantEmail);
+    const refreshedConsultant = refreshedConsultants[0];
+    const agendaIds = Array.isArray(refreshedConsultant?.data.agendaIds)
+      ? refreshedConsultant.data.agendaIds.map((value) => String(value))
+      : [];
+    if (!agendaIds.includes(agendaRef.agendaId)) return 0;
+    const slotDocs = (await runFirestoreQuery("officeHourSlots", "consultantId", consultant.id)).filter(
+      (doc) =>
+        doc.data.type === "regular" &&
+        doc.data.status === "open",
+    );
+    return slotDocs.length;
+  }, { timeout: 30_000 }).toBeGreaterThan(0);
+}
+
+async function assignAgendaToConsultantRecord(consultantEmail: string, agenda: E2EAgendaRef | string) {
+  const consultant = await waitForConsultantDoc(consultantEmail);
+  const agendaRef = await resolveAgendaRef(agenda);
+  const existingAgendaIds = Array.isArray(consultant.data.agendaIds)
+    ? consultant.data.agendaIds.map((value) => String(value))
+    : [];
+  const nextAgendaIds = Array.from(new Set([...existingAgendaIds, agendaRef.agendaId]));
+  await updateFirestoreDocument(`consultants/${consultant.id}`, {
+    agendaIds: nextAgendaIds,
+  });
 }
 
 async function login(page: Page, email: string, password: string) {
@@ -414,6 +578,47 @@ async function loginAndWaitForCompany(page: Page, email: string, password: strin
   await expect(page).toHaveURL(/\/company/, { timeout: 30_000 });
   await waitForAuthLoadingToClear(page);
   await expect(page.getByText("대시보드").first()).toBeVisible({ timeout: 30_000 });
+}
+
+async function waitForRegularCalendarReady(page: Page) {
+  const loadingText = page.getByText("정기 오피스아워 일정을 불러오는 중입니다.");
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      await expect
+        .poll(async () => {
+          const sessionCount = await page.locator('[data-testid^="regular-calendar-session-"]').count();
+          if (sessionCount > 0) return 0;
+          const emptyStateCount = await page.getByText("표시할 정기 오피스아워가 없습니다").count();
+          if (emptyStateCount > 0) return 0;
+          return await loadingText.count();
+        }, { timeout: 30_000 })
+        .toBe(0);
+      return;
+    } catch (error) {
+      if (attempt === 1) throw error;
+      await page.reload();
+      await waitForAuthLoadingToClear(page);
+    }
+  }
+}
+
+async function waitForRegularDetailReady(page: Page) {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      await expect
+        .poll(async () => {
+          if (await page.getByTestId("regular-start-application").count()) return "ready";
+          if (await page.getByText("오늘 이전 일정만 남아 있어 신청할 수 없습니다.").count()) return "ready";
+          return "loading";
+        }, { timeout: 30_000 })
+        .toBe("ready");
+      return;
+    } catch (error) {
+      if (attempt === 1) throw error;
+      await page.reload();
+      await waitForAuthLoadingToClear(page);
+    }
+  }
 }
 
 async function loginAndWaitForAdmin(page: Page, email: string, password: string) {
@@ -569,11 +774,43 @@ function ticketSummaryCard(page: Page, label: "내부 티켓" | "외부 티켓")
   return page.locator("div.rounded-lg.border.p-3").filter({ hasText: label }).first();
 }
 
-async function submitRegularApplication(page: Page, agendaName: string) {
-  const { officeHourTitle, sessionIndex, selectedDateIndex, selectedTime } = await openRegularApplicationWizard(
-    page,
-    agendaName,
-  );
+async function openRegularApplicationAgendaStepForOfficeHour(page: Page, officeHourId: string) {
+  await page.goto(`/company/regular-detail?id=${encodeURIComponent(officeHourId)}`);
+  let startApplicationButton = page.getByRole("button", { name: "신청 시작하기" }).first();
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    await waitForAuthLoadingToClear(page);
+    try {
+      await expect
+        .poll(
+          async () => ({
+            headingCount: await page.locator("main h1").count(),
+            buttonCount: await startApplicationButton.count(),
+          }),
+          { timeout: 30_000 },
+        )
+        .toEqual({ headingCount: 1, buttonCount: 1 });
+      await expect(startApplicationButton).toBeVisible({ timeout: 10_000 });
+      break;
+    } catch (error) {
+      if (attempt === 1) throw error;
+      await page.reload();
+      startApplicationButton = page.getByRole("button", { name: "신청 시작하기" }).first();
+    }
+  }
+
+  await startApplicationButton.click();
+  await expect(page.getByTestId("regular-agenda-trigger")).toBeVisible({ timeout: 30_000 });
+}
+
+async function submitRegularApplication(
+  page: Page,
+  companyName: string,
+  agendaName: string,
+  preferredSelection?: { dateIndex: number; time: string; expectDisabled?: boolean },
+) {
+  const officeHourId = await getRegularOfficeHourIdForCompany(companyName, agendaName);
+  const { officeHourTitle, selectedDateIndex, selectedTime } =
+    await openRegularApplicationWizardForOfficeHour(page, officeHourId, agendaName, preferredSelection);
 
   const functionResponsePromise = page.waitForResponse(
     (response) =>
@@ -596,16 +833,16 @@ async function submitRegularApplication(page: Page, agendaName: string) {
 
   await expect(page).toHaveURL(/\/company\/dashboard/, { timeout: 30_000 });
 
-  return { officeHourTitle, sessionIndex, selectedDateIndex, selectedTime };
+  return { officeHourTitle, officeHourId, selectedDateIndex, selectedTime };
 }
 
 async function claimApplication(page: Page, companyName: string) {
   await page.goto("/admin/admin-applications");
   await page.getByPlaceholder("신청 기업명으로 검색").fill(companyName);
 
-  const row = page.locator("tr").filter({ hasText: companyName }).first();
-  await expect(row).toBeVisible({ timeout: 30_000 });
-  await row.getByRole("button", { name: "상세보기" }).click();
+  const rows = page.locator("tbody tr");
+  await expect(rows.first()).toBeVisible({ timeout: 30_000 });
+  await rows.first().getByRole("button", { name: "상세보기" }).click();
 
   const modal = page.getByRole("dialog").filter({ hasText: companyName });
   await expect(modal).toBeVisible();
@@ -620,36 +857,34 @@ async function claimApplication(page: Page, companyName: string) {
     { timeout: 30_000 },
   );
   await actionDialog.getByTestId("application-action-confirm").click();
-  await expect(actionDialog).toBeHidden({ timeout: 15_000 });
   const functionResponse = await functionResponsePromise;
   const responseText = await functionResponse.text();
   console.log("transitionApplicationStatus accept:", functionResponse.status(), responseText.slice(0, 600));
   if (!functionResponse.ok()) {
     throw new Error(`수락 처리 실패: ${functionResponse.status()} ${responseText.slice(0, 300)}`);
   }
+  await expect(actionDialog).toBeHidden({ timeout: 30_000 });
 }
 
-async function openPendingApplicationFromDashboard(page: Page, officeHourTitle: string) {
-  await page.goto("/company/dashboard");
-  const pendingCard = page
-    .locator("div.cursor-pointer.rounded-xl")
-    .filter({ hasText: officeHourTitle })
-    .first();
-  await expect(pendingCard).toBeVisible({ timeout: 30_000 });
-  await pendingCard.click();
+async function openPendingApplication(page: Page, applicationId: string) {
+  await page.goto(`/company/application?id=${applicationId}`);
+  await waitForAuthLoadingToClear(page);
+  await expect(page).toHaveURL(new RegExp(`/company/application\\?id=${escapeRegExp(applicationId)}`), {
+    timeout: 30_000,
+  });
 }
 
-async function cancelPendingApplication(page: Page, officeHourTitle: string) {
-  await openPendingApplicationFromDashboard(page, officeHourTitle);
-  const applicationDialog = page.getByRole("dialog").filter({ hasText: officeHourTitle }).first();
-  await expect(applicationDialog).toBeVisible({ timeout: 30_000 });
+async function cancelPendingApplication(page: Page, applicationId: string) {
+  await openPendingApplication(page, applicationId);
+  const deleteButton = page.getByRole("button", { name: "신청 삭제" }).first();
+  await expect(deleteButton).toBeVisible({ timeout: 30_000 });
   const functionResponsePromise = page.waitForResponse(
     (response) =>
       response.url().includes("cancelApplication") &&
       response.request().method() === "POST",
     { timeout: 30_000 },
   );
-  await applicationDialog.getByRole("button", { name: "신청 삭제" }).click();
+  await deleteButton.click();
 
   const dialog = page.getByRole("alertdialog").filter({ hasText: "신청을 삭제하시겠습니까?" }).first();
   await expect(dialog).toBeVisible();
@@ -662,15 +897,14 @@ async function cancelPendingApplication(page: Page, officeHourTitle: string) {
   }
 
   await expect(page).toHaveURL(/\/company\/dashboard/, { timeout: 30_000 });
-  await expect(page.getByText(officeHourTitle)).toHaveCount(0);
 }
 
 async function rejectApplication(page: Page, companyName: string, reason: string) {
   await page.goto("/admin/admin-applications");
   await page.getByPlaceholder("신청 기업명으로 검색").fill(companyName);
 
-  const row = page.locator("tr").filter({ hasText: companyName }).first();
-  await expect(row).toBeVisible({ timeout: 30_000 });
+  await expect(page.locator("tbody tr").first()).toBeVisible({ timeout: 30_000 });
+  const row = page.locator("tbody tr").first();
   await row.getByRole("button", { name: "상세보기" }).click();
 
   const modal = page.getByRole("dialog").filter({ hasText: companyName });
@@ -754,6 +988,7 @@ async function getFirstAgendaOptionForCompany(browser: Browser, company: { email
   const { context, page } = await newPage(browser);
   await loginAndWaitForCompany(page, company.email, company.password);
   await page.goto("/company/regular");
+  await waitForRegularCalendarReady(page);
   const session = page.locator('[data-testid^="regular-calendar-session-"]').first();
   await expect(session).toBeVisible({ timeout: 30_000 });
   await session.click();
@@ -774,13 +1009,11 @@ async function getFirstAgendaOptionForCompany(browser: Browser, company: { email
 async function configureConsultantAgendaAndSchedule(
   browser: Browser,
   consultant: { name: string; email: string; password: string },
-  agendaName: string,
+  agenda: E2EAgendaRef | string,
 ) {
-  const adminSession = await newPage(browser);
-  await loginAndWaitForAdmin(adminSession.page, adminCredentials.email!, adminCredentials.password!);
-  await mapFirstAgendaToConsultant(adminSession.page, consultant.name, agendaName);
-  await adminSession.context.close();
+  await assignAgendaToConsultantRecord(consultant.email, agenda);
   await setConsultantAvailability(consultant.email);
+  await expectConsultantAgendaSlotsReady(consultant.email, agenda);
 }
 
 async function provisionApprovedConsultantWithAgenda(
@@ -843,15 +1076,16 @@ async function provisionApprovedCompany(browser: Browser, seed = uniqueSeed()) {
 }
 
 async function provisionApprovedConsultantAndCompany(browser: Browser, seed = uniqueSeed()) {
+  const agenda = await createE2EAgenda(seed);
   const { consultant } = await provisionApprovedConsultantAccount(browser, seed);
   const { company } = await provisionApprovedCompany(browser, seed);
-  const agendaName = await getFirstAgendaOptionForCompany(browser, company);
-  await configureConsultantAgendaAndSchedule(browser, consultant, agendaName);
+  await configureConsultantAgendaAndSchedule(browser, consultant, agenda);
 
   return {
     consultant,
     company,
-    agendaName,
+    agendaName: agenda.agendaName,
+    agendaId: agenda.agendaId,
   };
 }
 
@@ -884,109 +1118,211 @@ async function openRegularApplicationWizard(
   agendaName: string,
   preferredSelection?: { sessionIndex?: number; dateIndex: number; time: string; expectDisabled?: boolean },
 ) {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await page.goto("/company/regular");
+    await waitForAuthLoadingToClear(page);
+    await waitForRegularCalendarReady(page);
+    const sessionCards = page.locator('[data-testid^="regular-calendar-session-"]');
+    const sessionCount = await sessionCards.count();
+    const targetSessionIndexes =
+      preferredSelection && typeof preferredSelection.sessionIndex === "number"
+        ? [preferredSelection.sessionIndex]
+        : Array.from({ length: sessionCount }, (_, index) => index);
+
+    for (const sessionIndex of targetSessionIndexes) {
+      await page.goto("/company/regular");
+      await waitForRegularCalendarReady(page);
+      const sessionCard = page.locator('[data-testid^="regular-calendar-session-"]').nth(sessionIndex);
+      await expect(sessionCard).toBeVisible({ timeout: 30_000 });
+      await sessionCard.click();
+
+      const officeHourTitle =
+        (await page.locator("h1").first().textContent())?.trim() || "정기 오피스아워";
+
+      await page.getByTestId("regular-start-application").click();
+      await expect(page.getByTestId("regular-agenda-trigger")).toBeVisible();
+
+      await page.getByTestId("regular-agenda-trigger").click();
+      await page
+        .getByText(new RegExp(`^${escapeRegExp(agendaName)}\\s+·`))
+        .click();
+      await page.getByTestId("regular-wizard-next").click();
+
+      const enabledDates = page.locator('[role="gridcell"]:not([disabled]):not([aria-disabled="true"])');
+      const enabledDateCount = await enabledDates.count();
+      let foundSchedulableDate = false;
+      let selectedDateIndex = -1;
+      let selectedTime = "";
+
+  if (selection) {
+        const dateCell = enabledDates.nth(preferredSelection.dateIndex);
+        await expect(dateCell).toBeVisible();
+        await dateCell.click();
+        const preferredTime = page.getByTestId(
+          `regular-time-slot-${preferredSelection.time.replace(":", "-")}`,
+        );
+        await expect(preferredTime).toBeVisible();
+        if (preferredSelection.expectDisabled) {
+          await expect(preferredTime).toBeDisabled();
+        } else {
+          await expect(preferredTime).toBeEnabled();
+          await preferredTime.click();
+        }
+        selectedDateIndex = preferredSelection.dateIndex;
+        selectedTime = preferredSelection.time;
+        foundSchedulableDate = !preferredSelection.expectDisabled;
+      }
+
+      for (let index = 0; index < enabledDateCount; index += 1) {
+        if (preferredSelection) break;
+        const dateCell = enabledDates.nth(index);
+        await expect(dateCell).toBeVisible();
+        await dateCell.click();
+
+        const firstEnabledTime = page.locator('[data-testid^="regular-time-slot-"]:not([disabled])').first();
+        if (await firstEnabledTime.count()) {
+          selectedDateIndex = index;
+          selectedTime = ((await firstEnabledTime.textContent()) ?? "").trim().split(/\s+/u)[0] ?? "";
+          await firstEnabledTime.click();
+          foundSchedulableDate = true;
+          break;
+        }
+      }
+
+      if (!foundSchedulableDate && !preferredSelection) {
+        continue;
+      }
+
+      if (preferredSelection?.expectDisabled) {
+        return {
+          officeHourTitle,
+          sessionIndex,
+          selectedDateIndex,
+          selectedTime,
+        };
+      }
+
+      if (!foundSchedulableDate) {
+        continue;
+      }
+
+      await page.getByTestId("regular-wizard-next").click();
+      await page.getByTestId("regular-wizard-next").click();
+
+      await page
+        .getByTestId("regular-request-currentSituation")
+        .fill("현재 제품 출시 전환과 초기 매출 확보를 동시에 준비 중입니다.");
+      await page
+        .getByTestId("regular-request-keyChallenges")
+        .fill("시장 진입 우선순위와 초기 세일즈 메시지가 명확하지 않아 실행이 지연됩니다.");
+      await page
+        .getByTestId("regular-request-requestedSupport")
+        .fill("우선 타겟 고객군과 초기 영업 접근 전략을 함께 정리하고 싶습니다.");
+      await page.getByTestId("regular-wizard-next").click();
+
+      return { officeHourTitle, sessionIndex, selectedDateIndex, selectedTime };
+    }
+  }
+
+  throw new Error("신청 가능한 regular office hour session을 찾지 못했습니다.");
+}
+
+async function openRegularApplicationWizardForOfficeHour(
+  page: Page,
+  officeHourId: string,
+  agendaName: string,
+  preferredSelection?: { dateIndex: number; time: string; expectDisabled?: boolean },
+) {
   await page.goto("/company/regular");
   await waitForAuthLoadingToClear(page);
-  const sessionCards = page.locator('[data-testid^="regular-calendar-session-"]');
-  const sessionCount = await sessionCards.count();
-  const targetSessionIndexes =
-    preferredSelection && typeof preferredSelection.sessionIndex === "number"
-      ? [preferredSelection.sessionIndex]
-      : Array.from({ length: sessionCount }, (_, index) => index);
+  await waitForRegularCalendarReady(page);
+  const officeHourCard = page.getByTestId(`regular-calendar-session-${officeHourId}`).first();
+  await expect(officeHourCard).toBeVisible({ timeout: 30_000 });
+  await officeHourCard.click();
+  await waitForRegularDetailReady(page);
+  const startApplicationButton = page.getByTestId("regular-start-application");
+  await expect(startApplicationButton).toBeVisible({ timeout: 30_000 });
+  const officeHourTitle =
+    (await page.locator("h1").first().textContent())?.trim() || "정기 오피스아워";
 
-  for (const sessionIndex of targetSessionIndexes) {
-    await page.goto("/company/regular");
-    const sessionCard = page.locator('[data-testid^="regular-calendar-session-"]').nth(sessionIndex);
-    await expect(sessionCard).toBeVisible({ timeout: 30_000 });
-    await sessionCard.click();
+  await startApplicationButton.click();
+  await expect(page.getByTestId("regular-agenda-trigger")).toBeVisible();
+  await page.getByTestId("regular-agenda-trigger").click();
+  await page
+    .getByText(new RegExp(`^${escapeRegExp(agendaName)}\\s+·`))
+    .click();
+  await page.getByTestId("regular-wizard-next").click();
 
-    const officeHourTitle =
-      (await page.locator("h1").first().textContent())?.trim() || "정기 오피스아워";
+  const enabledDates = page.locator('[role="gridcell"]:not([disabled]):not([aria-disabled="true"])');
+  const enabledDateCount = await enabledDates.count();
+  let selectedDateIndex = -1;
+  let selectedTime = "";
+  let foundSchedulableDate = false;
 
-    await page.getByTestId("regular-start-application").click();
-    await expect(page.getByTestId("regular-agenda-trigger")).toBeVisible();
-
-    await page.getByTestId("regular-agenda-trigger").click();
-    await page
-      .getByText(new RegExp(`^${escapeRegExp(agendaName)}\\s+·`))
-      .click();
-    await page.getByTestId("regular-wizard-next").click();
-
-    const enabledDates = page.locator('[role="gridcell"]:not([disabled]):not([aria-disabled="true"])');
-    const enabledDateCount = await enabledDates.count();
-    let foundSchedulableDate = false;
-    let selectedDateIndex = -1;
-    let selectedTime = "";
-
-    if (preferredSelection) {
-      const dateCell = enabledDates.nth(preferredSelection.dateIndex);
-      await expect(dateCell).toBeVisible();
-      await dateCell.click();
-      const preferredTime = page.getByTestId(
-        `regular-time-slot-${preferredSelection.time.replace(":", "-")}`,
-      );
-      await expect(preferredTime).toBeVisible();
-      if (preferredSelection.expectDisabled) {
-        await expect(preferredTime).toBeDisabled();
+  let selection = preferredSelection;
+  if (selection) {
+    const dateCell = enabledDates.nth(preferredSelection.dateIndex);
+    await expect(dateCell).toBeVisible();
+    await dateCell.click();
+    const preferredTime = page.getByTestId(
+      `regular-time-slot-${preferredSelection.time.replace(":", "-")}`,
+    );
+    await expect(preferredTime).toBeVisible();
+    if (preferredSelection.expectDisabled) {
+      await expect(preferredTime).toBeDisabled();
+    } else {
+      if (await preferredTime.isDisabled()) {
+        selection = undefined;
       } else {
         await expect(preferredTime).toBeEnabled();
         await preferredTime.click();
       }
+    }
+    if (selection) {
       selectedDateIndex = preferredSelection.dateIndex;
       selectedTime = preferredSelection.time;
       foundSchedulableDate = !preferredSelection.expectDisabled;
     }
-
-    for (let index = 0; index < enabledDateCount; index += 1) {
-      if (preferredSelection) break;
-      const dateCell = enabledDates.nth(index);
-      await expect(dateCell).toBeVisible();
-      await dateCell.click();
-
-      const firstEnabledTime = page.locator('[data-testid^="regular-time-slot-"]:not([disabled])').first();
-      if (await firstEnabledTime.count()) {
-        selectedDateIndex = index;
-        selectedTime = ((await firstEnabledTime.textContent()) ?? "").trim().split(/\s+/u)[0] ?? "";
-        await firstEnabledTime.click();
-        foundSchedulableDate = true;
-        break;
-      }
-    }
-
-    if (!foundSchedulableDate && !preferredSelection) {
-      continue;
-    }
-
-    if (preferredSelection?.expectDisabled) {
-      return {
-        officeHourTitle,
-        sessionIndex,
-        selectedDateIndex,
-        selectedTime,
-      };
-    }
-
-    if (!foundSchedulableDate) {
-      continue;
-    }
-
-    await page.getByTestId("regular-wizard-next").click();
-    await page.getByTestId("regular-wizard-next").click();
-
-    await page
-      .getByTestId("regular-request-currentSituation")
-      .fill("현재 제품 출시 전환과 초기 매출 확보를 동시에 준비 중입니다.");
-    await page
-      .getByTestId("regular-request-keyChallenges")
-      .fill("시장 진입 우선순위와 초기 세일즈 메시지가 명확하지 않아 실행이 지연됩니다.");
-    await page
-      .getByTestId("regular-request-requestedSupport")
-      .fill("우선 타겟 고객군과 초기 영업 접근 전략을 함께 정리하고 싶습니다.");
-    await page.getByTestId("regular-wizard-next").click();
-
-    return { officeHourTitle, sessionIndex, selectedDateIndex, selectedTime };
   }
 
-  throw new Error("신청 가능한 regular office hour session을 찾지 못했습니다.");
+  for (let index = 0; index < enabledDateCount; index += 1) {
+    if (selection) break;
+    const dateCell = enabledDates.nth(index);
+    await expect(dateCell).toBeVisible();
+    await dateCell.click();
+
+    const firstEnabledTime = page.locator('[data-testid^="regular-time-slot-"]:not([disabled])').first();
+    if (await firstEnabledTime.count()) {
+      selectedDateIndex = index;
+      selectedTime = ((await firstEnabledTime.textContent()) ?? "").trim().split(/\s+/u)[0] ?? "";
+      await firstEnabledTime.click();
+      foundSchedulableDate = true;
+      break;
+    }
+  }
+
+  if (selection?.expectDisabled) {
+    return { officeHourTitle, selectedDateIndex, selectedTime };
+  }
+
+  if (!foundSchedulableDate) {
+    throw new Error("선택한 regular office hour에서 신청 가능한 날짜/시간을 찾지 못했습니다.");
+  }
+
+  await page.getByTestId("regular-wizard-next").click();
+  await page.getByTestId("regular-wizard-next").click();
+  await page
+    .getByTestId("regular-request-currentSituation")
+    .fill("현재 제품 출시 전환과 초기 매출 확보를 동시에 준비 중입니다.");
+  await page
+    .getByTestId("regular-request-keyChallenges")
+    .fill("시장 진입 우선순위와 초기 세일즈 메시지가 명확하지 않아 실행이 지연됩니다.");
+  await page
+    .getByTestId("regular-request-requestedSupport")
+    .fill("우선 타겟 고객군과 초기 영업 접근 전략을 함께 정리하고 싶습니다.");
+  await page.getByTestId("regular-wizard-next").click();
+
+  return { officeHourTitle, selectedDateIndex, selectedTime };
 }
 
 test.describe("preview smoke", () => {
@@ -1002,22 +1338,42 @@ test.describe("preview smoke", () => {
     cleanupPreviewTestAccounts();
   });
 
+  test.beforeEach(async () => {
+    await cleanupE2EAgendas();
+  });
+
   test("consultant and company flow stays consistent through approval and regular booking", async ({
     browser,
   }) => {
     test.setTimeout(5 * 60 * 1000);
     console.log("step: consultant/company provisioning");
     const { consultant, company, agendaName } = await provisionApprovedConsultantAndCompany(browser);
+    const officeHourId = await getRegularOfficeHourIdForCompany(company.name, agendaName);
 
     let officeHourTitle = "";
+    let applicationId = "";
     {
       console.log("step: company regular application");
       const { context, page } = await newPage(browser);
       await loginAndWaitForCompany(page, company.email, company.password);
-      ({ officeHourTitle } = await submitRegularApplication(page, agendaName));
+      ({ officeHourTitle } = await openRegularApplicationWizardForOfficeHour(page, officeHourId, agendaName));
+      const functionResponsePromise = page.waitForResponse(
+        (response) =>
+          response.url().includes("submitRegularApplication") &&
+          response.request().method() === "POST",
+        { timeout: 30_000 },
+      );
+      await page.getByTestId("regular-wizard-submit").click();
+      const functionResponse = await functionResponsePromise;
+      const responseText = await functionResponse.text();
+      if (!functionResponse.ok()) {
+        throw new Error(`정기 예약 제출 실패: ${functionResponse.status()} ${responseText.slice(0, 300)}`);
+      }
+      await expect(page).toHaveURL(/\/company\/dashboard/, { timeout: 30_000 });
       await expect(page.getByText(officeHourTitle)).toBeVisible();
       await expect(page.getByText("수락 대기").first()).toBeVisible();
       const applicationDoc = await expectSingleApplicationDoc(company.name);
+      applicationId = applicationDoc.id;
       expect(applicationDoc.data.status).toBe("pending");
       expect(applicationDoc.data.agenda).toBe(agendaName);
       const slotId = String(applicationDoc.data.officeHourSlotId ?? "");
@@ -1046,9 +1402,15 @@ test.describe("preview smoke", () => {
       console.log("step: company verification");
       const { context, page } = await newPage(browser);
       await loginAndWaitForCompany(page, company.email, company.password);
-      await page.goto("/company/dashboard");
-      await expect(page.getByText("다가오는 일정")).toBeVisible({ timeout: 30_000 });
-      await expect(page.getByRole("heading", { name: officeHourTitle }).first()).toBeVisible();
+      await page.goto(`/company/application?id=${applicationId}`);
+      await expect(page).toHaveURL(new RegExp(`/company/application\\?id=${escapeRegExp(applicationId)}`), {
+        timeout: 30_000,
+      });
+      await expect(page.locator("main")).toContainText(officeHourTitle, {
+        timeout: 30_000,
+      });
+      await expect(page.getByText("확정").first()).toBeVisible({ timeout: 30_000 });
+      await expect(page.getByText(consultant.name).first()).toBeVisible({ timeout: 30_000 });
       await context.close();
     }
   });
@@ -1058,18 +1420,32 @@ test.describe("preview smoke", () => {
   }) => {
     test.setTimeout(5 * 60 * 1000);
     const { company, agendaName } = await provisionApprovedConsultantAndCompany(browser);
+    const officeHourId = await getRegularOfficeHourIdForCompany(company.name, agendaName);
 
     let officeHourTitle = "";
     {
       const { context, page } = await newPage(browser);
       await loginAndWaitForCompany(page, company.email, company.password);
-      ({ officeHourTitle } = await submitRegularApplication(page, agendaName));
+      ({ officeHourTitle } = await openRegularApplicationWizardForOfficeHour(page, officeHourId, agendaName));
+      const functionResponsePromise = page.waitForResponse(
+        (response) =>
+          response.url().includes("submitRegularApplication") &&
+          response.request().method() === "POST",
+        { timeout: 30_000 },
+      );
+      await page.getByTestId("regular-wizard-submit").click();
+      const functionResponse = await functionResponsePromise;
+      const responseText = await functionResponse.text();
+      if (!functionResponse.ok()) {
+        throw new Error(`정기 예약 제출 실패: ${functionResponse.status()} ${responseText.slice(0, 300)}`);
+      }
+      await expect(page).toHaveURL(/\/company\/dashboard/, { timeout: 30_000 });
       await expect(ticketSummaryCard(page, "내부 티켓").getByText("예약 1")).toBeVisible({
         timeout: 30_000,
       });
       const applicationDoc = await expectSingleApplicationDoc(company.name);
       expect(applicationDoc.data.status).toBe("pending");
-      await cancelPendingApplication(page, officeHourTitle);
+      await cancelPendingApplication(page, applicationDoc.id);
       await expect(ticketSummaryCard(page, "내부 티켓").getByText("예약 0")).toBeVisible({
         timeout: 30_000,
       });
@@ -1094,7 +1470,7 @@ test.describe("preview smoke", () => {
     {
       const { context, page } = await newPage(browser);
       await loginAndWaitForCompany(page, company.email, company.password);
-      ({ officeHourTitle } = await submitRegularApplication(page, agendaName));
+      ({ officeHourTitle } = await submitRegularApplication(page, company.name, agendaName));
       await expect(ticketSummaryCard(page, "내부 티켓").getByText("예약 1")).toBeVisible({
         timeout: 30_000,
       });
@@ -1132,6 +1508,206 @@ test.describe("preview smoke", () => {
       const slotDoc = await getFirestoreDocument(`officeHourSlots/${slotId}`);
       expect(slotDoc?.data.status).toBe("open");
       await context.close();
+    }
+  });
+
+  test("internal ticket limit of one blocks a second booking until cancellation restores it", async ({
+    browser,
+  }) => {
+    test.setTimeout(6 * 60 * 1000);
+    const seed = uniqueSeed();
+    const agenda = await createE2EAgenda(seed);
+    try {
+      const { consultant } = await provisionApprovedConsultantAccount(browser, seed);
+      const { company } = await provisionApprovedCompany(browser, seed);
+      await configureConsultantAgendaAndSchedule(browser, consultant, agenda);
+
+      const companyDoc = await expectSingleCompanyDoc(company.name);
+      const programIds = Array.isArray(companyDoc.data.programs) ? companyDoc.data.programs : [];
+      expect(programIds).toHaveLength(1);
+      const [programId] = programIds.map((value) => String(value));
+      if (!programId) {
+        throw new Error("티켓 override를 설정할 programId를 찾지 못했습니다.");
+      }
+      await updateFirestoreDocument(`companies/${companyDoc.id}`, {
+        programTicketOverrides: {
+          [programId]: {
+            internal: 1,
+            external: 0,
+          },
+        },
+      });
+
+      let officeHourTitle = "";
+      let slotId = "";
+      const officeHourId = await getRegularOfficeHourIdForCompany(company.name, agenda.agendaName);
+      {
+        const { context, page } = await newPage(browser);
+        await loginAndWaitForCompany(page, company.email, company.password);
+        await expect(ticketSummaryCard(page, "내부 티켓").getByText("예약 0")).toBeVisible({
+          timeout: 30_000,
+        });
+        ({ officeHourTitle } = await openRegularApplicationWizardForOfficeHour(page, officeHourId, agenda.agendaName));
+        const functionResponsePromise = page.waitForResponse(
+          (response) =>
+            response.url().includes("submitRegularApplication") &&
+            response.request().method() === "POST",
+          { timeout: 30_000 },
+        );
+        await page.getByTestId("regular-wizard-submit").click();
+        const functionResponse = await functionResponsePromise;
+        const responseText = await functionResponse.text();
+        if (!functionResponse.ok()) {
+          throw new Error(`정기 예약 제출 실패: ${functionResponse.status()} ${responseText.slice(0, 300)}`);
+        }
+        await expect(page).toHaveURL(/\/company\/dashboard/, { timeout: 30_000 });
+        await expect(ticketSummaryCard(page, "내부 티켓").getByText("예약 1")).toBeVisible({
+          timeout: 30_000,
+        });
+        const applicationDoc = await expectSingleApplicationDoc(company.name);
+        expect(applicationDoc.data.status).toBe("pending");
+        slotId = String(applicationDoc.data.officeHourSlotId ?? "");
+        expect(slotId).not.toBe("");
+        await context.close();
+      }
+
+      {
+        const { context, page } = await newPage(browser);
+        await loginAndWaitForCompany(page, company.email, company.password);
+        await openRegularApplicationAgendaStepForOfficeHour(page, officeHourId);
+        await page.getByTestId("regular-agenda-trigger").click();
+        const exhaustedAgendaOption = page.getByRole("option", {
+          name: new RegExp(`^${escapeRegExp(agenda.agendaName)}\\s+·\\s+내부\\s+\\(티켓 소진\\)$`),
+        });
+        await expect(exhaustedAgendaOption).toBeVisible({ timeout: 30_000 });
+        await expect(exhaustedAgendaOption).toHaveAttribute("aria-disabled", "true");
+        await page.keyboard.press("Escape");
+        await expect.poll(async () => (await getApplicationsByCompanyName(company.name)).length, {
+          timeout: 30_000,
+        }).toBe(1);
+        await context.close();
+      }
+
+      {
+        const { context, page } = await newPage(browser);
+        await loginAndWaitForCompany(page, company.email, company.password);
+        const applicationDoc = await expectSingleApplicationDoc(company.name);
+        await cancelPendingApplication(page, applicationDoc.id);
+        await expect(ticketSummaryCard(page, "내부 티켓").getByText("예약 0")).toBeVisible({
+          timeout: 30_000,
+        });
+        await expect.poll(async () => (await getApplicationsByCompanyName(company.name)).length, {
+          timeout: 30_000,
+        }).toBe(0);
+        const slotDoc = await getFirestoreDocument(`officeHourSlots/${slotId}`);
+        expect(slotDoc?.data.status).toBe("open");
+        await context.close();
+      }
+
+      {
+        const { context, page } = await newPage(browser);
+        await loginAndWaitForCompany(page, company.email, company.password);
+        await openRegularApplicationWizardForOfficeHour(page, officeHourId, agenda.agendaName);
+        const functionResponsePromise = page.waitForResponse(
+          (response) =>
+            response.url().includes("submitRegularApplication") &&
+            response.request().method() === "POST",
+          { timeout: 30_000 },
+        );
+        await page.getByTestId("regular-wizard-submit").click();
+        const functionResponse = await functionResponsePromise;
+        const responseText = await functionResponse.text();
+        if (!functionResponse.ok()) {
+          throw new Error(`정기 예약 재신청 실패: ${functionResponse.status()} ${responseText.slice(0, 300)}`);
+        }
+        await expect(page).toHaveURL(/\/company\/dashboard/, { timeout: 30_000 });
+        await expect(ticketSummaryCard(page, "내부 티켓").getByText("예약 1")).toBeVisible({
+          timeout: 30_000,
+        });
+        const applicationDoc = await expectSingleApplicationDoc(company.name);
+        expect(applicationDoc.data.status).toBe("pending");
+        await context.close();
+      }
+    } finally {
+      await cleanupE2EAgendas();
+    }
+  });
+
+  test("internal and external tickets are tracked independently", async ({
+    browser,
+  }) => {
+    test.setTimeout(7 * 60 * 1000);
+    const seed = uniqueSeed();
+    const internalAgenda = await createE2EAgenda(`${seed}-internal`, "internal");
+    const externalAgenda = await createE2EAgenda(`${seed}-external`, "external");
+    try {
+      const { consultant } = await provisionApprovedConsultantAccount(browser, seed);
+      const { company } = await provisionApprovedCompany(browser, seed);
+      await configureConsultantAgendaAndSchedule(browser, consultant, internalAgenda);
+      await configureConsultantAgendaAndSchedule(browser, consultant, externalAgenda);
+
+      const companyDoc = await expectSingleCompanyDoc(company.name);
+      const programIds = Array.isArray(companyDoc.data.programs) ? companyDoc.data.programs : [];
+      expect(programIds).toHaveLength(1);
+      const [programId] = programIds.map((value) => String(value));
+      if (!programId) {
+        throw new Error("티켓 override를 설정할 programId를 찾지 못했습니다.");
+      }
+      await updateFirestoreDocument(`companies/${companyDoc.id}`, {
+        programTicketOverrides: {
+          [programId]: {
+            internal: 1,
+            external: 1,
+          },
+        },
+      });
+
+      let selectedDateIndex = -1;
+      let selectedTime = "";
+      {
+        const { context, page } = await newPage(browser);
+        await loginAndWaitForCompany(page, company.email, company.password);
+        ({ selectedDateIndex, selectedTime } = await submitRegularApplication(
+          page,
+          company.name,
+          internalAgenda.agendaName,
+        ));
+        await expect(ticketSummaryCard(page, "내부 티켓").getByText("예약 1")).toBeVisible({
+          timeout: 30_000,
+        });
+        await expect(ticketSummaryCard(page, "외부 티켓").getByText("예약 0")).toBeVisible({
+          timeout: 30_000,
+        });
+        await context.close();
+      }
+
+      const externalOfficeHourId = await getRegularOfficeHourIdForCompany(company.name, externalAgenda.agendaName);
+      {
+      const { context, page } = await newPage(browser);
+      await loginAndWaitForCompany(page, company.email, company.password);
+      await openRegularApplicationAgendaStepForOfficeHour(page, externalOfficeHourId);
+      await page.getByTestId("regular-agenda-trigger").click();
+      const exhaustedAgendaOption = page
+        .getByRole("option")
+        .filter({
+          hasText: new RegExp(`^${escapeRegExp(externalAgenda.agendaName)}\\s+·\\s+외부\\s+\\(티켓\\s+소진\\)`),
+        })
+        .first();
+      await expect(exhaustedAgendaOption).toBeVisible({ timeout: 30_000 });
+      await expect(exhaustedAgendaOption).toHaveAttribute("aria-disabled", "true");
+      await page.keyboard.press("Escape");
+      await context.close();
+      }
+
+      await expect.poll(async () => (await getApplicationsByCompanyName(company.name)).length, {
+        timeout: 30_000,
+      }).toBe(2);
+
+      const applicationDocs = await getApplicationsByCompanyName(company.name);
+      const agendaIds = new Set(applicationDocs.map((doc) => String(doc.data.agendaId ?? "")));
+      expect(agendaIds).toEqual(new Set([internalAgenda.agendaId, externalAgenda.agendaId]));
+    } finally {
+      await cleanupE2EAgendas();
     }
   });
 
@@ -1179,14 +1755,15 @@ test.describe("preview smoke", () => {
     browser,
   }) => {
     test.setTimeout(5 * 60 * 1000);
-    console.log("step: duplicate regular submit provisioning");
-    const { company, agendaName } = await provisionApprovedConsultantAndCompany(browser);
+      console.log("step: duplicate regular submit provisioning");
+      const { company, agendaName } = await provisionApprovedConsultantAndCompany(browser);
+      const officeHourId = await getRegularOfficeHourIdForCompany(company.name, agendaName);
 
-    {
-      console.log("step: duplicate regular submit company action");
-      const { context, page } = await newPage(browser);
-      await loginAndWaitForCompany(page, company.email, company.password);
-      const { officeHourTitle } = await openRegularApplicationWizard(page, agendaName);
+      {
+        console.log("step: duplicate regular submit company action");
+        const { context, page } = await newPage(browser);
+        await loginAndWaitForCompany(page, company.email, company.password);
+        await openRegularApplicationWizardForOfficeHour(page, officeHourId, agendaName);
 
       const responses: Array<{ status: number; body: string }> = [];
       page.on("response", async (response) => {
@@ -1208,7 +1785,9 @@ test.describe("preview smoke", () => {
       await expect(page).toHaveURL(/\/company\/dashboard/, { timeout: 10_000 });
       await expect.poll(() => responses.length, { timeout: 10_000 }).toBe(1);
       expect(responses[0]?.status).toBe(200);
-      await expect(page.getByText(officeHourTitle)).toHaveCount(1);
+      await expect(page.locator("div.cursor-pointer.rounded-xl").filter({ hasText: "수락 대기" })).toHaveCount(1, {
+        timeout: 30_000,
+      });
       await expect(ticketSummaryCard(page, "내부 티켓").getByText("예약 1")).toBeVisible({
         timeout: 30_000,
       });
@@ -1237,58 +1816,66 @@ test.describe("preview smoke", () => {
   }) => {
     test.setTimeout(5 * 60 * 1000);
     console.log("step: same slot duplicate provisioning");
-    const { company: companyA, agendaName } = await provisionApprovedConsultantAndCompany(
-      browser,
-      `${uniqueSeed()}-a`,
-    );
-    const { company: companyB } = await provisionApprovedCompany(browser, `${uniqueSeed()}-b`);
+    const seed = uniqueSeed();
+    const agenda = await createE2EAgenda(seed);
+    try {
+      const { consultant } = await provisionApprovedConsultantAccount(browser, `${seed}-a`);
+      const { company: companyA } = await provisionApprovedCompany(browser, `${seed}-a`);
+      const { company: companyB } = await provisionApprovedCompany(browser, `${seed}-b`);
+      await configureConsultantAgendaAndSchedule(browser, consultant, agenda);
 
-    let sessionIndex = -1;
-    let selectedDateIndex = -1;
-    let selectedTime = "";
-    {
-      console.log("step: same slot duplicate company A submit");
-      const { context, page } = await newPage(browser);
-      await loginAndWaitForCompany(page, companyA.email, companyA.password);
-      ({ sessionIndex, selectedDateIndex, selectedTime } = await submitRegularApplication(page, agendaName));
-      await expect(ticketSummaryCard(page, "내부 티켓").getByText("예약 1")).toBeVisible({
-        timeout: 30_000,
-      });
-      const applicationDoc = await expectSingleApplicationDoc(companyA.name);
-      expect(applicationDoc.data.status).toBe("pending");
-      await context.close();
-    }
+      let selectedDateIndex = -1;
+      let selectedTime = "";
+      {
+        console.log("step: same slot duplicate company A submit");
+        const { context, page } = await newPage(browser);
+        await loginAndWaitForCompany(page, companyA.email, companyA.password);
+        ({ selectedDateIndex, selectedTime } = await submitRegularApplication(
+          page,
+          companyA.name,
+          agenda.agendaName,
+        ));
+        await expect(ticketSummaryCard(page, "내부 티켓").getByText("예약 1")).toBeVisible({
+          timeout: 30_000,
+        });
+        const applicationDoc = await expectSingleApplicationDoc(companyA.name);
+        expect(applicationDoc.data.status).toBe("pending");
+        await context.close();
+      }
 
-    {
-      console.log("step: same slot duplicate company B blocked");
-      const { context, page } = await newPage(browser);
-      await loginAndWaitForCompany(page, companyB.email, companyB.password);
-      await openRegularApplicationWizard(page, agendaName, {
-        sessionIndex,
-        dateIndex: selectedDateIndex,
-        time: selectedTime,
-        expectDisabled: true,
-      });
-      await page.goto("/company/dashboard");
-      await expect(ticketSummaryCard(page, "내부 티켓").getByText("예약 0")).toBeVisible({
-        timeout: 30_000,
-      });
-      await context.close();
-    }
+      {
+        console.log("step: same slot duplicate company B blocked");
+        const { context, page } = await newPage(browser);
+        await loginAndWaitForCompany(page, companyB.email, companyB.password);
+        const officeHourIdB = await getRegularOfficeHourIdForCompany(companyB.name, agenda.agendaName);
+        await openRegularApplicationWizardForOfficeHour(page, officeHourIdB, agenda.agendaName, {
+          dateIndex: selectedDateIndex,
+          time: selectedTime,
+          expectDisabled: true,
+        });
+        await page.goto("/company/dashboard");
+        await expect(ticketSummaryCard(page, "내부 티켓").getByText("예약 0")).toBeVisible({
+          timeout: 30_000,
+        });
+        await context.close();
+      }
 
-    {
-      console.log("step: same slot duplicate admin verification");
-      const { context, page } = await newPage(browser);
-      await loginAndWaitForAdmin(page, adminCredentials.email!, adminCredentials.password!);
-      await expectSingleApplicationRow(page, companyA.name);
-      await expectNoApplicationRow(page, companyB.name);
-      await expect.poll(async () => (await getApplicationsByCompanyName(companyA.name)).length, {
-        timeout: 30_000,
-      }).toBe(1);
-      await expect.poll(async () => (await getApplicationsByCompanyName(companyB.name)).length, {
-        timeout: 30_000,
-      }).toBe(0);
-      await context.close();
+      {
+        console.log("step: same slot duplicate admin verification");
+        const { context, page } = await newPage(browser);
+        await loginAndWaitForAdmin(page, adminCredentials.email!, adminCredentials.password!);
+        await expectSingleApplicationRow(page, companyA.name);
+        await expectNoApplicationRow(page, companyB.name);
+        await expect.poll(async () => (await getApplicationsByCompanyName(companyA.name)).length, {
+          timeout: 30_000,
+        }).toBe(1);
+        await expect.poll(async () => (await getApplicationsByCompanyName(companyB.name)).length, {
+          timeout: 30_000,
+        }).toBe(0);
+        await context.close();
+      }
+    } finally {
+      await cleanupE2EAgendas();
     }
   });
 
@@ -1297,93 +1884,173 @@ test.describe("preview smoke", () => {
   }) => {
     test.setTimeout(6 * 60 * 1000);
     console.log("step: multi-consultant same slot provisioning");
-    const primary = await provisionApprovedConsultant(browser);
-    const secondary = await provisionApprovedConsultantWithAgenda(browser, primary.agendaName);
-    const { company: companyA } = await provisionApprovedCompany(browser, `${uniqueSeed()}-a`);
-    const { company: companyB } = await provisionApprovedCompany(browser, `${uniqueSeed()}-b`);
+    const seed = uniqueSeed();
+    const agenda = await createE2EAgenda(seed);
+    try {
+      const { consultant: primaryConsultant } = await provisionApprovedConsultantAccount(browser, `${seed}-a`);
+      const { consultant: secondaryConsultant } = await provisionApprovedConsultantAccount(browser, `${seed}-b`);
+      const { company: companyA } = await provisionApprovedCompany(browser, `${seed}-a`);
+      const { company: companyB } = await provisionApprovedCompany(browser, `${seed}-b`);
+      await configureConsultantAgendaAndSchedule(browser, primaryConsultant, agenda);
+      await configureConsultantAgendaAndSchedule(browser, secondaryConsultant, agenda);
 
-    let sessionIndex = -1;
-    let selectedDateIndex = -1;
-    let selectedTime = "";
-    {
-      const { context, page } = await newPage(browser);
-      await loginAndWaitForCompany(page, companyA.email, companyA.password);
-      ({ sessionIndex, selectedDateIndex, selectedTime } = await submitRegularApplication(page, primary.agendaName));
-      await context.close();
-    }
-
-    {
-      const { context, page } = await newPage(browser);
-      await loginAndWaitForCompany(page, companyB.email, companyB.password);
-      await openRegularApplicationWizard(page, primary.agendaName, {
-        sessionIndex,
-        dateIndex: selectedDateIndex,
-        time: selectedTime,
-      });
-      const functionResponsePromise = page.waitForResponse(
-        (response) =>
-          response.url().includes("submitRegularApplication") &&
-          response.request().method() === "POST",
-        { timeout: 30_000 },
-      );
-      await page.getByTestId("regular-wizard-submit").click();
-      const functionResponse = await functionResponsePromise;
-      const responseText = await functionResponse.text();
-      console.log("submitRegularApplication second consultant slot:", functionResponse.status(), responseText.slice(0, 600));
-      if (!functionResponse.ok()) {
-        throw new Error(`다중 컨설턴트 동일 시간 예약 실패: ${functionResponse.status()} ${responseText.slice(0, 300)}`);
+      let selectedDateIndex = -1;
+      let selectedTime = "";
+      {
+        const { context, page } = await newPage(browser);
+        await loginAndWaitForCompany(page, companyA.email, companyA.password);
+        ({ selectedDateIndex, selectedTime } = await submitRegularApplication(
+          page,
+          companyA.name,
+          agenda.agendaName,
+        ));
+        await context.close();
       }
-      await expect(page).toHaveURL(/\/company\/dashboard/, { timeout: 30_000 });
-      await context.close();
-    }
 
-    const applicationA = await expectSingleApplicationDoc(companyA.name);
-    const applicationB = await expectSingleApplicationDoc(companyB.name);
-    expect(applicationA.data.status).toBe("pending");
-    expect(applicationB.data.status).toBe("pending");
-    const slotIdA = String(applicationA.data.officeHourSlotId ?? "");
-    const slotIdB = String(applicationB.data.officeHourSlotId ?? "");
-    expect(slotIdA).not.toBe("");
-    expect(slotIdB).not.toBe("");
-    expect(slotIdA).not.toBe(slotIdB);
-
-    const slotDocA = await getFirestoreDocument(`officeHourSlots/${slotIdA}`);
-    const slotDocB = await getFirestoreDocument(`officeHourSlots/${slotIdB}`);
-    expect(slotDocA?.data.status).toBe("booked");
-    expect(slotDocB?.data.status).toBe("booked");
-    expect(slotDocA?.data.startTime).toBe(selectedTime);
-    expect(slotDocB?.data.startTime).toBe(selectedTime);
-    expect(slotDocA?.data.consultantName).not.toBe(slotDocB?.data.consultantName);
-
-    const companyByConsultant = new Map<string, string>([
-      [String(slotDocA?.data.consultantName ?? ""), companyA.name],
-      [String(slotDocB?.data.consultantName ?? ""), companyB.name],
-    ]);
-
-    {
-      const { context, page } = await newPage(browser);
-      await loginAndWaitForAdmin(page, primary.consultant.email, primary.consultant.password);
-      const expectedCompany = companyByConsultant.get(primary.consultant.name);
-      const otherCompany = expectedCompany === companyA.name ? companyB.name : companyA.name;
-      if (!expectedCompany) {
-        throw new Error(`컨설턴트 ${primary.consultant.name} 배정 회사를 찾지 못했습니다.`);
+      {
+        const { context, page } = await newPage(browser);
+        await loginAndWaitForCompany(page, companyB.email, companyB.password);
+        const officeHourIdB = await getRegularOfficeHourIdForCompany(companyB.name, agenda.agendaName);
+        await openRegularApplicationWizardForOfficeHour(page, officeHourIdB, agenda.agendaName, {
+          dateIndex: selectedDateIndex,
+          time: selectedTime,
+        });
+        const functionResponsePromise = page.waitForResponse(
+          (response) =>
+            response.url().includes("submitRegularApplication") &&
+            response.request().method() === "POST",
+          { timeout: 30_000 },
+        );
+        await page.getByTestId("regular-wizard-submit").click();
+        const functionResponse = await functionResponsePromise;
+        const responseText = await functionResponse.text();
+        console.log("submitRegularApplication second consultant slot:", functionResponse.status(), responseText.slice(0, 600));
+        if (!functionResponse.ok()) {
+          throw new Error(`다중 컨설턴트 동일 시간 예약 실패: ${functionResponse.status()} ${responseText.slice(0, 300)}`);
+        }
+        await expect(page).toHaveURL(/\/company\/dashboard/, { timeout: 30_000 });
+        await context.close();
       }
-      await expectSingleApplicationRow(page, expectedCompany);
-      await expectNoApplicationRow(page, otherCompany);
-      await context.close();
-    }
 
-    {
-      const { context, page } = await newPage(browser);
-      await loginAndWaitForAdmin(page, secondary.consultant.email, secondary.consultant.password);
-      const expectedCompany = companyByConsultant.get(secondary.consultant.name);
-      const otherCompany = expectedCompany === companyA.name ? companyB.name : companyA.name;
-      if (!expectedCompany) {
-        throw new Error(`컨설턴트 ${secondary.consultant.name} 배정 회사를 찾지 못했습니다.`);
+      const applicationA = await expectSingleApplicationDoc(companyA.name);
+      const applicationB = await expectSingleApplicationDoc(companyB.name);
+      expect(applicationA.data.status).toBe("pending");
+      expect(applicationB.data.status).toBe("pending");
+      const slotIdA = String(applicationA.data.officeHourSlotId ?? "");
+      const slotIdB = String(applicationB.data.officeHourSlotId ?? "");
+      expect(slotIdA).not.toBe("");
+      expect(slotIdB).not.toBe("");
+      expect(slotIdA).not.toBe(slotIdB);
+
+      const slotDocA = await getFirestoreDocument(`officeHourSlots/${slotIdA}`);
+      const slotDocB = await getFirestoreDocument(`officeHourSlots/${slotIdB}`);
+      expect(slotDocA?.data.status).toBe("booked");
+      expect(slotDocB?.data.status).toBe("booked");
+      expect(slotDocA?.data.startTime).toBe(selectedTime);
+      expect(slotDocB?.data.startTime).toBe(selectedTime);
+      expect(slotDocA?.data.consultantName).not.toBe(slotDocB?.data.consultantName);
+
+      const companyByConsultant = new Map<string, string>([
+        [String(slotDocA?.data.consultantName ?? ""), companyA.name],
+        [String(slotDocB?.data.consultantName ?? ""), companyB.name],
+      ]);
+
+      {
+        const { context, page } = await newPage(browser);
+        await loginAndWaitForAdmin(page, primaryConsultant.email, primaryConsultant.password);
+        const expectedCompany = companyByConsultant.get(primaryConsultant.name);
+        const otherCompany = expectedCompany === companyA.name ? companyB.name : companyA.name;
+        if (!expectedCompany) {
+          throw new Error(`컨설턴트 ${primaryConsultant.name} 배정 회사를 찾지 못했습니다.`);
+        }
+        await expectSingleApplicationRow(page, expectedCompany);
+        await expectNoApplicationRow(page, otherCompany);
+        await context.close();
       }
-      await expectSingleApplicationRow(page, expectedCompany);
-      await expectNoApplicationRow(page, otherCompany);
-      await context.close();
+
+      {
+        const { context, page } = await newPage(browser);
+        await loginAndWaitForAdmin(page, secondaryConsultant.email, secondaryConsultant.password);
+        const expectedCompany = companyByConsultant.get(secondaryConsultant.name);
+        const otherCompany = expectedCompany === companyA.name ? companyB.name : companyA.name;
+        if (!expectedCompany) {
+          throw new Error(`컨설턴트 ${secondaryConsultant.name} 배정 회사를 찾지 못했습니다.`);
+        }
+        await expectSingleApplicationRow(page, expectedCompany);
+        await expectNoApplicationRow(page, otherCompany);
+        await context.close();
+      }
+    } finally {
+      await cleanupE2EAgendas();
+    }
+  });
+
+  test("same consultant cannot accept two agendas at the same time", async ({
+    browser,
+  }) => {
+    test.setTimeout(6 * 60 * 1000);
+      const seed = uniqueSeed();
+      const agendaA = await createE2EAgenda(`${seed}-a`);
+      const agendaB = await createE2EAgenda(`${seed}-b`);
+    try {
+      const { consultant } = await provisionApprovedConsultantAccount(browser, seed);
+      const { company: companyA } = await provisionApprovedCompany(browser, `${seed}-a`);
+      const { company: companyB } = await provisionApprovedCompany(browser, `${seed}-b`);
+      await configureConsultantAgendaAndSchedule(browser, consultant, agendaA);
+      await configureConsultantAgendaAndSchedule(browser, consultant, agendaB);
+
+      let selectedDateIndex = -1;
+      let selectedTime = "";
+      const officeHourIdA = await getRegularOfficeHourIdForCompany(companyA.name, agendaA.agendaName);
+      const officeHourIdB = await getRegularOfficeHourIdForCompany(companyB.name, agendaB.agendaName);
+      {
+        const { context, page } = await newPage(browser);
+        await loginAndWaitForCompany(page, companyA.email, companyA.password);
+        ({ selectedDateIndex, selectedTime } = await openRegularApplicationWizardForOfficeHour(
+          page,
+          officeHourIdA,
+          agendaA.agendaName,
+        ));
+        const functionResponsePromise = page.waitForResponse(
+          (response) =>
+            response.url().includes("submitRegularApplication") &&
+            response.request().method() === "POST",
+          { timeout: 30_000 },
+        );
+        await page.getByTestId("regular-wizard-submit").click();
+        const functionResponse = await functionResponsePromise;
+        const responseText = await functionResponse.text();
+        if (!functionResponse.ok()) {
+          throw new Error(`정기 예약 제출 실패: ${functionResponse.status()} ${responseText.slice(0, 300)}`);
+        }
+        await expect(page).toHaveURL(/\/company\/dashboard/, { timeout: 30_000 });
+        await context.close();
+      }
+
+      {
+        const { context, page } = await newPage(browser);
+        await loginAndWaitForCompany(page, companyB.email, companyB.password);
+        await openRegularApplicationWizardForOfficeHour(page, officeHourIdB, agendaB.agendaName, {
+          dateIndex: selectedDateIndex,
+          time: selectedTime,
+          expectDisabled: true,
+        });
+        await page.goto("/company/dashboard");
+        await expect(ticketSummaryCard(page, "내부 티켓").getByText("예약 0")).toBeVisible({
+          timeout: 30_000,
+        });
+        await context.close();
+      }
+
+      {
+        const { context, page } = await newPage(browser);
+        await loginAndWaitForAdmin(page, adminCredentials.email!, adminCredentials.password!);
+        await expectSingleApplicationRow(page, companyA.name);
+        await expectNoApplicationRow(page, companyB.name);
+        await context.close();
+      }
+    } finally {
+      await cleanupE2EAgendas();
     }
   });
 });

@@ -5,6 +5,7 @@ import { useAuth } from "@/context/AuthContext"
 import { signOutUser } from "@/firebase/auth"
 import type { Role } from "@/types/auth"
 import { toast } from "sonner"
+import { PENDING_REQUEST_FLAG, PENDING_SIGNUP_KEY } from "@/constants/signup"
 
 function getSignupErrorMessage(error: any) {
   const code = error?.code ?? ""
@@ -28,8 +29,6 @@ type PendingSignupDraft = {
   password?: string
 }
 
-const PENDING_SIGNUP_KEY = "pending-signup"
-
 export function SignupPage() {
   const [role, setRole] = useState<Role>("company")
   const [loadingEmail, setLoadingEmail] = useState(false)
@@ -49,13 +48,14 @@ export function SignupPage() {
       )
       return
     }
+
     if (profile?.active === false || signupRequest) {
-      navigate(`/pending?role=${signupRequest?.requestedRole ?? signupRequest?.role ?? profile?.requestedRole ?? profile?.role}`, {
-        replace: true,
+      sessionStorage.removeItem(PENDING_REQUEST_FLAG)
+      sessionStorage.removeItem(PENDING_SIGNUP_KEY)
+      void signOutUser().catch(() => {
+        // ignore sign-out errors and keep the signup form accessible
       })
-      return
     }
-    if (!profile) return
   }, [loading, navigate, profile, signupRequest, user])
 
   function savePendingSignup(payload: PendingSignupDraft) {

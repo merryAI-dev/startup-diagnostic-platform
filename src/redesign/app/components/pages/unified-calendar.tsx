@@ -81,6 +81,13 @@ function parseLocalDateKey(value?: string): Date | null {
   return Number.isNaN(fallback.getTime()) ? null : fallback;
 }
 
+function normalizeConsultantDisplayName(value?: string | null): string {
+  return (value ?? "")
+    .replace(/\s*컨설턴트\s*$/u, "")
+    .trim()
+    .toLowerCase();
+}
+
 function toEventDateKey(value?: string | Date): string | null {
   if (!value) return null;
   if (value instanceof Date) {
@@ -97,13 +104,6 @@ function normalizeTimeKey(value?: string): string {
   const minute = Number(minuteRaw);
   if (Number.isNaN(hour) || Number.isNaN(minute)) return value.trim();
   return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
-}
-
-function normalizeConsultantDisplayName(value?: string | null): string {
-  return (value ?? "")
-    .replace(/\s*컨설턴트\s*$/u, "")
-    .trim()
-    .toLowerCase();
 }
 
 function clampDateToMonth(baseDate: Date, targetMonth: Date): Date {
@@ -241,7 +241,14 @@ export function UnifiedCalendar({
   const isConsultant = currentUser.role === "consultant";
   const isMyEvent = (event: Application) => {
     if (!isConsultant) return false;
-    return Boolean(currentConsultantId) && event.consultantId === currentConsultantId;
+    if (currentConsultantId && event.consultantId === currentConsultantId) {
+      return true;
+    }
+    const currentNameKey = normalizeConsultantDisplayName(currentConsultantName);
+    return (
+      currentNameKey !== "" &&
+      currentNameKey === normalizeConsultantDisplayName(event.consultant)
+    );
   };
   const consultantAgendaNameSet = useMemo(() => {
     if (!isConsultant) return new Set<string>();
@@ -268,7 +275,14 @@ export function UnifiedCalendar({
   };
   const isAssignedToCurrentConsultant = (app: Application) => {
     if (!isConsultant) return false;
-    return Boolean(currentConsultantId) && app.consultantId === currentConsultantId;
+    if (currentConsultantId && app.consultantId === currentConsultantId) {
+      return true;
+    }
+    const currentNameKey = normalizeConsultantDisplayName(currentConsultantName);
+    return (
+      currentNameKey !== "" &&
+      currentNameKey === normalizeConsultantDisplayName(app.consultant)
+    );
   };
   const isCurrentConsultantAvailableAt = (app: Application) => {
     if (!isConsultant) return true;
@@ -330,7 +344,7 @@ export function UnifiedCalendar({
     if (!isConsultant) return [];
     return applications
       .filter((app) =>
-        app.status === "pending"
+        (app.status === "pending" || app.status === "review")
         && !app.consultantId
         && (!app.consultant || app.consultant === "담당자 배정 중")
         && !hasSessionEnded(app)

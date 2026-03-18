@@ -23,83 +23,94 @@
           - generic [ref=e31]: 기업 정보 입력
       - main [ref=e32]:
         - generic [ref=e33]:
-          - generic [ref=e35]:
-            - generic [ref=e36]:
-              - heading "정기 오피스아워" [level=1] [ref=e37]
-              - paragraph [ref=e38]: 매주 정해진 시간에 진행되는 오피스아워를 신청하세요
-            - generic [ref=e39]:
-              - button "캘린더" [ref=e40]:
-                - img
-                - text: 캘린더
-              - button "리스트" [ref=e41]:
-                - img
-                - text: 리스트
-          - generic [ref=e42]:
-            - generic [ref=e44]:
-              - generic [ref=e46]:
-                - generic [ref=e47]:
-                  - heading "2026년 3월" [level=2] [ref=e48]
-                  - generic [ref=e49]:
-                    - button [ref=e50]:
-                      - img
-                    - button "오늘" [ref=e51]
-                    - button [ref=e52]:
-                      - img
-                - generic [ref=e53]:
-                  - text: 이번 달 예약 가능 일정
-                  - generic [ref=e55]: 0건
-              - generic [ref=e57]:
-                - generic [ref=e58]: 일
-                - generic [ref=e59]: 월
-                - generic [ref=e60]: 화
-                - generic [ref=e61]: 수
-                - generic [ref=e62]: 목
-                - generic [ref=e63]: 금
-                - generic [ref=e64]: 토
-                - generic [ref=e67] [cursor=pointer]: "1"
-                - generic [ref=e74] [cursor=pointer]: "2"
-                - generic [ref=e81] [cursor=pointer]: "3"
-                - generic [ref=e88] [cursor=pointer]: "4"
-                - generic [ref=e95] [cursor=pointer]: "5"
-                - generic [ref=e102] [cursor=pointer]: "6"
-                - generic [ref=e109] [cursor=pointer]: "7"
-                - generic [ref=e116] [cursor=pointer]: "8"
-                - generic [ref=e123] [cursor=pointer]: "9"
-                - generic [ref=e130] [cursor=pointer]: "10"
-                - generic [ref=e137] [cursor=pointer]: "11"
-                - generic [ref=e144] [cursor=pointer]: "12"
-                - generic [ref=e151] [cursor=pointer]: "13"
-                - generic [ref=e158] [cursor=pointer]: "14"
-                - generic [ref=e165] [cursor=pointer]: "15"
-                - generic [ref=e172] [cursor=pointer]: "16"
-                - generic [ref=e179] [cursor=pointer]: "17"
-                - generic [ref=e186] [cursor=pointer]: "18"
-                - generic [ref=e193] [cursor=pointer]: "19"
-                - generic [ref=e200] [cursor=pointer]: "20"
-                - generic [ref=e207] [cursor=pointer]: "21"
-                - generic [ref=e214] [cursor=pointer]: "22"
-                - generic [ref=e221] [cursor=pointer]: "23"
-                - generic [ref=e228] [cursor=pointer]: "24"
-                - generic [ref=e235] [cursor=pointer]: "25"
-                - generic [ref=e242] [cursor=pointer]: "26"
-                - generic [ref=e249] [cursor=pointer]: "27"
-                - generic [ref=e256] [cursor=pointer]: "28"
-                - generic [ref=e263] [cursor=pointer]: "29"
-                - generic [ref=e270] [cursor=pointer]: "30"
-                - generic [ref=e277] [cursor=pointer]: "31"
-                - generic [ref=e284] [cursor=pointer]: "1"
-                - generic [ref=e291] [cursor=pointer]: "2"
-                - generic [ref=e298] [cursor=pointer]: "3"
-                - generic [ref=e305] [cursor=pointer]: "4"
-                - generic [ref=e312] [cursor=pointer]: "5"
-                - generic [ref=e319] [cursor=pointer]: "6"
-                - generic [ref=e326] [cursor=pointer]: "7"
-                - generic [ref=e333] [cursor=pointer]: "8"
-                - generic [ref=e340] [cursor=pointer]: "9"
-                - generic [ref=e347] [cursor=pointer]: "10"
-                - generic [ref=e354] [cursor=pointer]: "11"
-            - generic [ref=e360]:
-              - heading "3월 16일 (월)" [level=2] [ref=e361]
-              - paragraph [ref=e362]: 예정된 세션이 없습니다
+          - generic [ref=e34]:
+            - button "취소" [ref=e35]:
+              - img
+              - text: 취소
+            - heading "오피스아워 신청" [level=1] [ref=e36]
+            - paragraph [ref=e37]: CTS Seed0 AC_2026 정기 오피스아워
+          - generic [ref=e39]:
+            - generic [ref=e41]:
+              - img [ref=e44]
+              - generic [ref=e47]: 아젠다 선택
+            - generic [ref=e49]:
+              - generic [ref=e52]: "2"
+              - generic [ref=e54]: 날짜/시간 선택
+            - generic [ref=e56]:
+              - generic [ref=e59]: "3"
+              - generic [ref=e61]: 진행 형태
+            - generic [ref=e63]:
+              - generic [ref=e66]: "4"
+              - generic [ref=e68]: 요청 내용
+            - generic [ref=e70]:
+              - generic [ref=e73]: "5"
+              - generic [ref=e74]: 최종 확인
+          - generic [ref=e76]:
+            - generic [ref=e78]:
+              - heading "날짜와 시간을 선택하세요" [level=3] [ref=e79]
+              - generic [ref=e81]:
+                - generic [ref=e82]: 신청 가능한 날짜
+                - generic [ref=e85]:
+                  - generic [ref=e86]:
+                    - generic [ref=e87]: March 2026
+                    - generic:
+                      - button "Go to previous month" [ref=e88]:
+                        - img
+                      - button "Go to next month" [ref=e89]:
+                        - img
+                  - grid "March 2026" [ref=e90]:
+                    - rowgroup [ref=e91]:
+                      - row "Sunday Monday Tuesday Wednesday Thursday Friday Saturday" [ref=e92]:
+                        - columnheader "Sunday" [ref=e93]: Su
+                        - columnheader "Monday" [ref=e94]: Mo
+                        - columnheader "Tuesday" [ref=e95]: Tu
+                        - columnheader "Wednesday" [ref=e96]: We
+                        - columnheader "Thursday" [ref=e97]: Th
+                        - columnheader "Friday" [ref=e98]: Fr
+                        - columnheader "Saturday" [ref=e99]: Sa
+                    - rowgroup [ref=e100]:
+                      - row "1 2 3 4 5 6 7" [ref=e101]:
+                        - gridcell "1" [disabled]
+                        - gridcell "2" [disabled]
+                        - gridcell "3" [disabled]
+                        - gridcell "4" [disabled]
+                        - gridcell "5" [disabled]
+                        - gridcell "6" [disabled]
+                        - gridcell "7" [disabled]
+                      - row "8 9 10 11 12 13 14" [ref=e102]:
+                        - gridcell "8" [disabled]
+                        - gridcell "9" [disabled]
+                        - gridcell "10" [disabled]
+                        - gridcell "11" [disabled]
+                        - gridcell "12" [disabled]
+                        - gridcell "13" [disabled]
+                        - gridcell "14" [disabled]
+                      - row "15 16 17 18 19 20 21" [ref=e103]:
+                        - gridcell "15" [disabled]
+                        - gridcell "16" [disabled]
+                        - gridcell "17" [disabled]
+                        - gridcell "18" [disabled]
+                        - gridcell "19" [disabled]
+                        - gridcell "20" [disabled]
+                        - gridcell "21" [disabled]
+                      - row "22 23 24 25 26 27 28" [ref=e104]:
+                        - gridcell "22" [disabled]
+                        - gridcell "23" [disabled]
+                        - gridcell "24" [disabled]
+                        - gridcell "25" [disabled]
+                        - gridcell "26" [disabled]
+                        - gridcell "27" [disabled]
+                        - gridcell "28" [disabled]
+                      - row "29 30 31 1 2 3 4" [ref=e105]:
+                        - gridcell "29" [disabled]
+                        - gridcell "30" [disabled]
+                        - gridcell "31" [disabled]
+                        - gridcell "1" [disabled]
+                        - gridcell "2" [disabled]
+                        - gridcell "3" [disabled]
+                        - gridcell "4" [disabled]
+            - generic [ref=e106]:
+              - button "이전" [ref=e107]
+              - button "다음" [disabled]
   - region "Notifications alt+T"
 ```

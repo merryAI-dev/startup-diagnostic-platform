@@ -63,6 +63,12 @@ const escapeHtml = (value: string) =>
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
 
+const normalizeConsultantDisplayName = (value?: string | null) =>
+  (value ?? "")
+    .replace(/\s*컨설턴트\s*$/u, "")
+    .trim()
+    .toLowerCase();
+
 interface PendingReportsDashboardProps {
   applications: Application[];
   reports: OfficeHourReport[];
@@ -568,9 +574,18 @@ export function PendingReportsDashboard({
 
   const isForCurrentConsultant = (application?: Application | null, report?: OfficeHourReport | null) => {
     if (!isConsultantUser) return true;
-    if (!currentConsultantId) return false;
-    if (report?.consultantId) return report.consultantId === currentConsultantId;
-    if (application?.consultantId) return application.consultantId === currentConsultantId;
+    if (currentConsultantId) {
+      if (report?.consultantId) return report.consultantId === currentConsultantId;
+      if (application?.consultantId) return application.consultantId === currentConsultantId;
+    }
+    const currentNameKey = normalizeConsultantDisplayName(currentConsultantName);
+    if (!currentNameKey) return false;
+    if (report?.consultantName) {
+      return normalizeConsultantDisplayName(report.consultantName) === currentNameKey;
+    }
+    if (application?.consultant) {
+      return normalizeConsultantDisplayName(application.consultant) === currentNameKey;
+    }
     return false;
   };
 

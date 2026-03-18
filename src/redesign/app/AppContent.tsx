@@ -88,6 +88,7 @@ import {
   useFirestoreCollection,
   useFirestoreCRUD,
   useFirestoreDocument,
+  useFirestoreDocumentOnce,
 } from "@/redesign/app/hooks/use-firestore"
 import {
   approvePendingUserViaFunction,
@@ -95,6 +96,7 @@ import {
   submitRegularApplicationViaFunction,
   transitionApplicationStatusViaFunction,
 } from "@/redesign/app/lib/functions"
+import { getAssignableConsultantsAt } from "@/redesign/app/lib/application-availability"
 import { firestoreService } from "@/redesign/app/lib/firestore-service"
 import { storage as firebaseStorage } from "@/redesign/app/lib/firebase"
 import {
@@ -378,7 +380,13 @@ function getWeekdayNumbers(weekdays?: Program["weekdays"]): number[] {
     if (weekday === "TUE") numbers.push(2)
     if (weekday === "THU") numbers.push(4)
   })
-  return numbers
+  return numbers.length > 0 ? numbers : [2, 4]
+}
+
+function isProgramDateAllowed(program: Program | undefined, dateKey: string): boolean {
+  if (!program || !isDateKey(dateKey)) return false
+  const targetDate = parseDateKey(dateKey)
+  return new Set(getWeekdayNumbers(program.weekdays)).has(targetDate.getDay())
 }
 
 function sortOfficeHourSlots(slots: OfficeHourSlot[]): OfficeHourSlot[] {
@@ -510,11 +518,18 @@ function buildManagedRegularSlots(
   }
 }
 
-function groupSlotsToRegularOfficeHours(slots: OfficeHourSlot[]): RegularOfficeHour[] {
+function groupSlotsToRegularOfficeHours(
+  slots: OfficeHourSlot[],
+  programs: Program[],
+): RegularOfficeHour[] {
   const grouped = new Map<string, RegularOfficeHour>()
+  const programsById = new Map(programs.map((program) => [program.id, program]))
 
   slots.forEach((slot) => {
     if (!isDateKey(slot.date)) return
+    if (slot.programId && !isProgramDateAllowed(programsById.get(slot.programId), slot.date)) {
+      return
+    }
     const isOpenSlot = slot.status === "open"
     const month = slot.date.slice(0, 7)
     const groupKey = [slot.programId ?? "no-program", month].join(":")
@@ -745,6 +760,9 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     "dashboard",
     "history",
     "application",
+    "regular",
+    "regular-detail",
+    "regular-wizard",
     "irregular",
     "irregular-wizard",
     "unified-calendar",
@@ -768,7 +786,8 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
   const needsConsultants =
     resolvedRole === "consultant" ||
     isPage(["consultants", "regular-wizard", "admin-consultants", "admin-users", "pending-reports"])
-  const needsOfficeHourSlots = needsApplications || needsRegularOfficeHours
+  const needsOfficeHourSlots =
+    needsRegularOfficeHours || isPage(["application", "pending-reports"])
   const needsCompanyLookup = resolvedRole === "admin" && needsApplications
   const needsCompanyDirectory =
     resolvedRole === "admin" && isPage(["admin-programs", "admin-program-list"])
@@ -908,7 +927,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       enabled: isFirebaseConfigured && resolvedRole === "user" && !!companyRecordId,
     },
   )
-  const { data: companyMetaDoc } = useFirestoreDocument<{
+  const { data: companyMetaDoc, loading: companyMetaDocLoading } = useFirestoreDocument<{
     programTicketOverrides?: Record<string, { internal?: number; external?: number }>
     programs?: string[]
   }>("companies", companyRecordId ?? null, {
@@ -1076,12 +1095,12 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     orderDirection: "asc",
     enabled: isFirebaseConfigured && !isCompanyInfoRoute && needsAgendas,
   })
-  const { data: programDocs } = useFirestoreCollection<Program>(COLLECTIONS.PROGRAMS, {
+  const { data: programDocs, loading: programDocsLoading } = useFirestoreCollection<Program>(COLLECTIONS.PROGRAMS, {
     orderByField: "name",
     orderDirection: "asc",
     enabled: isFirebaseConfigured && !isCompanyInfoRoute && needsPrograms,
   })
-  const { data: officeHourSlotDocs } = useFirestoreCollection<OfficeHourSlot>(
+  const { data: officeHourSlotDocs, loading: officeHourSlotDocsLoading } = useFirestoreCollection<OfficeHourSlot>(
     COLLECTIONS.OFFICE_HOUR_SLOTS,
     {
       orderByField: "date",
@@ -1089,8 +1108,17 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       enabled: isFirebaseConfigured && !isCompanyInfoRoute && needsOfficeHourSlots,
     },
   )
-  const { data: officeHourApplicationDocs } = useFirestoreCollection<Application>(
+  const { data: officeHourApplicationDocs, loading: officeHourApplicationDocsLoading } = useFirestoreCollection<Application>(
     COLLECTIONS.OFFICE_HOUR_APPLICATIONS,
+    {
+      orderByField: "createdAt",
+      orderDirection: "desc",
+      enabled: isFirebaseConfigured && !isCompanyInfoRoute && needsApplications,
+    },
+  )
+  const { data: selectedApplicationDoc, loading: selectedApplicationDocLoading } = useFirestoreDocumentOnce<Application>(
+    COLLECTIONS.OFFICE_HOUR_APPLICATIONS,
+    currentPage === "application" ? selectedApplicationId : null,
     {
       enabled: isFirebaseConfigured && !isCompanyInfoRoute && needsApplications,
     },
@@ -1173,75 +1201,95 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     return new Set(names)
   }, [agendaList, consultantAgendaIds, resolvedRole])
 
+  const liveApplications = useMemo(() => {
+    if (!isFirebaseConfigured) {
+      return applications
+    }
+    return officeHourApplicationDocs
+      .map((application) => normalizeApplicationDoc(application, resolveCompanyName))
+      .filter((application) => application.status !== "cancelled")
+      .sort((a, b) => getTimeValue(b.createdAt) - getTimeValue(a.createdAt))
+  }, [applications, isFirebaseConfigured, officeHourApplicationDocs, resolveCompanyName])
+
+  const slotTitleById = useMemo(
+    () => new Map(officeHourSlotList.map((slot) => [slot.id, slot.title])),
+    [officeHourSlotList],
+  )
+  const slotProgramIdById = useMemo(
+    () =>
+      new Map(
+        officeHourSlotList.flatMap((slot) =>
+          slot.programId ? [[slot.id, slot.programId] as const] : [],
+        ),
+      ),
+    [officeHourSlotList],
+  )
+  const officeHourById = useMemo(
+    () => new Map(regularOfficeHourList.map((officeHour) => [officeHour.id, officeHour])),
+    [regularOfficeHourList],
+  )
+  const programNameById = useMemo(
+    () =>
+      new Map(
+        programList.flatMap((program) => {
+          const name = program.name?.trim()
+          return name ? [[program.id, name] as const] : []
+        }),
+      ),
+    [programList],
+  )
+
+  const resolveApplicationRecord = useCallback((application: Application): Application => {
+    const inferredProgramId = (() => {
+      if (application.programId) return application.programId
+      if (application.officeHourId && application.officeHourId.includes(":")) {
+        return application.officeHourId.split(":")[0]
+      }
+      if (application.officeHourSlotId && slotProgramIdById.has(application.officeHourSlotId)) {
+        return slotProgramIdById.get(application.officeHourSlotId)
+      }
+      return undefined
+    })()
+
+    const agendaName = application.agendaId ? agendaNameById.get(application.agendaId) : undefined
+    const resolvedAgenda = agendaName ?? application.agenda ?? "미지정"
+
+    let resolvedOfficeHourTitle = application.officeHourTitle
+    if (application.officeHourSlotId && slotTitleById.has(application.officeHourSlotId)) {
+      resolvedOfficeHourTitle = slotTitleById.get(application.officeHourSlotId)!
+    } else if (application.officeHourId && officeHourById.has(application.officeHourId)) {
+      resolvedOfficeHourTitle = officeHourById.get(application.officeHourId)!.title
+    }
+
+    if (application.type === "regular" && inferredProgramId) {
+      const programName = programNameById.get(inferredProgramId)
+      if (programName) {
+        resolvedOfficeHourTitle = `${programName} 정기 오피스아워`
+      }
+    } else if (application.type === "irregular" && agendaName) {
+      resolvedOfficeHourTitle = `비정기 오피스아워 - ${agendaName}`
+    }
+
+    if (
+      resolvedAgenda === application.agenda &&
+      resolvedOfficeHourTitle === application.officeHourTitle
+    ) {
+      return application
+    }
+
+    return {
+      ...application,
+      programId: application.programId ?? inferredProgramId,
+      agenda: resolvedAgenda,
+      officeHourTitle: resolvedOfficeHourTitle,
+    }
+  }, [agendaNameById, officeHourById, programNameById, slotProgramIdById, slotTitleById])
+
   const resolvedApplications = useMemo(() => {
-    const slotTitleById = new Map(officeHourSlotList.map((slot) => [slot.id, slot.title]))
-    const slotProgramIdById = new Map(
-      officeHourSlotList.flatMap((slot) => (slot.programId ? [[slot.id, slot.programId] as const] : [])),
-    )
-    const officeHourById = new Map(
-      regularOfficeHourList.map((officeHour) => [officeHour.id, officeHour]),
-    )
-    const programNameById = new Map(
-      programList.flatMap((program) => {
-        const name = program.name?.trim()
-        return name ? [[program.id, name] as const] : []
-      }),
-    )
-
-    return applications.map((application) => {
-      const inferredProgramId = (() => {
-        if (application.programId) return application.programId
-        if (application.officeHourId && application.officeHourId.includes(":")) {
-          return application.officeHourId.split(":")[0]
-        }
-        if (application.officeHourSlotId && slotProgramIdById.has(application.officeHourSlotId)) {
-          return slotProgramIdById.get(application.officeHourSlotId)
-        }
-        return undefined
-      })()
-
-      const agendaName = application.agendaId ? agendaNameById.get(application.agendaId) : undefined
-      const resolvedAgenda = agendaName ?? application.agenda ?? "미지정"
-
-      let resolvedOfficeHourTitle = application.officeHourTitle
-      if (application.officeHourSlotId && slotTitleById.has(application.officeHourSlotId)) {
-        resolvedOfficeHourTitle = slotTitleById.get(application.officeHourSlotId)!
-      } else if (application.officeHourId && officeHourById.has(application.officeHourId)) {
-        resolvedOfficeHourTitle = officeHourById.get(application.officeHourId)!.title
-      }
-
-      if (application.type === "regular" && inferredProgramId) {
-        const programName = programNameById.get(inferredProgramId)
-        if (programName) {
-          resolvedOfficeHourTitle = `${programName} 정기 오피스아워`
-        }
-      } else if (application.type === "irregular" && agendaName) {
-        resolvedOfficeHourTitle = `비정기 오피스아워 - ${agendaName}`
-      }
-
-      if (
-        resolvedAgenda === application.agenda &&
-        resolvedOfficeHourTitle === application.officeHourTitle
-      ) {
-        return application
-      }
-
-      return {
-        ...application,
-        programId: application.programId ?? inferredProgramId,
-        agenda: resolvedAgenda,
-        officeHourTitle: resolvedOfficeHourTitle,
-      }
-    })
-  }, [agendaNameById, applications, officeHourSlotList, programList, regularOfficeHourList])
+    return liveApplications.map(resolveApplicationRecord)
+  }, [liveApplications, resolveApplicationRecord])
 
   const resolvedRegularOfficeHourList = useMemo(() => {
-    const programNameById = new Map(
-      programList.flatMap((program) => {
-        const name = program.name?.trim()
-        return name ? [[program.id, name] as const] : []
-      }),
-    )
     return regularOfficeHourList.map((officeHour) => {
       if (!officeHour.programId) return officeHour
       const programName = programNameById.get(officeHour.programId)
@@ -1254,7 +1302,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
         title: nextTitle,
       }
     })
-  }, [programList, regularOfficeHourList])
+  }, [programNameById, regularOfficeHourList])
 
   const scopedApplications = useMemo(() => {
     if (resolvedRole === "user") {
@@ -1276,7 +1324,9 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       if (application.officeHourSlotId) {
         const reservedSlot = officeHourSlotList.find((slot) => slot.id === application.officeHourSlotId)
         if (reservedSlot?.consultantId) {
-          return consultantIdCandidates.has(reservedSlot.consultantId)
+          if (consultantIdCandidates.has(reservedSlot.consultantId)) {
+            return true
+          }
         }
       }
       if (application.agendaId && consultantAgendaIds.has(application.agendaId)) {
@@ -1375,6 +1425,22 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     resolvedRegularOfficeHourList,
     resolvedRole,
   ])
+  const regularOfficeHoursLoading =
+    isFirebaseConfigured &&
+    resolvedRole === "user" &&
+    needsRegularOfficeHours &&
+    resolvedRegularOfficeHourList.length === 0 &&
+    (
+      programDocsLoading ||
+      officeHourSlotDocsLoading
+    )
+  const applicationsLoading =
+    isFirebaseConfigured &&
+    needsApplications &&
+    (
+      officeHourApplicationDocsLoading ||
+      (currentPage === "application" && !!selectedApplicationId && selectedApplicationDocLoading)
+    )
 
   const consultantProgramIds = useMemo(() => {
     if (resolvedRole !== "consultant") return new Set<string>()
@@ -1436,8 +1502,9 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     scopedApplications.forEach((app) => {
       const scope = resolveScope(app)
       if (!scope) return
-      const isReserved = app.status === "pending" || app.status === "confirmed"
-      const isCompleted = app.status === "completed"
+      const normalizedStatus = normalizeApplicationStatus(app.status)
+      const isReserved = normalizedStatus === "pending" || normalizedStatus === "confirmed"
+      const isCompleted = normalizedStatus === "completed"
       if (!isReserved && !isCompleted) return
       if (scope === "internal") {
         if (isCompleted) completedInternal += 1
@@ -1618,7 +1685,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     const normalizedSlots = officeHourSlotDocs.map(normalizeSlotDoc)
     setOfficeHourSlotList(normalizedSlots)
 
-    const slotGroups = groupSlotsToRegularOfficeHours(normalizedSlots)
+    const slotGroups = groupSlotsToRegularOfficeHours(normalizedSlots, programList)
     const programGroups = groupProgramsToRegularOfficeHours(programList)
     const programIdsWithSlots = new Set(
       slotGroups.map((group) => group.programId).filter(Boolean) as string[],
@@ -1752,7 +1819,9 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
   }
 
   const rejectApplicationsAsExpired = async (targets: Application[], updatedAt = new Date()) => {
-    const eligible = targets.filter((app) => app.status === "pending")
+    const eligible = targets.filter(
+      (app) => normalizeApplicationStatus(app.status) === "pending",
+    )
     if (eligible.length === 0) return false
     if (isFirebaseConfigured) return false
 
@@ -1816,7 +1885,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       try {
         const now = new Date()
         const expiredPending = applications.filter(
-          (app) => app.status === "pending" && hasSessionEnded(app, now),
+          (app) => normalizeApplicationStatus(app.status) === "pending" && hasSessionEnded(app, now),
         )
 
         if (expiredPending.length > 0) {
@@ -2310,30 +2379,15 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
         return
       }
 
-      const isConsultantBusyAt = (consultant: Consultant) => {
-        const targetTime = normalizeTimeKey(data.time)
-        return applications.some((application) => {
-          const normalizedStatus = normalizeApplicationStatus(application.status)
-          if (
-            normalizedStatus !== "pending" &&
-            normalizedStatus !== "confirmed" &&
-            normalizedStatus !== "completed"
-          ) {
-            return false
-          }
-          if (!application.scheduledDate || !application.scheduledTime) return false
-          if (application.scheduledDate !== scheduledDate) return false
-          if (normalizeTimeKey(application.scheduledTime) !== targetTime) return false
-
-          return application.consultantId === consultant.id
-        })
-      }
-
-      const assignableConsultants = linkedConsultants.filter(
-        (consultant) =>
-          isConsultantAvailableAt(consultant, scheduledDate, data.time) &&
-          !isConsultantBusyAt(consultant),
-      )
+      const assignableConsultants = getAssignableConsultantsAt({
+        consultants: linkedConsultants,
+        applications,
+        officeHourSlots: officeHourSlotList,
+        agendaId: data.agendaId,
+        dateKey: scheduledDate,
+        time: data.time,
+        slotConsultantId: selectedSlot?.consultantId,
+      })
 
       if (assignableConsultants.length === 0) {
         toast.error(
@@ -2580,7 +2634,10 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       }
       return
     }
-    if (targetApplication.status === "pending" && hasSessionEnded(targetApplication)) {
+    if (
+      normalizeApplicationStatus(targetApplication.status) === "pending" &&
+      hasSessionEnded(targetApplication)
+    ) {
       await rejectApplicationsAsExpired([targetApplication])
       toast.error("진행 시간이 지나 취소할 수 없어 자동 거절 처리되었습니다")
       return
@@ -2616,6 +2673,21 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     const targetApplication = applications.find((app) => app.id === id)
     if (!targetApplication) return
     if (isFirebaseConfigured) {
+      if (status === "pending") {
+        try {
+          await transitionApplicationStatusViaFunction({
+            applicationId: id,
+            action: "reopen",
+          })
+        } catch (error) {
+          toast.error(getFunctionErrorMessage(error, "수락 대기 변경에 실패했습니다"))
+          return
+        }
+
+        toast.success("상태가 수락 대기로 변경되었습니다.")
+        return
+      }
+
       toast.error("상태 변경은 서버 함수 경유로만 처리할 수 있습니다")
       return
     }
@@ -2623,7 +2695,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     const expired = hasSessionEnded(targetApplication, now)
 
     if (expired) {
-      const isPendingLike = targetApplication.status === "pending"
+      const isPendingLike = normalizeApplicationStatus(targetApplication.status) === "pending"
       if (isPendingLike && status !== "rejected") {
         await rejectApplicationsAsExpired([targetApplication], now)
         toast.error("진행 시간이 지나 자동으로 거절 처리되었습니다")
@@ -2698,7 +2770,10 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     const shouldReleaseSlot =
       status === "cancelled" ||
       status === "rejected" ||
-      (status === "pending" && targetApplication.status !== "pending")
+      (
+        status === "pending" &&
+        normalizeApplicationStatus(targetApplication.status) !== "pending"
+      )
     if (shouldReleaseSlot) {
       const releasableSlotIds = collectReleasableSlotIds([targetApplication], nextApplications)
       await releaseSlots(releasableSlotIds)
@@ -2744,7 +2819,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       return
     }
 
-    const isAcceptableStatus = targetApplication.status === "pending"
+    const isAcceptableStatus = normalizeApplicationStatus(targetApplication.status) === "pending"
     const isUnassigned =
       !targetApplication.consultantId &&
       (!targetApplication.consultant || targetApplication.consultant === "담당자 배정 중")
@@ -2857,7 +2932,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       return
     }
 
-    const isAcceptableStatus = targetApplication.status === "pending"
+    const isAcceptableStatus = normalizeApplicationStatus(targetApplication.status) === "pending"
     const isUnassigned =
       !targetApplication.consultantId &&
       (!targetApplication.consultant || targetApplication.consultant === "담당자 배정 중")
@@ -2941,7 +3016,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       return
     }
 
-    const isPending = targetApplication.status === "pending"
+    const isPending = normalizeApplicationStatus(targetApplication.status) === "pending"
     const isRequester = targetApplication.consultantId === currentConsultant.id
     const reservedSlot = targetApplication.officeHourSlotId
       ? officeHourSlotList.find((slot) => slot.id === targetApplication.officeHourSlotId)
@@ -3115,8 +3190,9 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       return false
     }
 
+    const normalizedTargetStatus = normalizeApplicationStatus(targetApplication.status)
     if (
-      (targetApplication.status !== "pending" && targetApplication.status !== "confirmed") ||
+      (normalizedTargetStatus !== "pending" && normalizedTargetStatus !== "confirmed") ||
       hasSessionEnded(targetApplication)
     ) {
       toast.error("진행 시간이 지난 신청 또는 완료된 신청은 수정할 수 없습니다")
@@ -3268,7 +3344,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     }
 
     setOfficeHourSlotList(mergedSlots)
-    const slotGroups = groupSlotsToRegularOfficeHours(mergedSlots)
+    const slotGroups = groupSlotsToRegularOfficeHours(mergedSlots, programList)
     const programGroups = groupProgramsToRegularOfficeHours(programList)
     const programIdsWithSlots = new Set(
       slotGroups.map((group) => group.programId).filter(Boolean) as string[],
@@ -3962,7 +4038,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     })
 
     setOfficeHourSlotList(mergedSlots)
-    setRegularOfficeHourList(groupSlotsToRegularOfficeHours(mergedSlots))
+    setRegularOfficeHourList(groupSlotsToRegularOfficeHours(mergedSlots, programList))
     toast.success(`${generatedSlots.length}개 슬롯을 생성했습니다`)
   }
 
@@ -4123,7 +4199,55 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     (oh) => oh.id === selectedOfficeHourId,
   )
 
-  const selectedApplication = scopedApplications.find((app) => app.id === selectedApplicationId)
+  const selectedApplication = useMemo(() => {
+    const scopedMatch = scopedApplications.find((app) => app.id === selectedApplicationId)
+    if (scopedMatch) return scopedMatch
+    if (!selectedApplicationDoc) return undefined
+
+    const resolvedDoc = resolveApplicationRecord(
+      normalizeApplicationDoc(selectedApplicationDoc, resolveCompanyName),
+    )
+
+    if (resolvedRole === "user") {
+      const uid = firebaseUser?.uid ?? user.id
+      if (!uid || resolvedDoc.status === "cancelled") return undefined
+      return resolvedDoc.createdByUid === uid ? resolvedDoc : undefined
+    }
+    if (resolvedRole !== "consultant") {
+      return resolvedDoc
+    }
+    if (resolvedDoc.consultantId && consultantIdCandidates.has(resolvedDoc.consultantId)) {
+      return resolvedDoc
+    }
+    if (resolvedDoc.officeHourSlotId) {
+      const reservedSlot = officeHourSlotList.find((slot) => slot.id === resolvedDoc.officeHourSlotId)
+      if (reservedSlot?.consultantId) {
+        if (consultantIdCandidates.has(reservedSlot.consultantId)) {
+          return resolvedDoc
+        }
+      }
+    }
+    if (resolvedDoc.agendaId && consultantAgendaIds.has(resolvedDoc.agendaId)) {
+      return resolvedDoc
+    }
+    if (resolvedDoc.agenda && consultantAgendaNames.has(resolvedDoc.agenda)) {
+      return resolvedDoc
+    }
+    return undefined
+  }, [
+    scopedApplications,
+    selectedApplicationId,
+    selectedApplicationDoc,
+    resolveApplicationRecord,
+    resolveCompanyName,
+    resolvedRole,
+    firebaseUser?.uid,
+    user.id,
+    consultantIdCandidates,
+    officeHourSlotList,
+    consultantAgendaIds,
+    consultantAgendaNames,
+  ])
 
   const applicationMessages = messages.filter((msg) => msg.applicationId === selectedApplicationId)
 
@@ -4189,10 +4313,19 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
           )}
 
           {currentPage === "regular" && (
-            <RegularOfficeHoursCalendar
-              officeHours={scopedRegularOfficeHourList}
-              onSelectOfficeHour={handleSelectOfficeHour}
-            />
+            regularOfficeHoursLoading ? (
+              <div className="flex min-h-0 flex-1 items-center justify-center bg-gray-50">
+                <div className="flex flex-col items-center gap-3 text-sm text-slate-500">
+                  <div className="h-8 w-8 animate-spin rounded-full border-2 border-slate-200 border-t-slate-700" />
+                  <p>정기 오피스아워 일정을 불러오는 중입니다.</p>
+                </div>
+              </div>
+            ) : (
+              <RegularOfficeHoursCalendar
+                officeHours={scopedRegularOfficeHourList}
+                onSelectOfficeHour={handleSelectOfficeHour}
+              />
+            )
           )}
 
           {currentPage === "regular-detail" && selectedOfficeHour && (
@@ -4212,6 +4345,9 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
               applications={resolvedApplications}
               consultants={consultants}
               agendas={agendaList}
+              allowedWeekdays={
+                programList.find((program) => program.id === selectedOfficeHour.programId)?.weekdays
+              }
               remainingInternalTickets={ticketStats.remainingInternal}
               remainingExternalTickets={ticketStats.remainingExternal}
               onBack={() => handleNavigate("regular-detail", selectedOfficeHour.id)}
@@ -4273,7 +4409,15 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
               currentConsultantName={currentConsultant?.name ?? null}
             />
           )}
-          {currentPage === "application" && !selectedApplication && (
+          {currentPage === "application" && !selectedApplication && applicationsLoading && (
+            <div className="flex min-h-0 flex-1 items-center justify-center bg-gray-50">
+              <div className="flex flex-col items-center gap-3 text-sm text-slate-500">
+                <div className="h-8 w-8 animate-spin rounded-full border-2 border-slate-200 border-t-slate-700" />
+                <p>신청 정보를 불러오는 중입니다.</p>
+              </div>
+            </div>
+          )}
+          {currentPage === "application" && !selectedApplication && !applicationsLoading && (
             <div className="p-10">
               <div className="rounded-2xl border border-slate-200 bg-white p-8">
                 <h2 className="text-lg font-semibold text-slate-900">
