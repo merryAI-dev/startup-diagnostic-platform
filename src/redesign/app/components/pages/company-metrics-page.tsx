@@ -53,7 +53,7 @@ import {
   TableRow,
 } from "@/redesign/app/components/ui/table";
 import { cn } from "@/redesign/app/components/ui/utils";
-import { createCompanyMetrics, formatCurrency, formatNumber, getCompanyMetrics } from "@/redesign/app/lib/company-metrics-data";
+import { formatCurrency, formatNumber } from "@/redesign/app/lib/company-metrics-data";
 import { useFirestoreDocument } from "@/redesign/app/hooks/use-firestore";
 import { isFirebaseConfigured } from "@/redesign/app/lib/firebase";
 import { firestoreService } from "@/redesign/app/lib/firestore-service";
@@ -162,6 +162,14 @@ function inferCustomFields(data: MonthlyMetrics[]): CustomMetricField[] {
   }));
 }
 
+function createEmptyMetricsState(year = new Date().getFullYear()): MetricsPageState {
+  return {
+    year,
+    data: normalizeMonthlyData([], year),
+    customFields: [],
+  };
+}
+
 function normalizeCustomFields(
   value: unknown,
   fallback: CustomMetricField[],
@@ -186,21 +194,11 @@ function normalizeCustomFields(
   return customFields.length > 0 ? customFields : fallback;
 }
 
-function createSeedState(companyName: string): MetricsPageState {
-  const seed = getCompanyMetrics(companyName) ?? createCompanyMetrics(companyName);
-
-  return {
-    year: seed.year,
-    data: normalizeMonthlyData(seed.data, seed.year),
-    customFields: inferCustomFields(seed.data),
-  };
-}
-
 function normalizeMetricsState(
   source: Partial<MetricsPageState> | null | undefined,
-  companyName: string,
+  fallbackYear = new Date().getFullYear(),
 ): MetricsPageState {
-  const fallback = createSeedState(companyName);
+  const fallback = createEmptyMetricsState(fallbackYear);
 
   if (!source) {
     return fallback;
@@ -430,10 +428,10 @@ export function CompanyMetricsPage({ currentUser, companyId }: CompanyMetricsPag
       enabled: isFirebaseConfigured && !!companyId,
     });
   const [savedMetricsState, setSavedMetricsState] = useState<MetricsPageState>(() =>
-    createSeedState(currentUser.companyName),
+    createEmptyMetricsState(),
   );
   const [draftMetricsState, setDraftMetricsState] = useState<MetricsPageState>(() =>
-    createSeedState(currentUser.companyName),
+    createEmptyMetricsState(),
   );
   const [selectedMetricKey, setSelectedMetricKey] = useState<string>(DEFAULT_SELECTED_METRIC_KEY);
   const [chartVariant, setChartVariant] = useState<ChartVariant>("line");
@@ -444,26 +442,25 @@ export function CompanyMetricsPage({ currentUser, companyId }: CompanyMetricsPag
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
 
   useEffect(() => {
-    const seedState = createSeedState(currentUser.companyName);
-    setSavedMetricsState(seedState);
-    setDraftMetricsState(seedState);
+    const emptyState = createEmptyMetricsState();
+    setSavedMetricsState(emptyState);
+    setDraftMetricsState(emptyState);
     setSelectedMetricKey(DEFAULT_SELECTED_METRIC_KEY);
     setIsDirty(false);
     setLastSavedAt(null);
-  }, [currentUser.companyName, companyId]);
+  }, [companyId]);
 
   useEffect(() => {
     if (!isFirebaseConfigured || !companyId || persistedMetricsLoading || isDirty) {
       return;
     }
 
-    const nextState = normalizeMetricsState(persistedMetricsDoc ?? null, currentUser.companyName);
+    const nextState = normalizeMetricsState(persistedMetricsDoc ?? null);
     setSavedMetricsState(nextState);
     setDraftMetricsState(nextState);
     setLastSavedAt(normalizeDateLabel(persistedMetricsDoc?.updatedAt) ?? null);
   }, [
     companyId,
-    currentUser.companyName,
     isDirty,
     persistedMetricsDoc,
     persistedMetricsLoading,
@@ -662,7 +659,6 @@ export function CompanyMetricsPage({ currentUser, companyId }: CompanyMetricsPag
     );
     const nextState = normalizeMetricsState(
       refreshedDocument ?? draftMetricsState,
-      currentUser.companyName,
     );
 
     setSavedMetricsState(nextState);
