@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useLocation, useNavigate } from "react-router-dom"
 import { toast } from "sonner"
 import { addDays, differenceInDays, isBefore, startOfDay } from "date-fns"
-import { deleteField, where } from "firebase/firestore"
+import { deleteField, serverTimestamp, where } from "firebase/firestore"
 import { deleteObject, getDownloadURL, ref, uploadBytes } from "firebase/storage"
 import { useAuth as useAppAuth } from "@/context/AuthContext"
 import { signOutUser } from "@/firebase/auth"
@@ -734,7 +734,7 @@ function omitId<T extends { id: string }>(item: T): Omit<T, "id"> {
 }
 
 export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
-  const { user: firebaseUser, profile, loading } = useAppAuth()
+  const { user: firebaseUser, profile, loading, refreshProfile } = useAppAuth()
   const navigate = useNavigate()
   const location = useLocation()
   const routeSegment = location.pathname.split("/")[2] ?? ""
@@ -1782,7 +1782,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
   ])
 
   const getSessionEndTime = (app: Application) => {
-    const durationHours = app.duration ?? 2
+    const durationHours = app.duration ?? 1
     const slot = app.officeHourSlotId
       ? officeHourSlotList.find((item) => item.id === app.officeHourSlotId)
       : undefined
@@ -3167,6 +3167,36 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     toast.success("거절 사유가 수정되었습니다")
   }
 
+  const handleToggleMarketingConsent = async (checked: boolean) => {
+    if (!firebaseUser?.uid) {
+      toast.error("로그인 정보를 확인한 뒤 다시 시도해주세요")
+      return
+    }
+
+    const nextMarketingConsent = {
+      consented: checked,
+      version: profile?.consents?.marketing?.version ?? "v1.0",
+      method: "settings_toggle",
+      userAgent: typeof navigator !== "undefined" ? navigator.userAgent : null,
+    }
+
+    const updated = await profileCrud.update(firebaseUser.uid, {
+      "consents.marketing.consented": nextMarketingConsent.consented,
+      "consents.marketing.version": nextMarketingConsent.version,
+      "consents.marketing.method": nextMarketingConsent.method,
+      "consents.marketing.userAgent": nextMarketingConsent.userAgent,
+      "consents.marketing.consentedAt": checked ? serverTimestamp() : deleteField(),
+    })
+
+    if (!updated) {
+      toast.error("마케팅 수신 동의 저장에 실패했습니다")
+      return
+    }
+
+    await refreshProfile()
+    toast.success(checked ? "마케팅 수신 동의가 저장되었습니다." : "마케팅 수신 거부로 변경되었습니다.")
+  }
+
   const handleUpdateApplication = async (id: string, data: Partial<Application>) => {
     const updatedAt = new Date()
     if (isFirebaseConfigured) {
@@ -4467,7 +4497,14 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
             </div>
           )}
 
-          {currentPage === "settings" && <Settings user={user} />}
+          {currentPage === "settings" && (
+            <Settings
+              user={user}
+              marketingConsentEnabled={profile?.role === "company" ? Boolean(profile?.consents?.marketing?.consented) : undefined}
+              marketingConsentSaving={profileCrud.saving}
+              onToggleMarketingConsent={profile?.role === "company" ? handleToggleMarketingConsent : undefined}
+            />
+          )}
 
           {currentPage === "company-info" && firebaseUser && companyRecordId && (
             <CompanyDashboard

@@ -79,6 +79,19 @@ service cloud.firestore {
         )
         && request.resource.data.active is bool
         && request.resource.data.active == false;
+      allow update: if isSignedIn()
+        && request.auth.uid == userId
+        && resource.data.active is bool
+        && resource.data.active == true
+        && request.resource.data.role == resource.data.role
+        && request.resource.data.requestedRole == resource.data.requestedRole
+        && request.resource.data.active == resource.data.active
+        && request.resource.data.email == resource.data.email
+        && request.resource.data.companyId == resource.data.companyId
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          "consents",
+          "updatedAt"
+        ]);
 
       allow delete: if false;
     }

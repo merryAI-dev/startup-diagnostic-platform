@@ -590,7 +590,7 @@ export function PendingReportsDashboard({
   };
 
   const getSessionEndTime = (app: Application) => {
-    const durationHours = app.duration ?? 2;
+    const durationHours = app.duration ?? 1;
 
     if (app.scheduledDate && app.scheduledTime) {
       const start = new Date(`${app.scheduledDate}T${app.scheduledTime}`);

@@ -78,6 +78,7 @@ const companyCoreNavIds = new Set([
   "regular",
   "company-metrics",
   "company-info",
+  "settings",
 ]);
 
 const activeNavIdByPage: Record<string, string> = {

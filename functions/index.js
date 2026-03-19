@@ -368,8 +368,8 @@ function isSessionFormat(value) {
 }
 
 function getApplicationDurationHours(application, slotDoc) {
-  const raw = Number(application?.duration ?? slotDoc?.duration ?? 2);
-  return Number.isFinite(raw) && raw > 0 ? raw : 2;
+  const raw = Number(application?.duration ?? slotDoc?.duration ?? 1);
+  return Number.isFinite(raw) && raw > 0 ? raw : 1;
 }
 
 function getSessionEndTime(application, slotDoc) {
@@ -1720,7 +1720,7 @@ exports.runApplicationMaintenance = onCall(
 exports.scheduledApplicationMaintenance = onSchedule(
   {
     region: REGION,
-    schedule: "every 30 minutes",
+    schedule: "10 * * * *",
     timeZone: "Asia/Seoul",
     timeoutSeconds: 60,
     memory: "256MiB",

@@ -87,7 +87,7 @@ export function AdminApplicationDetailModal({
     milestone910: "",
   });
   const sessionEndTime = useMemo(() => {
-    const durationHours = application.duration ?? 2;
+    const durationHours = application.duration ?? 1;
     if (application.scheduledDate && application.scheduledTime) {
       const start = new Date(`${application.scheduledDate}T${application.scheduledTime}`);
       if (!Number.isNaN(start.getTime())) {
