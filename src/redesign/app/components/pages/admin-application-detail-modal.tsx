@@ -463,7 +463,7 @@ export function AdminApplicationDetailModal({
                         onClick={() => handleOpenAction("reject")}
                       >
                         <XCircle className="w-4 h-4 mr-2" />
-                        거절
+                        최종 거절
                       </Button>
                     )}
                     {application.status === "rejected" && !isSessionEnded && (
@@ -1298,7 +1298,7 @@ export function AdminApplicationDetailModal({
       <Dialog open={actionDialogOpen} onOpenChange={setActionDialogOpen}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>{actionType === "confirm" ? "확정 확인" : "거절 사유 입력"}</DialogTitle>
+            <DialogTitle>{actionType === "confirm" ? "확정 확인" : "최종 거절 확인"}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-2">
             {actionType === "confirm" ? (
@@ -1309,13 +1309,22 @@ export function AdminApplicationDetailModal({
                 </div>
               </div>
             ) : (
-              <div className="space-y-2">
+              <div className="space-y-3">
+                <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-900">
+                  <p className="font-medium">최종 거절 전 확인</p>
+                  <p className="mt-1">
+                    동일 시간·동일 아젠다에 배정 가능한 다른 컨설턴트까지 모두 검토한 뒤 진행해주세요.
+                  </p>
+                  <p className="mt-1 text-amber-800">
+                    최종 거절 처리 시 신청 기업에 즉시 결과가 안내됩니다.
+                  </p>
+                </div>
                 <Label htmlFor="reject-reason">거절 사유</Label>
                 <Textarea
                   id="reject-reason"
                   value={rejectReason}
                   onChange={(e) => setRejectReason(e.target.value)}
-                  placeholder="거절 사유를 입력해주세요"
+                  placeholder="최종 거절 사유를 입력해주세요"
                   className="min-h-[120px]"
                 />
               </div>

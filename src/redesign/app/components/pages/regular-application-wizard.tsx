@@ -31,6 +31,7 @@ import {
 import { getTimeSlots } from "@/redesign/app/lib/data";
 import {
   getAssignableConsultantsAt,
+  hasApplicantConflictAt,
   normalizeApplicationStatus,
   normalizeTimeKey,
 } from "@/redesign/app/lib/application-availability";
@@ -41,12 +42,18 @@ import { cn } from "@/redesign/app/components/ui/utils";
 interface RegularApplicationWizardProps {
   officeHour: RegularOfficeHour;
   officeHours: RegularOfficeHour[];
+  officeHourSlots: OfficeHourSlot[];
   applications: Application[];
   consultants: Consultant[];
   agendas: Agenda[];
   allowedWeekdays?: ProgramWeekday[];
   remainingInternalTickets: number;
   remainingExternalTickets: number;
+  currentApplicant?: {
+    createdByUid?: string | null;
+    companyId?: string | null;
+    applicantEmail?: string | null;
+  };
   onBack: () => void;
   onSubmit: (data: ApplicationFormData) => Promise<void> | void;
 }
@@ -121,12 +128,14 @@ function isPastScheduledStart(dateKey: string, timeKey: string, now = new Date()
 export function RegularApplicationWizard({
   officeHour,
   officeHours,
+  officeHourSlots,
   applications,
   consultants,
   agendas,
   allowedWeekdays = ["TUE", "THU"],
   remainingInternalTickets,
   remainingExternalTickets,
+  currentApplicant,
   onBack,
   onSubmit,
 }: RegularApplicationWizardProps) {
@@ -164,29 +173,16 @@ export function RegularApplicationWizard({
   const consultantPool = selectedAgendaId
     ? consultantsByAgendaId.get(selectedAgendaId) ?? []
     : [];
-  const officeHourSlots = useMemo<OfficeHourSlot[]>(
-    () =>
-      officeHours.flatMap((item) =>
-        (item.slots ?? []).map((slot) => ({
-          id: slot.id,
-          type: "regular" as const,
-          programId: item.programId,
-          consultantId: slot.consultantId,
-          consultantName: slot.consultantName ?? "",
-          title: item.title,
-          description: item.description,
-          date: slot.date,
-          startTime: slot.startTime,
-          endTime: slot.endTime,
-          agendaIds: slot.agendaIds,
-          status: slot.status,
-        })),
-      ),
-    [officeHours],
-  );
   const programOfficeHours = officeHour.programId
     ? officeHours.filter((item) => item.programId === officeHour.programId)
     : [officeHour];
+  const programOfficeHourSlots = useMemo(
+    () =>
+      officeHour.programId
+        ? officeHourSlots.filter((slot) => slot.programId === officeHour.programId)
+        : officeHourSlots,
+    [officeHour.programId, officeHourSlots],
+  );
   const selectedAgenda = agendas.find((agenda) => agenda.id === selectedAgendaId);
   const isExternalAgendaSelected = selectedAgenda?.scope === "external";
   const agendaName = selectedAgenda?.name;
@@ -219,7 +215,7 @@ export function RegularApplicationWizard({
     const keys = new Set<string>();
 
     programOfficeHours.forEach((item) => {
-      const slots = item.slots ?? [];
+      const slots = programOfficeHourSlots.filter((slot) => slot.date.startsWith(item.month));
       if (slots.length === 0) {
         (item.availableDates ?? []).forEach((date) => {
           const normalizedDate = format(parseISO(date), "yyyy-MM-dd");
@@ -282,15 +278,13 @@ export function RegularApplicationWizard({
     allowedWeekdayNumbers,
     applications,
     consultants,
-    officeHourSlots,
+    programOfficeHourSlots,
     programOfficeHours,
     selectedAgendaId,
   ]);
   const timeSlots = selectedDate ? (() => {
     const selectedDateKey = format(selectedDate, "yyyy-MM-dd");
-    const slotsForDate = programOfficeHours.flatMap((item) =>
-      item.slots?.filter((slot) => slot.date === selectedDateKey) ?? []
-    );
+    const slotsForDate = programOfficeHourSlots.filter((slot) => slot.date === selectedDateKey);
     const assignableConsultantIds = new Set(consultantPool.map((consultant) => consultant.id));
     const byTime = new Map<string, { hasOpen: boolean; slotId?: string; slotConsultantId?: string }>();
     if (slotsForDate.length > 0) {
@@ -335,10 +329,18 @@ export function RegularApplicationWizard({
               slotConsultantId: meta?.slotConsultantId,
             })
           : [];
+      const applicantConflict = hasApplicantConflictAt({
+        applications,
+        dateKey: selectedDateKey,
+        time: slot.time,
+        createdByUid: currentApplicant?.createdByUid,
+        companyId: currentApplicant?.companyId,
+        applicantEmail: currentApplicant?.applicantEmail,
+      });
       const consultantAssignable = assignableConsultants.length > 0;
       const futureSchedulable = !isPastScheduledStart(selectedDateKey, slot.time);
       const openBySlotState = meta ? meta.hasOpen : slot.available;
-      const available = openBySlotState && consultantAssignable && futureSchedulable;
+      const available = openBySlotState && consultantAssignable && futureSchedulable && !applicantConflict;
       return {
         ...slot,
         available,
@@ -346,6 +348,8 @@ export function RegularApplicationWizard({
           ? undefined
           : !futureSchedulable
             ? "이미 지난 시간은 신청할 수 없습니다"
+          : applicantConflict
+            ? "이미 같은 시간에 신청한 일정이 있어 선택할 수 없습니다"
           : !consultantAssignable
             ? "해당 시간에 배정 가능한 컨설턴트가 없습니다"
             : meta && !meta.hasOpen

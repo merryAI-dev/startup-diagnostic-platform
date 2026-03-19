@@ -437,18 +437,24 @@ export function UnifiedCalendar({
     setActionDialogOpen(true);
   };
 
-  const handleConfirmAction = () => {
+  const handleConfirmAction = async () => {
     if (!actionTarget) return;
-    if (actionType === "accept") {
-      onRequestApplication?.(actionTarget.id);
-    } else {
-      const reason = rejectReason.trim();
-      if (!reason) return;
-      onRejectApplication?.(actionTarget.id, reason);
+
+    try {
+      if (actionType === "accept") {
+        await onRequestApplication?.(actionTarget.id);
+      } else {
+        const reason = rejectReason.trim();
+        if (!reason) return;
+        await onRejectApplication?.(actionTarget.id, reason);
+      }
+
+      setActionDialogOpen(false);
+      setActionTarget(null);
+      setRejectReason("");
+    } catch (error) {
+      console.error("Failed to process pending application action:", error);
     }
-    setActionDialogOpen(false);
-    setActionTarget(null);
-    setRejectReason("");
   };
   const openPendingDetailModal = (applicationId: string) => {
     setSelectedPendingApplicationId(applicationId);
@@ -538,8 +544,8 @@ export function UnifiedCalendar({
       </div>
 
       {pendingOfficeHourReports.length === 0 ? (
-        <div className="flex flex-1 items-center justify-center py-5 text-center">
-          <AlertCircle className="mx-auto mb-2 size-8 text-slate-300" />
+        <div className="flex flex-1 items-center justify-center gap-1.5 py-5 text-center">
+          <AlertCircle className="size-5 text-slate-300" />
           <p className="text-sm text-slate-500">바로 작성할 미작성 일지가 없습니다</p>
         </div>
       ) : (
@@ -826,7 +832,7 @@ export function UnifiedCalendar({
                 <DialogContent className="sm:max-w-md">
                   <DialogHeader>
                     <DialogTitle>
-                      {actionType === "accept" ? "수락 확인" : "거절 사유 입력"}
+                      {actionType === "accept" ? "수락 확인" : "최종 거절 확인"}
                     </DialogTitle>
                   </DialogHeader>
                   <div className="space-y-4 py-2">
@@ -840,13 +846,22 @@ export function UnifiedCalendar({
                         </div>
                       </div>
                     ) : (
-                      <div className="space-y-2">
+                      <div className="space-y-3">
+                        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-900">
+                          <p className="font-medium">최종 거절 전 확인</p>
+                          <p className="mt-1">
+                            동일 시간·동일 아젠다에 배정 가능한 다른 컨설턴트까지 모두 검토한 뒤 진행해주세요.
+                          </p>
+                          <p className="mt-1 text-amber-800">
+                            최종 거절 처리 시 신청 기업에 즉시 결과가 안내됩니다.
+                          </p>
+                        </div>
                         <Label htmlFor="reject-reason">거절 사유</Label>
                         <Textarea
                           id="reject-reason"
                           value={rejectReason}
                           onChange={(e) => setRejectReason(e.target.value)}
-                          placeholder="거절 사유를 입력해주세요"
+                          placeholder="최종 거절 사유를 입력해주세요"
                           className="min-h-[100px]"
                         />
                       </div>

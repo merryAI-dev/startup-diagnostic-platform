@@ -237,7 +237,6 @@ export function AdminUsers({
                   {paginatedPendingApprovals.map((pending) => {
                     const requestedRole = pending.requestedRole ?? pending.role
                     const isApproving = approvalSaving || approvingUserId === pending.id
-                    const currentRoleLabel = getRoleLabel(pending.role)
                     const requestedRoleLabel = getRoleLabel(requestedRole)
 
                     return (
@@ -248,11 +247,7 @@ export function AdminUsers({
                               {pending.email || "-"}
                             </p>
                             <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                              {pending.role !== requestedRole && (
-                                <span>
-                                  역할 변경 신청: {currentRoleLabel} → {requestedRoleLabel}
-                                </span>
-                              )}
+                              <span>요청 역할: {requestedRoleLabel}</span>
                               <span className="flex items-center gap-1">
                                 <Calendar className="h-3 w-3" />
                                 {formatDate(pending.createdAt)}

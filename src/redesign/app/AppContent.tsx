@@ -96,7 +96,10 @@ import {
   submitRegularApplicationViaFunction,
   transitionApplicationStatusViaFunction,
 } from "@/redesign/app/lib/functions"
-import { getAssignableConsultantsAt } from "@/redesign/app/lib/application-availability"
+import {
+  getAssignableConsultantsAt,
+  hasApplicantConflictAt,
+} from "@/redesign/app/lib/application-availability"
 import { firestoreService } from "@/redesign/app/lib/firestore-service"
 import { storage as firebaseStorage } from "@/redesign/app/lib/firebase"
 import {
@@ -1271,6 +1274,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     }
 
     if (
+      application.programId === inferredProgramId &&
       resolvedAgenda === application.agenda &&
       resolvedOfficeHourTitle === application.officeHourTitle
     ) {
@@ -2309,8 +2313,21 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     return results.filter((ok) => !ok).length
   }
 
-  const getFunctionErrorMessage = (error: unknown, fallback: string) =>
-    error instanceof Error && error.message ? error.message : fallback
+  const getFunctionErrorMessage = (error: unknown, fallback: string) => {
+    if (error && typeof error === "object") {
+      console.error("Function call failed:", error)
+      const maybeFirebaseError = error as {
+        message?: string
+        code?: string
+        details?: unknown
+      }
+      if (maybeFirebaseError.message) {
+        const codeSuffix = maybeFirebaseError.code ? ` (${maybeFirebaseError.code})` : ""
+        return `${maybeFirebaseError.message}${codeSuffix}`
+      }
+    }
+    return error instanceof Error && error.message ? error.message : fallback
+  }
 
   const handleSubmitRegularApplication = async (data: ApplicationFormData) => {
     const officeHour = resolvedRegularOfficeHourList.find((oh) => oh.id === data.officeHourId)
@@ -2368,6 +2385,19 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
           )
           return
         }
+      }
+
+      const applicantConflict = hasApplicantConflictAt({
+        applications,
+        dateKey: scheduledDate,
+        time: data.time,
+        createdByUid: requesterId,
+        companyId: companyRecordId,
+        applicantEmail: user.email,
+      })
+      if (applicantConflict) {
+        toast.error("이미 같은 시간에 신청한 일정이 있어 중복 신청할 수 없습니다.")
+        return
       }
 
       const linkedConsultants = consultants.filter(
@@ -2809,8 +2839,6 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
         toast.error(getFunctionErrorMessage(error, "수락 요청 처리에 실패했습니다"))
         return
       }
-
-      toast.success("수락이 완료되어 확정되었습니다.")
       return
     }
     if (hasSessionEnded(targetApplication)) {
@@ -2927,8 +2955,6 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
         toast.error(getFunctionErrorMessage(error, "거절 처리에 실패했습니다"))
         return
       }
-
-      toast.success("거절 처리되었습니다.")
       return
     }
 
@@ -3006,8 +3032,6 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
         toast.error(getFunctionErrorMessage(error, "확정 처리에 실패했습니다"))
         return
       }
-
-      toast.success("일정이 확정되었습니다.")
       return
     }
     if (hasSessionEnded(targetApplication)) {
@@ -4342,6 +4366,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
             <RegularApplicationWizard
               officeHour={selectedOfficeHour}
               officeHours={scopedRegularOfficeHourList}
+              officeHourSlots={officeHourSlotList}
               applications={resolvedApplications}
               consultants={consultants}
               agendas={agendaList}
@@ -4350,6 +4375,11 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
               }
               remainingInternalTickets={ticketStats.remainingInternal}
               remainingExternalTickets={ticketStats.remainingExternal}
+              currentApplicant={{
+                createdByUid: firebaseUser?.uid ?? user.id,
+                companyId: companyRecordId,
+                applicantEmail: user.email,
+              }}
               onBack={() => handleNavigate("regular-detail", selectedOfficeHour.id)}
               onSubmit={handleSubmitRegularApplication}
             />

@@ -13,6 +13,11 @@ export function normalizeApplicationStatus(status?: Application["status"]): Appl
   return status === "review" ? "pending" : (status ?? "pending")
 }
 
+export function isApplicantReservedStatus(status?: Application["status"]): boolean {
+  const normalizedStatus = normalizeApplicationStatus(status)
+  return normalizedStatus === "pending" || normalizedStatus === "confirmed"
+}
+
 export function isConsultantAvailableAt(
   consultant: Consultant,
   dateKey: string,
@@ -39,6 +44,30 @@ export function getReservedConsultantId(
   if (application.consultantId) return application.consultantId
   if (!application.officeHourSlotId) return undefined
   return officeHourSlots.find((slot) => slot.id === application.officeHourSlotId)?.consultantId
+}
+
+function getFallbackReservedConsultantId(params: {
+  application: Application
+  consultants: Consultant[]
+  agendaId: string
+  dateKey: string
+  time: string
+}): string | undefined {
+  const { application, consultants, agendaId, dateKey, time } = params
+  if (!application.agendaId || application.agendaId !== agendaId) return undefined
+  if (!application.scheduledDate || application.scheduledDate !== dateKey) return undefined
+  if (!application.scheduledTime) return undefined
+  if (normalizeTimeKey(application.scheduledTime) !== normalizeTimeKey(time)) return undefined
+
+  const possibleConsultants = consultants.filter(
+    (consultant) =>
+      consultant.status === "active" &&
+      (consultant.agendaIds ?? []).includes(agendaId) &&
+      isConsultantAvailableAt(consultant, dateKey, time),
+  )
+
+  if (possibleConsultants.length !== 1) return undefined
+  return possibleConsultants[0]?.id
 }
 
 export function getAssignableConsultantsAt(params: {
@@ -78,7 +107,49 @@ export function getAssignableConsultantsAt(params: {
       if (application.scheduledDate !== dateKey) return false
       if (normalizeTimeKey(application.scheduledTime) !== normalizedTime) return false
 
-      return getReservedConsultantId(application, officeHourSlots) === consultant.id
+      const reservedConsultantId =
+        getReservedConsultantId(application, officeHourSlots) ??
+        getFallbackReservedConsultantId({
+          application,
+          consultants: linkedConsultants,
+          agendaId,
+          dateKey,
+          time: normalizedTime,
+        })
+
+      return reservedConsultantId === consultant.id
     })
+  })
+}
+
+export function hasApplicantConflictAt(params: {
+  applications: Application[]
+  dateKey: string
+  time: string
+  createdByUid?: string | null
+  companyId?: string | null
+  applicantEmail?: string | null
+}): boolean {
+  const { applications, dateKey, time, createdByUid, companyId, applicantEmail } = params
+  const normalizedTime = normalizeTimeKey(time)
+  const normalizedEmail = applicantEmail?.trim().toLowerCase() ?? ""
+
+  return applications.some((application) => {
+    if (!isApplicantReservedStatus(application.status)) return false
+    if (!application.scheduledDate || application.scheduledDate !== dateKey) return false
+    if (!application.scheduledTime) return false
+    if (normalizeTimeKey(application.scheduledTime) !== normalizedTime) return false
+
+    if (createdByUid && application.createdByUid === createdByUid) return true
+    if (companyId && application.companyId === companyId) return true
+    if (
+      normalizedEmail &&
+      typeof application.applicantEmail === "string" &&
+      application.applicantEmail.trim().toLowerCase() === normalizedEmail
+    ) {
+      return true
+    }
+
+    return false
   })
 }
