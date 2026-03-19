@@ -526,7 +526,6 @@ export function CompanyMetricsPage({ currentUser, companyId }: CompanyMetricsPag
       })),
     [savedMetricsState.data, selectedMetric.key],
   );
-
   const summaryFields = useMemo(() => {
     const fixedFields = ["revenue", "employees", "customers"];
     const fallbackFourth = selectedMetric.key === "revenue" || selectedMetric.key === "employees" || selectedMetric.key === "customers"
@@ -827,36 +826,36 @@ export function CompanyMetricsPage({ currentUser, companyId }: CompanyMetricsPag
 
           return (
             <Card key={field.key} className="gap-0">
-              <CardContent className="flex h-full min-h-[112px] flex-col justify-between p-3.5">
-                <div className="flex items-start justify-between gap-2.5">
-                  <div className="space-y-1">
-                    <p className="text-xs font-medium text-muted-foreground">{selectedMonth}월 {field.label}</p>
-                    <p className="text-lg font-semibold text-foreground">
-                      {formatMetricValue(currentValue, field.format)}
-                    </p>
-                  </div>
-                  <span className={cn("flex h-8 w-8 items-center justify-center rounded-lg text-white", field.tone)}>
-                    <Icon className="h-4 w-4" />
-                  </span>
-                </div>
-
-                <div className="flex items-center justify-between gap-3">
-                  <p className="text-xs text-muted-foreground">{getMonthDelta(currentValue, previousValue)}</p>
-                  {previousValue !== undefined && (
-                    <span
-                      className={cn(
-                        "inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs font-medium",
-                        isPositive
-                          ? "bg-emerald-50 text-emerald-700"
-                          : "bg-rose-50 text-rose-700",
-                      )}
-                    >
-                      {isPositive ? <TrendingUp className="h-3.5 w-3.5" /> : <TrendingDown className="h-3.5 w-3.5" />}
-                      {Math.abs(difference).toLocaleString()}
+                <CardContent className="flex h-full min-h-[112px] flex-col justify-between p-3.5">
+                  <div className="flex items-start justify-between gap-2.5">
+                    <div className="space-y-1">
+                      <p className="text-xs font-medium text-muted-foreground">{selectedMonth}월 {field.label}</p>
+                      <p className="text-lg font-semibold text-foreground">
+                        {formatMetricValue(currentValue, field.format)}
+                      </p>
+                    </div>
+                    <span className={cn("flex h-8 w-8 items-center justify-center rounded-lg text-white", field.tone)}>
+                      <Icon className="h-4 w-4" />
                     </span>
-                  )}
-                </div>
-              </CardContent>
+                  </div>
+
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-xs text-muted-foreground">{getMonthDelta(currentValue, previousValue)}</p>
+                    {previousValue !== undefined && (
+                      <span
+                        className={cn(
+                          "inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs font-medium",
+                          isPositive
+                            ? "bg-emerald-50 text-emerald-700"
+                            : "bg-rose-50 text-rose-700",
+                        )}
+                      >
+                        {isPositive ? <TrendingUp className="h-3.5 w-3.5" /> : <TrendingDown className="h-3.5 w-3.5" />}
+                        {Math.abs(difference).toLocaleString()}
+                      </span>
+                    )}
+                  </div>
+                </CardContent>
             </Card>
           );
         })}
@@ -984,12 +983,6 @@ export function CompanyMetricsPage({ currentUser, companyId }: CompanyMetricsPag
                   ))}
                 </TableBody>
               </Table>
-            </div>
-
-            <div className="flex flex-wrap gap-3 pt-3 text-[11px] text-muted-foreground">
-              <span>저장 전에는 차트와 요약 카드에 반영되지 않습니다.</span>
-              <span>저장 후 회사 문서 하위 데이터에 반영됩니다.</span>
-              <span>예: 투자유치현황, 제휴 수, 리드 수</span>
             </div>
           </CardContent>
         </Card>
