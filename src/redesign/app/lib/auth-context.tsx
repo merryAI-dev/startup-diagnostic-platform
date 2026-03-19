@@ -356,6 +356,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           doc(db, "companies", userCredential.user.uid),
           {
             name: companyName || null,
+            ownerUid: userCredential.user.uid,
             updatedAt: serverTimestamp(),
           },
           { merge: true }

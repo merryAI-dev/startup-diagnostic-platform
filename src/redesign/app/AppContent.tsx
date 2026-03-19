@@ -4465,7 +4465,9 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
 
           {currentPage === "consultants" && <ConsultantsDirectory consultants={consultants} />}
 
-          {currentPage === "company-metrics" && <CompanyMetricsPage currentUser={user} />}
+          {currentPage === "company-metrics" && (
+            <CompanyMetricsPage currentUser={user} companyId={companyRecordId} />
+          )}
 
           {currentPage === "company-newsletter" && <CompanyNewsletter currentUser={user} />}
 

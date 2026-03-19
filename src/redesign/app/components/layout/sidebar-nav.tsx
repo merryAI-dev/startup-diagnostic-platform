@@ -76,6 +76,7 @@ const userNavItems: NavItem[] = [
 const companyCoreNavIds = new Set([
   "dashboard",
   "regular",
+  "company-metrics",
   "company-info",
 ]);
 

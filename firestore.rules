@@ -34,6 +34,18 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/companies/$(companyId)).data.ownerUid == request.auth.uid;
     }
 
+    function isCompanyMember(companyId) {
+      return hasProfile()
+        && (
+          get(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.companyId == companyId
+          || isCompanyOwner(companyId)
+        )
+        && (
+          get(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.role == "company"
+          || get(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.requestedRole == "company"
+        );
+    }
+
     match /profiles/{userId} {
       allow create: if isAdmin()
         && request.resource.data.role in ["admin", "company", "consultant"]
@@ -100,7 +112,7 @@ service cloud.firestore {
     }
 
     match /companies/{companyId} {
-      allow read: if isCompanyOwner(companyId) || isAdmin();
+      allow read: if isCompanyMember(companyId) || isAdmin();
       allow create: if isSignedIn()
         && (
           request.resource.data.ownerUid == request.auth.uid
@@ -109,8 +121,12 @@ service cloud.firestore {
       allow update: if isSignedIn()
         && (
           (
-            isCompanyOwner(companyId)
-            && request.resource.data.ownerUid == resource.data.ownerUid
+            isCompanyMember(companyId)
+            && (
+              !("ownerUid" in resource.data)
+              || request.resource.data.ownerUid == resource.data.ownerUid
+              || request.resource.data.ownerUid == request.auth.uid
+            )
           )
           || isAdmin()
         );
@@ -118,25 +134,31 @@ service cloud.firestore {
     }
 
     match /companies/{companyId}/companyInfo/{docId} {
-      allow read: if isCompanyOwner(companyId) || isAdmin();
-      allow create, update: if isCompanyOwner(companyId) || isAdmin();
+      allow read: if isCompanyMember(companyId) || isAdmin();
+      allow create, update: if isCompanyMember(companyId) || isAdmin();
       allow delete: if false;
     }
 
     match /companies/{companyId}/selfAssessment/{docId} {
-      allow read: if isCompanyOwner(companyId) || isAdmin();
-      allow create, update: if isCompanyOwner(companyId);
+      allow read: if isCompanyMember(companyId) || isAdmin();
+      allow create, update: if isCompanyMember(companyId);
+      allow delete: if false;
+    }
+
+    match /companies/{companyId}/metrics/{docId} {
+      allow read: if isCompanyMember(companyId) || isAdmin();
+      allow create, update: if isCompanyMember(companyId) || isAdmin();
       allow delete: if false;
     }
 
     match /companies/{companyId}/files/{fileId} {
-      allow read: if isCompanyOwner(companyId) || isAdmin();
-      allow create: if isCompanyOwner(companyId)
+      allow read: if isCompanyMember(companyId) || isAdmin();
+      allow create: if isCompanyMember(companyId)
         && request.resource.data.createdByUid == request.auth.uid
         && request.resource.data.storagePath is string
         && request.resource.data.name is string
         && request.resource.data.size is int;
-      allow delete: if isCompanyOwner(companyId) || isAdmin();
+      allow delete: if isCompanyMember(companyId) || isAdmin();
       allow update: if false;
     }
 
