@@ -1,0 +1,26 @@
+import { Navigate } from "react-router-dom"
+import { useAuth } from "@/context/AuthContext"
+import { LoadingScreen } from "@/components/auth/RouteGuards"
+
+export function HomeRedirect() {
+  const { user, profile, signupRequest, loading } = useAuth()
+
+  if (loading) {
+    return <LoadingScreen />
+  }
+  if (!user) {
+    return <Navigate to="/login" replace />
+  }
+  if (profile?.active === true) {
+    return (
+      <Navigate
+        to={profile.role === "admin" || profile.role === "consultant" ? "/admin" : "/company"}
+        replace
+      />
+    )
+  }
+  if (profile?.active === false || signupRequest) {
+    return <Navigate to="/pending" replace />
+  }
+  return <Navigate to="/signup" replace />
+}

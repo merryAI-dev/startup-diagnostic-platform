@@ -1,0 +1,116 @@
+# Page snapshot
+
+```yaml
+- generic [ref=e2]:
+  - generic [ref=e3]:
+    - generic [ref=e4]:
+      - generic [ref=e7]:
+        - heading "MYSC 기업육성플랫폼" [level=2] [ref=e8]
+        - paragraph [ref=e9]: MYSC EMA
+      - button "자가진단표 미완료" [ref=e11]:
+        - img
+        - generic "자가진단표 미완료" [ref=e12]
+    - generic [ref=e13]:
+      - navigation [ref=e15]:
+        - button "대시보드" [ref=e16]:
+          - img [ref=e17]
+          - generic [ref=e22]: 대시보드
+        - button "정기 오피스아워" [ref=e23]:
+          - img [ref=e24]
+          - generic [ref=e26]: 정기 오피스아워
+        - button "기업 정보 입력" [ref=e27]:
+          - img [ref=e28]
+          - generic [ref=e31]: 기업 정보 입력
+      - main [ref=e32]:
+        - generic [ref=e33]:
+          - generic [ref=e34]:
+            - button "취소" [ref=e35]:
+              - img
+              - text: 취소
+            - heading "오피스아워 신청" [level=1] [ref=e36]
+            - paragraph [ref=e37]: CTS Seed0 AC_2026 정기 오피스아워
+          - generic [ref=e39]:
+            - generic [ref=e41]:
+              - img [ref=e44]
+              - generic [ref=e47]: 아젠다 선택
+            - generic [ref=e49]:
+              - generic [ref=e52]: "2"
+              - generic [ref=e54]: 날짜/시간 선택
+            - generic [ref=e56]:
+              - generic [ref=e59]: "3"
+              - generic [ref=e61]: 진행 형태
+            - generic [ref=e63]:
+              - generic [ref=e66]: "4"
+              - generic [ref=e68]: 요청 내용
+            - generic [ref=e70]:
+              - generic [ref=e73]: "5"
+              - generic [ref=e74]: 최종 확인
+          - generic [ref=e76]:
+            - generic [ref=e78]:
+              - heading "날짜와 시간을 선택하세요" [level=3] [ref=e79]
+              - generic [ref=e81]:
+                - generic [ref=e82]: 신청 가능한 날짜
+                - generic [ref=e85]:
+                  - generic [ref=e86]:
+                    - generic [ref=e87]: March 2026
+                    - generic:
+                      - button "Go to previous month" [ref=e88]:
+                        - img
+                      - button "Go to next month" [ref=e89]:
+                        - img
+                  - grid "March 2026" [ref=e90]:
+                    - rowgroup [ref=e91]:
+                      - row "Sunday Monday Tuesday Wednesday Thursday Friday Saturday" [ref=e92]:
+                        - columnheader "Sunday" [ref=e93]: Su
+                        - columnheader "Monday" [ref=e94]: Mo
+                        - columnheader "Tuesday" [ref=e95]: Tu
+                        - columnheader "Wednesday" [ref=e96]: We
+                        - columnheader "Thursday" [ref=e97]: Th
+                        - columnheader "Friday" [ref=e98]: Fr
+                        - columnheader "Saturday" [ref=e99]: Sa
+                    - rowgroup [ref=e100]:
+                      - row "1 2 3 4 5 6 7" [ref=e101]:
+                        - gridcell "1" [disabled]
+                        - gridcell "2" [disabled]
+                        - gridcell "3" [disabled]
+                        - gridcell "4" [disabled]
+                        - gridcell "5" [disabled]
+                        - gridcell "6" [disabled]
+                        - gridcell "7" [disabled]
+                      - row "8 9 10 11 12 13 14" [ref=e102]:
+                        - gridcell "8" [disabled]
+                        - gridcell "9" [disabled]
+                        - gridcell "10" [disabled]
+                        - gridcell "11" [disabled]
+                        - gridcell "12" [disabled]
+                        - gridcell "13" [disabled]
+                        - gridcell "14" [disabled]
+                      - row "15 16 17 18 19 20 21" [ref=e103]:
+                        - gridcell "15" [disabled]
+                        - gridcell "16" [disabled]
+                        - gridcell "17" [disabled]
+                        - gridcell "18" [disabled]
+                        - gridcell "19" [disabled]
+                        - gridcell "20" [disabled]
+                        - gridcell "21" [disabled]
+                      - row "22 23 24 25 26 27 28" [ref=e104]:
+                        - gridcell "22" [disabled]
+                        - gridcell "23" [disabled]
+                        - gridcell "24" [disabled]
+                        - gridcell "25" [disabled]
+                        - gridcell "26" [disabled]
+                        - gridcell "27" [disabled]
+                        - gridcell "28" [disabled]
+                      - row "29 30 31 1 2 3 4" [ref=e105]:
+                        - gridcell "29" [disabled]
+                        - gridcell "30" [disabled]
+                        - gridcell "31" [disabled]
+                        - gridcell "1" [disabled]
+                        - gridcell "2" [disabled]
+                        - gridcell "3" [disabled]
+                        - gridcell "4" [disabled]
+            - generic [ref=e106]:
+              - button "이전" [ref=e107]
+              - button "다음" [disabled]
+  - region "Notifications alt+T"
+```

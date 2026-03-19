@@ -1,0 +1,272 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function hasProfile() {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/profiles/$(request.auth.uid));
+    }
+
+    function isActiveUser() {
+      return hasProfile()
+        && (
+          !(get(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.active is bool)
+          || get(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.active == true
+        );
+    }
+
+    function isAdmin() {
+      return isActiveUser()
+        && get(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.role == "admin";
+    }
+
+    function isConsultant() {
+      return isActiveUser()
+        && get(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.role == "consultant";
+    }
+
+    function isCompanyOwner(companyId) {
+      return isSignedIn()
+        && get(/databases/$(database)/documents/companies/$(companyId)).data.ownerUid == request.auth.uid;
+    }
+
+    function isCompanyMember(companyId) {
+      return hasProfile()
+        && (
+          get(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.companyId == companyId
+          || isCompanyOwner(companyId)
+        )
+        && (
+          get(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.role == "company"
+          || get(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.requestedRole == "company"
+        );
+    }
+
+    match /profiles/{userId} {
+      allow create: if isAdmin()
+        && request.resource.data.role in ["admin", "company", "consultant"]
+        && (
+          request.resource.data.requestedRole == null
+          || request.resource.data.requestedRole in ["admin", "company", "consultant"]
+        )
+        && request.resource.data.active is bool
+        && request.resource.data.active == true
+        && request.resource.data.approvedByUid == request.auth.uid;
+
+      allow read: if isSignedIn()
+        && request.auth.uid == userId;
+      allow read: if isAdmin();
+
+      allow update: if isAdmin()
+        && request.resource.data.role in ["admin", "company", "consultant"]
+        && (
+          request.resource.data.requestedRole == null
+          || request.resource.data.requestedRole in ["admin", "company", "consultant"]
+        )
+        && request.resource.data.active is bool;
+      allow update: if isSignedIn()
+        && request.auth.uid == userId
+        && resource.data.active is bool
+        && resource.data.active == false
+        && request.resource.data.role == "company"
+        && (
+          request.resource.data.requestedRole == null
+          || request.resource.data.requestedRole in ["admin", "company", "consultant"]
+        )
+        && request.resource.data.active is bool
+        && request.resource.data.active == false;
+
+      allow delete: if false;
+    }
+
+    match /users/{userId} {
+      allow read: if isSignedIn()
+        && (request.auth.uid == userId || isAdmin());
+      allow create: if isSignedIn()
+        && request.auth.uid == userId;
+      allow update: if isSignedIn()
+        && (request.auth.uid == userId || isAdmin());
+      allow delete: if isAdmin();
+    }
+
+    match /adminRoleRequests/{requestId} {
+      allow read, write: if false;
+    }
+
+    match /signupRequests/{userId} {
+      allow create: if isSignedIn()
+        && request.auth.uid == userId;
+      allow read: if isSignedIn()
+        && (request.auth.uid == userId || isAdmin());
+      allow update: if isAdmin()
+        || (
+          isSignedIn()
+          && request.auth.uid == userId
+        );
+      allow delete: if isAdmin()
+        || (isSignedIn() && request.auth.uid == userId);
+    }
+
+    match /companies/{companyId} {
+      allow read: if isCompanyMember(companyId) || isAdmin();
+      allow create: if isSignedIn()
+        && (
+          request.resource.data.ownerUid == request.auth.uid
+          || isAdmin()
+        );
+      allow update: if isSignedIn()
+        && (
+          (
+            isCompanyMember(companyId)
+            && (
+              !("ownerUid" in resource.data)
+              || request.resource.data.ownerUid == resource.data.ownerUid
+              || request.resource.data.ownerUid == request.auth.uid
+            )
+          )
+          || isAdmin()
+        );
+      allow delete: if false;
+    }
+
+    match /companies/{companyId}/companyInfo/{docId} {
+      allow read: if isCompanyMember(companyId) || isAdmin();
+      allow create, update: if isCompanyMember(companyId) || isAdmin();
+      allow delete: if false;
+    }
+
+    match /companies/{companyId}/selfAssessment/{docId} {
+      allow read: if isCompanyMember(companyId) || isAdmin();
+      allow create, update: if isCompanyMember(companyId);
+      allow delete: if false;
+    }
+
+    match /companies/{companyId}/metrics/{docId} {
+      allow read: if isCompanyMember(companyId) || isAdmin();
+      allow create, update: if isCompanyMember(companyId) || isAdmin();
+      allow delete: if false;
+    }
+
+    match /companies/{companyId}/files/{fileId} {
+      allow read: if isCompanyMember(companyId) || isAdmin();
+      allow create: if isCompanyMember(companyId)
+        && request.resource.data.createdByUid == request.auth.uid
+        && request.resource.data.storagePath is string
+        && request.resource.data.name is string
+        && request.resource.data.size is int;
+      allow delete: if isCompanyMember(companyId) || isAdmin();
+      allow update: if false;
+    }
+
+    match /consultants/{consultantId} {
+      allow read: if isActiveUser() || (isSignedIn() && consultantId == request.auth.uid);
+      allow create: if isAdmin()
+        || (
+          isSignedIn()
+          && consultantId == request.auth.uid
+          && request.resource.data.email is string
+          && request.resource.data.email == request.auth.token.email
+        );
+      allow update: if isAdmin()
+        || (
+          isSignedIn()
+          && consultantId == request.auth.uid
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            "name",
+            "title",
+            "email",
+            "phone",
+            "organization",
+            "secondaryEmail",
+            "secondaryPhone",
+            "fixedMeetingLink",
+            "expertise",
+            "bio",
+            "status",
+            "availability",
+            "joinedDate",
+            "updatedAt"
+          ])
+        )
+      ;
+      allow delete: if isAdmin();
+    }
+
+    match /agendas/{agendaId} {
+      allow read: if isActiveUser();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /programs/{programId} {
+      allow read: if true;
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /officeHourSlots/{slotId} {
+      allow read: if isActiveUser();
+      allow create, update, delete: if isAdmin() || isConsultant();
+    }
+
+    match /officeHourApplications/{applicationId} {
+      allow read: if isActiveUser();
+      allow create: if isActiveUser()
+        && request.resource.data.createdByUid == request.auth.uid;
+      allow update: if isAdmin()
+        || isConsultant()
+        || (
+          isActiveUser()
+          && resource.data.createdByUid == request.auth.uid
+          && request.resource.data.createdByUid == resource.data.createdByUid
+          && (
+            (
+              request.resource.data.status == "cancelled"
+              && request.resource.data.diff(resource.data).affectedKeys()
+                .hasOnly(["status", "updatedAt"])
+            )
+            || (
+              resource.data.status in ["pending", "confirmed"]
+              && request.resource.data.status == resource.data.status
+              && request.resource.data.requestContent is string
+              && request.resource.data.attachments is list
+              && request.resource.data.attachmentUrls is list
+              && request.resource.data.diff(resource.data).affectedKeys()
+                .hasOnly(["requestContent", "attachments", "attachmentUrls", "updatedAt"])
+            )
+          )
+        );
+      allow delete: if isAdmin()
+        || isConsultant()
+        || (
+          isActiveUser()
+          && (
+            resource.data.createdByUid == request.auth.uid
+            || (
+              request.auth.token.email is string
+              && resource.data.applicantEmail == request.auth.token.email
+            )
+          )
+        );
+    }
+
+    match /reports/{reportId} {
+      allow read: if isActiveUser();
+      allow create, update, delete: if isAdmin() || isConsultant();
+    }
+
+    match /consents/{consentId} {
+      allow read: if isActiveUser()
+        && (request.auth.uid == resource.data.userId || isAdmin());
+      allow create: if isSignedIn()
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.type in ["privacy", "marketing"]
+        && request.resource.data.consented is bool
+        && request.resource.data.version is string
+        && request.resource.data.method is string;
+      allow update, delete: if false;
+    }
+  }
+}

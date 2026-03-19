@@ -1,0 +1,607 @@
+import { useEffect, useState } from "react";
+import { ArrowLeft, Calendar as CalendarIcon, Check, AlertCircle } from "lucide-react";
+import { Button } from "@/redesign/app/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/redesign/app/components/ui/alert-dialog";
+import { Card, CardContent } from "@/redesign/app/components/ui/card";
+import { Stepper } from "@/redesign/app/components/stepper";
+import { RadioGroup, RadioGroupItem } from "@/redesign/app/components/ui/radio-group";
+import { Label } from "@/redesign/app/components/ui/label";
+import { Textarea } from "@/redesign/app/components/ui/textarea";
+import { FileUpload } from "@/redesign/app/components/file-upload";
+import { Calendar } from "@/redesign/app/components/ui/calendar";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/redesign/app/components/ui/select";
+import { Agenda, SessionFormat, FileItem } from "@/redesign/app/lib/types";
+import { format } from "date-fns";
+import { ko } from "date-fns/locale";
+import { cn } from "@/redesign/app/components/ui/utils";
+
+interface IrregularApplicationWizardProps {
+  agendas: Agenda[];
+  remainingInternalTickets: number;
+  remainingExternalTickets: number;
+  onBack: () => void;
+  onSubmit: (data: IrregularApplicationFormData) => Promise<void> | void;
+}
+
+export interface IrregularApplicationFormData {
+  projectName: string;
+  isInternal: boolean;
+  agendaId: string;
+  periodFrom: Date;
+  periodTo: Date;
+  sessionFormat: SessionFormat;
+  requestContent: string;
+  files: FileItem[];
+}
+
+type RequestSectionKey =
+  | "currentSituation"
+  | "keyChallenges"
+  | "requestedSupport";
+
+type RequestSections = Record<RequestSectionKey, string>;
+
+const REQUEST_SECTION_MIN_LENGTH = 20;
+const REQUEST_SECTION_META: Array<{ key: RequestSectionKey; label: string; placeholder: string }> = [
+  {
+    key: "currentSituation",
+    label: "1. 현재 상황 및 배경",
+    placeholder: "예: 지금까지의 진행 과정과 주요 이슈 발생 배경",
+  },
+  {
+    key: "keyChallenges",
+    label: "2. 당면한 문제/과제",
+    placeholder: "예: 현재 가장 해결이 필요한 문제와 영향",
+  },
+  {
+    key: "requestedSupport",
+    label: "3. 요청 사항",
+    placeholder: "예: 오피스아워에서 얻고 싶은 구체적인 도움/산출물",
+  },
+];
+
+const steps = [
+  "프로젝트 선택",
+  "컨설팅 유형",
+  "아젠다 선택",
+  "희망 기간",
+  "최종 확인",
+];
+
+export function IrregularApplicationWizard({
+  agendas,
+  remainingInternalTickets,
+  remainingExternalTickets,
+  onBack,
+  onSubmit,
+}: IrregularApplicationWizardProps) {
+  const [currentStep, setCurrentStep] = useState(1);
+  const [projectName, setProjectName] = useState("MYSC EMA");
+  const [isInternal, setIsInternal] = useState(true);
+  const [selectedAgendaId, setSelectedAgendaId] = useState("");
+  const [periodFrom, setPeriodFrom] = useState<Date | undefined>();
+  const [periodTo, setPeriodTo] = useState<Date | undefined>();
+  const [sessionFormat, setSessionFormat] = useState<SessionFormat>("online");
+  const [requestSections, setRequestSections] = useState<RequestSections>({
+    currentSituation: "",
+    keyChallenges: "",
+    requestedSupport: "",
+  });
+  const [files, setFiles] = useState<FileItem[]>([]);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [ticketAlertOpen, setTicketAlertOpen] = useState(false);
+  const [ticketAlertMessage, setTicketAlertMessage] = useState("");
+
+  const remainingInternalSessions = remainingInternalTickets;
+  const remainingExternalSessions = remainingExternalTickets;
+  const requestSectionValidations = REQUEST_SECTION_META.map(({ key, label }) => {
+    const value = requestSections[key].trim();
+    return {
+      key,
+      label,
+      value,
+      length: value.length,
+      isValid: value.length >= REQUEST_SECTION_MIN_LENGTH,
+    };
+  });
+  const isRequestSectionStepValid = requestSectionValidations.every((item) => item.isValid);
+  const requestContent = requestSectionValidations
+    .map(({ label, value }) => `${label}\n${value}`)
+    .join("\n\n");
+
+  const isStepValid = () => {
+    switch (currentStep) {
+      case 1:
+        return projectName.trim().length > 0;
+      case 2:
+        return isInternal ? remainingInternalSessions > 0 : remainingExternalSessions > 0;
+      case 3:
+        return selectedAgendaId.length > 0;
+      case 4:
+        return Boolean(periodFrom && periodTo && isRequestSectionStepValid);
+      default:
+        return true;
+    }
+  };
+
+  const handleNext = () => {
+    if (currentStep === 2) {
+      const remaining = isInternal ? remainingInternalSessions : remainingExternalSessions;
+      if (remaining <= 0) {
+        setTicketAlertMessage(
+          isInternal
+            ? "내부 티켓이 모두 소진되어 내부 오피스아워를 신청할 수 없습니다."
+            : "외부 티켓이 모두 소진되어 외부 오피스아워를 신청할 수 없습니다."
+        );
+        setTicketAlertOpen(true);
+        return;
+      }
+    }
+    if (currentStep < 5) {
+      setCurrentStep(currentStep + 1);
+    }
+  };
+
+  const handleBack = () => {
+    if (currentStep > 1) {
+      setCurrentStep(currentStep - 1);
+    }
+  };
+
+  const handleSubmit = async () => {
+    if (!periodFrom || !periodTo || isSubmitting) return;
+    setIsSubmitting(true);
+    try {
+      await Promise.resolve(
+        onSubmit({
+          projectName,
+          isInternal,
+          agendaId: selectedAgendaId,
+          periodFrom,
+          periodTo,
+          sessionFormat,
+          requestContent,
+          files,
+        })
+      );
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const activeAgendas = agendas.filter((agenda) => agenda.active !== false);
+  const selectedAgenda = activeAgendas.find((a) => a.id === selectedAgendaId);
+  const isExternalAgendaSelected = selectedAgenda?.scope === "external";
+
+  useEffect(() => {
+    if (isExternalAgendaSelected && sessionFormat !== "online") {
+      setSessionFormat("online");
+    }
+  }, [isExternalAgendaSelected, sessionFormat]);
+
+  return (
+    <div className="p-8 space-y-6">
+      <AlertDialog open={ticketAlertOpen} onOpenChange={setTicketAlertOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>티켓이 부족합니다</AlertDialogTitle>
+            <AlertDialogDescription>
+              {ticketAlertMessage}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogAction>확인</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      <div>
+        <Button variant="ghost" onClick={onBack} className="mb-4">
+          <ArrowLeft className="w-4 h-4 mr-2" />
+          취소
+        </Button>
+        <h1 className="mb-2">비정기 오피스아워 신청</h1>
+        <p className="text-sm text-muted-foreground">
+          맞춤형 일정으로 컨설팅을 요청하세요
+        </p>
+      </div>
+
+      <Stepper steps={steps} currentStep={currentStep} />
+
+      <Card>
+        <CardContent className="p-8">
+          {/* Step 1: Project Selection */}
+          {currentStep === 1 && (
+            <div className="space-y-6">
+              <div>
+                <h3 className="mb-4">프로젝트를 선택하세요</h3>
+                <Label htmlFor="project" className="mb-2 block">
+                  프로젝트명
+                </Label>
+                <Select value={projectName} onValueChange={setProjectName}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="MYSC EMA">MYSC EMA</SelectItem>
+                    <SelectItem value="임팩트 프로젝트 A">
+                      임팩트 프로젝트 A
+                    </SelectItem>
+                    <SelectItem value="소셜벤처 프로젝트 B">
+                      소셜벤처 프로젝트 B
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          )}
+
+          {/* Step 2: Consulting Type */}
+          {currentStep === 2 && (
+            <div className="space-y-6">
+              <div>
+                <h3 className="mb-4">컨설팅 유형을 선택하세요</h3>
+                <RadioGroup
+                  value={isInternal ? "internal" : "external"}
+                  onValueChange={(v) => setIsInternal(v === "internal")}
+                >
+                  <div className="space-y-3">
+                    <div
+                      className={cn(
+                        "flex items-start space-x-3 p-4 rounded-lg border cursor-pointer transition-colors",
+                        isInternal && "border-primary bg-primary/5",
+                        remainingInternalSessions <= 0 && "opacity-60 cursor-not-allowed"
+                      )}
+                    >
+                      <RadioGroupItem
+                        value="internal"
+                        id="internal"
+                        disabled={remainingInternalSessions <= 0}
+                      />
+                      <div className="flex-1">
+                        <Label htmlFor="internal" className="cursor-pointer">
+                          내부 컨설팅
+                        </Label>
+                        <p className="text-sm text-muted-foreground mt-1">
+                          프로그램 참여 기업 대상 (무료)
+                        </p>
+                        <p className="text-xs text-primary mt-2">
+                          잔여 횟수: {remainingInternalSessions}회
+                        </p>
+                        {remainingInternalSessions <= 0 && (
+                          <p className="text-xs text-rose-600 mt-1">
+                            내부 티켓이 모두 소진되었습니다.
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                    <div
+                      className={cn(
+                        "flex items-start space-x-3 p-4 rounded-lg border cursor-pointer transition-colors",
+                        !isInternal && "border-primary bg-primary/5",
+                        remainingExternalSessions <= 0 && "opacity-60 cursor-not-allowed"
+                      )}
+                    >
+                      <RadioGroupItem
+                        value="external"
+                        id="external"
+                        disabled={remainingExternalSessions <= 0}
+                      />
+                      <div className="flex-1">
+                        <Label htmlFor="external" className="cursor-pointer">
+                          외부 컨설팅
+                        </Label>
+                        <p className="text-sm text-muted-foreground mt-1">
+                          별도 비용 발생 (견적 협의)
+                        </p>
+                        <p className="text-xs text-primary mt-2">
+                          잔여 횟수: {remainingExternalSessions}회
+                        </p>
+                        {remainingExternalSessions <= 0 && (
+                          <p className="text-xs text-rose-600 mt-1">
+                            외부 티켓이 모두 소진되었습니다.
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </RadioGroup>
+              </div>
+            </div>
+          )}
+
+          {/* Step 3: Agenda */}
+          {currentStep === 3 && (
+            <div className="space-y-6">
+              <div>
+                <h3 className="mb-4">논의하실 아젠다를 선택하세요</h3>
+                <div className="grid grid-cols-2 gap-3">
+                  {activeAgendas.map((agenda) => (
+                    <button
+                      key={agenda.id}
+                      onClick={() => setSelectedAgendaId(agenda.id)}
+                      className={cn(
+                        "p-4 rounded-lg border text-left transition-colors",
+                        selectedAgendaId === agenda.id
+                          ? "border-primary bg-primary/5"
+                          : "hover:border-gray-400"
+                      )}
+                    >
+                      <div className="text-sm mb-1">{agenda.name}</div>
+                      <div className="text-xs text-muted-foreground">
+                        {agenda.category}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Step 4: Period and Content */}
+          {currentStep === 4 && (
+            <div className="space-y-6">
+              <div>
+                <h3 className="mb-4">희망 기간을 선택하세요</h3>
+                <div className="grid grid-cols-2 gap-6">
+                  <div>
+                    <Label className="mb-2 block">시작일</Label>
+                    <Calendar
+                      mode="single"
+                      selected={periodFrom}
+                      onSelect={setPeriodFrom}
+                      disabled={(date) => date < new Date()}
+                      className="rounded-md border"
+                    />
+                  </div>
+                  <div>
+                    <Label className="mb-2 block">종료일</Label>
+                    <Calendar
+                      mode="single"
+                      selected={periodTo}
+                      onSelect={setPeriodTo}
+                      disabled={(date) =>
+                        date < new Date() ||
+                        (periodFrom ? date < periodFrom : false)
+                      }
+                      className="rounded-md border"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <h3 className="mb-4">진행 형태를 선택하세요</h3>
+                <RadioGroup
+                  value={sessionFormat}
+                  onValueChange={(v) => {
+                    const nextFormat = v as SessionFormat;
+                    if (isExternalAgendaSelected && nextFormat === "offline") return;
+                    setSessionFormat(nextFormat);
+                  }}
+                >
+                  <div className="space-y-3">
+                    <div
+                      className={cn(
+                        "flex items-start space-x-3 p-4 rounded-lg border cursor-pointer transition-colors",
+                        sessionFormat === "online" && "border-primary bg-primary/5"
+                      )}
+                    >
+                      <RadioGroupItem value="online" id="online" />
+                      <div className="flex-1">
+                        <Label htmlFor="online" className="cursor-pointer">
+                          온라인 (화상 회의)
+                        </Label>
+                      </div>
+                    </div>
+                    <div
+                      className={cn(
+                        "flex items-start space-x-3 p-4 rounded-lg border cursor-pointer transition-colors",
+                        sessionFormat === "offline" &&
+                          "border-primary bg-primary/5",
+                        isExternalAgendaSelected && "opacity-60 cursor-not-allowed"
+                      )}
+                    >
+                      <RadioGroupItem
+                        value="offline"
+                        id="offline"
+                        disabled={isExternalAgendaSelected}
+                      />
+                      <div className="flex-1">
+                        <Label
+                          htmlFor="offline"
+                          className={cn(
+                            "cursor-pointer",
+                            isExternalAgendaSelected && "cursor-not-allowed"
+                          )}
+                        >
+                          오프라인 (대면 미팅)
+                        </Label>
+                        {isExternalAgendaSelected && (
+                          <p className="text-xs text-rose-600 mt-1">
+                            외부 아젠다는 온라인으로만 신청할 수 있습니다.
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </RadioGroup>
+              </div>
+
+              <div>
+                <h3 className="mb-2">요청 내용을 작성하세요</h3>
+                <p className="text-sm text-muted-foreground mb-4">
+                  항목별로 최소 20자 이상 입력해야 다음 단계로 진행할 수 있습니다.
+                </p>
+                <div className="space-y-4">
+                  {requestSectionValidations.map(({ key, label, length, isValid }) => (
+                    <div key={key} className="space-y-2">
+                      <Label>{label}</Label>
+                      <Textarea
+                        value={requestSections[key]}
+                        onChange={(e) =>
+                          setRequestSections((prev) => ({ ...prev, [key]: e.target.value }))
+                        }
+                        placeholder={
+                          REQUEST_SECTION_META.find((item) => item.key === key)?.placeholder ?? ""
+                        }
+                        className="min-h-[96px]"
+                      />
+                      <p
+                        className={cn(
+                          "text-xs",
+                          isValid ? "text-emerald-600" : "text-rose-600"
+                        )}
+                      >
+                        {length}/{REQUEST_SECTION_MIN_LENGTH}자
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <h3 className="mb-2">파일 첨부 (선택)</h3>
+                <FileUpload files={files} onFilesChange={setFiles} />
+              </div>
+            </div>
+          )}
+
+          {/* Step 5: Confirmation */}
+          {currentStep === 5 && (
+            <div className="space-y-6">
+              <div className="flex items-start gap-3 p-4 bg-blue-50 rounded-lg mb-6">
+                <AlertCircle className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
+                <div className="text-sm text-blue-900">
+                  <p className="mb-1">신청 내용을 확인해주세요</p>
+                  <p className="text-xs">
+                    제출 후 담당 컨설턴트가 배정되며, 희망 기간 내에서 일정이
+                    조율됩니다.
+                  </p>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <div className="flex items-start gap-3">
+                  <div className="w-5 h-5 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0 mt-0.5">
+                    <Check className="w-3 h-3 text-primary" />
+                  </div>
+                  <div className="flex-1">
+                    <Label className="text-muted-foreground">프로젝트</Label>
+                    <p className="text-sm">{projectName}</p>
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-3">
+                  <div className="w-5 h-5 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0 mt-0.5">
+                    <Check className="w-3 h-3 text-primary" />
+                  </div>
+                  <div className="flex-1">
+                    <Label className="text-muted-foreground">유형</Label>
+                    <p className="text-sm">
+                      {isInternal ? "내부 컨설팅" : "외부 컨설팅"}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-3">
+                  <div className="w-5 h-5 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0 mt-0.5">
+                    <Check className="w-3 h-3 text-primary" />
+                  </div>
+                  <div className="flex-1">
+                    <Label className="text-muted-foreground">아젠다</Label>
+                    <p className="text-sm">{selectedAgenda?.name}</p>
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-3">
+                  <div className="w-5 h-5 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0 mt-0.5">
+                    <CalendarIcon className="w-3 h-3 text-primary" />
+                  </div>
+                  <div className="flex-1">
+                    <Label className="text-muted-foreground">희망 기간</Label>
+                    <p className="text-sm">
+                      {periodFrom &&
+                        format(periodFrom, "M월 d일", { locale: ko })}{" "}
+                      ~{" "}
+                      {periodTo && format(periodTo, "M월 d일", { locale: ko })}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-3">
+                  <div className="w-5 h-5 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0 mt-0.5">
+                    <Check className="w-3 h-3 text-primary" />
+                  </div>
+                  <div className="flex-1">
+                    <Label className="text-muted-foreground">진행 형태</Label>
+                    <p className="text-sm">
+                      {sessionFormat === "online" ? "온라인" : "오프라인"}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-3">
+                  <div className="w-5 h-5 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0 mt-0.5">
+                    <Check className="w-3 h-3 text-primary" />
+                  </div>
+                  <div className="flex-1">
+                    <Label className="text-muted-foreground">요청 내용</Label>
+                    <div className="text-sm whitespace-pre-wrap space-y-2">
+                      {requestSectionValidations.map(({ key, label, value }) => (
+                        <p key={key}>
+                          <span className="font-medium">{label}</span>
+                          {"\n"}
+                          {value}
+                        </p>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {files.length > 0 && (
+                  <div className="flex items-start gap-3">
+                    <div className="w-5 h-5 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0 mt-0.5">
+                      <Check className="w-3 h-3 text-primary" />
+                    </div>
+                    <div className="flex-1">
+                      <Label className="text-muted-foreground">첨부 파일</Label>
+                      <p className="text-sm">{files.length}개 파일</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Navigation buttons */}
+          <div className="flex justify-between mt-8 pt-6 border-t">
+            <Button
+              variant="outline"
+              onClick={handleBack}
+              disabled={currentStep === 1}
+            >
+              이전
+            </Button>
+            {currentStep < 5 ? (
+              <Button onClick={handleNext} disabled={!isStepValid()}>
+                다음
+              </Button>
+            ) : (
+              <Button onClick={handleSubmit} disabled={isSubmitting}>
+                {isSubmitting ? "제출 중..." : "신청 제출"}
+              </Button>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
