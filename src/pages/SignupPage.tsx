@@ -5,6 +5,7 @@ import { useAuth } from "@/context/AuthContext"
 import { signOutUser } from "@/firebase/auth"
 import type { Role } from "@/types/auth"
 import { toast } from "sonner"
+import { PENDING_REQUEST_FLAG, PENDING_SIGNUP_KEY } from "@/constants/signup"
 
 function getSignupErrorMessage(error: any) {
   const code = error?.code ?? ""
@@ -28,31 +29,34 @@ type PendingSignupDraft = {
   password?: string
 }
 
-const PENDING_SIGNUP_KEY = "pending-signup"
-
 export function SignupPage() {
   const [role, setRole] = useState<Role>("company")
   const [loadingEmail, setLoadingEmail] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const navigate = useNavigate()
-  const { user, profile, loading } = useAuth()
+  const { user, profile, signupRequest, loading } = useAuth()
   const isBusy = loadingEmail
 
   useEffect(() => {
-    if (loading || !user || !profile) return
-    if (profile.active === false) {
-      navigate(`/pending?role=${profile.requestedRole ?? profile.role}`, {
-        replace: true,
-      })
+    if (loading || !user) return
+    if (profile?.active === true) {
+      navigate(
+        profile.role === "admin" || profile.role === "consultant"
+          ? "/admin"
+          : "/company",
+        { replace: true }
+      )
       return
     }
-    navigate(
-      profile.role === "admin" || profile.role === "consultant"
-        ? "/admin"
-        : "/company",
-      { replace: true }
-    )
-  }, [loading, navigate, profile, user])
+
+    if (profile?.active === false || signupRequest) {
+      sessionStorage.removeItem(PENDING_REQUEST_FLAG)
+      sessionStorage.removeItem(PENDING_SIGNUP_KEY)
+      void signOutUser().catch(() => {
+        // ignore sign-out errors and keep the signup form accessible
+      })
+    }
+  }, [loading, navigate, profile, signupRequest, user])
 
   function savePendingSignup(payload: PendingSignupDraft) {
     sessionStorage.setItem(PENDING_SIGNUP_KEY, JSON.stringify(payload))

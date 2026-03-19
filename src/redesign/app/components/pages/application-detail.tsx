@@ -40,6 +40,13 @@ interface ApplicationDetailProps {
   currentConsultantName?: string | null;
 }
 
+function normalizeConsultantDisplayName(value?: string | null): string {
+  return (value ?? "")
+    .replace(/\s*컨설턴트\s*$/u, "")
+    .trim()
+    .toLowerCase();
+}
+
 export function ApplicationDetail({
   application,
   messages,
@@ -100,29 +107,31 @@ export function ApplicationDetail({
     const endTime = getSessionEndTime();
     return Boolean(endTime && new Date() >= endTime);
   })();
+  const isPendingLike =
+    application.status === "pending" || application.status === "review";
   const canCancel =
     isCompanyUser
-    && application.status === "pending"
+    && isPendingLike
     && !isSessionEnded;
   const shouldShowConsultant = (consultant?: string) =>
     Boolean(consultant && consultant !== "담당자 배정 중");
-  const normalizeConsultantName = (value?: string | null) =>
-    (value ?? "").replace(/\s*컨설턴트\s*$/u, "").trim().toLowerCase();
   const isAssignedToCurrentConsultant = () => {
     if (!isConsultantUser) return false;
-    if (currentConsultantId && application.consultantId) {
-      return currentConsultantId === application.consultantId;
+    if (currentConsultantId && currentConsultantId === application.consultantId) {
+      return true;
     }
-    const appName = normalizeConsultantName(application.consultant);
-    const currentName = normalizeConsultantName(currentConsultantName);
-    return appName !== "" && currentName !== "" && appName === currentName;
+    const currentNameKey = normalizeConsultantDisplayName(currentConsultantName);
+    return (
+      currentNameKey !== "" &&
+      currentNameKey === normalizeConsultantDisplayName(application.consultant)
+    );
   };
   const isUnassigned =
     !application.consultantId
     && (!application.consultant || application.consultant === "담당자 배정 중");
   const canReject =
     isConsultantUser
-    && application.status === "pending"
+    && isPendingLike
     && (isUnassigned || isAssignedToCurrentConsultant())
     && Boolean(onRejectApplication);
   const canEditRejectReason =
@@ -152,7 +161,7 @@ export function ApplicationDetail({
   const canEditCompanyApplication =
     isCompanyUser
     && !isSessionEnded
-    && (application.status === "pending" || application.status === "confirmed")
+    && (isPendingLike || application.status === "confirmed")
     && Boolean(onUpdateCompanyApplication);
   const [isEditingCompanyApplication, setIsEditingCompanyApplication] = useState(false);
   const [editingRequestContent, setEditingRequestContent] = useState(

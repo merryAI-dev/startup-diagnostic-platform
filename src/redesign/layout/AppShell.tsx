@@ -24,9 +24,9 @@ export function AppShell({
   children,
 }: AppShellProps) {
   return (
-    <div className="flex h-screen w-full overflow-hidden bg-background text-foreground">
+    <div className="flex h-screen min-h-0 w-full overflow-hidden bg-background text-foreground">
       <SidebarNav basePath={basePath} userRole={userRole} />
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         <Topbar
           title={title}
           subtitle={subtitle}
@@ -34,7 +34,7 @@ export function AppShell({
           onLogout={onLogout}
           menuLinks={menuLinks}
         />
-        <div className="flex-1 overflow-y-auto">{children}</div>
+        <div className="min-h-0 flex-1 overflow-y-auto">{children}</div>
       </div>
     </div>
   )

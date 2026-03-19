@@ -1,13 +1,12 @@
 import {
-  addDoc,
   collection,
   doc,
   getDoc,
   serverTimestamp,
-  writeBatch,
+  setDoc,
 } from "firebase/firestore"
 import { db } from "@/firebase/client"
-import type { ConsentSnapshot, Role, UserProfile } from "@/types/auth"
+import type { ConsentSnapshot, Role, SignupRequest, UserProfile } from "@/types/auth"
 import type { CompanyInfoForm, CompanyInfoRecord, InvestmentInput } from "@/types/company"
 
 const collectionName = "profiles"
@@ -153,7 +152,16 @@ export async function getUserProfile(uid: string) {
   return snapshot.data() as UserProfile
 }
 
-export async function createUserProfile(
+export async function getSignupRequest(uid: string) {
+  const ref = doc(db, "signupRequests", uid)
+  const snapshot = await getDoc(ref)
+  if (!snapshot.exists()) {
+    return null
+  }
+  return snapshot.data() as SignupRequest
+}
+
+export async function createSignupRequest(
   uid: string,
   role: Role,
   requestedRole: Role | null,
@@ -164,7 +172,6 @@ export async function createUserProfile(
     programIds?: string[]
     investmentRows?: InvestmentInput[]
     consultantInfo?: ConsultantSignupInfo
-    active?: boolean
     consents?: ConsentSnapshot
   }
 ) {
@@ -173,31 +180,6 @@ export async function createUserProfile(
       ? (options?.companyId ?? uid)
       : null
 
-  const ref = doc(db, collectionName, uid)
-  const profileData: Record<string, any> = {
-    role,
-    requestedRole,
-    active: options?.active ?? false,
-    email: email ?? null,
-    companyId,
-    createdAt: serverTimestamp(),
-  }
-  if (options?.consents) {
-    profileData.consents = {
-      privacy: options.consents.privacy
-        ? {
-            ...options.consents.privacy,
-            consentedAt: serverTimestamp(),
-          }
-        : undefined,
-      marketing: options.consents.marketing
-        ? {
-            ...options.consents.marketing,
-            consentedAt: serverTimestamp(),
-          }
-        : undefined,
-    }
-  }
   const signupRequestData: Record<string, any> = {
     uid,
     requestedRole,
@@ -207,6 +189,9 @@ export async function createUserProfile(
     status: "pending",
     updatedAt: serverTimestamp(),
     createdAt: serverTimestamp(),
+  }
+  if (options?.consents) {
+    signupRequestData.consents = options.consents
   }
   if (requestedRole === "company") {
     signupRequestData.companyInfo = options?.companyInfo ?? null
@@ -228,31 +213,5 @@ export async function createUserProfile(
     }
   }
 
-  const batch = writeBatch(db)
-  batch.set(ref, profileData)
-  batch.set(doc(db, "signupRequests", uid), signupRequestData)
-  await batch.commit()
-
-  if (options?.consents) {
-    const consentEntries = ([
-      ["privacy", options.consents.privacy],
-      ["marketing", options.consents.marketing],
-    ] as const).filter(([, value]) => Boolean(value))
-
-    if (consentEntries.length > 0) {
-      await Promise.all(
-        consentEntries.map(([type, value]) =>
-          addDoc(collection(db, "consents"), {
-            userId: uid,
-            type,
-            consented: value?.consented ?? false,
-            version: value?.version ?? "v1.0",
-            method: value?.method ?? "unknown",
-            userAgent: value?.userAgent ?? null,
-            createdAt: serverTimestamp(),
-          })
-        )
-      )
-    }
-  }
+  await setDoc(doc(db, "signupRequests", uid), signupRequestData, { merge: true })
 }

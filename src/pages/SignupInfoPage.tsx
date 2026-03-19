@@ -14,12 +14,12 @@ import {
   Trash2,
 } from "lucide-react"
 import { toast } from "sonner"
-import { createUserProfile, getUserProfile } from "@/firebase/profile"
+import { createSignupRequest, getSignupRequest, getUserProfile } from "@/firebase/profile"
 import type { CompanyInfoForm, InvestmentInput } from "@/types/company"
 import { DEFAULT_FORM } from "@/types/company"
 import { InputSuffix } from "@/components/ui/InputSuffix"
+import { PENDING_REQUEST_FLAG, PENDING_SIGNUP_KEY } from "@/constants/signup"
 
-const PENDING_SIGNUP_KEY = "pending-signup"
 type ProgramOption = {
   id: string
   name: string
@@ -72,6 +72,7 @@ export function SignupInfoPage() {
   const navigate = useNavigate()
   const [hydratingProfile, setHydratingProfile] = useState(false)
   const [creatingAccount, setCreatingAccount] = useState(false)
+  const adminSubmitLockRef = useRef(false)
 
   const pendingSignup = useMemo(() => {
     try {
@@ -82,6 +83,7 @@ export function SignupInfoPage() {
       return null
     }
   }, [])
+
   const requestedRole = useMemo(
     () => profile?.requestedRole ?? getRoleFromQuery(location.search) ?? pendingSignup?.role ?? null,
     [location.search, pendingSignup?.role, profile?.requestedRole]
@@ -121,6 +123,7 @@ export function SignupInfoPage() {
   }
 
   const handleComplete = async () => {
+    sessionStorage.setItem(PENDING_REQUEST_FLAG, "1")
     await signOutUser()
     navigate(`/pending?role=${requestedRole}`)
   }
@@ -129,14 +132,28 @@ export function SignupInfoPage() {
     authUser: FirebaseUser,
     nextRequestedRole: Role
   ) {
-    const existingProfile = await getUserProfile(authUser.uid)
-    if (!existingProfile) return true
+    const [existingProfile, existingSignupRequest] = await Promise.all([
+      getUserProfile(authUser.uid),
+      getSignupRequest(authUser.uid),
+    ])
+    console.log("guardExistingProfile", {
+      uid: authUser.uid,
+      nextRequestedRole,
+      existingProfile,
+      existingSignupRequest,
+    })
+    if (!existingProfile && !existingSignupRequest) return true
 
-    const existingRequestedRole = existingProfile.requestedRole ?? existingProfile.role
+    const existingRequestedRole =
+      existingSignupRequest?.requestedRole ??
+      existingSignupRequest?.role ??
+      existingProfile?.requestedRole ??
+      existingProfile?.role ??
+      nextRequestedRole
     const existingRoleLabel = getRoleLabel(existingRequestedRole)
     const requestedRoleLabel = getRoleLabel(nextRequestedRole)
 
-    if (existingProfile.active === true) {
+    if (existingProfile?.active === true) {
       if (existingRequestedRole !== nextRequestedRole) {
         toast.error(`이미 승인된 ${existingRoleLabel} 계정입니다. ${requestedRoleLabel} 역할로는 가입할 수 없습니다.`)
       } else {
@@ -230,12 +247,14 @@ export function SignupInfoPage() {
         <button
           className="rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white"
           onClick={async () => {
+            if (adminSubmitLockRef.current) return
+            adminSubmitLockRef.current = true
             try {
               const authUser = await ensureAuthUser()
               if (!authUser) return
               const canProceed = await guardExistingProfile(authUser, requestedRole)
               if (!canProceed) return
-              await createUserProfile(
+              await createSignupRequest(
                 authUser.uid,
                 "company",
                 requestedRole,
@@ -249,6 +268,8 @@ export function SignupInfoPage() {
                   ? `승인 요청에 실패했습니다. (${code})`
                   : "승인 요청에 실패했습니다. 다시 시도해주세요."
               )
+            } finally {
+              adminSubmitLockRef.current = false
             }
           }}
           type="button"
@@ -310,6 +331,9 @@ function ConsultantSignupInfo({
   onComplete: () => Promise<void>
   onCancel: () => void
 }) {
+  const submitLockRef = useRef(false)
+  const [submitting, setSubmitting] = useState(false)
+
   async function handleSubmit(values: {
     name: string
     organization: string
@@ -322,12 +346,15 @@ function ConsultantSignupInfo({
     bio: string
   }) {
     if (!db) return
+    if (submitLockRef.current) return
+    submitLockRef.current = true
+    setSubmitting(true)
     try {
       const authUser = await ensureAuthUser()
       if (!authUser) return
       const canProceed = await guardExistingProfile(authUser, requestedRole)
       if (!canProceed) return
-      await createUserProfile(
+      await createSignupRequest(
         authUser.uid,
         "company",
         requestedRole,
@@ -336,12 +363,16 @@ function ConsultantSignupInfo({
       )
       await onComplete()
     } catch (error) {
+      console.error("signup submit error", error)
       const code = getErrorCode(error)
       toast.error(
         code
           ? `승인 요청에 실패했습니다. (${code})`
           : "승인 요청에 실패했습니다. 다시 시도해주세요."
       )
+    } finally {
+      submitLockRef.current = false
+      setSubmitting(false)
     }
   }
 
@@ -375,6 +406,7 @@ function ConsultantSignupInfo({
             submitClassName="rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-semibold text-white hover:bg-slate-800"
             hideReset
             hideDescription
+            saving={submitting}
             onSubmit={handleSubmit}
           />
         </div>
@@ -419,6 +451,7 @@ function CompanySignupInfo({
   const [consentOpen, setConsentOpen] = useState(false)
   const [consentPrivacy, setConsentPrivacy] = useState(false)
   const [consentMarketing, setConsentMarketing] = useState(false)
+  const submitLockRef = useRef(false)
   const [consentError, setConsentError] = useState<string | null>(null)
   const [activeSignupSection, setActiveSignupSection] = useState("company-service")
   const CONSENT_VERSION = "v1.0"
@@ -456,6 +489,15 @@ function CompanySignupInfo({
       active = false
     }
   }, [])
+
+  const uniquePrograms = useMemo(() => {
+    const seen = new Set<string>()
+    return availablePrograms.filter((program) => {
+      if (seen.has(program.id)) return false
+      seen.add(program.id)
+      return true
+    })
+  }, [availablePrograms])
 
 
   const CERTIFICATION_OPTIONS = [
@@ -513,7 +555,7 @@ function CompanySignupInfo({
   const COMPANY_TYPE_OPTIONS = ["예비창업", "법인"] as const
   const REPRESENTATIVE_SOLUTION_MAX_LENGTH = 50
   const REPRESENTATIVE_SOLUTION_MIN_LENGTH = 20
-  const MYSC_EXPECTATION_MAX_LENGTH = 20
+  const MYSC_EXPECTATION_MIN_LENGTH = 20
 
   const CORPORATE_ONLY_FIELDS: (keyof CompanyInfoForm)[] = [
     "foundedAt",
@@ -759,8 +801,9 @@ function CompanySignupInfo({
   }
 
   function meetsMinLength(field: keyof CompanyInfoForm, value: string) {
-    if (field !== "representativeSolution") return true
-    return value.trim().length >= REPRESENTATIVE_SOLUTION_MIN_LENGTH
+    if (field === "representativeSolution") return value.trim().length >= REPRESENTATIVE_SOLUTION_MIN_LENGTH
+    if (field === "myscExpectation") return value.trim().length >= MYSC_EXPECTATION_MIN_LENGTH
+    return true
   }
 
   function shouldSkipFieldValidation(field: keyof CompanyInfoForm) {
@@ -1090,6 +1133,8 @@ function CompanySignupInfo({
   }
 
   async function handleSubmit() {
+    if (submitLockRef.current) return
+    submitLockRef.current = true
     try {
       const authUser = await ensureAuthUser()
       if (!authUser) return
@@ -1097,7 +1142,7 @@ function CompanySignupInfo({
       if (!canProceed) return
       setSaving(true)
       const userAgent = typeof navigator !== "undefined" ? navigator.userAgent : null
-      await createUserProfile(
+      await createSignupRequest(
         authUser.uid,
         "company",
         requestedRole,
@@ -1132,6 +1177,7 @@ function CompanySignupInfo({
           : "승인 요청에 실패했습니다. 다시 시도해주세요."
       )
     } finally {
+      submitLockRef.current = false
       setSaving(false)
     }
   }
@@ -1335,7 +1381,7 @@ function CompanySignupInfo({
 
   return (
     <div className="h-full overflow-hidden bg-gray-50 p-6">
-      <div className="mx-auto h-full w-full max-w-5xl">
+      <div className="mx-auto h-full w-full max-w-6xl">
         <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white">
         <div className="shrink-0 border-b border-slate-200 bg-white px-8 py-5">
           <div className="flex items-center justify-between gap-4">
@@ -1349,6 +1395,7 @@ function CompanySignupInfo({
             </button>
             <button
               type="button"
+              data-testid="company-signup-submit-mobile"
               onClick={() => {
                 if (!canSubmit || saving) return
                 if (!consentPrivacy) {
@@ -1404,6 +1451,7 @@ function CompanySignupInfo({
                     <button
                       key={option}
                       type="button"
+                      data-testid={`company-type-${option === "예비창업" ? "prestartup" : "corporation"}`}
                       className={segmentedToggleClass(active)}
                       onClick={() => applyCompanyType(option)}
                     >
@@ -1440,6 +1488,7 @@ function CompanySignupInfo({
                 <div className="flex justify-end">
                   <button
                     type="button"
+                    data-testid="company-signup-submit"
                     onClick={() => {
                       if (!canSubmit || saving) return
                       if (!consentPrivacy) {
@@ -1460,842 +1509,57 @@ function CompanySignupInfo({
           </aside>
 
           <div className="min-w-0 flex-1 space-y-5 overflow-y-auto pr-1">
-
-          <section
-            ref={(element) => {
-              signupSectionRefs.current["company-service"] = element
-            }}
-            className="rounded-2xl border border-slate-200 bg-white p-5"
-          >
-            <div className="text-sm font-semibold text-slate-900">회사/서비스 정보</div>
-            <div className="mt-4 grid gap-3 md:grid-cols-6">
-              <label className="text-xs text-slate-500 md:col-span-3">
-                기업/팀명
-                <input
-                  className={inputClass(isFieldInvalid("companyInfo"))}
-                  placeholder={isPreStartup ? "팀명 또는 서비스명을 입력하세요" : "법인등기부등본 기준 회사명을 입력하세요"}
-                  value={form.companyInfo}
-                  onChange={(e) =>
-                    setForm((prev) => ({ ...prev, companyInfo: e.target.value }))
-                  }
-                  onBlur={() => markTouched("companyInfo")}
-                />
-              </label>
-              <label className="text-xs text-slate-500 md:col-span-3">
-                2026년 MYSC 참여사업
-                <div className="relative mt-1" ref={programDropdownRef}>
-                  <div
-                    tabIndex={0}
-                    className={`${inputClass(false)} cursor-pointer pr-9 text-left`}
-                    onMouseDown={(event) => {
-                      event.preventDefault()
-                      setProgramDropdownOpen((prev) => !prev)
-                    }}
-                  >
-                    {selectedProgramIds.length > 0 ? (
-                      <div className="truncate pr-2 text-sm text-slate-700">
-                        {availablePrograms
-                          .filter((program) => selectedProgramIds.includes(program.id))
-                          .map((program) => program.name)
-                          .join(", ")}
-                      </div>
-                    ) : (
-                      <span className="text-sm text-slate-400">
-                        참여 중인 사업을 선택하세요
-                      </span>
-                    )}
-                  </div>
-                  <ChevronDown
-                    className="pointer-events-none absolute right-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400"
-                    aria-hidden="true"
-                  />
-                  {programDropdownOpen ? (
-                    <div className="absolute z-20 mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white p-1 shadow-lg">
-                      {availablePrograms.length > 0 ? (
-                        availablePrograms.map((program) => {
-                          const isSelected = selectedProgramIds.includes(program.id)
-                          return (
-                            <button
-                              key={program.id}
-                              type="button"
-                              className={`flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-xs ${
-                                isSelected
-                                  ? "bg-slate-100 font-semibold text-slate-900"
-                                  : "text-slate-700 hover:bg-slate-50"
-                              }`}
-                              onMouseDown={(event) => {
-                                event.preventDefault()
-                                toggleProgram(program.id)
-                              }}
-                            >
-                              <span
-                                className={`inline-flex h-4 w-4 items-center justify-center rounded border ${
-                                  isSelected
-                                    ? "border-slate-700 bg-slate-700 text-white"
-                                    : "border-slate-300 bg-white text-transparent"
-                                }`}
-                              >
-                                <Check className="h-3 w-3" />
-                              </span>
-                              <span className="min-w-0 flex-1 truncate">{program.name}</span>
-                            </button>
-                          )
-                        })
-                      ) : (
-                        <div className="px-3 py-2 text-xs text-slate-500">
-                          등록된 사업이 없습니다.
-                        </div>
-                      )}
-                    </div>
-                  ) : null}
-                </div>
-              </label>
-              <label className="text-xs text-slate-500 md:col-span-2">
-                대표 솔루션 한 줄 소개
-                <input
-                  className={inputClass(false)}
-                  maxLength={REPRESENTATIVE_SOLUTION_MAX_LENGTH}
-                  placeholder="기업/서비스를 한 줄로 소개해주세요"
-                  value={form.representativeSolution}
-                  onChange={(e) =>
-                    setForm((prev) => ({
-                      ...prev,
-                      representativeSolution: e.target.value.slice(
-                        0,
-                        REPRESENTATIVE_SOLUTION_MAX_LENGTH
-                      ),
-                    }))
-                  }
-                />
-                <div className="mt-1 text-[11px] text-slate-400">
-                  {representativeSolutionLength}/{REPRESENTATIVE_SOLUTION_MAX_LENGTH}자
-                </div>
-              </label>
-              <label className="text-xs text-slate-500 md:col-span-2">
-                UN SDGs 우선순위 1위
-                <div className="relative">
-                  <select
-                    className={`${inputClass(false)} appearance-none pr-10`}
-                    value={form.sdgPriority1}
-                    onChange={(e) =>
-                      setForm((prev) => ({ ...prev, sdgPriority1: e.target.value }))
-                    }
-                  >
-                    <option value="">선택</option>
-                    {SDG_OPTIONS.map((option) => (
-                      <option key={option} value={option}>
-                        {option}
-                      </option>
-                    ))}
-                  </select>
-                  <ChevronDown
-                    className="pointer-events-none absolute right-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400"
-                    aria-hidden="true"
-                  />
-                </div>
-              </label>
-              <label className="text-xs text-slate-500 md:col-span-2">
-                UN SDGs 우선순위 2위
-                <div className="relative">
-                  <select
-                    className={`${inputClass(false)} appearance-none pr-10`}
-                    value={form.sdgPriority2}
-                    onChange={(e) =>
-                      setForm((prev) => ({ ...prev, sdgPriority2: e.target.value }))
-                    }
-                  >
-                    <option value="">선택</option>
-                    {SDG_SECONDARY_OPTIONS.map((option) => (
-                      <option key={option} value={option}>
-                        {option}
-                      </option>
-                    ))}
-                  </select>
-                  <ChevronDown
-                    className="pointer-events-none absolute right-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400"
-                    aria-hidden="true"
-                  />
-                </div>
-              </label>
-              <label className="text-xs text-slate-500 md:col-span-3">
-                회사 홈페이지
-                <input
-                  className={inputClass(false)}
-                  placeholder="https://example.com"
-                  value={form.website}
-                  onChange={(e) =>
-                    setForm((prev) => ({ ...prev, website: e.target.value }))
-                  }
-                />
-              </label>
-              <label className="text-xs text-slate-500 md:col-span-3">
-                해외 지사 또는 진출 희망국가 (최대 3개)
-                <input
-                  className={inputClass(false)}
-                  placeholder="예: 미국, 일본, 싱가포르"
-                  value={form.targetCountries}
-                  onChange={(e) =>
-                    setForm((prev) => ({ ...prev, targetCountries: e.target.value }))
-                  }
-                />
-              </label>
-            </div>
-          </section>
-
-          <section
-            ref={(element) => {
-              signupSectionRefs.current.representative = element
-            }}
-            className="rounded-2xl border border-slate-200 bg-white p-5"
-          >
-            <div className="text-sm font-semibold text-slate-900">대표자 정보</div>
-            <div className="mt-4 grid gap-3 md:grid-cols-6">
-              <label className="text-xs text-slate-500 md:col-span-2">
-                대표자 성명
-                <input
-                  className={inputClass(isFieldInvalid("ceoName"))}
-                  placeholder="홍길동"
-                  value={form.ceoName}
-                  onChange={(e) =>
-                    setForm((prev) => ({ ...prev, ceoName: e.target.value }))
-                  }
-                  onBlur={() => markTouched("ceoName")}
-                />
-              </label>
-              <label className="text-xs text-slate-500 md:col-span-1">
-                대표자 나이
-                <input
-                  className={inputClass(false)}
-                  inputMode="numeric"
-                  placeholder="예: 42"
-                  value={form.ceoAge}
-                  onChange={(e) =>
-                    setForm((prev) => ({
-                      ...prev,
-                      ceoAge: e.target.value.replace(/[^\d]/g, "").slice(0, 3),
-                    }))
-                  }
-                />
-              </label>
-              <label className="text-xs text-slate-500 md:col-span-3">
-                대표자 이메일
-                <input
-                  className={inputClass(isFieldInvalid("ceoEmail"))}
-                  placeholder="ceo@company.com"
-                  value={form.ceoEmail}
-                  onChange={(e) =>
-                    setForm((prev) => ({ ...prev, ceoEmail: e.target.value }))
-                  }
-                  onBlur={() => markTouched("ceoEmail")}
-                />
-              </label>
-              <label className="text-xs text-slate-500 md:col-span-2">
-                대표자 전화번호
-                <input
-                  className={inputClass(isFieldInvalid("ceoPhone"))}
-                  placeholder="010-0000-0000"
-                  value={form.ceoPhone}
-                  onChange={(e) =>
-                    setForm((prev) => ({
-                      ...prev,
-                      ceoPhone: formatPhoneNumber(e.target.value),
-                    }))
-                  }
-                  onBlur={() => markTouched("ceoPhone")}
-                />
-              </label>
-              <label className="text-xs text-slate-500 md:col-span-1">
-                <span className="block">대표자 성별</span>
-                <div className="mt-1 inline-grid w-fit grid-cols-2 gap-1 rounded-xl border border-slate-200 bg-slate-50 p-1">
-                  {GENDER_OPTIONS.map((option) => {
-                    const active = form.ceoGender === option
-                    return (
-                      <button
-                        key={option}
-                        type="button"
-                        className={segmentedToggleClass(active)}
-                        onClick={() =>
-                          setForm((prev) => ({
-                            ...prev,
-                            ceoGender: prev.ceoGender === option ? "" : option,
-                          }))
-                        }
-                      >
-                        {option}
-                      </button>
-                    )
-                  })}
-                </div>
-              </label>
-              <label className="text-xs text-slate-500 md:col-span-2">
-                대표자 국적
-                <input
-                  className={inputClass(false)}
-                  placeholder="예: 대한민국"
-                  value={form.ceoNationality}
-                  onChange={(e) =>
-                    setForm((prev) => ({ ...prev, ceoNationality: e.target.value }))
-                  }
-                />
-              </label>
-              <label className="text-xs text-slate-500 md:col-span-1">
-                이전 창업 횟수
-                <input
-                  className={inputClass(false)}
-                  inputMode="numeric"
-                  placeholder="예: 1"
-                  value={form.founderSerialNumber}
-                  onChange={(e) =>
-                    setForm((prev) => ({
-                      ...prev,
-                      founderSerialNumber: e.target.value.replace(/[^\d]/g, "").slice(0, 2),
-                    }))
-                  }
-                />
-              </label>
-            </div>
-          </section>
-
-          <section
-            ref={(element) => {
-              signupSectionRefs.current["co-representative"] = element
-            }}
-            className="rounded-2xl border border-slate-200 bg-white p-5"
-          >
-            <div className="text-sm font-semibold text-slate-900">공동대표 정보</div>
-            <div className="mt-4 grid gap-3 md:grid-cols-6">
-              <label className="text-xs text-slate-500 md:col-span-2">
-                <span className="block">공동대표 여부</span>
-                <div className="mt-1 inline-grid w-fit grid-cols-2 gap-1 rounded-xl border border-slate-200 bg-slate-50 p-1">
-                  {YES_NO_OPTIONS.map((option) => {
-                    const active = form.hasCoRepresentative === option
-                    return (
-                      <button
-                        key={option}
-                        type="button"
-                        className={segmentedToggleClass(active)}
-                        onClick={() =>
-                          setForm((prev) => ({
-                            ...prev,
-                            hasCoRepresentative: prev.hasCoRepresentative === option ? "" : option,
-                          }))
-                        }
-                      >
-                        {option}
-                      </button>
-                    )
-                  })}
-                </div>
-              </label>
-            </div>
-            <div className={`mt-3 grid gap-3 md:grid-cols-6 ${form.hasCoRepresentative === "예" ? "" : "opacity-60"}`}>
-              <label className="text-xs text-slate-500 md:col-span-2">
-                공동대표 성명
-                <input
-                  className={inputClass(isFieldInvalid("coRepresentativeName"))}
-                  disabled={form.hasCoRepresentative !== "예"}
-                  placeholder="홍길동"
-                  value={form.coRepresentativeName}
-                  onChange={(e) =>
-                    setForm((prev) => ({ ...prev, coRepresentativeName: e.target.value }))
-                  }
-                  onBlur={() => markTouched("coRepresentativeName")}
-                />
-              </label>
-              <label className="text-xs text-slate-500 md:col-span-2">
-                공동대표 생년월일
-                <input
-                  type="date"
-                  className={inputClass(isFieldInvalid("coRepresentativeBirthDate"))}
-                  disabled={form.hasCoRepresentative !== "예"}
-                  value={form.coRepresentativeBirthDate}
-                  onChange={(e) =>
-                    setForm((prev) => ({ ...prev, coRepresentativeBirthDate: e.target.value }))
-                  }
-                  onBlur={() => markTouched("coRepresentativeBirthDate")}
-                />
-              </label>
-              <label className="text-xs text-slate-500 md:col-span-1">
-                <span className="block">공동대표 성별</span>
-                <div className="mt-1 inline-grid w-fit grid-cols-2 gap-1 rounded-xl border border-slate-200 bg-slate-50 p-1">
-                  {GENDER_OPTIONS.map((option) => {
-                    const active = form.coRepresentativeGender === option
-                    return (
-                      <button
-                        key={option}
-                        type="button"
-                        disabled={form.hasCoRepresentative !== "예"}
-                        className={segmentedToggleClass(active, form.hasCoRepresentative !== "예")}
-                        onClick={() =>
-                          setForm((prev) => ({
-                            ...prev,
-                            coRepresentativeGender:
-                              prev.coRepresentativeGender === option ? "" : option,
-                          }))
-                        }
-                      >
-                        {option}
-                      </button>
-                    )
-                  })}
-                </div>
-              </label>
-              <label className="text-xs text-slate-500 md:col-span-1">
-                공동대표 직책
-                <input
-                  className={inputClass(isFieldInvalid("coRepresentativeTitle"))}
-                  disabled={form.hasCoRepresentative !== "예"}
-                  placeholder="예: COO"
-                  value={form.coRepresentativeTitle}
-                  onChange={(e) =>
-                    setForm((prev) => ({ ...prev, coRepresentativeTitle: e.target.value }))
-                  }
-                  onBlur={() => markTouched("coRepresentativeTitle")}
-                />
-              </label>
-            </div>
-          </section>
-
-          {!isPreStartup ? (
-            <>
-              <section
-                ref={(element) => {
-                  signupSectionRefs.current["corporate-info"] = element
-                }}
-                className="rounded-2xl border border-slate-200 bg-white p-5"
-              >
-                <div className="text-sm font-semibold text-slate-900">법인 기본 정보</div>
-                <div className="mt-4 grid gap-3 md:grid-cols-6">
-                  <label className="text-xs text-slate-500 md:col-span-2">
-                    법인 설립일자
+            <section
+              ref={(element) => {
+                signupSectionRefs.current["company-service"] = element
+              }}
+              className="space-y-4"
+            >
+              <div className="text-sm font-semibold text-slate-700">회사/서비스</div>
+              <div className="rounded-2xl border border-slate-200 bg-white p-5">
+                <div className="grid gap-3 md:grid-cols-6">
+                  <label className="text-xs text-slate-500 md:col-span-3">
+                    기업/팀명
                     <input
-                      type="date"
-                      className={inputClass(isFieldInvalid("foundedAt"))}
-                      value={form.foundedAt}
-                      onChange={(e) =>
-                        setForm((prev) => ({ ...prev, foundedAt: e.target.value }))
+                      data-testid="company-signup-name"
+                      className={inputClass(isFieldInvalid("companyInfo"))}
+                      placeholder={
+                        isPreStartup
+                          ? "팀명 또는 창업 예정 기업명을 입력하세요"
+                          : "법인등기부등본 기준 회사명을 입력하세요"
                       }
-                      onBlur={() => markTouched("foundedAt")}
-                    />
-                  </label>
-                  <label className="text-xs text-slate-500 md:col-span-2">
-                    사업자등록번호
-                    <input
-                      className={inputClass(isFieldInvalid("businessNumber"))}
-                      placeholder="000-00-00000"
-                      value={form.businessNumber}
+                      value={form.companyInfo}
                       onChange={(e) =>
                         setForm((prev) => ({
                           ...prev,
-                          businessNumber: formatBusinessNumber(e.target.value),
+                          companyInfo: e.target.value,
                         }))
                       }
-                      onBlur={() => markTouched("businessNumber")}
+                      onBlur={() => markTouched("companyInfo")}
                     />
                   </label>
-                  <label className="text-xs text-slate-500 md:col-span-2">
-                    주업태
-                    <input
-                      className={inputClass(isFieldInvalid("primaryBusiness"))}
-                      placeholder="예: 정보통신업"
-                      value={form.primaryBusiness}
-                      onChange={(e) =>
-                        setForm((prev) => ({ ...prev, primaryBusiness: e.target.value }))
-                      }
-                      onBlur={() => markTouched("primaryBusiness")}
-                    />
-                  </label>
-                  <label className="text-xs text-slate-500 md:col-span-2">
-                    주업종
-                    <input
-                      className={inputClass(isFieldInvalid("primaryIndustry"))}
-                      placeholder="예: 소프트웨어 개발"
-                      value={form.primaryIndustry}
-                      onChange={(e) =>
-                        setForm((prev) => ({ ...prev, primaryIndustry: e.target.value }))
-                      }
-                      onBlur={() => markTouched("primaryIndustry")}
-                    />
-                  </label>
-                  <label className="text-xs text-slate-500 md:col-span-2">
-                    종업원수 (정규)
-                    <span className="ml-1 text-[11px] text-slate-400">4대보험 가입자 수 기준</span>
-                    <InputSuffix suffix="명">
-                      <input
-                        className={`${inputClass(isFieldInvalid("workforceFullTime"))} mt-0`}
-                        value={form.workforceFullTime}
-                        onChange={(e) =>
-                          setForm((prev) => ({
-                            ...prev,
-                            workforceFullTime: formatNumberInput(e.target.value),
-                          }))
-                        }
-                        onBlur={() => markTouched("workforceFullTime")}
-                      />
-                    </InputSuffix>
-                  </label>
-                  <label className="text-xs text-slate-500 md:col-span-2">
-                    종업원수 (계약)
-                    <InputSuffix suffix="명">
-                      <input
-                        className={`${inputClass(isFieldInvalid("workforceContract"))} mt-0`}
-                        value={form.workforceContract}
-                        onChange={(e) =>
-                          setForm((prev) => ({
-                            ...prev,
-                            workforceContract: formatNumberInput(e.target.value),
-                          }))
-                        }
-                        onBlur={() => markTouched("workforceContract")}
-                      />
-                    </InputSuffix>
-                  </label>
-                </div>
-              </section>
-
-              <section
-                ref={(element) => {
-                  signupSectionRefs.current.location = element
-                }}
-                className="rounded-2xl border border-slate-200 bg-white p-5"
-              >
-                <div className="text-sm font-semibold text-slate-900">소재지</div>
-                <div className="mt-4 grid gap-3 md:grid-cols-2">
-                  <label className="text-xs text-slate-500">
-                    <div className="flex items-center justify-between gap-2">
-                      <span>
-                        본점 소재지
-                        <span className="ml-1 text-[11px] text-slate-400">법인등기부등본 기준</span>
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => handleAddressSearchClick("headOffice")}
-                        className="rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
-                      >
-                        주소 검색
-                      </button>
-                    </div>
-                    <div className="relative">
-                      <input
-                        className={inputClass(isFieldInvalid("headOffice"))}
-                        placeholder="주소 검색으로 입력"
-                        value={form.headOffice}
-                        onChange={(e) =>
-                          setForm((prev) => ({ ...prev, headOffice: e.target.value }))
-                        }
-                        onBlur={() => markTouched("headOffice")}
-                      />
-                      {form.headOffice.trim().length > 0 ? (
-                        <button
-                          type="button"
-                          onClick={() => clearAddressField("headOffice")}
-                          className="absolute right-2 top-1/2 -translate-y-1/2 px-1 py-0.5 text-[10px] font-semibold text-slate-400 hover:text-slate-700"
-                        >
-                          x
-                        </button>
-                      ) : null}
-                    </div>
-                  </label>
-                  <label className="text-xs text-slate-500">
-                    <div className="flex items-center justify-between gap-2">
-                      <span>
-                        지점 또는 연구소 소재지
-                        <span className="ml-1 text-[11px] text-slate-400">법인등기부등본 기준</span>
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => handleAddressSearchClick("branchOffice")}
-                        className="rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
-                      >
-                        주소 검색
-                      </button>
-                    </div>
-                    <div className="relative">
-                      <input
-                        className={inputClass(false)}
-                        placeholder="없으면 비워두세요"
-                        value={form.branchOffice}
-                        onChange={(e) =>
-                          setForm((prev) => ({ ...prev, branchOffice: e.target.value }))
-                        }
-                      />
-                      {form.branchOffice.trim().length > 0 ? (
-                        <button
-                          type="button"
-                          onClick={() => clearAddressField("branchOffice")}
-                          className="absolute right-2 top-1/2 -translate-y-1/2 px-1 py-0.5 text-[10px] font-semibold text-slate-400 hover:text-slate-700"
-                        >
-                          x
-                        </button>
-                      ) : null}
-                    </div>
-                  </label>
-                </div>
-              </section>
-
-              <section
-                ref={(element) => {
-                  signupSectionRefs.current.finance = element
-                }}
-                className="rounded-2xl border border-slate-200 bg-white p-5"
-              >
-                <div className="text-sm font-semibold text-slate-900">재무 및 투자이력</div>
-                <div className="mt-4 grid gap-3 md:grid-cols-4">
-                  <label className="text-xs text-slate-500 md:col-span-2 md:max-w-md">
-                    매출액 (2025년)
-                    <InputSuffix suffix="원">
-                      <input
-                        className={`${inputClass(isFieldInvalid("revenue2025"))} mt-0`}
-                        placeholder="예: 1,250,000,000"
-                        value={form.revenue2025}
-                        onChange={(e) =>
-                          setForm((prev) => ({
-                            ...prev,
-                            revenue2025: formatRevenueInput(e.target.value),
-                          }))
-                        }
-                        onBlur={() => markTouched("revenue2025")}
-                      />
-                    </InputSuffix>
-                  </label>
-                  <label className="text-xs text-slate-500 md:col-span-2 md:max-w-md">
-                    매출액 (2026년)
-                    <InputSuffix suffix="원">
-                      <input
-                        className={`${inputClass(isFieldInvalid("revenue2026"))} mt-0`}
-                        placeholder="예: 1,800,000,000"
-                        value={form.revenue2026}
-                        onChange={(e) =>
-                          setForm((prev) => ({
-                            ...prev,
-                            revenue2026: formatRevenueInput(e.target.value),
-                          }))
-                        }
-                        onBlur={() => markTouched("revenue2026")}
-                      />
-                    </InputSuffix>
-                  </label>
-                  <label className="text-xs text-slate-500 md:col-span-2 md:max-w-md">
-                    자본총계
-                    <InputSuffix suffix="원">
-                      <input
-                        className={`${inputClass(isFieldInvalid("capitalTotal"))} mt-0`}
-                        placeholder="예: 300,000,000"
-                        value={form.capitalTotal}
-                        onChange={(e) =>
-                          setForm((prev) => ({
-                            ...prev,
-                            capitalTotal: formatNumberInput(e.target.value),
-                          }))
-                        }
-                        onBlur={() => markTouched("capitalTotal")}
-                      />
-                    </InputSuffix>
-                  </label>
-                </div>
-                <div className="mt-5 space-y-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="text-xs font-semibold text-slate-600">
-                      투자이력 (지분율 상위 3명 기준)
-                    </div>
-                    <button
-                      type="button"
-                      className="rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-slate-700 shadow-sm hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
-                      onClick={addInvestmentRow}
-                      disabled={investmentRows.length >= 3}
-                    >
-                      {investmentRows.length >= 3 ? "최대 3개" : "+ 투자이력 추가"}
-                    </button>
-                  </div>
-                  {investmentRows.map((row, idx) => {
-                    const selectedStages = parseInvestmentStages(row.stage)
-                    return (
+                  <label className="text-xs text-slate-500 md:col-span-3">
+                    2026년 MYSC 참여사업
+                    <div className="relative mt-1" ref={programDropdownRef}>
                       <div
-                        key={`investment-${idx}`}
-                        className="grid gap-3 rounded-xl border border-slate-100 bg-slate-50 p-3 sm:grid-cols-2 lg:grid-cols-4"
-                      >
-                        <label className="text-xs text-slate-500">
-                          <span className="block whitespace-nowrap">투자단계 (다중선택)</span>
-                          <div
-                            className="relative"
-                            ref={(element) => {
-                              investmentStageDropdownRefs.current[idx] = element
-                            }}
-                          >
-                            <div
-                              tabIndex={0}
-                              className={`${inputClass(false)} min-h-[40px] cursor-pointer pr-9`}
-                              onMouseDown={(event) => {
-                                event.preventDefault()
-                                event.stopPropagation()
-                                setActiveInvestmentStageRow((prev) => (prev === idx ? null : idx))
-                              }}
-                            >
-                              {selectedStages.length > 0 ? (
-                                <div className="flex items-center gap-1 overflow-x-auto whitespace-nowrap pr-1">
-                                  {selectedStages.map((stage) => (
-                                    <span
-                                      key={`${stage}-${idx}`}
-                                      className="inline-flex items-center gap-1 rounded-full border border-slate-700 bg-slate-700 px-1.5 py-0 text-[10px] font-semibold text-white"
-                                    >
-                                      <span>{stage}</span>
-                                      <button
-                                        type="button"
-                                        className="text-white/80 hover:text-white"
-                                        onMouseDown={(event) => {
-                                          event.preventDefault()
-                                          event.stopPropagation()
-                                          removeInvestmentStage(idx, stage)
-                                        }}
-                                      >
-                                        ×
-                                      </button>
-                                    </span>
-                                  ))}
-                                </div>
-                              ) : (
-                                <span className="text-sm text-slate-400">투자단계를 선택하세요</span>
-                              )}
-                            </div>
-                            <ChevronDown
-                              className="pointer-events-none absolute right-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400"
-                              aria-hidden="true"
-                            />
-                            {activeInvestmentStageRow === idx ? (
-                              <div className="absolute z-20 mt-1 max-h-44 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg">
-                                {INVESTMENT_STAGE_OPTIONS.map((option) => {
-                                  const isSelected = selectedStages.includes(option)
-                                  return (
-                                    <button
-                                      key={option}
-                                      type="button"
-                                      className={`w-full px-3 py-2 text-left text-xs hover:bg-slate-50 ${
-                                        isSelected ? "font-semibold text-slate-900" : "text-slate-700"
-                                      }`}
-                                      onMouseDown={(event) => {
-                                        event.preventDefault()
-                                        toggleInvestmentStage(idx, option)
-                                      }}
-                                    >
-                                      {isSelected ? `✓ ${option}` : option}
-                                    </button>
-                                  )
-                                })}
-                              </div>
-                            ) : null}
-                          </div>
-                        </label>
-                        <label className="text-xs text-slate-500">
-                          <span className="block whitespace-nowrap">투자유치시기</span>
-                          <input
-                            type="text"
-                            className={inputClass(false)}
-                            inputMode="numeric"
-                            maxLength={10}
-                            placeholder="YYYY.MM.DD"
-                            value={row.date}
-                            onInput={(e) => {
-                              const nextValue = formatInvestmentDateInput(e.currentTarget.value)
-                              e.currentTarget.value = nextValue
-                              updateInvestmentRow(idx, "date", nextValue)
-                            }}
-                            onBlur={(e) => {
-                              const nextValue = formatInvestmentDateInput(e.currentTarget.value)
-                              const digits = nextValue.replace(/[^\d]/g, "")
-                              updateInvestmentRow(idx, "date", digits.length === 8 ? nextValue : "")
-                            }}
-                          />
-                        </label>
-                        <label className="text-xs text-slate-500">
-                          <span className="block whitespace-nowrap">투자 유치금액</span>
-                          <InputSuffix suffix="원">
-                            <input
-                              className={`${inputClass(false)} mt-0`}
-                              placeholder="예: 2,550,000,000"
-                              inputMode="numeric"
-                              value={row.postMoney}
-                              onChange={(e) => updateInvestmentRow(idx, "postMoney", e.target.value)}
-                            />
-                          </InputSuffix>
-                        </label>
-                        <div className="flex items-start gap-2">
-                          <label className="min-w-0 flex-1 text-xs text-slate-500">
-                            <span className="block whitespace-nowrap">지분율 상위 3명 주주명</span>
-                            <input
-                              className={inputClass(false)}
-                              placeholder="예: 홍길동, 김철수, 박영희"
-                              value={row.majorShareholder}
-                              onChange={(e) =>
-                                updateInvestmentRow(idx, "majorShareholder", e.target.value)
-                              }
-                            />
-                          </label>
-                          <button
-                            type="button"
-                            className="mt-5 rounded-md border border-rose-200 p-2 text-rose-600 hover:border-rose-300 hover:bg-rose-50 hover:text-rose-700 disabled:cursor-not-allowed disabled:opacity-60"
-                            onClick={() => removeInvestmentRow(idx)}
-                            disabled={investmentRows.length <= 1}
-                            aria-label="삭제"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
-                        </div>
-                      </div>
-                    )
-                  })}
-                </div>
-              </section>
-
-              <section
-                ref={(element) => {
-                  signupSectionRefs.current.certification = element
-                }}
-                className="rounded-2xl border border-slate-200 bg-white p-5"
-              >
-                <div className="text-sm font-semibold text-slate-900">인증 및 이력</div>
-                <div className="mt-4 grid gap-3 md:grid-cols-2">
-                  <label className="text-xs text-slate-500">
-                    <span className="block whitespace-nowrap">
-                      인증/지정 여부 (다중선택)
-                    </span>
-                    <div className="relative" ref={certificationDropdownRef}>
-                      <div
+                        data-testid="company-program-trigger"
                         tabIndex={0}
-                        className={inputClass(
-                          isFieldInvalid("certification"),
-                          "min-h-[40px] cursor-pointer rounded-lg pr-9"
-                        )}
+                        className={inputClass(false, "cursor-pointer pr-9 text-left")}
                         onMouseDown={(event) => {
                           event.preventDefault()
-                          event.stopPropagation()
-                          setCertificationDropdownOpen((prev) => !prev)
+                          setProgramDropdownOpen((prev) => !prev)
                         }}
                       >
-                        {parseCertificationSelections(form.certification).length > 0 ? (
-                          <div className="flex items-center gap-1 overflow-x-auto whitespace-nowrap pr-1">
-                            {parseCertificationSelections(form.certification).map((option) => (
-                              <span
-                                key={option}
-                                className="inline-flex h-5 items-center gap-1 rounded-full border border-slate-300 bg-slate-100 px-1.5 text-[9px] font-medium text-slate-700"
-                              >
-                                <span>{option}</span>
-                                <button
-                                  type="button"
-                                  className="text-slate-500 hover:text-slate-800"
-                                  onMouseDown={(event) => {
-                                    event.preventDefault()
-                                    event.stopPropagation()
-                                    removeCertification(option)
-                                  }}
-                                >
-                                  ×
-                                </button>
-                              </span>
-                            ))}
+                        {selectedProgramIds.length > 0 ? (
+                          <div className="truncate pr-2 text-sm text-slate-700">
+                        {uniquePrograms
+                          .filter((program) => selectedProgramIds.includes(program.id))
+                          .map((program) => program.name)
+                          .join(", ")}
                           </div>
                         ) : (
                           <span className="text-sm text-slate-400">
-                            인증/지정 여부를 선택하세요
+                            참여 중인 사업을 선택하세요
                           </span>
                         )}
                       </div>
@@ -2303,47 +1567,86 @@ function CompanySignupInfo({
                         className="pointer-events-none absolute right-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400"
                         aria-hidden="true"
                       />
-                      {certificationDropdownOpen ? (
-                        <div className="absolute z-20 mt-1 max-h-44 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg">
-                          {CERTIFICATION_OPTIONS.map((option) => {
-                            const isSelected = parseCertificationSelections(
-                              form.certification
-                            ).includes(option)
-                            return (
-                              <button
-                                key={option}
-                                type="button"
-                                className={`w-full px-3 py-2 text-left text-xs hover:bg-slate-50 ${
-                                  isSelected
-                                    ? "font-semibold text-slate-900"
-                                    : "text-slate-700"
-                                }`}
-                                onMouseDown={(event) => {
-                                  event.preventDefault()
-                                  toggleCertification(option)
-                                }}
-                              >
-                                {isSelected ? `✓ ${option}` : option}
-                              </button>
-                            )
-                          })}
+                      {programDropdownOpen ? (
+                        <div className="absolute z-20 mt-1 max-h-56 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white p-1 shadow-lg">
+                          {uniquePrograms.length > 0 ? (
+                            uniquePrograms.map((program) => {
+                              const isSelected = selectedProgramIds.includes(program.id)
+                              return (
+                                <button
+                                  key={program.id}
+                                  type="button"
+                                  data-testid={`company-program-option-${program.id}`}
+                                  className={`flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-xs ${
+                                    isSelected
+                                      ? "bg-slate-100 font-semibold text-slate-900"
+                                      : "text-slate-700 hover:bg-slate-50"
+                                  }`}
+                                  onMouseDown={(event) => {
+                                    event.preventDefault()
+                                    toggleProgram(program.id)
+                                  }}
+                                >
+                                  <span
+                                    className={`inline-flex h-4 w-4 items-center justify-center rounded border ${
+                                      isSelected
+                                        ? "border-slate-700 bg-slate-700 text-white"
+                                        : "border-slate-300 bg-white text-transparent"
+                                    }`}
+                                  >
+                                    <Check className="h-3 w-3" />
+                                  </span>
+                                  <span className="min-w-0 flex-1 truncate">{program.name}</span>
+                                </button>
+                              )
+                            })
+                          ) : (
+                            <div className="px-3 py-2 text-xs text-slate-500">
+                              등록된 사업이 없습니다.
+                            </div>
+                          )}
                         </div>
                       ) : null}
                     </div>
                   </label>
-                  <label className="text-xs text-slate-500">
-                    TIPS/LIPS 이력
+                  <label className="text-xs text-slate-500 md:col-span-2">
+                    대표 솔루션 한 줄 소개
+                    <input
+                      className={inputClass(isFieldInvalid("representativeSolution"))}
+                      maxLength={REPRESENTATIVE_SOLUTION_MAX_LENGTH}
+                      placeholder="기업/서비스를 한 줄로 소개해주세요"
+                      value={form.representativeSolution}
+                      onChange={(e) =>
+                        setForm((prev) => ({
+                          ...prev,
+                          representativeSolution: e.target.value.slice(
+                            0,
+                            REPRESENTATIVE_SOLUTION_MAX_LENGTH
+                          ),
+                        }))
+                      }
+                      onBlur={() => markTouched("representativeSolution")}
+                    />
+                    <div className="mt-1 text-[11px] text-slate-400">
+                      {Math.min(
+                        representativeSolutionLength,
+                        REPRESENTATIVE_SOLUTION_MIN_LENGTH
+                      )}/{REPRESENTATIVE_SOLUTION_MIN_LENGTH}자
+                    </div>
+                  </label>
+                  <label className="text-xs text-slate-500 md:col-span-2">
+                    UN SDGs 우선순위 1위
                     <div className="relative">
                       <select
-                        className={`${inputClass(isFieldInvalid("tipsLipsHistory"))} appearance-none pr-10`}
-                        value={form.tipsLipsHistory}
+                        className={`${inputClass(isFieldInvalid("sdgPriority1"))} appearance-none pr-10`}
+                        value={form.sdgPriority1}
                         onChange={(e) =>
-                          setForm((prev) => ({ ...prev, tipsLipsHistory: e.target.value }))
+                          setForm((prev) => ({ ...prev, sdgPriority1: e.target.value }))
                         }
-                        onBlur={() => markTouched("tipsLipsHistory")}
+                        onBlur={() => markTouched("sdgPriority1")}
                       >
                         <option value="">선택</option>
-                        {TIPS_LIPS_OPTIONS.map((option) => (
+                        {SDG_OPTIONS.map((option) => (
                           <option key={option} value={option}>
                             {option}
                           </option>
@@ -2355,214 +1658,1066 @@ function CompanySignupInfo({
                       />
                     </div>
                   </label>
-                </div>
-                <div className="mt-4 grid gap-4 md:grid-cols-2">
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-                    <label className="text-xs text-slate-500">
-                      <span className="block">수출바우처 보유 여부</span>
-                      <div className="mt-3 inline-grid w-fit grid-cols-2 gap-1 rounded-xl border border-slate-200 bg-white p-1">
-                        {YES_NO_OPTIONS.map((option) => {
-                          const active = form.exportVoucherHeld === option
-                          return (
-                            <button
-                              key={option}
-                              type="button"
-                              className={segmentedToggleClass(active)}
-                              onClick={() =>
-                                setForm((prev) => ({
-                                  ...prev,
-                                  exportVoucherHeld: prev.exportVoucherHeld === option ? "" : option,
-                                }))
-                              }
-                            >
-                              {option}
-                            </button>
-                          )
-                        })}
-                      </div>
-                    </label>
-                    <div className="mt-5 grid gap-3">
-                      <label className="text-xs text-slate-500">
-                        수출바우처 확보 금액
-                        <InputSuffix
-                          suffix="원"
-                          disabled={form.exportVoucherHeld !== "예"}
-                        >
-                          <input
-                            className={`${inputClass(false)} mt-0`}
-                            placeholder="예: 50,000,000"
-                            inputMode="numeric"
-                            value={form.exportVoucherAmount}
-                            disabled={form.exportVoucherHeld !== "예"}
-                            onChange={(e) =>
-                              setForm((prev) => ({
-                                ...prev,
-                                exportVoucherAmount: formatNumberInput(e.target.value),
-                              }))
-                            }
-                          />
-                        </InputSuffix>
-                      </label>
-                      <label className="text-xs text-slate-500">
-                        수출바우처 소진율
-                        <InputSuffix
-                          suffix="%"
-                          disabled={form.exportVoucherHeld !== "예"}
-                        >
-                          <input
-                            className={`${inputClass(false)} mt-0`}
-                            placeholder="예: 40"
-                            inputMode="numeric"
-                            value={form.exportVoucherUsageRate}
-                            disabled={form.exportVoucherHeld !== "예"}
-                            onChange={(e) =>
-                              setForm((prev) => ({
-                                ...prev,
-                                exportVoucherUsageRate: formatNumberInput(e.target.value),
-                              }))
-                            }
-                          />
-                        </InputSuffix>
-                      </label>
+                  <label className="text-xs text-slate-500 md:col-span-2">
+                    UN SDGs 우선순위 2위
+                    <div className="relative">
+                      <select
+                        className={`${inputClass(isFieldInvalid("sdgPriority2"))} appearance-none pr-10`}
+                        value={form.sdgPriority2}
+                        onChange={(e) =>
+                          setForm((prev) => ({ ...prev, sdgPriority2: e.target.value }))
+                        }
+                        onBlur={() => markTouched("sdgPriority2")}
+                      >
+                        <option value="">선택</option>
+                        {SDG_SECONDARY_OPTIONS.map((option) => (
+                          <option key={option} value={option}>
+                            {option}
+                          </option>
+                        ))}
+                      </select>
+                      <ChevronDown
+                        className="pointer-events-none absolute right-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400"
+                        aria-hidden="true"
+                      />
                     </div>
-                  </div>
+                  </label>
+                  {!isPreStartup ? (
+                    <>
+                      <div className="mt-2 border-t border-slate-100 pt-5 md:col-span-6" />
+                      <label className="text-xs text-slate-500 md:col-span-2">
+                        법인 설립일자
+                        <input
+                          type="date"
+                          className={inputClass(isFieldInvalid("foundedAt"))}
+                          value={form.foundedAt}
+                          onChange={(e) =>
+                            setForm((prev) => ({
+                              ...prev,
+                              foundedAt: e.target.value,
+                            }))
+                          }
+                          onBlur={() => markTouched("foundedAt")}
+                        />
+                      </label>
+                      <label className="text-xs text-slate-500 md:col-span-2">
+                        사업자등록번호
+                        <input
+                          className={inputClass(isFieldInvalid("businessNumber"))}
+                          placeholder="000-00-00000"
+                          value={form.businessNumber}
+                          onChange={(e) =>
+                            setForm((prev) => ({
+                              ...prev,
+                              businessNumber: formatBusinessNumber(e.target.value),
+                            }))
+                          }
+                          onBlur={() => markTouched("businessNumber")}
+                        />
+                      </label>
+                      <label className="text-xs text-slate-500 md:col-span-2">
+                        회사 홈페이지
+                        <input
+                          className={inputClass(isFieldInvalid("website"))}
+                          placeholder="https://example.com"
+                          value={form.website}
+                          onChange={(e) =>
+                            setForm((prev) => ({ ...prev, website: e.target.value }))
+                          }
+                          onBlur={() => markTouched("website")}
+                        />
+                      </label>
+                      <label className="text-xs text-slate-500 md:col-span-2">
+                        주업태
+                        <input
+                          className={inputClass(isFieldInvalid("primaryBusiness"))}
+                          placeholder="예: 정보통신업"
+                          value={form.primaryBusiness}
+                          onChange={(e) =>
+                            setForm((prev) => ({
+                              ...prev,
+                              primaryBusiness: e.target.value,
+                            }))
+                          }
+                          onBlur={() => markTouched("primaryBusiness")}
+                        />
+                      </label>
+                      <label className="text-xs text-slate-500 md:col-span-2">
+                        주업종
+                        <input
+                          className={inputClass(isFieldInvalid("primaryIndustry"))}
+                          placeholder="예: 소프트웨어 개발"
+                          value={form.primaryIndustry}
+                          onChange={(e) =>
+                            setForm((prev) => ({
+                              ...prev,
+                              primaryIndustry: e.target.value,
+                            }))
+                          }
+                          onBlur={() => markTouched("primaryIndustry")}
+                        />
+                      </label>
+                      <label className="text-xs text-slate-500 md:col-span-2">
+                        해외 지사 또는 진출 희망국가 (최대 3개)
+                        <input
+                          className={inputClass(isFieldInvalid("targetCountries"))}
+                          placeholder="없으면 '없음' 입력"
+                          value={form.targetCountries}
+                          onChange={(e) =>
+                            setForm((prev) => ({
+                              ...prev,
+                              targetCountries: e.target.value,
+                            }))
+                          }
+                          onBlur={() => markTouched("targetCountries")}
+                        />
+                      </label>
+                      <div className="mt-2 border-t border-slate-100 pt-5 md:col-span-6" />
+                      <label className="text-xs text-slate-500 md:col-span-3">
+                        <div className="flex items-center justify-between gap-2">
+                          <span>
+                            본점 소재지{" "}
+                            <span className="text-[11px] text-slate-400">
+                              (법인등기부등본 기준)
+                            </span>
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => handleAddressSearchClick("headOffice")}
+                            className="rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
+                          >
+                            주소 검색
+                          </button>
+                        </div>
+                        <div className="relative">
+                          <input
+                            className={inputClass(isFieldInvalid("headOffice"), "pr-8")}
+                            placeholder="서울시 강남구 ..."
+                            value={form.headOffice}
+                            onChange={(e) =>
+                              setForm((prev) => ({
+                                ...prev,
+                                headOffice: e.target.value,
+                              }))
+                            }
+                            onBlur={() => markTouched("headOffice")}
+                          />
+                          {form.headOffice.trim().length > 0 ? (
+                            <button
+                              type="button"
+                              onClick={() => clearAddressField("headOffice")}
+                              className="absolute right-2 top-1/2 -translate-y-1/2 px-1 py-0.5 text-[10px] font-semibold text-slate-400 hover:text-slate-700"
+                              aria-label="본점 소재지 지우기"
+                              title="지우기"
+                            >
+                              x
+                            </button>
+                          ) : null}
+                        </div>
+                      </label>
+                      <label className="text-xs text-slate-500 md:col-span-3">
+                        <div className="flex items-center justify-between gap-2">
+                          <span>
+                            지점 또는 연구소 소재지{" "}
+                            <span className="text-[11px] text-slate-400">
+                              (법인등기부등본 기준)
+                            </span>
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => handleAddressSearchClick("branchOffice")}
+                            className="rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
+                          >
+                            주소 검색
+                          </button>
+                        </div>
+                        <div className="relative">
+                          <input
+                            className={inputClass(isFieldInvalid("branchOffice"), "pr-8")}
+                            placeholder="없으면 '없음' 입력"
+                            value={form.branchOffice}
+                            onChange={(e) =>
+                              setForm((prev) => ({
+                                ...prev,
+                                branchOffice: e.target.value,
+                              }))
+                            }
+                            onBlur={() => markTouched("branchOffice")}
+                          />
+                          {form.branchOffice.trim().length > 0 ? (
+                            <button
+                              type="button"
+                              onClick={() => clearAddressField("branchOffice")}
+                              className="absolute right-2 top-1/2 -translate-y-1/2 px-1 py-0.5 text-[10px] font-semibold text-slate-400 hover:text-slate-700"
+                              aria-label="지점 또는 연구소 소재지 지우기"
+                              title="지우기"
+                            >
+                              x
+                            </button>
+                          ) : null}
+                        </div>
+                      </label>
+                      <div className="mt-1 border-t border-slate-100 pt-5 md:col-span-6" />
+                      <label className="text-xs text-slate-500 md:col-span-2">
+                        종업원수 (정규, 4대보험 가입자 수 기준)
+                        <InputSuffix suffix="명">
+                          <input
+                            className={inputClass(isFieldInvalid("workforceFullTime"), "mt-0")}
+                            placeholder="0"
+                            value={form.workforceFullTime}
+                            onChange={(e) =>
+                              setForm((prev) => ({
+                                ...prev,
+                                workforceFullTime: formatNumberInput(e.target.value),
+                              }))
+                            }
+                            onBlur={() => markTouched("workforceFullTime")}
+                          />
+                        </InputSuffix>
+                      </label>
+                      <label className="text-xs text-slate-500 md:col-span-2">
+                        종업원수 (계약, 4대보험 가입자 수 기준)
+                        <InputSuffix suffix="명">
+                          <input
+                            className={inputClass(isFieldInvalid("workforceContract"), "mt-0")}
+                            placeholder="0"
+                            value={form.workforceContract}
+                            onChange={(e) =>
+                              setForm((prev) => ({
+                                ...prev,
+                                workforceContract: formatNumberInput(e.target.value),
+                              }))
+                            }
+                            onBlur={() => markTouched("workforceContract")}
+                          />
+                        </InputSuffix>
+                      </label>
+                    </>
+                  ) : null}
+                </div>
+              </div>
+            </section>
 
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-                    <label className="text-xs text-slate-500">
-                      <span className="block">중소기업혁신바우처 보유 여부</span>
-                      <div className="mt-3 inline-grid w-fit grid-cols-2 gap-1 rounded-xl border border-slate-200 bg-white p-1">
+            <section
+              ref={(element) => {
+                signupSectionRefs.current.representative = element
+              }}
+              className="space-y-4"
+            >
+              <div className="text-sm font-semibold text-slate-700">대표자</div>
+              <div className="rounded-2xl border border-slate-200 bg-white p-5">
+                <div className="grid gap-3 md:grid-cols-6">
+                  <label className="text-xs text-slate-500 md:col-span-2">
+                    대표자 성명
+                    <input
+                      className={inputClass(isFieldInvalid("ceoName"))}
+                      placeholder="홍길동"
+                      value={form.ceoName}
+                      onChange={(e) =>
+                        setForm((prev) => ({
+                          ...prev,
+                          ceoName: e.target.value,
+                        }))
+                      }
+                      onBlur={() => markTouched("ceoName")}
+                    />
+                  </label>
+                  <label className="text-xs text-slate-500 md:col-span-1">
+                    대표자 나이
+                    <input
+                      className={inputClass(isFieldInvalid("ceoAge"))}
+                      inputMode="numeric"
+                      placeholder="예: 42"
+                      value={form.ceoAge}
+                      onChange={(e) =>
+                        setForm((prev) => ({
+                          ...prev,
+                          ceoAge: e.target.value.replace(/[^\d]/g, "").slice(0, 3),
+                        }))
+                      }
+                      onBlur={() => markTouched("ceoAge")}
+                    />
+                  </label>
+                  <label className="text-xs text-slate-500 md:col-span-3">
+                    대표자 이메일
+                    <input
+                      className={inputClass(isFieldInvalid("ceoEmail"))}
+                      placeholder="ceo@company.com"
+                      value={form.ceoEmail}
+                      onChange={(e) =>
+                        setForm((prev) => ({
+                          ...prev,
+                          ceoEmail: e.target.value,
+                        }))
+                      }
+                      onBlur={() => markTouched("ceoEmail")}
+                    />
+                  </label>
+                  <label className="text-xs text-slate-500 md:col-span-2">
+                    대표자 전화번호
+                    <input
+                      className={inputClass(isFieldInvalid("ceoPhone"))}
+                      placeholder="010-0000-0000"
+                      value={form.ceoPhone}
+                      onChange={(e) =>
+                        setForm((prev) => ({
+                          ...prev,
+                          ceoPhone: formatPhoneNumber(e.target.value),
+                        }))
+                      }
+                      onBlur={() => markTouched("ceoPhone")}
+                    />
+                  </label>
+                  <label className="text-xs text-slate-500 md:col-span-1">
+                    <span className="block">대표자 성별</span>
+                    <div className="mt-1 inline-grid w-fit grid-cols-2 gap-1 rounded-xl border border-slate-200 bg-white p-1">
+                      {GENDER_OPTIONS.map((option) => {
+                        const active = form.ceoGender === option
+                        return (
+                          <button
+                            key={option}
+                            type="button"
+                            data-testid={`company-ceo-gender-${option === "남" ? "male" : "female"}`}
+                            className={segmentedToggleClass(active)}
+                            onClick={() => {
+                              setForm((prev) => ({
+                                ...prev,
+                                ceoGender: prev.ceoGender === option ? "" : option,
+                              }))
+                              markTouched("ceoGender")
+                            }}
+                          >
+                            {option}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </label>
+                  <label className="text-xs text-slate-500 md:col-span-2">
+                    대표자 국적
+                    <input
+                      className={inputClass(isFieldInvalid("ceoNationality"))}
+                      placeholder="예: 대한민국"
+                      value={form.ceoNationality}
+                      onChange={(e) =>
+                        setForm((prev) => ({
+                          ...prev,
+                          ceoNationality: e.target.value,
+                        }))
+                      }
+                      onBlur={() => markTouched("ceoNationality")}
+                    />
+                  </label>
+                  <label className="text-xs text-slate-500 md:col-span-1">
+                    이전 창업 횟수
+                    <input
+                      className={inputClass(isFieldInvalid("founderSerialNumber"))}
+                      inputMode="numeric"
+                      placeholder="예: 1"
+                      value={form.founderSerialNumber}
+                      onChange={(e) =>
+                        setForm((prev) => ({
+                          ...prev,
+                          founderSerialNumber: e.target.value
+                            .replace(/[^\d]/g, "")
+                            .slice(0, 2),
+                        }))
+                      }
+                      onBlur={() => markTouched("founderSerialNumber")}
+                    />
+                  </label>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 md:col-span-6">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <div className="text-xs font-semibold text-slate-700">
+                          공동대표 정보
+                        </div>
+                        <div className="mt-1 text-[11px] text-slate-500">
+                          공동대표가 있는 경우에만 추가 정보를 입력합니다.
+                        </div>
+                      </div>
+                      <div className="inline-grid w-fit grid-cols-2 gap-1 rounded-xl border border-slate-200 bg-white p-1">
                         {YES_NO_OPTIONS.map((option) => {
-                          const active = form.innovationVoucherHeld === option
+                          const active = form.hasCoRepresentative === option
                           return (
                             <button
                               key={option}
                               type="button"
+                              data-testid={`company-corep-${option === "예" ? "yes" : "no"}`}
                               className={segmentedToggleClass(active)}
-                              onClick={() =>
+                              onClick={() => {
                                 setForm((prev) => ({
                                   ...prev,
-                                  innovationVoucherHeld:
-                                    prev.innovationVoucherHeld === option ? "" : option,
+                                  hasCoRepresentative:
+                                    prev.hasCoRepresentative === option ? "" : option,
+                                  coRepresentativeName:
+                                    option === "예" ? prev.coRepresentativeName : "",
+                                  coRepresentativeBirthDate:
+                                    option === "예" ? prev.coRepresentativeBirthDate : "",
+                                  coRepresentativeGender:
+                                    option === "예" ? prev.coRepresentativeGender : "",
+                                  coRepresentativeTitle:
+                                    option === "예" ? prev.coRepresentativeTitle : "",
                                 }))
-                              }
+                                markTouched("hasCoRepresentative")
+                              }}
                             >
                               {option}
                             </button>
                           )
                         })}
                       </div>
+                    </div>
+                    {form.hasCoRepresentative === "예" ? (
+                      <div className="mt-4 grid gap-3 md:grid-cols-6">
+                        <label className="text-xs text-slate-500 md:col-span-2">
+                          공동대표 성명
+                          <input
+                            className={inputClass(isFieldInvalid("coRepresentativeName"))}
+                            placeholder="홍길동"
+                            value={form.coRepresentativeName}
+                            onChange={(e) =>
+                              setForm((prev) => ({
+                                ...prev,
+                                coRepresentativeName: e.target.value,
+                              }))
+                            }
+                            onBlur={() => markTouched("coRepresentativeName")}
+                          />
+                        </label>
+                        <label className="text-xs text-slate-500 md:col-span-2">
+                          공동대표 생년월일
+                          <input
+                            type="date"
+                            className={inputClass(isFieldInvalid("coRepresentativeBirthDate"))}
+                            value={form.coRepresentativeBirthDate}
+                            onChange={(e) =>
+                              setForm((prev) => ({
+                                ...prev,
+                                coRepresentativeBirthDate: e.target.value,
+                              }))
+                            }
+                            onBlur={() => markTouched("coRepresentativeBirthDate")}
+                          />
+                        </label>
+                        <label className="text-xs text-slate-500 md:col-span-1">
+                          <span className="block">공동대표 성별</span>
+                          <div className="mt-1 inline-grid w-fit grid-cols-2 gap-1 rounded-xl border border-slate-200 bg-white p-1">
+                            {GENDER_OPTIONS.map((option) => {
+                              const active = form.coRepresentativeGender === option
+                              return (
+                                <button
+                                  key={option}
+                                  type="button"
+                                  className={segmentedToggleClass(active)}
+                                  onClick={() => {
+                                    setForm((prev) => ({
+                                      ...prev,
+                                      coRepresentativeGender:
+                                        prev.coRepresentativeGender === option ? "" : option,
+                                    }))
+                                    markTouched("coRepresentativeGender")
+                                  }}
+                                >
+                                  {option}
+                                </button>
+                              )
+                            })}
+                          </div>
+                        </label>
+                        <label className="text-xs text-slate-500 md:col-span-1">
+                          공동대표 직책
+                          <input
+                            className={inputClass(isFieldInvalid("coRepresentativeTitle"))}
+                            placeholder="예: COO"
+                            value={form.coRepresentativeTitle}
+                            onChange={(e) =>
+                              setForm((prev) => ({
+                                ...prev,
+                                coRepresentativeTitle: e.target.value,
+                              }))
+                            }
+                            onBlur={() => markTouched("coRepresentativeTitle")}
+                          />
+                        </label>
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            {!isPreStartup ? (
+              <section
+                ref={(element) => {
+                  signupSectionRefs.current["finance-investment"] = element
+                }}
+                className="space-y-4"
+              >
+                <div className="text-sm font-semibold text-slate-700">재무 및 투자이력</div>
+                <div className="rounded-2xl border border-slate-200 bg-white p-5">
+                  <div className="grid gap-3 md:grid-cols-4">
+                    <label className="text-xs text-slate-500 md:col-span-2 md:max-w-md">
+                      매출액 (2025년)
+                      <InputSuffix suffix="원">
+                        <input
+                          className={inputClass(isFieldInvalid("revenue2025"), "mt-0")}
+                          placeholder="예: 1,250,000,000"
+                          value={form.revenue2025}
+                          onChange={(e) =>
+                            setForm((prev) => ({
+                              ...prev,
+                              revenue2025: formatRevenueInput(e.target.value),
+                            }))
+                          }
+                          onBlur={() => markTouched("revenue2025")}
+                        />
+                      </InputSuffix>
                     </label>
-                    <div className="mt-5 grid gap-3">
-                      <label className="text-xs text-slate-500">
-                        중소기업혁신바우처 확보 금액
-                        <InputSuffix
-                          suffix="원"
-                          disabled={form.innovationVoucherHeld !== "예"}
+                    <label className="text-xs text-slate-500 md:col-span-2 md:max-w-md">
+                      매출액 (2026년)
+                      <InputSuffix suffix="원">
+                        <input
+                          className={inputClass(isFieldInvalid("revenue2026"), "mt-0")}
+                          placeholder="예: 1,800,000,000"
+                          value={form.revenue2026}
+                          onChange={(e) =>
+                            setForm((prev) => ({
+                              ...prev,
+                              revenue2026: formatRevenueInput(e.target.value),
+                            }))
+                          }
+                          onBlur={() => markTouched("revenue2026")}
+                        />
+                      </InputSuffix>
+                    </label>
+                    <label className="text-xs text-slate-500 md:col-span-2 md:max-w-md">
+                      자본총계
+                      <InputSuffix suffix="원">
+                        <input
+                          className={inputClass(isFieldInvalid("capitalTotal"), "mt-0")}
+                          placeholder="예: 300,000,000"
+                          value={form.capitalTotal}
+                          onChange={(e) =>
+                            setForm((prev) => ({
+                              ...prev,
+                              capitalTotal: formatNumberInput(e.target.value),
+                            }))
+                          }
+                          onBlur={() => markTouched("capitalTotal")}
+                        />
+                      </InputSuffix>
+                    </label>
+                  </div>
+                  <div className="mt-4 space-y-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="text-xs font-semibold text-slate-600">
+                        투자이력 (순서별 작성)
+                      </div>
+                      <button
+                        type="button"
+                        className="inline-flex items-center rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+                        onClick={addInvestmentRow}
+                        disabled={investmentRows.length >= 3}
+                      >
+                        {investmentRows.length >= 3 ? "최대 3개" : "+ 투자이력 추가"}
+                      </button>
+                    </div>
+                    {investmentRows.map((row, idx) => {
+                      const selectedStages = parseInvestmentStages(row.stage)
+                      return (
+                        <div
+                          key={`investment-${idx}`}
+                          className="grid gap-3 rounded-xl border border-slate-100 bg-slate-50 p-3 sm:grid-cols-2 lg:grid-cols-[minmax(240px,2fr)_minmax(120px,0.95fr)_minmax(150px,1.1fr)_minmax(170px,1.35fr)_auto] lg:items-end"
                         >
-                          <input
-                            className={`${inputClass(false)} mt-0`}
-                            placeholder="예: 30,000,000"
-                            inputMode="numeric"
-                            value={form.innovationVoucherAmount}
-                            disabled={form.innovationVoucherHeld !== "예"}
-                            onChange={(e) =>
-                              setForm((prev) => ({
-                                ...prev,
-                                innovationVoucherAmount: formatNumberInput(e.target.value),
-                              }))
-                            }
-                          />
-                        </InputSuffix>
-                      </label>
-                      <label className="text-xs text-slate-500">
-                        중소기업혁신바우처 소진율
-                        <InputSuffix
-                          suffix="%"
-                          disabled={form.innovationVoucherHeld !== "예"}
+                          <label className="min-w-0 text-xs text-slate-500">
+                            <span className="block whitespace-nowrap">투자단계 (다중선택)</span>
+                            <div
+                              className="relative"
+                              ref={(element) => {
+                                investmentStageDropdownRefs.current[idx] = element
+                              }}
+                            >
+                              <div
+                                tabIndex={0}
+                                className={inputClass(
+                                  false,
+                                  "min-h-[40px] cursor-pointer rounded-lg pr-9"
+                                )}
+                                onMouseDown={(event) => {
+                                  event.preventDefault()
+                                  event.stopPropagation()
+                                  setActiveInvestmentStageRow((prev) =>
+                                    prev === idx ? null : idx
+                                  )
+                                }}
+                              >
+                                {selectedStages.length > 0 ? (
+                                  <div className="flex items-center gap-1 overflow-x-auto whitespace-nowrap pr-1">
+                                    {selectedStages.map((stage) => (
+                                      <span
+                                        key={`${stage}-${idx}`}
+                                        className="inline-flex h-5 items-center gap-1 rounded-full border border-slate-400 bg-slate-100 px-1.5 text-[9px] font-medium text-slate-700"
+                                      >
+                                        <span>{stage}</span>
+                                        <button
+                                          type="button"
+                                          className="text-slate-500 hover:text-slate-800"
+                                          onMouseDown={(event) => {
+                                            event.preventDefault()
+                                            event.stopPropagation()
+                                            removeInvestmentStage(idx, stage)
+                                          }}
+                                        >
+                                          ×
+                                        </button>
+                                      </span>
+                                    ))}
+                                  </div>
+                                ) : (
+                                  <span className="inline-block min-w-max whitespace-nowrap text-sm text-slate-400">
+                                    투자단계를 선택하세요
+                                  </span>
+                                )}
+                              </div>
+                              <ChevronDown
+                                className="pointer-events-none absolute right-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400"
+                                aria-hidden="true"
+                              />
+                              {activeInvestmentStageRow === idx ? (
+                                <div className="absolute z-20 mt-1 max-h-44 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg">
+                                  {INVESTMENT_STAGE_OPTIONS.map((option) => {
+                                    const isSelected = selectedStages.includes(option)
+                                    return (
+                                      <button
+                                        key={option}
+                                        type="button"
+                                        className={`w-full px-3 py-2 text-left text-xs hover:bg-slate-50 ${
+                                          isSelected
+                                            ? "font-semibold text-slate-900"
+                                            : "text-slate-700"
+                                        }`}
+                                        onMouseDown={(event) => {
+                                          event.preventDefault()
+                                          toggleInvestmentStage(idx, option)
+                                        }}
+                                      >
+                                        {isSelected ? `✓ ${option}` : option}
+                                      </button>
+                                    )
+                                  })}
+                                </div>
+                              ) : null}
+                            </div>
+                          </label>
+                          <label className="min-w-0 text-xs text-slate-500">
+                            <span className="block whitespace-nowrap">투자유치시기</span>
+                            <input
+                              type="text"
+                              className={inputClass(false, "rounded-lg")}
+                              inputMode="numeric"
+                              maxLength={10}
+                              placeholder="YYYY.MM.DD"
+                              value={row.date}
+                              onInput={(e) => {
+                                const nextValue = formatInvestmentDateInput(
+                                  e.currentTarget.value
+                                )
+                                e.currentTarget.value = nextValue
+                                updateInvestmentRow(idx, "date", nextValue)
+                              }}
+                              onBlur={(e) => {
+                                const nextValue = formatInvestmentDateInput(
+                                  e.currentTarget.value
+                                )
+                                const digits = nextValue.replace(/[^\d]/g, "")
+                                updateInvestmentRow(
+                                  idx,
+                                  "date",
+                                  digits.length === 8 ? nextValue : ""
+                                )
+                              }}
+                            />
+                          </label>
+                          <label className="min-w-0 text-xs text-slate-500">
+                            <span className="block whitespace-nowrap">투자 유치금액</span>
+                            <InputSuffix suffix="원">
+                              <input
+                                className={inputClass(false, "mt-0 rounded-lg")}
+                                placeholder="예: 2,550,000,000"
+                                inputMode="numeric"
+                                value={row.postMoney}
+                                onChange={(e) =>
+                                  updateInvestmentRow(idx, "postMoney", e.target.value)
+                                }
+                              />
+                            </InputSuffix>
+                          </label>
+                          <div className="flex items-start gap-2">
+                            <label className="min-w-0 flex-1 text-xs text-slate-500">
+                              <span className="block whitespace-nowrap">주주명(지분율 상위 3명)</span>
+                              <input
+                                className={inputClass(false, "rounded-lg")}
+                                placeholder="예: 홍길동, 김철수, 박영희"
+                                value={row.majorShareholder}
+                                onChange={(e) =>
+                                  updateInvestmentRow(idx, "majorShareholder", e.target.value)
+                                }
+                              />
+                            </label>
+                            <button
+                              type="button"
+                              className="mt-5 shrink-0 rounded-md border border-rose-200 p-2 text-rose-600 hover:border-rose-300 hover:bg-rose-50 hover:text-rose-700 disabled:cursor-not-allowed disabled:opacity-60"
+                              onClick={() => removeInvestmentRow(idx)}
+                              disabled={investmentRows.length <= 1}
+                              aria-label="삭제"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              </section>
+            ) : null}
+
+            {!isPreStartup ? (
+              <section
+                ref={(element) => {
+                  signupSectionRefs.current["certification-voucher"] = element
+                }}
+                className="space-y-4"
+              >
+                <div className="text-sm font-semibold text-slate-700">인증 및 바우처</div>
+                <div className="rounded-2xl border border-slate-200 bg-white p-5">
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <label className="text-xs text-slate-500">
+                      <span className="block whitespace-nowrap">인증/지정 여부 (다중선택)</span>
+                      <div className="relative" ref={certificationDropdownRef}>
+                        <div
+                          tabIndex={0}
+                          className={inputClass(
+                            isFieldInvalid("certification"),
+                            "min-h-[40px] cursor-pointer rounded-lg pr-9"
+                          )}
+                          onMouseDown={(event) => {
+                            event.preventDefault()
+                            event.stopPropagation()
+                            setCertificationDropdownOpen((prev) => !prev)
+                          }}
                         >
-                          <input
-                            className={`${inputClass(false)} mt-0`}
-                            placeholder="예: 75"
-                            inputMode="numeric"
-                            value={form.innovationVoucherUsageRate}
-                            disabled={form.innovationVoucherHeld !== "예"}
-                            onChange={(e) =>
-                              setForm((prev) => ({
-                                ...prev,
-                                innovationVoucherUsageRate: formatNumberInput(e.target.value),
-                              }))
-                            }
-                          />
-                        </InputSuffix>
+                          {parseCertificationSelections(form.certification).length > 0 ? (
+                            <div className="flex items-center gap-1 overflow-x-auto whitespace-nowrap pr-1">
+                              {parseCertificationSelections(form.certification).map((option) => (
+                                <span
+                                  key={option}
+                                  className="inline-flex h-5 items-center gap-1 rounded-full border border-slate-400 bg-slate-100 px-1.5 text-[9px] font-medium text-slate-700"
+                                >
+                                  <span>{option}</span>
+                                  <button
+                                    type="button"
+                                    className="text-slate-500 hover:text-slate-800"
+                                    onMouseDown={(event) => {
+                                      event.preventDefault()
+                                      event.stopPropagation()
+                                      removeCertification(option)
+                                    }}
+                                  >
+                                    ×
+                                  </button>
+                                </span>
+                              ))}
+                            </div>
+                          ) : (
+                            <span className="text-sm text-slate-400">
+                              인증/지정 여부를 선택하세요
+                            </span>
+                          )}
+                        </div>
+                        <ChevronDown
+                          className="pointer-events-none absolute right-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400"
+                          aria-hidden="true"
+                        />
+                        {certificationDropdownOpen ? (
+                          <div className="absolute z-20 mt-1 max-h-44 w-full overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg">
+                            {CERTIFICATION_OPTIONS.map((option) => {
+                              const isSelected = parseCertificationSelections(
+                                form.certification
+                              ).includes(option)
+                              return (
+                                <button
+                                  key={option}
+                                  type="button"
+                                  className={`w-full px-3 py-2 text-left text-xs hover:bg-slate-50 ${
+                                    isSelected
+                                      ? "font-semibold text-slate-900"
+                                      : "text-slate-700"
+                                  }`}
+                                  onMouseDown={(event) => {
+                                    event.preventDefault()
+                                    toggleCertification(option)
+                                  }}
+                                >
+                                  {isSelected ? `✓ ${option}` : option}
+                                </button>
+                              )
+                            })}
+                          </div>
+                        ) : null}
+                      </div>
+                    </label>
+                    <label className="text-xs text-slate-500">
+                      TIPS/LIPS 이력
+                      <div className="relative">
+                        <select
+                          className={`${inputClass(isFieldInvalid("tipsLipsHistory"))} appearance-none pr-10`}
+                          value={form.tipsLipsHistory}
+                          onChange={(e) =>
+                            setForm((prev) => ({
+                              ...prev,
+                              tipsLipsHistory: e.target.value,
+                            }))
+                          }
+                          onBlur={() => markTouched("tipsLipsHistory")}
+                        >
+                          <option value="">선택</option>
+                          {TIPS_LIPS_OPTIONS.map((option) => (
+                            <option key={option} value={option}>
+                              {option}
+                            </option>
+                          ))}
+                        </select>
+                        <ChevronDown
+                          className="pointer-events-none absolute right-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400"
+                          aria-hidden="true"
+                        />
+                      </div>
+                    </label>
+                  </div>
+                  <div className="mt-3 grid gap-4 sm:grid-cols-2">
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                      <label className="text-xs text-slate-500">
+                        <span className="block">수출바우처 보유 여부</span>
+                        <div className="mt-3 inline-grid w-fit grid-cols-2 gap-1 rounded-xl border border-slate-200 bg-white p-1">
+                          {YES_NO_OPTIONS.map((option) => {
+                            const active = form.exportVoucherHeld === option
+                            return (
+                              <button
+                                key={option}
+                                type="button"
+                                className={segmentedToggleClass(active)}
+                                onClick={() => {
+                                  setForm((prev) => ({
+                                    ...prev,
+                                    exportVoucherHeld:
+                                      prev.exportVoucherHeld === option ? "" : option,
+                                  }))
+                                  markTouched("exportVoucherHeld")
+                                }}
+                              >
+                                {option}
+                              </button>
+                            )
+                          })}
+                        </div>
                       </label>
+                      <div className="mt-5 grid gap-3">
+                        <label className="text-xs text-slate-500">
+                          수출바우처 확보 금액
+                          <InputSuffix suffix="원" disabled={form.exportVoucherHeld !== "예"}>
+                            <input
+                              className={inputClass(
+                                isFieldInvalid("exportVoucherAmount"),
+                                "mt-0"
+                              )}
+                              placeholder="예: 50,000,000"
+                              inputMode="numeric"
+                              value={form.exportVoucherAmount}
+                              disabled={form.exportVoucherHeld !== "예"}
+                              onChange={(e) =>
+                                setForm((prev) => ({
+                                  ...prev,
+                                  exportVoucherAmount: formatNumberInput(e.target.value),
+                                }))
+                              }
+                              onBlur={() => markTouched("exportVoucherAmount")}
+                            />
+                          </InputSuffix>
+                        </label>
+                        <label className="text-xs text-slate-500">
+                          수출바우처 소진율
+                          <InputSuffix suffix="%" disabled={form.exportVoucherHeld !== "예"}>
+                            <input
+                              className={inputClass(
+                                isFieldInvalid("exportVoucherUsageRate"),
+                                "mt-0"
+                              )}
+                              placeholder="예: 40"
+                              inputMode="numeric"
+                              value={form.exportVoucherUsageRate}
+                              disabled={form.exportVoucherHeld !== "예"}
+                              onChange={(e) =>
+                                setForm((prev) => ({
+                                  ...prev,
+                                  exportVoucherUsageRate: formatNumberInput(e.target.value),
+                                }))
+                              }
+                              onBlur={() => markTouched("exportVoucherUsageRate")}
+                            />
+                          </InputSuffix>
+                        </label>
+                      </div>
+                    </div>
+
+                    <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                      <label className="text-xs text-slate-500">
+                        <span className="block">중소기업혁신바우처 보유 여부</span>
+                        <div className="mt-3 inline-grid w-fit grid-cols-2 gap-1 rounded-xl border border-slate-200 bg-white p-1">
+                          {YES_NO_OPTIONS.map((option) => {
+                            const active = form.innovationVoucherHeld === option
+                            return (
+                              <button
+                                key={option}
+                                type="button"
+                                className={segmentedToggleClass(active)}
+                                onClick={() => {
+                                  setForm((prev) => ({
+                                    ...prev,
+                                    innovationVoucherHeld:
+                                      prev.innovationVoucherHeld === option ? "" : option,
+                                  }))
+                                  markTouched("innovationVoucherHeld")
+                                }}
+                              >
+                                {option}
+                              </button>
+                            )
+                          })}
+                        </div>
+                      </label>
+                      <div className="mt-5 grid gap-3">
+                        <label className="text-xs text-slate-500">
+                          중소기업혁신바우처 확보 금액
+                          <InputSuffix suffix="원" disabled={form.innovationVoucherHeld !== "예"}>
+                            <input
+                              className={inputClass(
+                                isFieldInvalid("innovationVoucherAmount"),
+                                "mt-0"
+                              )}
+                              placeholder="예: 30,000,000"
+                              inputMode="numeric"
+                              value={form.innovationVoucherAmount}
+                              disabled={form.innovationVoucherHeld !== "예"}
+                              onChange={(e) =>
+                                setForm((prev) => ({
+                                  ...prev,
+                                  innovationVoucherAmount: formatNumberInput(e.target.value),
+                                }))
+                              }
+                              onBlur={() => markTouched("innovationVoucherAmount")}
+                            />
+                          </InputSuffix>
+                        </label>
+                        <label className="text-xs text-slate-500">
+                          중소기업혁신바우처 소진율
+                          <InputSuffix suffix="%" disabled={form.innovationVoucherHeld !== "예"}>
+                            <input
+                              className={inputClass(
+                                isFieldInvalid("innovationVoucherUsageRate"),
+                                "mt-0"
+                              )}
+                              placeholder="예: 75"
+                              inputMode="numeric"
+                              value={form.innovationVoucherUsageRate}
+                              disabled={form.innovationVoucherHeld !== "예"}
+                              onChange={(e) =>
+                                setForm((prev) => ({
+                                  ...prev,
+                                  innovationVoucherUsageRate: formatNumberInput(e.target.value),
+                                }))
+                              }
+                              onBlur={() => markTouched("innovationVoucherUsageRate")}
+                            />
+                          </InputSuffix>
+                        </label>
+                      </div>
                     </div>
                   </div>
                 </div>
               </section>
-            </>
-          ) : null}
+            ) : null}
 
-          <section
-            ref={(element) => {
-              signupSectionRefs.current.funding = element
-            }}
-            className="rounded-2xl border border-slate-200 bg-white p-5"
-          >
-            <div className="text-sm font-semibold text-slate-900">투자 희망</div>
-            <div className="mt-4 grid gap-3 md:grid-cols-4">
-              <label className="text-xs text-slate-500 md:col-span-2 md:max-w-md">
-                2026년 내 희망 투자액
-                <InputSuffix suffix="원">
-                  <input
-                    className={`${inputClass(isFieldInvalid("desiredInvestment2026"))} mt-0`}
-                    placeholder="예: 2,050,000,000"
-                    inputMode="numeric"
-                    value={form.desiredInvestment2026}
-                    onChange={(e) =>
-                      setForm((prev) => ({
-                        ...prev,
-                        desiredInvestment2026: formatRevenueInput(e.target.value),
-                      }))
-                    }
-                    onBlur={() => markTouched("desiredInvestment2026")}
-                  />
-                </InputSuffix>
-              </label>
-              <label className="text-xs text-slate-500 md:col-span-2 md:max-w-md">
-                투자전 희망기업가치 (Pre-Value)
-                <InputSuffix suffix="원">
-                  <input
-                    className={`${inputClass(isFieldInvalid("desiredPreValue"))} mt-0`}
-                    placeholder="예: 12,000,000,000"
-                    inputMode="numeric"
-                    value={form.desiredPreValue}
-                    onChange={(e) =>
-                      setForm((prev) => ({
-                        ...prev,
-                        desiredPreValue: formatRevenueInput(e.target.value),
-                      }))
-                    }
-                    onBlur={() => markTouched("desiredPreValue")}
-                  />
-                </InputSuffix>
-              </label>
-            </div>
-            <div className="mt-4">
-              <label className="text-xs text-slate-500">
-                MYSC에 가장 기대하는 점
-                <textarea
-                  className={`${inputClass(false)} min-h-[96px] resize-y`}
-                  placeholder="MYSC에 기대하는 점을 입력하세요"
-                  value={form.myscExpectation}
-                  onChange={(e) =>
-                    setForm((prev) => ({ ...prev, myscExpectation: e.target.value }))
-                  }
-                />
-              </label>
-            </div>
-          </section>
-
-        </div>
+            <section
+              ref={(element) => {
+                signupSectionRefs.current.funding = element
+              }}
+              className="space-y-4"
+            >
+              <div className="text-sm font-semibold text-slate-700">투자희망</div>
+              <div className="rounded-2xl border border-slate-200 bg-white p-5">
+                <div className="grid gap-3 md:grid-cols-4">
+                  <label className="text-xs text-slate-500 md:col-span-2 md:max-w-md">
+                    2026년 내 희망 투자액
+                    <InputSuffix suffix="원">
+                      <input
+                        className={inputClass(isFieldInvalid("desiredInvestment2026"), "mt-0")}
+                        placeholder="예: 2,050,000,000"
+                        inputMode="numeric"
+                        value={form.desiredInvestment2026}
+                        onChange={(e) =>
+                          setForm((prev) => ({
+                            ...prev,
+                            desiredInvestment2026: formatRevenueInput(e.target.value),
+                          }))
+                        }
+                        onBlur={() => markTouched("desiredInvestment2026")}
+                      />
+                    </InputSuffix>
+                  </label>
+                  <label className="text-xs text-slate-500 md:col-span-2 md:max-w-md">
+                    투자전 희망기업가치 (Pre-Value)
+                    <InputSuffix suffix="원">
+                      <input
+                        className={inputClass(isFieldInvalid("desiredPreValue"), "mt-0")}
+                        placeholder="예: 20,000,000,000"
+                        inputMode="numeric"
+                        value={form.desiredPreValue}
+                        onChange={(e) =>
+                          setForm((prev) => ({
+                            ...prev,
+                            desiredPreValue: formatRevenueInput(e.target.value),
+                          }))
+                        }
+                        onBlur={() => markTouched("desiredPreValue")}
+                      />
+                    </InputSuffix>
+                  </label>
+                </div>
+                <div className="mt-3">
+                  <label className="text-xs text-slate-500">
+                    MYSC에 가장 기대하는 점
+                    <input
+                      className={inputClass(isFieldInvalid("myscExpectation"))}
+                      placeholder="MYSC에 기대하는 점을 입력하세요"
+                      value={form.myscExpectation}
+                      onChange={(e) =>
+                        setForm((prev) => ({
+                          ...prev,
+                          myscExpectation: e.target.value,
+                        }))
+                      }
+                      onBlur={() => markTouched("myscExpectation")}
+                    />
+                    <div className="mt-1 text-[11px] text-slate-400">
+                      {myscExpectationLength}/{MYSC_EXPECTATION_MIN_LENGTH}자 이상
+                    </div>
+                  </label>
+                </div>
+              </div>
+            </section>
+          </div>
       </div>
       </div>
       </div>
@@ -2591,6 +2746,7 @@ function CompanySignupInfo({
               <label className="flex items-start gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
                 <input
                   type="checkbox"
+                  data-testid="company-consent-privacy"
                   className="mt-1"
                   checked={consentPrivacy}
                   onChange={(e) => {
@@ -2660,6 +2816,7 @@ function CompanySignupInfo({
               </button>
               <button
                 type="button"
+                data-testid="company-consent-confirm"
                 className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white"
                 onClick={() => {
                   if (!consentPrivacy) {

@@ -148,6 +148,7 @@ export function ConsultantScheduleSettingsPage({
                 variant="outline"
                 onClick={() => setAllSlots(true)}
                 disabled={saving}
+                data-testid="consultant-schedule-select-all"
               >
                 전체 선택
               </Button>
@@ -171,6 +172,7 @@ export function ConsultantScheduleSettingsPage({
                 type="button"
                 onClick={handleSave}
                 disabled={saving || !isDirty}
+                data-testid="consultant-schedule-save"
               >
                 {saving ? "저장 중..." : "스케줄 저장"}
               </Button>

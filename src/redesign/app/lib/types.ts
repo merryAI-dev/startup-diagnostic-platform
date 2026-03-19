@@ -145,6 +145,8 @@ export interface RegularOfficeHour {
     date: string;
     startTime: string;
     endTime: string;
+    consultantId?: string;
+    consultantName?: string;
     agendaIds?: string[];
     status: OfficeHourSlotStatus;
   }[];

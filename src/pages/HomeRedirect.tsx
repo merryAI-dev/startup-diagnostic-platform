@@ -3,7 +3,7 @@ import { useAuth } from "@/context/AuthContext"
 import { LoadingScreen } from "@/components/auth/RouteGuards"
 
 export function HomeRedirect() {
-  const { user, profile, loading } = useAuth()
+  const { user, profile, signupRequest, loading } = useAuth()
 
   if (loading) {
     return <LoadingScreen />
@@ -11,16 +11,16 @@ export function HomeRedirect() {
   if (!user) {
     return <Navigate to="/login" replace />
   }
-  if (!profile) {
-    return <Navigate to="/signup" replace />
+  if (profile?.active === true) {
+    return (
+      <Navigate
+        to={profile.role === "admin" || profile.role === "consultant" ? "/admin" : "/company"}
+        replace
+      />
+    )
   }
-  if (profile.active === false) {
+  if (profile?.active === false || signupRequest) {
     return <Navigate to="/pending" replace />
   }
-  return (
-    <Navigate
-      to={profile.role === "admin" || profile.role === "consultant" ? "/admin" : "/company"}
-      replace
-    />
-  )
+  return <Navigate to="/signup" replace />
 }

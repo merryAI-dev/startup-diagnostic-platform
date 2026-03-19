@@ -23,3 +23,15 @@ export type UserProfile = {
   companyId?: string | null
   consents?: ConsentSnapshot
 }
+
+export type SignupRequest = {
+  uid?: string
+  role?: Role
+  requestedRole?: Role | null
+  email?: string | null
+  companyId?: string | null
+  status?: string
+  consents?: ConsentSnapshot
+  createdAt?: unknown
+  updatedAt?: unknown
+}

@@ -2,10 +2,12 @@ import { useEffect, useMemo } from "react"
 import { useLocation, useNavigate } from "react-router-dom"
 import { PendingApproval } from "@/components/auth/PendingApproval"
 import { useAuth } from "@/context/AuthContext"
+import { signOutUser } from "@/firebase/auth"
 import type { Role } from "@/types/auth"
+import { PENDING_REQUEST_FLAG, PENDING_SIGNUP_KEY } from "@/constants/signup"
 
 export function PendingPage() {
-  const { profile } = useAuth()
+  const { profile, signupRequest } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
 
@@ -29,9 +31,9 @@ export function PendingPage() {
 
   return (
     <div className="h-full overflow-hidden bg-gray-50 p-6">
-      <div className="mx-auto flex h-full w-full max-w-4xl items-center justify-center">
+      <div className="mx-auto flex h-full w-full max-w-4xl flex-col items-center justify-center gap-6">
         <PendingApproval
-          role={profile?.requestedRole ?? profile?.role ?? roleFromQuery}
+          role={signupRequest?.requestedRole ?? signupRequest?.role ?? profile?.requestedRole ?? profile?.role ?? roleFromQuery}
           onBack={() => navigate("/login")}
         />
       </div>

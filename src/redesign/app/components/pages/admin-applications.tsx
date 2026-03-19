@@ -47,7 +47,7 @@ export function AdminApplications({
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [dateRange, setDateRange] = useState<DateRange | undefined>();
   const [page, setPage] = useState(1);
-  const [selectedApplication, setSelectedApplication] = useState<Application | null>(null);
+  const [selectedApplicationId, setSelectedApplicationId] = useState<string | null>(null);
   const isConsultantUser = currentUserRole === "consultant";
   const pageContainerClassName = isConsultantUser
     ? "mx-auto w-full max-w-[1440px]"
@@ -160,6 +160,11 @@ export function AdminApplications({
       setPage(totalPages);
     }
   }, [page, sortedApplications.length]);
+
+  const selectedApplication = useMemo(
+    () => applications.find((application) => application.id === selectedApplicationId) ?? null,
+    [applications, selectedApplicationId],
+  );
 
   const handleStatusChange = (id: string, newStatus: ApplicationStatus) => {
     onUpdateStatus(id, newStatus);
@@ -287,7 +292,7 @@ export function AdminApplications({
                         <Button
                           variant="outline"
                           size="sm"
-                          onClick={() => setSelectedApplication(app)}
+                          onClick={() => setSelectedApplicationId(app.id)}
                         >
                           상세보기
                         </Button>
@@ -329,7 +334,7 @@ export function AdminApplications({
       {selectedApplication && (
         <AdminApplicationDetailModal
           application={selectedApplication}
-          onClose={() => setSelectedApplication(null)}
+          onClose={() => setSelectedApplicationId(null)}
           onUpdateStatus={handleStatusChange}
           onUpdateApplication={onUpdateApplication}
           onConfirmApplication={onConfirmApplication}

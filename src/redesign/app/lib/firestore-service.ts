@@ -434,7 +434,13 @@ class FirestoreService {
       return "";
     }
 
-    const subscriptionKey = `${collectionName}_${JSON.stringify(options?.constraints || [])}`;
+    const subscriptionKey = JSON.stringify({
+      collectionName,
+      constraints: options?.constraints || [],
+      orderByField: options?.orderByField || null,
+      orderDirection: options?.orderDirection || null,
+      limitCount: options?.limitCount || null,
+    });
 
     const constraints: QueryConstraint[] = [...(options?.constraints || [])];
     if (options?.orderByField) {

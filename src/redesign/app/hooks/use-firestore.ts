@@ -57,6 +57,16 @@ export function useFirestoreCollection<T>(
   const subscriptionKeyRef = useRef<string>("");
 
   const enabled = options?.enabled !== false;
+  const constraintsKey = useMemo(() => {
+    try {
+      return JSON.stringify(options?.constraints ?? []);
+    } catch {
+      return "constraints";
+    }
+  }, [options?.constraints]);
+  const orderByField = options?.orderByField;
+  const orderDirection = options?.orderDirection;
+  const limitCount = options?.limitCount;
 
   useEffect(() => {
     if (!isFirebaseConfigured || !enabled) {
@@ -89,7 +99,7 @@ export function useFirestoreCollection<T>(
     return () => {
       if (key) firestoreService.unsubscribe(key);
     };
-  }, [collectionName, enabled]);
+  }, [collectionName, constraintsKey, enabled, limitCount, orderByField, orderDirection]);
 
   return { data, loading, error };
 }

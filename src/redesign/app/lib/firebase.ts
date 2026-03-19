@@ -18,6 +18,11 @@ import {
   CACHE_SIZE_UNLIMITED,
   connectFirestoreEmulator,
 } from "firebase/firestore";
+import {
+  connectFunctionsEmulator,
+  Functions,
+  getFunctions,
+} from "firebase/functions";
 import { getStorage, FirebaseStorage } from "firebase/storage";
 
 // ──────────────────────────────────────────────
@@ -41,6 +46,8 @@ const isFirebaseConfigured =
   !!firebaseConfig.apiKey &&
   firebaseConfig.apiKey !== "" &&
   firebaseConfig.apiKey !== "your_api_key_here";
+const disableFirestorePersistence =
+  import.meta.env.VITE_DISABLE_FIRESTORE_PERSISTENCE === "true";
 
 // ──────────────────────────────────────────────
 // Initialize Firebase App
@@ -49,6 +56,7 @@ let app: FirebaseApp | null = null;
 let auth: Auth | null = null;
 let db: Firestore | null = null;
 let storage: FirebaseStorage | null = null;
+let functions: Functions | null = null;
 let googleProvider: GoogleAuthProvider | null = null;
 
 if (isFirebaseConfigured) {
@@ -63,16 +71,20 @@ if (isFirebaseConfigured) {
     auth = getAuth(app);
 
     // ── Firestore (500-user optimized) ──
-    try {
-      db = initializeFirestore(app, {
-        localCache: persistentLocalCache({
-          tabManager: persistentMultipleTabManager(),
-          cacheSizeBytes: CACHE_SIZE_UNLIMITED,
-        }),
-      });
-    } catch {
-      // 이미 초기화된 경우 기존 인스턴스 사용
+    if (disableFirestorePersistence) {
       db = getFirestore(app);
+    } else {
+      try {
+        db = initializeFirestore(app, {
+          localCache: persistentLocalCache({
+            tabManager: persistentMultipleTabManager(),
+            cacheSizeBytes: CACHE_SIZE_UNLIMITED,
+          }),
+        });
+      } catch {
+        // 이미 초기화된 경우 기존 인스턴스 사용
+        db = getFirestore(app);
+      }
     }
 
     // Emulator 연결 (개발 모드)
@@ -83,8 +95,18 @@ if (isFirebaseConfigured) {
     // ── Storage ──
     storage = getStorage(app);
 
+    // ── Functions ──
+    functions = getFunctions(
+      app,
+      import.meta.env.VITE_FIREBASE_FUNCTIONS_REGION || "asia-northeast3"
+    );
+
     // ── Google Auth Provider ──
     googleProvider = new GoogleAuthProvider();
+
+    if (import.meta.env.VITE_USE_FIREBASE_EMULATOR === "true") {
+      connectFunctionsEmulator(functions, "localhost", 5001);
+    }
 
     console.log("✅ Firebase initialized (Offline persistence + Multi-tab)");
   } catch (error) {
@@ -132,5 +154,5 @@ export const RECOMMENDED_INDEXES = [
   { collection: "goals", fields: ["status", "priority"] },
 ];
 
-export { app, auth, db, storage, googleProvider, isFirebaseConfigured };
+export { app, auth, db, storage, functions, googleProvider, isFirebaseConfigured };
 export default app;

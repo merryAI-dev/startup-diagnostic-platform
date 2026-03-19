@@ -14,17 +14,17 @@ export function RequireAuth({ children }: { children: JSX.Element }) {
 }
 
 export function RequireApproved({ children }: { children: JSX.Element }) {
-  const { profile, loading } = useAuth()
+  const { profile, signupRequest, loading } = useAuth()
   if (loading) {
     return <LoadingScreen />
   }
-  if (!profile) {
-    return <Navigate to="/signup" replace />
+  if (profile?.active === true) {
+    return children
   }
-  if (profile.active === false) {
+  if (profile?.active === false || signupRequest) {
     return <Navigate to="/pending" replace />
   }
-  return children
+  return <Navigate to="/signup" replace />
 }
 
 export function RequireRole({
@@ -34,12 +34,25 @@ export function RequireRole({
   role: Role | Role[]
   children: JSX.Element
 }) {
-  const { profile, loading } = useAuth()
+  const { profile, signupRequest, loading } = useAuth()
   if (loading) {
     return <LoadingScreen />
   }
+  if (profile?.active === true) {
+    const allowedRoles = Array.isArray(role) ? role : [role]
+    if (!allowedRoles.includes(profile.role)) {
+      return <Navigate to="/" replace />
+    }
+    return children
+  }
+  if (signupRequest) {
+    return <Navigate to="/pending" replace />
+  }
   if (!profile) {
     return <Navigate to="/signup" replace />
+  }
+  if (profile.active === false) {
+    return <Navigate to="/pending" replace />
   }
   const allowedRoles = Array.isArray(role) ? role : [role]
   if (!allowedRoles.includes(profile.role)) {

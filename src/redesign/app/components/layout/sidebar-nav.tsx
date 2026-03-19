@@ -40,7 +40,6 @@ type NavItem = {
 const adminNavItems: NavItem[] = [
   { id: "admin-dashboard", label: "관리자 대시보드", icon: Shield },
   { id: "admin-applications", label: "신청 관리", icon: ClipboardList },
-  { id: "admin-programs", label: "사업별 프로그램", icon: Target },
   { id: "admin-program-list", label: "사업 관리", icon: FileText },
   { id: "startup-diagnostic", label: "기업 관리", icon: FileText },
   { id: "admin-agendas", label: "아젠다 관리", icon: FileText },
@@ -77,6 +76,7 @@ const userNavItems: NavItem[] = [
 const companyCoreNavIds = new Set([
   "dashboard",
   "regular",
+  "company-metrics",
   "company-info",
 ]);
 

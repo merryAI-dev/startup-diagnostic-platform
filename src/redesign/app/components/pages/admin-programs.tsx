@@ -550,7 +550,7 @@ export function AdminPrograms({
               </div>
             </Card>
           ) : (
-            <div className="min-h-0 flex-1 space-y-6 overflow-y-auto pr-1">
+            <div className="min-h-0 flex-1 space-y-6 overflow-y-auto pr-1 pb-6">
               <Card className="border border-slate-200">
                 <CardHeader className="pb-3">
                   <CardTitle className="text-base">전체 요약</CardTitle>
@@ -613,58 +613,81 @@ export function AdminPrograms({
                     <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                       {programStats.map((item) => {
                         const isSelected = selectedProgramId === item.program.id
+                        const pendingCount =
+                          item.pendingSessions + item.confirmedSessions
+                        const statusChips = [
+                          {
+                            label: `완료 ${item.completedSessions}건`,
+                            variant: "border-slate-200 text-slate-700",
+                          },
+                          {
+                            label: `진행중 ${pendingCount}건`,
+                            variant: "border-amber-200 bg-amber-50/80 text-amber-700",
+                          },
+                          {
+                            label: `취소 ${item.cancelledSessions}건`,
+                            variant: "border-rose-200 bg-rose-50/80 text-rose-600",
+                          },
+                        ]
                         return (
                           <button
-                        key={item.program.id}
-                        type="button"
-                        onClick={() => setSelectedProgramId(item.program.id)}
-                        className={`text-left rounded-xl border p-4 transition-shadow ${
-                          isSelected ? "ring-2 ring-blue-200 shadow-md" : "hover:shadow-md"
-                        }`}
-                        style={{
-                          borderColor: item.program.color,
-                          background: `linear-gradient(135deg, ${item.program.color}14 0%, #ffffff 55%)`,
-                        }}
-                      >
-                        <div className="flex items-start justify-between gap-3">
-                          <div>
-                            <div className="flex items-center gap-2">
-                              <span
-                                className="inline-block h-2.5 w-2.5 rounded-full"
-                                style={{ backgroundColor: item.program.color }}
-                              />
-                              <span className="font-semibold text-slate-900">
-                                {item.program.name}
-                              </span>
+                            key={item.program.id}
+                            type="button"
+                            onClick={() => setSelectedProgramId(item.program.id)}
+                            className={`text-left rounded-xl border px-4 py-3 transition-shadow ${
+                              isSelected ? "ring-2 ring-blue-200 shadow-md" : "hover:shadow-md"
+                            }`}
+                            style={{
+                              borderColor: item.program.color,
+                              background: `linear-gradient(135deg, ${item.program.color}14 0%, #ffffff 55%)`,
+                            }}
+                          >
+                            <div className="flex flex-col gap-2">
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="min-w-0">
+                                  <div className="flex items-center gap-2">
+                                    <span
+                                      className="inline-block h-2.5 w-2.5 rounded-full"
+                                      style={{ backgroundColor: item.program.color }}
+                                    />
+                                    <span className="text-sm font-semibold text-slate-900 truncate">
+                                      {item.program.name}
+                                    </span>
+                                  </div>
+                                  <p className="text-xs text-muted-foreground mt-0.5 truncate">
+                                    {prettyDateRange(
+                                      item.program.periodStart,
+                                      item.program.periodEnd,
+                                    )}
+                                  </p>
+                                </div>
+                                <Badge variant="outline" className="shrink-0 whitespace-nowrap">
+                                  {item.totalSessions}건
+                                </Badge>
+                              </div>
+
+                              <div className="flex flex-wrap gap-2 text-xs font-medium">
+                                {statusChips.map((chip) => (
+                                  <span
+                                    key={chip.label}
+                                    className={`rounded-full border px-2 py-1 whitespace-nowrap bg-white/80 text-[0.65rem] font-medium ${chip.variant}`}
+                                  >
+                                    {chip.label}
+                                  </span>
+                                ))}
+                              </div>
+
+                              <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
+                                <span className="truncate">
+                                  {item.completedHours}h / {item.program.targetHours}h
+                                </span>
+                                <span className="text-sm font-semibold text-slate-900 whitespace-nowrap">
+                                  달성률 {item.achievementRate}%
+                                </span>
+                              </div>
+
+                              <Progress value={item.achievementRate} className="h-1.5" />
                             </div>
-                            <p className="text-xs text-muted-foreground mt-1">
-                              {prettyDateRange(item.program.periodStart, item.program.periodEnd)}
-                            </p>
-                          </div>
-                          <Badge variant="outline">{item.totalSessions}건</Badge>
-                        </div>
-
-                        <div className="mt-4 space-y-2">
-                          <div className="text-xs text-muted-foreground">
-                            {item.completedHours}h / {item.program.targetHours}h
-                          </div>
-                          <Progress value={item.achievementRate} className="h-2" />
-                          <div className="text-sm font-semibold text-slate-900">
-                            달성률 {item.achievementRate}%
-                          </div>
-                        </div>
-
-                        <div className="mt-4 grid grid-cols-3 gap-2 text-xs text-muted-foreground">
-                          <div className="rounded-lg bg-white/70 border px-2 py-1 text-center">
-                            완료 {item.completedSessions}건
-                          </div>
-                          <div className="rounded-lg bg-white/70 border px-2 py-1 text-center">
-                            진행중 {item.pendingSessions + item.confirmedSessions}건
-                          </div>
-                          <div className="rounded-lg bg-white/70 border px-2 py-1 text-center">
-                            취소 {item.cancelledSessions}건
-                          </div>
-                        </div>
                           </button>
                         )
                       })}
@@ -797,7 +820,7 @@ export function AdminPrograms({
                       </Button>
                     </CardHeader>
 
-                    <CardContent className="p-0 overflow-x-auto">
+                    <CardContent className="p-0 overflow-auto max-h-[48vh]">
                       <Table>
                         <TableHeader>
                           <TableRow>

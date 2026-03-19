@@ -63,6 +63,12 @@ const escapeHtml = (value: string) =>
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
 
+const normalizeConsultantDisplayName = (value?: string | null) =>
+  (value ?? "")
+    .replace(/\s*컨설턴트\s*$/u, "")
+    .trim()
+    .toLowerCase();
+
 interface PendingReportsDashboardProps {
   applications: Application[];
   reports: OfficeHourReport[];
@@ -150,20 +156,12 @@ export function PendingReportsDashboard({
 
   const resolveConsultantEmail = (application?: Application | null, report?: OfficeHourReport | null) => {
     const consultantId = report?.consultantId || application?.consultantId || "";
-    const consultantName = report?.consultantName || application?.consultant || "";
 
     if (consultantId) {
       const byId = consultants.find((consultant) => consultant.id === consultantId);
       if (byId?.email) return byId.email;
     }
-
-    const normalizedName = normalizeConsultantName(consultantName);
-    if (!normalizedName) return "";
-
-    const byName = consultants.find(
-      (consultant) => normalizeConsultantName(consultant.name) === normalizedName
-    );
-    return byName?.email ?? "";
+    return "";
   };
 
   const handleSendReminderEmail = (row: ReportRow) => {
@@ -580,10 +578,15 @@ export function PendingReportsDashboard({
       if (report?.consultantId) return report.consultantId === currentConsultantId;
       if (application?.consultantId) return application.consultantId === currentConsultantId;
     }
-    const appName = normalizeConsultantName(application?.consultant);
-    const reportName = normalizeConsultantName(report?.consultantName);
-    const currentName = normalizeConsultantName(currentConsultantName);
-    return Boolean(currentName) && (appName === currentName || reportName === currentName);
+    const currentNameKey = normalizeConsultantDisplayName(currentConsultantName);
+    if (!currentNameKey) return false;
+    if (report?.consultantName) {
+      return normalizeConsultantDisplayName(report.consultantName) === currentNameKey;
+    }
+    if (application?.consultant) {
+      return normalizeConsultantDisplayName(application.consultant) === currentNameKey;
+    }
+    return false;
   };
 
   const getSessionEndTime = (app: Application) => {
@@ -810,7 +813,7 @@ export function PendingReportsDashboard({
     : "세션 완료 후 3일 이내 보고서 작성 현황을 관리합니다";
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-gray-50">
+    <div className="flex min-h-0 flex-1 flex-col bg-gray-50">
       {/* Header */}
       <div className="bg-white border-b px-6 py-5">
         <div className={pageContainerClassName}>
@@ -883,7 +886,7 @@ export function PendingReportsDashboard({
               </div>
             </div>
           </div>
-          <div className="min-h-0 flex-1 divide-y overflow-hidden">
+          <div className="flex min-h-0 flex-1 flex-col divide-y overflow-hidden">
             {filteredReportRows.length === 0 ? (
               <div className="p-12 text-center">
                 <FileText className="w-12 h-12 text-slate-300 mx-auto mb-3" />
