@@ -54,6 +54,25 @@ function prettyDateRange(start?: string, end?: string) {
   return `${start} ~ ${end}`
 }
 
+function formatApplicationBreakdown(
+  waitingCount: number,
+  inProgressCount: number,
+  completedCount: number,
+  cancelledCount: number,
+) {
+  const segments = [
+    `대기 ${waitingCount}건`,
+    `진행 ${inProgressCount}건`,
+    `완료 ${completedCount}건`,
+  ]
+
+  if (cancelledCount > 0) {
+    segments.push(`취소/거절 ${cancelledCount}건`)
+  }
+
+  return segments.join(" · ")
+}
+
 export function AdminDashboardCharts({
   applications,
   programs,
@@ -162,6 +181,7 @@ export function AdminDashboardCharts({
     const waitingCount = programStats.reduce((sum, item) => sum + item.waitingCount, 0)
     const inProgressCount = programStats.reduce((sum, item) => sum + item.inProgressCount, 0)
     const completedCount = programStats.reduce((sum, item) => sum + item.completedCount, 0)
+    const cancelledCount = programStats.reduce((sum, item) => sum + item.cancelledCount, 0)
 
     return {
       totalPrograms: programStats.length,
@@ -172,6 +192,7 @@ export function AdminDashboardCharts({
       waitingCount,
       inProgressCount,
       completedCount,
+      cancelledCount,
     }
   }, [programStats])
 
@@ -241,7 +262,12 @@ export function AdminDashboardCharts({
                 </div>
                 <div className="text-xl font-semibold text-slate-900">{summary.totalApplications}건</div>
                 <p className="mt-1 text-xs text-slate-400">
-                  대기 {summary.waitingCount}건 · 진행 {summary.inProgressCount}건 · 완료 {summary.completedCount}건
+                  {formatApplicationBreakdown(
+                    summary.waitingCount,
+                    summary.inProgressCount,
+                    summary.completedCount,
+                    summary.cancelledCount,
+                  )}
                 </p>
               </CardContent>
             </Card>
@@ -385,7 +411,12 @@ export function AdminDashboardCharts({
                           {selectedProgramStats.totalApplications}건
                         </div>
                         <div className="mt-1 text-xs text-slate-500">
-                          대기 {selectedProgramStats.waitingCount}건 · 진행 {selectedProgramStats.inProgressCount}건
+                          {formatApplicationBreakdown(
+                            selectedProgramStats.waitingCount,
+                            selectedProgramStats.inProgressCount,
+                            selectedProgramStats.completedCount,
+                            selectedProgramStats.cancelledCount,
+                          )}
                         </div>
                       </div>
                     </div>

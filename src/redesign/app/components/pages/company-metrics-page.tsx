@@ -1,4 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { collection, deleteDoc, doc, setDoc, serverTimestamp } from "firebase/firestore";
+import { deleteObject, getDownloadURL, ref, uploadBytes } from "firebase/storage";
 import {
   Area,
   AreaChart,
@@ -16,6 +18,7 @@ import {
   Award,
   Download,
   DollarSign,
+  FileText,
   Loader2,
   Plus,
   Save,
@@ -54,8 +57,8 @@ import {
 } from "@/redesign/app/components/ui/table";
 import { cn } from "@/redesign/app/components/ui/utils";
 import { formatCurrency, formatNumber } from "@/redesign/app/lib/company-metrics-data";
-import { useFirestoreDocument } from "@/redesign/app/hooks/use-firestore";
-import { isFirebaseConfigured } from "@/redesign/app/lib/firebase";
+import { useFirestoreCollection, useFirestoreDocument } from "@/redesign/app/hooks/use-firestore";
+import { db, isFirebaseConfigured, storage as firebaseStorage } from "@/redesign/app/lib/firebase";
 import { firestoreService } from "@/redesign/app/lib/firestore-service";
 import { MonthlyMetrics, User } from "@/redesign/app/lib/types";
 
@@ -96,6 +99,17 @@ type PersistedMetricsDocument = MetricsPageState & {
   companyName: string;
   createdAt?: unknown;
   updatedAt?: unknown;
+};
+
+type MetricsAttachmentDocument = {
+  id: string;
+  category?: string;
+  name: string;
+  size: number;
+  storagePath: string;
+  createdByUid?: string;
+  createdByName?: string;
+  createdAt?: unknown;
 };
 
 const MONTHS = Array.from({ length: 12 }, (_, index) => index + 1);
@@ -369,6 +383,47 @@ function normalizeDateLabel(value: unknown): string | null {
   });
 }
 
+function getDateValue(value: unknown): Date | null {
+  if (!value) {
+    return null;
+  }
+
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value;
+  }
+
+  if (typeof value === "string" || typeof value === "number") {
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+
+  if (typeof value === "object" && value !== null) {
+    const maybeTimestamp = value as { toDate?: () => Date };
+    if (typeof maybeTimestamp.toDate === "function") {
+      try {
+        const parsed = maybeTimestamp.toDate();
+        return Number.isNaN(parsed.getTime()) ? null : parsed;
+      } catch {
+        return null;
+      }
+    }
+  }
+
+  return null;
+}
+
+function formatFileSize(size: number): string {
+  if (size >= 1024 * 1024) {
+    return `${(size / (1024 * 1024)).toFixed(1)}MB`;
+  }
+
+  if (size >= 1024) {
+    return `${Math.round(size / 1024)}KB`;
+  }
+
+  return `${size}B`;
+}
+
 function createMetricsCsv(metricsState: MetricsPageState, metricFields: MetricField[]): string {
   const escapeCell = (value: string | number) => {
     const source = String(value ?? "");
@@ -423,10 +478,17 @@ export function CompanyMetricsPage({ currentUser, companyId }: CompanyMetricsPag
     () => (companyId ? `companies/${companyId}/metrics` : ""),
     [companyId],
   );
+  const filesCollectionPath = useMemo(
+    () => (companyId ? `companies/${companyId}/files` : ""),
+    [companyId],
+  );
   const { data: persistedMetricsDoc, loading: persistedMetricsLoading } =
     useFirestoreDocument<PersistedMetricsDocument>(metricsCollectionPath, "annual", {
       enabled: isFirebaseConfigured && !!companyId,
     });
+  const { data: companyFileDocs } = useFirestoreCollection<MetricsAttachmentDocument>(filesCollectionPath, {
+    enabled: isFirebaseConfigured && !!companyId,
+  });
   const [savedMetricsState, setSavedMetricsState] = useState<MetricsPageState>(() =>
     createEmptyMetricsState(),
   );
@@ -440,6 +502,9 @@ export function CompanyMetricsPage({ currentUser, companyId }: CompanyMetricsPag
   const [isDirty, setIsDirty] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
+  const [isUploadingAttachments, setIsUploadingAttachments] = useState(false);
+  const [deletingAttachmentIds, setDeletingAttachmentIds] = useState<Record<string, boolean>>({});
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     const emptyState = createEmptyMetricsState();
@@ -488,6 +553,24 @@ export function CompanyMetricsPage({ currentUser, companyId }: CompanyMetricsPag
       })),
     ],
     [draftMetricsState.customFields],
+  );
+
+  const metricsAttachments = useMemo(
+    () =>
+      companyFileDocs
+        .filter(
+          (file) =>
+            file.category === "metrics" &&
+            typeof file.name === "string" &&
+            typeof file.storagePath === "string" &&
+            typeof file.size === "number",
+        )
+        .sort((left, right) => {
+          const leftTime = getDateValue(left.createdAt)?.getTime() ?? 0;
+          const rightTime = getDateValue(right.createdAt)?.getTime() ?? 0;
+          return rightTime - leftTime;
+        }),
+    [companyFileDocs],
   );
 
   useEffect(() => {
@@ -689,6 +772,126 @@ export function CompanyMetricsPage({ currentUser, companyId }: CompanyMetricsPag
     link.click();
     document.body.removeChild(link);
     window.URL.revokeObjectURL(url);
+  };
+
+  const handleAttachmentUpload = async (fileList: FileList | null) => {
+    if (!fileList?.length) {
+      return;
+    }
+
+    if (!companyId || !db || !firebaseStorage || !isFirebaseConfigured) {
+      toast.error("첨부 자료를 업로드할 수 없습니다.");
+      return;
+    }
+
+    const dbInstance = db;
+    const storageInstance = firebaseStorage;
+
+    const files = Array.from(fileList);
+    const validFiles = files.filter((file) => file.size <= 5 * 1024 * 1024);
+
+    if (validFiles.length !== files.length) {
+      toast.error("파일당 최대 5MB까지만 업로드할 수 있습니다.");
+    }
+
+    if (validFiles.length === 0) {
+      return;
+    }
+
+    setIsUploadingAttachments(true);
+
+    try {
+      await Promise.all(
+        validFiles.map(async (file) => {
+          const docRef = doc(collection(dbInstance, filesCollectionPath));
+          const storagePath = `company-files/${companyId}/${docRef.id}/${file.name}`;
+
+          try {
+            await uploadBytes(ref(storageInstance, storagePath), file);
+            await setDoc(docRef, {
+              category: "metrics",
+              companyId,
+              name: file.name,
+              size: file.size,
+              storagePath,
+              createdByUid: currentUser.id,
+              createdByName: currentUser.companyName,
+              contentType: file.type || "application/octet-stream",
+              createdAt: serverTimestamp(),
+              updatedAt: serverTimestamp(),
+            });
+          } catch (error) {
+            try {
+              await deleteObject(ref(storageInstance, storagePath));
+            } catch {
+              // best effort cleanup
+            }
+            throw error;
+          }
+        }),
+      );
+
+      toast.success(`${validFiles.length}개 파일을 업로드했습니다.`);
+    } catch (error) {
+      console.warn("Failed to upload metrics attachments:", error);
+      toast.error("첨부 자료 업로드에 실패했습니다.");
+    } finally {
+      setIsUploadingAttachments(false);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+    }
+  };
+
+  const handleAttachmentDelete = async (attachment: MetricsAttachmentDocument) => {
+    if (!db || !firebaseStorage || !companyId) {
+      toast.error("첨부 자료를 삭제할 수 없습니다.");
+      return;
+    }
+
+    const dbInstance = db;
+    const storageInstance = firebaseStorage;
+
+    setDeletingAttachmentIds((prev) => ({ ...prev, [attachment.id]: true }));
+
+    try {
+      try {
+        await deleteObject(ref(storageInstance, attachment.storagePath));
+      } catch (error: any) {
+        if (error?.code !== "storage/object-not-found") {
+          throw error;
+        }
+      }
+
+      await deleteDoc(doc(dbInstance, filesCollectionPath, attachment.id));
+      toast.success("첨부 자료를 삭제했습니다.");
+    } catch (error) {
+      console.warn("Failed to delete metrics attachment:", error);
+      toast.error("첨부 자료 삭제에 실패했습니다.");
+    } finally {
+      setDeletingAttachmentIds((prev) => {
+        const next = { ...prev };
+        delete next[attachment.id];
+        return next;
+      });
+    }
+  };
+
+  const handleAttachmentDownload = async (attachment: MetricsAttachmentDocument) => {
+    if (!firebaseStorage) {
+      toast.error("파일을 내려받을 수 없습니다.");
+      return;
+    }
+
+    const storageInstance = firebaseStorage;
+
+    try {
+      const downloadUrl = await getDownloadURL(ref(storageInstance, attachment.storagePath));
+      window.open(downloadUrl, "_blank", "noopener,noreferrer");
+    } catch (error) {
+      console.warn("Failed to download metrics attachment:", error);
+      toast.error("파일을 내려받지 못했습니다.");
+    }
   };
 
   const renderChart = () => {
@@ -922,6 +1125,108 @@ export function CompanyMetricsPage({ currentUser, companyId }: CompanyMetricsPag
           </CardHeader>
 
           <CardContent className="flex flex-1 flex-col px-5 pt-4">
+            <div className="mb-4 rounded-lg border bg-slate-50/60 p-3">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-sm font-semibold text-foreground">첨부 자료</h3>
+                    <Badge variant="outline" className="border-slate-200 bg-white text-slate-500">
+                      파일당 5MB
+                    </Badge>
+                  </div>
+                  <p className="text-xs leading-5 text-muted-foreground">
+                    IR 자료, 투자유치 현황표, 증빙 이미지처럼 월별 실적 근거 자료를 함께 보관할 수 있습니다.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    multiple
+                    className="hidden"
+                    accept=".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.csv,.jpg,.jpeg,.png,.webp,.hwp,.hwpx"
+                    onChange={(event) => {
+                      void handleAttachmentUpload(event.target.files);
+                    }}
+                  />
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={isUploadingAttachments || !companyId || !isFirebaseConfigured}
+                  >
+                    {isUploadingAttachments ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Plus className="h-4 w-4" />
+                    )}
+                    파일 업로드
+                  </Button>
+                </div>
+              </div>
+
+              <div
+                className={cn(
+                  "mt-3 space-y-2",
+                  metricsAttachments.length > 2 && "max-h-[148px] overflow-y-auto pr-1",
+                )}
+              >
+                {metricsAttachments.length > 0 ? (
+                  metricsAttachments.map((attachment) => (
+                    <div
+                      key={attachment.id}
+                      className="flex flex-col gap-2 rounded-md border bg-white px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <FileText className="h-4 w-4 shrink-0 text-slate-500" />
+                          <p className="truncate text-sm font-medium text-foreground">{attachment.name}</p>
+                        </div>
+                        <p className="mt-1 text-[11px] text-muted-foreground">
+                          {formatFileSize(attachment.size)}
+                          {normalizeDateLabel(attachment.createdAt)
+                            ? ` · ${normalizeDateLabel(attachment.createdAt)}`
+                            : ""}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-1 self-end sm:self-auto">
+                        <Button
+                          type="button"
+                          size="icon"
+                          variant="ghost"
+                          className="h-8 w-8"
+                          onClick={() => void handleAttachmentDownload(attachment)}
+                          aria-label={`${attachment.name} 다운로드`}
+                        >
+                          <Download className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          type="button"
+                          size="icon"
+                          variant="ghost"
+                          className="h-8 w-8 text-rose-600 hover:text-rose-700"
+                          onClick={() => void handleAttachmentDelete(attachment)}
+                          disabled={Boolean(deletingAttachmentIds[attachment.id])}
+                          aria-label={`${attachment.name} 삭제`}
+                        >
+                          {deletingAttachmentIds[attachment.id] ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <Trash2 className="h-4 w-4" />
+                          )}
+                        </Button>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="rounded-md border border-dashed bg-white/70 px-3 py-4 text-xs text-muted-foreground">
+                    아직 첨부된 자료가 없습니다.
+                  </div>
+                )}
+              </div>
+            </div>
+
             <div className="min-h-0 flex-1 overflow-auto rounded-lg border xl:max-h-[500px]">
               <Table className="min-w-[980px]">
                 <TableHeader className="bg-muted/30 [&_tr]:sticky [&_tr]:top-0 [&_tr]:z-10 [&_tr]:bg-muted/95">

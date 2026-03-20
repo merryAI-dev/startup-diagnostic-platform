@@ -89,7 +89,7 @@ export function OfficeHourReportForm({
         content: parsedContent.companyStatus,
         advisoryContent: parsedContent.advisoryContent,
         followUp: initialReport.followUp || "",
-        duration: initialReport.duration || application.duration || 2,
+        duration: initialReport.duration || application.duration || 1,
         satisfaction: initialReport.satisfaction || 5,
       };
     }
@@ -101,7 +101,7 @@ export function OfficeHourReportForm({
       content: "",
       advisoryContent: "",
       followUp: "",
-      duration: application.duration || 2,
+      duration: application.duration || 1,
       satisfaction: 5,
     };
   };

@@ -23,6 +23,34 @@ export type ConsultantSignupInfo = {
   bio: string
 }
 
+function normalizeConsentRecord(record?: ConsentSnapshot[keyof ConsentSnapshot]) {
+  if (!record) return undefined
+  const normalized: Record<string, unknown> = {
+    consented: Boolean(record.consented),
+    version: record.version,
+    method: record.method,
+    userAgent: record.userAgent ?? null,
+  }
+
+  if (record.consented) {
+    normalized.consentedAt = record.consentedAt ?? serverTimestamp()
+  }
+
+  return normalized
+}
+
+function normalizeConsentSnapshot(consents?: ConsentSnapshot) {
+  if (!consents) return undefined
+
+  const privacy = normalizeConsentRecord(consents.privacy)
+  const marketing = normalizeConsentRecord(consents.marketing)
+
+  return {
+    ...(privacy ? { privacy } : {}),
+    ...(marketing ? { marketing } : {}),
+  }
+}
+
 function toNumber(value: string) {
   const digits = value.replace(/[^\d]/g, "")
   if (!digits) return null
@@ -190,8 +218,9 @@ export async function createSignupRequest(
     updatedAt: serverTimestamp(),
     createdAt: serverTimestamp(),
   }
-  if (options?.consents) {
-    signupRequestData.consents = options.consents
+  const normalizedConsents = normalizeConsentSnapshot(options?.consents)
+  if (normalizedConsents) {
+    signupRequestData.consents = normalizedConsents
   }
   if (requestedRole === "company") {
     signupRequestData.companyInfo = options?.companyInfo ?? null

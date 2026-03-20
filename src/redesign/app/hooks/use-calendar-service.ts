@@ -38,8 +38,12 @@ export interface AvailableSlot {
   reason?: string;
 }
 
-export function useCalendarService(userId: string | null) {
+export function useCalendarService(
+  userId: string | null,
+  options?: { subscribeToEvents?: boolean },
+) {
   const [isLoading, setIsLoading] = useState(false);
+  const shouldSubscribeToEvents = options?.subscribeToEvents === true;
 
   // 현재 달 ±2달 범위의 이벤트 실시간 구독
   const dateRange = useMemo(() => {
@@ -56,7 +60,7 @@ export function useCalendarService(userId: string | null) {
     createEvent: firestoreCreateEvent,
     updateEvent: firestoreUpdateEvent,
     deleteEvent: firestoreDeleteEvent,
-  } = useCalendarEvents(userId, dateRange);
+  } = useCalendarEvents(userId, dateRange, { enabled: shouldSubscribeToEvents });
 
   // ─── 이벤트 생성 ───
   const createEvent = useCallback(

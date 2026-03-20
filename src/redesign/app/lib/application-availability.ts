@@ -86,6 +86,23 @@ export function getAssignableConsultantsAt(params: {
       consultant.status === "active" && (consultant.agendaIds ?? []).includes(agendaId),
   )
 
+  const hasPendingUnassignedApplication = applications.some((application) => {
+    const normalizedStatus = normalizeApplicationStatus(application.status)
+    if (normalizedStatus !== "pending") return false
+    if (application.agendaId !== agendaId) return false
+    if (!application.scheduledDate || application.scheduledDate !== dateKey) return false
+    if (!application.scheduledTime) return false
+    if (normalizeTimeKey(application.scheduledTime) !== normalizedTime) return false
+    if (application.consultantId) return false
+
+    const consultantName = application.consultant?.trim() ?? ""
+    return consultantName === "" || consultantName === "담당자 배정 중"
+  })
+
+  if (hasPendingUnassignedApplication) {
+    return []
+  }
+
   return linkedConsultants.filter((consultant) => {
     if (slotConsultantId && consultant.id !== slotConsultantId) {
       return false

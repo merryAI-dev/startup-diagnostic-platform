@@ -368,8 +368,8 @@ function isSessionFormat(value) {
 }
 
 function getApplicationDurationHours(application, slotDoc) {
-  const raw = Number(application?.duration ?? slotDoc?.duration ?? 2);
-  return Number.isFinite(raw) && raw > 0 ? raw : 2;
+  const raw = Number(application?.duration ?? slotDoc?.duration ?? 1);
+  return Number.isFinite(raw) && raw > 0 ? raw : 1;
 }
 
 function getSessionEndTime(application, slotDoc) {
@@ -1191,8 +1191,20 @@ exports.submitRegularApplication = onCall(
         const consultantNameKey = normalizeConsultantDisplayName(consultant.name);
         return !sameTimeApplicationsSnap.docs.some((applicationDoc) => {
           const application = applicationDoc.data() || {};
-          if (!ACTIVE_APPLICATION_STATUSES.has(normalizeApplicationStatus(application.status))) {
+          const normalizedStatus = normalizeApplicationStatus(application.status);
+          if (!ACTIVE_APPLICATION_STATUSES.has(normalizedStatus)) {
             return false;
+          }
+          if (
+            normalizedStatus === "pending" &&
+            normalizeString(application.agendaId) === agendaId &&
+            !normalizeString(application.consultantId) &&
+            (
+              !normalizeString(application.consultant) ||
+              normalizeString(application.consultant) === "담당자 배정 중"
+            )
+          ) {
+            return true;
           }
           const reservedSlotId = normalizeString(application.officeHourSlotId);
           const reservedSlotDoc = reservedSlotId ? sameTimeSlotById.get(reservedSlotId) : null;
@@ -1720,7 +1732,7 @@ exports.runApplicationMaintenance = onCall(
 exports.scheduledApplicationMaintenance = onSchedule(
   {
     region: REGION,
-    schedule: "every 30 minutes",
+    schedule: "10 * * * *",
     timeZone: "Asia/Seoul",
     timeoutSeconds: 60,
     memory: "256MiB",
@@ -1794,13 +1806,6 @@ exports.transitionApplicationStatus = onCall(
           throw new HttpsError("failed-precondition", "수락 대기로 되돌릴 수 있는 상태가 아닙니다.");
         }
 
-        const hasBlockingApplication = await hasBlockingApplicationForSlotGroup(
-          transaction,
-          application,
-          applicationId,
-          relatedSlotIds
-        );
-
         transaction.update(applicationRef, {
           status: "pending",
           consultant: "담당자 배정 중",
@@ -1808,9 +1813,6 @@ exports.transitionApplicationStatus = onCall(
           rejectionReason: FieldValue.delete(),
           updatedAt: FieldValue.serverTimestamp(),
         });
-        if (!hasBlockingApplication) {
-          updateSlotSnapshots(transaction, relatedSlotSnaps, "open");
-        }
 
         return {
           applicationId,
@@ -1951,13 +1953,6 @@ exports.transitionApplicationStatus = onCall(
             throw new HttpsError("failed-precondition", "수락 대기로 되돌릴 수 있는 상태가 아닙니다.");
           }
 
-          const hasBlockingApplication = await hasBlockingApplicationForSlotGroup(
-            transaction,
-            application,
-            applicationId,
-            relatedSlotIds
-          );
-
           transaction.update(applicationRef, {
             status: "pending",
             consultant: "담당자 배정 중",
@@ -1965,9 +1960,6 @@ exports.transitionApplicationStatus = onCall(
             rejectionReason: FieldValue.delete(),
             updatedAt: FieldValue.serverTimestamp(),
           });
-          if (!hasBlockingApplication) {
-            updateSlotSnapshots(transaction, relatedSlotSnaps, "open");
-          }
 
           return {
             applicationId,
