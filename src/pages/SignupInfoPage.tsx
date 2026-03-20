@@ -1135,12 +1135,12 @@ function CompanySignupInfo({
   async function handleSubmit() {
     if (submitLockRef.current) return
     submitLockRef.current = true
+    setSaving(true)
     try {
       const authUser = await ensureAuthUser()
-      if (!authUser) return
+      if (!authUser) return false
       const canProceed = await guardExistingProfile(authUser, requestedRole)
-      if (!canProceed) return
-      setSaving(true)
+      if (!canProceed) return false
       const userAgent = typeof navigator !== "undefined" ? navigator.userAgent : null
       await createSignupRequest(
         authUser.uid,
@@ -1169,6 +1169,7 @@ function CompanySignupInfo({
         }
       )
       await onComplete()
+      return true
     } catch (error) {
       const code = getErrorCode(error)
       toast.error(
@@ -1176,9 +1177,32 @@ function CompanySignupInfo({
           ? `승인 요청에 실패했습니다. (${code})`
           : "승인 요청에 실패했습니다. 다시 시도해주세요."
       )
+      return false
     } finally {
       submitLockRef.current = false
       setSaving(false)
+    }
+  }
+
+  async function handleSubmitRequest() {
+    if (!canSubmit || saving) return
+    if (!consentPrivacy) {
+      setConsentError(null)
+      setConsentOpen(true)
+      return
+    }
+    await handleSubmit()
+  }
+
+  async function handleConsentConfirm() {
+    if (!consentPrivacy) {
+      setConsentError("개인정보 수집·이용 동의는 필수입니다.")
+      return
+    }
+
+    const submitted = await handleSubmit()
+    if (submitted) {
+      setConsentOpen(false)
     }
   }
 
@@ -1397,18 +1421,12 @@ function CompanySignupInfo({
               type="button"
               data-testid="company-signup-submit-mobile"
               onClick={() => {
-                if (!canSubmit || saving) return
-                if (!consentPrivacy) {
-                  setConsentError(null)
-                  setConsentOpen(true)
-                  return
-                }
-                handleSubmit()
+                void handleSubmitRequest()
               }}
               disabled={!canSubmit || saving}
               className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 lg:hidden"
             >
-              승인 대기 요청
+              {saving ? "요청 중..." : "승인 대기 요청"}
             </button>
           </div>
           <div className="mt-3 space-y-2">
@@ -1490,18 +1508,12 @@ function CompanySignupInfo({
                     type="button"
                     data-testid="company-signup-submit"
                     onClick={() => {
-                      if (!canSubmit || saving) return
-                      if (!consentPrivacy) {
-                        setConsentError(null)
-                        setConsentOpen(true)
-                        return
-                      }
-                      handleSubmit()
+                      void handleSubmitRequest()
                     }}
                     disabled={!canSubmit || saving}
                     className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    승인 대기 요청
+                    {saving ? "요청 중..." : "승인 대기 요청"}
                   </button>
                 </div>
               </div>
@@ -2811,23 +2823,20 @@ function CompanySignupInfo({
                 type="button"
                 className="rounded-lg border border-slate-200 px-4 py-2 text-sm text-slate-600 hover:bg-slate-50"
                 onClick={() => setConsentOpen(false)}
+                disabled={saving}
               >
                 취소
               </button>
               <button
                 type="button"
                 data-testid="company-consent-confirm"
-                className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white"
+                disabled={saving}
+                className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
                 onClick={() => {
-                  if (!consentPrivacy) {
-                    setConsentError("개인정보 수집·이용 동의는 필수입니다.")
-                    return
-                  }
-                  setConsentOpen(false)
-                  handleSubmit()
+                  void handleConsentConfirm()
                 }}
               >
-                동의하고 계속
+                {saving ? "승인 요청 중..." : "동의하고 계속"}
               </button>
             </div>
           </div>
