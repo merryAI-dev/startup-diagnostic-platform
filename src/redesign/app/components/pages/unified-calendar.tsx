@@ -158,7 +158,9 @@ export function UnifiedCalendar({
   });
 
   const { isOnline, isFirebaseReady, isMockMode } = useConnectionStatus();
-  const calendarService = useCalendarService(currentUser.id);
+  const calendarService = useCalendarService(currentUser.id, {
+    subscribeToEvents: false,
+  });
 
   // ─── 이벤트 생성 핸들러 ───
   const handleCreateEvent = async () => {
