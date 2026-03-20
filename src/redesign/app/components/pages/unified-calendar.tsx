@@ -143,6 +143,7 @@ export function UnifiedCalendar({
   const [actionDialogOpen, setActionDialogOpen] = useState(false);
   const [actionTarget, setActionTarget] = useState<Application | null>(null);
   const [actionType, setActionType] = useState<"accept" | "reject">("accept");
+  const [isActionPending, setIsActionPending] = useState(false);
   const [rejectReason, setRejectReason] = useState("");
   const [selectedPendingApplicationId, setSelectedPendingApplicationId] = useState<string | null>(null);
   const [selectedScheduledApplicationId, setSelectedScheduledApplicationId] = useState<string | null>(null);
@@ -157,7 +158,9 @@ export function UnifiedCalendar({
   });
 
   const { isOnline, isFirebaseReady, isMockMode } = useConnectionStatus();
-  const calendarService = useCalendarService(currentUser.id);
+  const calendarService = useCalendarService(currentUser.id, {
+    subscribeToEvents: false,
+  });
 
   // ─── 이벤트 생성 핸들러 ───
   const handleCreateEvent = async () => {
@@ -321,7 +324,7 @@ export function UnifiedCalendar({
     });
   };
   const getSessionEndTime = (app: Application) => {
-    const durationHours = app.duration ?? 2;
+    const durationHours = app.duration ?? 1;
     if (app.scheduledDate && app.scheduledTime) {
       const start = new Date(`${app.scheduledDate}T${app.scheduledTime}`);
       if (!Number.isNaN(start.getTime())) {
@@ -438,8 +441,9 @@ export function UnifiedCalendar({
   };
 
   const handleConfirmAction = async () => {
-    if (!actionTarget) return;
+    if (!actionTarget || isActionPending) return;
 
+    setIsActionPending(true);
     try {
       if (actionType === "accept") {
         await onRequestApplication?.(actionTarget.id);
@@ -454,6 +458,8 @@ export function UnifiedCalendar({
       setRejectReason("");
     } catch (error) {
       console.error("Failed to process pending application action:", error);
+    } finally {
+      setIsActionPending(false);
     }
   };
   const openPendingDetailModal = (applicationId: string) => {
@@ -870,6 +876,7 @@ export function UnifiedCalendar({
                   <div className="flex justify-end gap-2">
                     <Button
                       variant="outline"
+                      disabled={isActionPending}
                       onClick={() => {
                         setActionDialogOpen(false);
                         setActionTarget(null);
@@ -880,9 +887,13 @@ export function UnifiedCalendar({
                     </Button>
                     <Button
                       onClick={handleConfirmAction}
-                      disabled={actionType === "reject" && rejectReason.trim().length === 0}
+                      disabled={isActionPending || (actionType === "reject" && rejectReason.trim().length === 0)}
                     >
-                      확인
+                      {isActionPending
+                        ? actionType === "accept"
+                          ? "수락 중..."
+                          : "거절 중..."
+                        : "확인"}
                     </Button>
                   </div>
                 </DialogContent>

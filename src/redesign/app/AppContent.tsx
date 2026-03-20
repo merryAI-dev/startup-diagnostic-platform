@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useLocation, useNavigate } from "react-router-dom"
 import { toast } from "sonner"
 import { addDays, differenceInDays, isBefore, startOfDay } from "date-fns"
-import { deleteField, where } from "firebase/firestore"
+import { deleteField, serverTimestamp, where } from "firebase/firestore"
 import { deleteObject, getDownloadURL, ref, uploadBytes } from "firebase/storage"
 import { useAuth as useAppAuth } from "@/context/AuthContext"
 import { signOutUser } from "@/firebase/auth"
@@ -734,7 +734,7 @@ function omitId<T extends { id: string }>(item: T): Omit<T, "id"> {
 }
 
 export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
-  const { user: firebaseUser, profile, loading } = useAppAuth()
+  const { user: firebaseUser, profile, loading, refreshProfile } = useAppAuth()
   const navigate = useNavigate()
   const location = useLocation()
   const routeSegment = location.pathname.split("/")[2] ?? ""
@@ -1782,7 +1782,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
   ])
 
   const getSessionEndTime = (app: Application) => {
-    const durationHours = app.duration ?? 2
+    const durationHours = app.duration ?? 1
     const slot = app.officeHourSlotId
       ? officeHourSlotList.find((item) => item.id === app.officeHourSlotId)
       : undefined
@@ -2799,11 +2799,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
 
     const shouldReleaseSlot =
       status === "cancelled" ||
-      status === "rejected" ||
-      (
-        status === "pending" &&
-        normalizeApplicationStatus(targetApplication.status) !== "pending"
-      )
+      status === "rejected"
     if (shouldReleaseSlot) {
       const releasableSlotIds = collectReleasableSlotIds([targetApplication], nextApplications)
       await releaseSlots(releasableSlotIds)
@@ -2826,26 +2822,32 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       toast.error("컨설턴트 정보를 확인할 수 없습니다")
       return
     }
+    const submissionKey = ["application-action", "claim", id].join(":")
+    if (!acquireSubmissionLock(submissionKey)) {
+      toast.error("이미 수락 요청을 처리 중입니다. 잠시만 기다려주세요.")
+      return
+    }
 
-    const targetApplication = applications.find((app) => app.id === id)
-    if (!targetApplication) return
-    if (isFirebaseConfigured) {
-      try {
-        await transitionApplicationStatusViaFunction({
-          applicationId: id,
-          action: "claim",
-        })
-      } catch (error) {
-        toast.error(getFunctionErrorMessage(error, "수락 요청 처리에 실패했습니다"))
+    try {
+      const targetApplication = applications.find((app) => app.id === id)
+      if (!targetApplication) return
+      if (isFirebaseConfigured) {
+        try {
+          await transitionApplicationStatusViaFunction({
+            applicationId: id,
+            action: "claim",
+          })
+        } catch (error) {
+          toast.error(getFunctionErrorMessage(error, "수락 요청 처리에 실패했습니다"))
+          return
+        }
         return
       }
-      return
-    }
-    if (hasSessionEnded(targetApplication)) {
-      await rejectApplicationsAsExpired([targetApplication])
-      toast.error("진행 시간이 지나 수락할 수 없어 자동 거절 처리되었습니다")
-      return
-    }
+      if (hasSessionEnded(targetApplication)) {
+        await rejectApplicationsAsExpired([targetApplication])
+        toast.error("진행 시간이 지나 수락할 수 없어 자동 거절 처리되었습니다")
+        return
+      }
 
     const isAcceptableStatus = normalizeApplicationStatus(targetApplication.status) === "pending"
     const isUnassigned =
@@ -2927,7 +2929,10 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       setApplications((prev) => prev.map((app) => (app.id === id ? nextApplication : app)))
     }
 
-    toast.success("수락이 완료되어 확정되었습니다.")
+      toast.success("수락이 완료되어 확정되었습니다.")
+    } finally {
+      releaseSubmissionLock(submissionKey)
+    }
   }
 
   const handleRejectApplication = async (id: string, reason: string) => {
@@ -2936,27 +2941,33 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       toast.error("컨설턴트 정보를 확인할 수 없습니다")
       return
     }
-
-    const targetApplication = applications.find((app) => app.id === id)
-    if (!targetApplication) return
-    const rejectionReason = reason.trim()
-    if (!rejectionReason) {
-      toast.error("거절 사유를 입력해주세요")
+    const submissionKey = ["application-action", "reject", id].join(":")
+    if (!acquireSubmissionLock(submissionKey)) {
+      toast.error("이미 거절 처리를 진행 중입니다. 잠시만 기다려주세요.")
       return
     }
-    if (isFirebaseConfigured) {
-      try {
-        await transitionApplicationStatusViaFunction({
-          applicationId: id,
-          action: "reject",
-          rejectionReason,
-        })
-      } catch (error) {
-        toast.error(getFunctionErrorMessage(error, "거절 처리에 실패했습니다"))
+
+    try {
+      const targetApplication = applications.find((app) => app.id === id)
+      if (!targetApplication) return
+      const rejectionReason = reason.trim()
+      if (!rejectionReason) {
+        toast.error("거절 사유를 입력해주세요")
         return
       }
-      return
-    }
+      if (isFirebaseConfigured) {
+        try {
+          await transitionApplicationStatusViaFunction({
+            applicationId: id,
+            action: "reject",
+            rejectionReason,
+          })
+        } catch (error) {
+          toast.error(getFunctionErrorMessage(error, "거절 처리에 실패했습니다"))
+          return
+        }
+        return
+      }
 
     const isAcceptableStatus = normalizeApplicationStatus(targetApplication.status) === "pending"
     const isUnassigned =
@@ -3010,7 +3021,10 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     const releasableSlotIds = collectReleasableSlotIds([targetApplication], nextApplications)
     await releaseSlots(releasableSlotIds)
 
-    toast.success("거절 처리되었습니다.")
+      toast.success("거절 처리되었습니다.")
+    } finally {
+      releaseSubmissionLock(submissionKey)
+    }
   }
 
   const handleConfirmApplication = async (id: string) => {
@@ -3019,26 +3033,32 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       toast.error("컨설턴트 정보를 확인할 수 없습니다")
       return
     }
+    const submissionKey = ["application-action", "confirm", id].join(":")
+    if (!acquireSubmissionLock(submissionKey)) {
+      toast.error("이미 확정 처리를 진행 중입니다. 잠시만 기다려주세요.")
+      return
+    }
 
-    const targetApplication = applications.find((app) => app.id === id)
-    if (!targetApplication) return
-    if (isFirebaseConfigured) {
-      try {
-        await transitionApplicationStatusViaFunction({
-          applicationId: id,
-          action: "confirm",
-        })
-      } catch (error) {
-        toast.error(getFunctionErrorMessage(error, "확정 처리에 실패했습니다"))
+    try {
+      const targetApplication = applications.find((app) => app.id === id)
+      if (!targetApplication) return
+      if (isFirebaseConfigured) {
+        try {
+          await transitionApplicationStatusViaFunction({
+            applicationId: id,
+            action: "confirm",
+          })
+        } catch (error) {
+          toast.error(getFunctionErrorMessage(error, "확정 처리에 실패했습니다"))
+          return
+        }
         return
       }
-      return
-    }
-    if (hasSessionEnded(targetApplication)) {
-      await rejectApplicationsAsExpired([targetApplication])
-      toast.error("진행 시간이 지나 확정할 수 없어 자동 거절 처리되었습니다")
-      return
-    }
+      if (hasSessionEnded(targetApplication)) {
+        await rejectApplicationsAsExpired([targetApplication])
+        toast.error("진행 시간이 지나 확정할 수 없어 자동 거절 처리되었습니다")
+        return
+      }
 
     const isPending = normalizeApplicationStatus(targetApplication.status) === "pending"
     const isRequester = targetApplication.consultantId === currentConsultant.id
@@ -3121,7 +3141,10 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       }
     }
 
-    toast.success("일정이 확정되었습니다.")
+      toast.success("일정이 확정되었습니다.")
+    } finally {
+      releaseSubmissionLock(submissionKey)
+    }
   }
 
   const handleUpdateRejectionReason = async (id: string, reason: string) => {
@@ -3165,6 +3188,36 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     }
 
     toast.success("거절 사유가 수정되었습니다")
+  }
+
+  const handleToggleMarketingConsent = async (checked: boolean) => {
+    if (!firebaseUser?.uid) {
+      toast.error("로그인 정보를 확인한 뒤 다시 시도해주세요")
+      return
+    }
+
+    const nextMarketingConsent = {
+      consented: checked,
+      version: profile?.consents?.marketing?.version ?? "v1.0",
+      method: "settings_toggle",
+      userAgent: typeof navigator !== "undefined" ? navigator.userAgent : null,
+    }
+
+    const updated = await profileCrud.update(firebaseUser.uid, {
+      "consents.marketing.consented": nextMarketingConsent.consented,
+      "consents.marketing.version": nextMarketingConsent.version,
+      "consents.marketing.method": nextMarketingConsent.method,
+      "consents.marketing.userAgent": nextMarketingConsent.userAgent,
+      "consents.marketing.consentedAt": checked ? serverTimestamp() : deleteField(),
+    })
+
+    if (!updated) {
+      toast.error("마케팅 수신 동의 저장에 실패했습니다")
+      return
+    }
+
+    await refreshProfile()
+    toast.success(checked ? "마케팅 수신 동의가 저장되었습니다." : "마케팅 수신 거부로 변경되었습니다.")
   }
 
   const handleUpdateApplication = async (id: string, data: Partial<Application>) => {
@@ -4467,7 +4520,14 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
             </div>
           )}
 
-          {currentPage === "settings" && <Settings user={user} />}
+          {currentPage === "settings" && (
+            <Settings
+              user={user}
+              marketingConsentEnabled={profile?.role === "company" ? Boolean(profile?.consents?.marketing?.consented) : undefined}
+              marketingConsentSaving={profileCrud.saving}
+              onToggleMarketingConsent={profile?.role === "company" ? handleToggleMarketingConsent : undefined}
+            />
+          )}
 
           {currentPage === "company-info" && firebaseUser && companyRecordId && (
             <CompanyDashboard

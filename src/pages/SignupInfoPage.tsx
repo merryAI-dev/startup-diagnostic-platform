@@ -1135,12 +1135,12 @@ function CompanySignupInfo({
   async function handleSubmit() {
     if (submitLockRef.current) return
     submitLockRef.current = true
+    setSaving(true)
     try {
       const authUser = await ensureAuthUser()
-      if (!authUser) return
+      if (!authUser) return false
       const canProceed = await guardExistingProfile(authUser, requestedRole)
-      if (!canProceed) return
-      setSaving(true)
+      if (!canProceed) return false
       const userAgent = typeof navigator !== "undefined" ? navigator.userAgent : null
       await createSignupRequest(
         authUser.uid,
@@ -1169,6 +1169,7 @@ function CompanySignupInfo({
         }
       )
       await onComplete()
+      return true
     } catch (error) {
       const code = getErrorCode(error)
       toast.error(
@@ -1176,9 +1177,32 @@ function CompanySignupInfo({
           ? `승인 요청에 실패했습니다. (${code})`
           : "승인 요청에 실패했습니다. 다시 시도해주세요."
       )
+      return false
     } finally {
       submitLockRef.current = false
       setSaving(false)
+    }
+  }
+
+  async function handleSubmitRequest() {
+    if (!canSubmit || saving) return
+    if (!consentPrivacy) {
+      setConsentError(null)
+      setConsentOpen(true)
+      return
+    }
+    await handleSubmit()
+  }
+
+  async function handleConsentConfirm() {
+    if (!consentPrivacy) {
+      setConsentError("개인정보 수집·이용 동의는 필수입니다.")
+      return
+    }
+
+    const submitted = await handleSubmit()
+    if (submitted) {
+      setConsentOpen(false)
     }
   }
 
@@ -1397,18 +1421,12 @@ function CompanySignupInfo({
               type="button"
               data-testid="company-signup-submit-mobile"
               onClick={() => {
-                if (!canSubmit || saving) return
-                if (!consentPrivacy) {
-                  setConsentError(null)
-                  setConsentOpen(true)
-                  return
-                }
-                handleSubmit()
+                void handleSubmitRequest()
               }}
               disabled={!canSubmit || saving}
               className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 lg:hidden"
             >
-              승인 대기 요청
+              {saving ? "요청 중..." : "승인 대기 요청"}
             </button>
           </div>
           <div className="mt-3 space-y-2">
@@ -1490,18 +1508,12 @@ function CompanySignupInfo({
                     type="button"
                     data-testid="company-signup-submit"
                     onClick={() => {
-                      if (!canSubmit || saving) return
-                      if (!consentPrivacy) {
-                        setConsentError(null)
-                        setConsentOpen(true)
-                        return
-                      }
-                      handleSubmit()
+                      void handleSubmitRequest()
                     }}
                     disabled={!canSubmit || saving}
                     className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
                   >
-                    승인 대기 요청
+                    {saving ? "요청 중..." : "승인 대기 요청"}
                   </button>
                 </div>
               </div>
@@ -2729,7 +2741,7 @@ function CompanySignupInfo({
               <div>
                 <h2 className="text-lg font-semibold text-slate-900">약관 및 동의</h2>
                 <p className="mt-1 text-sm text-slate-500">
-                  회사 가입을 위해 아래 동의가 필요합니다.
+                  필수 동의와 선택 동의를 구분해 받으며, 선택 동의 미동의 시에도 회원가입은 가능합니다.
                 </p>
               </div>
               <button
@@ -2758,16 +2770,16 @@ function CompanySignupInfo({
                   <span className="font-semibold text-slate-900">개인정보 수집·이용 동의</span>{" "}
                   <span className="text-rose-600">(필수)</span>
                   <span className="block text-xs text-slate-500 mt-1">
-                    수집 목적, 항목, 보유·이용 기간, 동의 거부권을 포함합니다.
+                    회원 식별, 가입 심사, 프로그램 운영 및 안내를 위한 필수 동의입니다.
                   </span>
                 </span>
               </label>
               <div className="max-h-40 overflow-y-auto rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600 leading-relaxed">
                 <p className="font-semibold text-slate-700">[개인정보 수집·이용 동의]</p>
                 <p className="mt-2">제1조 (수집 목적)</p>
-                <p>회사는 회원 가입 및 서비스 제공, 고객 문의 대응, 공지사항 전달을 위하여 개인정보를 수집·이용합니다.</p>
+                <p>회사는 회원가입, 참여기업 확인 및 심사, 프로그램 운영, 문의 대응, 공지사항 전달을 위하여 개인정보를 수집·이용합니다.</p>
                 <p className="mt-2">제2조 (수집 항목)</p>
-                <p>필수: 회사명, 대표자 성명, 대표자 이메일, 대표자 전화번호, 사업자등록번호, 소재지 등 가입에 필요한 정보</p>
+                <p>회사 기본 정보, 대표자·공동대표 정보, 연락처, 사업자 및 소재지 정보, 인력·재무·투자 현황, 인증·바우처 정보, 신청 사업 및 심사 참고 정보를 수집합니다.</p>
                 <p className="mt-2">제3조 (보유 및 이용 기간)</p>
                 <p>회원 탈퇴 시까지 보관하며, 관계 법령에 따라 보존이 필요한 경우 해당 기간 동안 보관합니다.</p>
                 <p className="mt-2">제4조 (동의 거부권 및 불이익)</p>
@@ -2785,7 +2797,7 @@ function CompanySignupInfo({
                   <span className="font-semibold text-slate-900">마케팅 정보 수신 동의</span>{" "}
                   <span className="text-slate-500">(선택)</span>
                   <span className="block text-xs text-slate-500 mt-1">
-                    이벤트, 뉴스레터 등 안내를 받을 수 있습니다.
+                    이벤트, 뉴스레터, 프로그램 안내 수신 여부를 선택할 수 있습니다.
                   </span>
                 </span>
               </label>
@@ -2811,23 +2823,20 @@ function CompanySignupInfo({
                 type="button"
                 className="rounded-lg border border-slate-200 px-4 py-2 text-sm text-slate-600 hover:bg-slate-50"
                 onClick={() => setConsentOpen(false)}
+                disabled={saving}
               >
                 취소
               </button>
               <button
                 type="button"
                 data-testid="company-consent-confirm"
-                className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white"
+                disabled={saving}
+                className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
                 onClick={() => {
-                  if (!consentPrivacy) {
-                    setConsentError("개인정보 수집·이용 동의는 필수입니다.")
-                    return
-                  }
-                  setConsentOpen(false)
-                  handleSubmit()
+                  void handleConsentConfirm()
                 }}
               >
-                동의하고 계속
+                {saving ? "승인 요청 중..." : "동의하고 계속"}
               </button>
             </div>
           </div>

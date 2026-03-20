@@ -42,6 +42,15 @@ service firebase.storage {
         && firestore.get(/databases/(default)/documents/companies/$(companyId)).data.ownerUid == request.auth.uid;
     }
 
+    function isCompanyMember(companyId) {
+      return isSignedIn()
+        && hasProfile()
+        && (
+          isCompanyOwner(companyId)
+          || firestore.get(/databases/(default)/documents/profiles/$(request.auth.uid)).data.companyId == companyId
+        );
+    }
+
     // Legacy path compatibility (companyId/fileId/fileName)
     match /company-files/{companyId}/{fileId}/{fileName} {
       function isAllowedFile() {
@@ -49,9 +58,9 @@ service firebase.storage {
           && request.resource.name.matches(".*\\.(pdf|PDF|png|PNG|ai|AI)$");
       }
 
-      allow read: if isAdmin() || isCompanyOwner(companyId);
-      allow create, update: if isAllowedFile() && (isAdmin() || isCompanyOwner(companyId));
-      allow delete: if isAdmin() || isCompanyOwner(companyId);
+      allow read: if isAdmin() || isCompanyMember(companyId);
+      allow create, update: if isAllowedFile() && (isAdmin() || isCompanyMember(companyId));
+      allow delete: if isAdmin() || isCompanyMember(companyId);
     }
 
     match /office-hour-applications/{category}/{userId}/{filePath=**} {

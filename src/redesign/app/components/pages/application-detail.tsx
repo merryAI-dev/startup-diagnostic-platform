@@ -88,7 +88,7 @@ export function ApplicationDetail({
   const isCompanyUser = currentUserRole === "user" || currentUserRole === "company";
   const canViewMessageTab = !isCompanyUser && !isConsultantUser;
   const getSessionEndTime = () => {
-    const durationHours = application.duration ?? 2;
+    const durationHours = application.duration ?? 1;
     if (application.scheduledDate && application.scheduledTime) {
       const start = new Date(`${application.scheduledDate}T${application.scheduledTime}`);
       if (!Number.isNaN(start.getTime())) {

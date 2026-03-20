@@ -274,11 +274,13 @@ export function useFirestoreCRUD<T extends Record<string, any>>(
 // ──────────────────────────────────────────────
 export function useCalendarEvents(
   userId: string | null,
-  dateRange?: { start: Date; end: Date }
+  dateRange?: { start: Date; end: Date },
+  options?: { enabled?: boolean }
 ) {
   const [events, setEvents] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
+  const enabled = options?.enabled !== false;
 
   // 기본 범위: 현재 달 ±1달
   const range = useMemo(() => {
@@ -290,7 +292,8 @@ export function useCalendarEvents(
   }, [dateRange?.start?.getTime(), dateRange?.end?.getTime()]);
 
   useEffect(() => {
-    if (!isFirebaseConfigured || !userId) {
+    if (!isFirebaseConfigured || !userId || !enabled) {
+      setEvents([]);
       setLoading(false);
       return;
     }
@@ -309,7 +312,7 @@ export function useCalendarEvents(
     return () => {
       if (key) firestoreService.unsubscribe(key);
     };
-  }, [userId, range.start.getTime(), range.end.getTime()]);
+  }, [enabled, userId, range.start.getTime(), range.end.getTime()]);
 
   const createEvent = useCallback(
     async (eventData: {
