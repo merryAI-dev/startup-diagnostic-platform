@@ -3703,20 +3703,6 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     toast.success("아젠다가 추가되었습니다")
   }
 
-  const handleToggleAgendaActive = async (agendaId: string, active: boolean) => {
-    setAgendaList((prev) =>
-      prev.map((agenda) => (agenda.id === agendaId ? { ...agenda, active } : agenda)),
-    )
-    if (isFirebaseConfigured) {
-      const ok = await agendaCrud.update(agendaId, { active })
-      if (!ok) {
-        toast.error("아젠다 상태 저장에 실패했습니다")
-        return
-      }
-    }
-    toast.success("아젠다 상태가 변경되었습니다")
-  }
-
   const handleUpdateAgenda = async (agendaId: string, data: Partial<Agenda>) => {
     const prevAgenda = agendaList.find((agenda) => agenda.id === agendaId)
     const nextName = typeof data.name === "string" ? data.name.trim() : ""
@@ -4117,79 +4103,6 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     setOfficeHourSlotList(mergedSlots)
     setRegularOfficeHourList(groupSlotsToRegularOfficeHours(mergedSlots, programList))
     toast.success(`${generatedSlots.length}개 슬롯을 생성했습니다`)
-  }
-
-  const handleUpdateUser = async (id: string, data: Partial<UserWithPermissions>) => {
-    const targetUser = users.find((userItem) => userItem.id === id)
-    const nextStatus = data.status ?? targetUser?.status ?? "active"
-    const nextActive = nextStatus === "active"
-
-    setUsers(users.map((u) => (u.id === id ? { ...u, ...data } : u)))
-
-    if (isFirebaseConfigured) {
-      const profileSaved = await profileCrud.update(id, {
-        active: nextActive,
-      })
-      if (!profileSaved) {
-        toast.error("사용자 정보 저장에 실패했습니다")
-        return
-      }
-
-      if (
-        (nextStatus === "active" || nextStatus === "inactive") &&
-        targetUser?.role === "consultant"
-      ) {
-        const targetConsultantIds = consultants
-          .filter((consultant) => consultant.id === id)
-          .map((consultant) => consultant.id)
-        if (targetConsultantIds.length > 0) {
-          const consultantResults = await Promise.all(
-            targetConsultantIds.map((consultantId) =>
-              consultantCrud.update(consultantId, {
-                status: nextActive ? "active" : "inactive",
-              }),
-            ),
-          )
-          if (consultantResults.some((result) => !result)) {
-            toast.error("컨설턴트 상태 동기화에 실패했습니다")
-            return
-          }
-          setConsultants((prev) =>
-            prev.map((consultant) =>
-              targetConsultantIds.includes(consultant.id)
-                ? {
-                    ...consultant,
-                    status: nextActive ? "active" : "inactive",
-                  }
-                : consultant,
-            ),
-          )
-        }
-      }
-
-      setProfileList((prev) =>
-        prev.map((item) => (item.id === id ? { ...item, active: nextActive } : item)),
-      )
-      toast.success("사용자 정보가 업데이트되었습니다")
-      return
-    }
-
-    if (
-      (nextStatus === "active" || nextStatus === "inactive") &&
-      targetUser?.role === "consultant"
-    ) {
-      setConsultants((prev) =>
-        prev.map((consultant) => {
-          if (consultant.id !== id) return consultant
-          return {
-            ...consultant,
-            status: nextActive ? "active" : "inactive",
-          }
-        }),
-      )
-    }
-
-    toast.success("사용자 정보가 업데이트되었습니다")
   }
 
   const handleAddUser = (data: Omit<UserWithPermissions, "id" | "createdAt">) => {
@@ -4821,7 +4734,6 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
                   name: consultant.name,
                   email: consultant.email,
                 }))}
-                onUpdateUser={handleUpdateUser}
                 onAddUser={handleAddUser}
                 pendingApprovals={pendingProfileApprovals}
                 onApprovePendingUser={handleApprovePendingUser}
@@ -4881,7 +4793,6 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
                 agendas={agendaList}
                 consultants={consultants}
                 onAddAgenda={handleAddAgenda}
-                onToggleActive={handleToggleAgendaActive}
                 onUpdateAgenda={handleUpdateAgenda}
               />
             </ProtectedRoute>
