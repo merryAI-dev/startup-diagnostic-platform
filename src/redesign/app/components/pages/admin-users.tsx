@@ -4,7 +4,6 @@ import { Button } from "@/redesign/app/components/ui/button"
 import { Input } from "@/redesign/app/components/ui/input"
 import { Badge } from "@/redesign/app/components/ui/badge"
 import { PendingProfileApproval, UserWithPermissions } from "@/redesign/app/lib/types"
-import { Switch } from "@/redesign/app/components/ui/switch"
 import { Card, CardHeader, CardTitle } from "@/redesign/app/components/ui/card"
 import {
   Select,
@@ -26,7 +25,6 @@ import {
 interface AdminUsersProps {
   users: UserWithPermissions[]
   consultants?: { id: string; name: string; email: string }[]
-  onUpdateUser: (id: string, data: Partial<UserWithPermissions>) => void
   onAddUser: (data: Omit<UserWithPermissions, "id" | "createdAt">) => void
   pendingApprovals: PendingProfileApproval[]
   onApprovePendingUser: (pendingProfile: PendingProfileApproval) => Promise<void> | void
@@ -39,7 +37,6 @@ const USER_PAGE_SIZE = 8
 export function AdminUsers({
   users,
   consultants = [],
-  onUpdateUser,
   onAddUser: _onAddUser,
   pendingApprovals,
   onApprovePendingUser,
@@ -102,10 +99,6 @@ export function AdminUsers({
       setUserPage(totalPages)
     }
   }, [filteredUsers.length, userPage])
-
-  const handleUpdateStatus = (userId: string, status: UserWithPermissions["status"]) => {
-    onUpdateUser(userId, { status })
-  }
 
   const formatDate = (date?: Date | string) => {
     if (!date) return "-"
@@ -398,24 +391,16 @@ export function AdminUsers({
                             {formatDate(user.createdAt)}
                           </TableCell>
                           <TableCell>
-                            <div className="flex items-center gap-3">
-                              <Switch
-                                checked={user.status === "active"}
-                                onCheckedChange={(checked) =>
-                                  handleUpdateStatus(user.id, checked ? "active" : "inactive")
-                                }
-                              />
-                              <Badge
-                                variant="secondary"
-                                className={
-                                  user.status === "active"
-                                    ? "bg-emerald-100 text-emerald-700"
-                                    : "bg-slate-100 text-slate-600"
-                                }
-                              >
-                                {user.status === "active" ? "활성" : "비활성"}
-                              </Badge>
-                            </div>
+                            <Badge
+                              variant="secondary"
+                              className={
+                                user.status === "active"
+                                  ? "bg-emerald-100 text-emerald-700"
+                                  : "bg-slate-100 text-slate-600"
+                              }
+                            >
+                              {user.status === "active" ? "활성" : "비활성"}
+                            </Badge>
                           </TableCell>
                         </TableRow>
                       )
