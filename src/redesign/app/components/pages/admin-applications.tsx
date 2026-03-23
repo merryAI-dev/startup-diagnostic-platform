@@ -2,14 +2,13 @@ import { useEffect, useMemo, useState } from "react";
 import { Calendar, Clock, Search } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/redesign/app/components/ui/card";
 import { Button } from "@/redesign/app/components/ui/button";
-import { Input } from "@/redesign/app/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/redesign/app/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/redesign/app/components/ui/table";
 import { Badge } from "@/redesign/app/components/ui/badge";
 import { DateRangePicker } from "@/redesign/app/components/ui/date-range-picker";
 import { PaginationControls } from "@/redesign/app/components/ui/pagination-controls";
 import { StatusChip } from "@/redesign/app/components/status-chip";
-import { Agenda, Application, ApplicationStatus } from "@/redesign/app/lib/types";
+import { Agenda, Application, ApplicationStatus, Program } from "@/redesign/app/lib/types";
 import { format } from "date-fns";
 import { ko } from "date-fns/locale";
 import { AdminApplicationDetailModal } from "@/redesign/app/components/pages/admin-application-detail-modal";
@@ -18,6 +17,7 @@ import type { DateRange } from "react-day-picker";
 interface AdminApplicationsProps {
   applications: Application[];
   agendas?: Agenda[];
+  programs?: Program[];
   onUpdateStatus: (id: string, status: ApplicationStatus) => void;
   onUpdateApplication: (id: string, data: Partial<Application>) => void;
   onConfirmApplication?: (id: string) => void;
@@ -31,6 +31,7 @@ interface AdminApplicationsProps {
 export function AdminApplications({
   applications,
   agendas = [],
+  programs = [],
   onUpdateStatus,
   onUpdateApplication,
   onConfirmApplication,
@@ -43,7 +44,7 @@ export function AdminApplications({
   const PAGE_SIZE = 10;
   const pageTitleClassName = "text-2xl font-semibold text-slate-900";
   const pageDescriptionClassName = "mt-1 text-sm text-slate-500";
-  const [searchQuery, setSearchQuery] = useState("");
+  const [programFilter, setProgramFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [dateRange, setDateRange] = useState<DateRange | undefined>();
   const [page, setPage] = useState(1);
@@ -116,6 +117,35 @@ export function AdminApplications({
     return names;
   }, [agendas, currentConsultantAgendaIds]);
 
+  const programNameById = useMemo(
+    () => new Map(programs.map((program) => [program.id, program.name])),
+    [programs],
+  );
+
+  const getApplicationProgramLabel = (application: Application) => {
+    const mappedProgramName = application.programId ? programNameById.get(application.programId) : null;
+    if (mappedProgramName) return mappedProgramName;
+
+    const title = application.officeHourTitle?.trim();
+    if (!title) return "-";
+
+    return title
+      .replace(/\s*정기 오피스아워$/u, "")
+      .replace(/^비정기 오피스아워\s*-\s*/u, "")
+      .replace(/^비정기 오피스아워\s*/u, "")
+      .trim() || "-";
+  };
+
+  const programFilterOptions = useMemo(() => {
+    return Array.from(
+      new Set(
+        applications
+          .map((application) => getApplicationProgramLabel(application))
+          .filter((name) => name && name !== "-"),
+      ),
+    ).sort((a, b) => a.localeCompare(b, "ko"));
+  }, [applications, programNameById]);
+
   // Filter applications
   const filteredApplications = applications.filter((app) => {
     const matchesConsultantAgenda = !isConsultantUser
@@ -123,13 +153,8 @@ export function AdminApplications({
         && ((app.agendaId && currentConsultantAgendaIds.includes(app.agendaId))
           || (app.agenda && consultantAgendaNames.has(app.agenda))));
 
-    const normalizedQuery = searchQuery.trim().toLowerCase();
-    const matchesSearch = normalizedQuery.length === 0
-      ? true
-      : app.officeHourTitle?.toLowerCase().includes(normalizedQuery)
-        || app.companyName?.toLowerCase().includes(normalizedQuery)
-        || app.consultant?.toLowerCase().includes(normalizedQuery)
-        || app.agenda?.toLowerCase().includes(normalizedQuery);
+    const applicationProgramLabel = getApplicationProgramLabel(app);
+    const matchesProgram = programFilter === "all" || applicationProgramLabel === programFilter;
 
     const normalizedStatus = app.status === "review" ? "pending" : app.status;
     const matchesStatus = statusFilter === "all" || normalizedStatus === statusFilter;
@@ -138,7 +163,7 @@ export function AdminApplications({
         ? isDateInRange(parseDateValue(app.scheduledDate))
         : doesPeriodOverlapRange(app.periodFrom, app.periodTo);
 
-    return matchesConsultantAgenda && matchesSearch && matchesStatus && matchesDate;
+    return matchesConsultantAgenda && matchesProgram && matchesStatus && matchesDate;
   });
 
   // Sort by most recent
@@ -152,7 +177,7 @@ export function AdminApplications({
 
   useEffect(() => {
     setPage(1);
-  }, [applications.length, dateRange?.from, dateRange?.to, searchQuery, statusFilter]);
+  }, [applications.length, dateRange?.from, dateRange?.to, programFilter, statusFilter]);
 
   useEffect(() => {
     const totalPages = Math.max(1, Math.ceil(sortedApplications.length / PAGE_SIZE));
@@ -191,15 +216,19 @@ export function AdminApplications({
         <CardContent className="shrink-0 border-b bg-white p-4">
           <div className="flex flex-wrap items-center gap-3">
             <div className="flex flex-wrap items-center gap-3">
-              <div className="relative w-full sm:w-[320px]">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                <Input
-                  placeholder="신청 기업명으로 검색"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-9"
-                />
-              </div>
+              <Select value={programFilter} onValueChange={setProgramFilter}>
+                <SelectTrigger className="w-full sm:w-[260px]">
+                  <SelectValue placeholder="신청사업 필터" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">전체 사업</SelectItem>
+                  {programFilterOptions.map((programName) => (
+                    <SelectItem key={programName} value={programName}>
+                      {programName}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
               <DateRangePicker
                 value={dateRange}
                 onChange={setDateRange}
@@ -227,7 +256,7 @@ export function AdminApplications({
                 <TableHead className="bg-white">상태</TableHead>
                 <TableHead className="bg-white">유형</TableHead>
                 <TableHead className="bg-white">신청 기업</TableHead>
-                <TableHead className="bg-white">오피스아워</TableHead>
+                <TableHead className="bg-white">신청 사업</TableHead>
                 <TableHead className="bg-white">아젠다</TableHead>
                 <TableHead className="bg-white">컨설턴트</TableHead>
                 <TableHead className="bg-white">일정</TableHead>
@@ -253,7 +282,7 @@ export function AdminApplications({
                     </TableCell>
                     <TableCell>
                       <div className="max-w-xs">
-                        <p className="text-sm font-medium truncate">{app.officeHourTitle}</p>
+                        <p className="text-sm font-medium truncate">{getApplicationProgramLabel(app)}</p>
                       </div>
                     </TableCell>
                     <TableCell>
@@ -306,7 +335,7 @@ export function AdminApplications({
                     <div className="flex flex-col items-center gap-2">
                       <Search className="w-12 h-12 text-muted-foreground" />
                       <p className="text-sm text-muted-foreground">
-                        {searchQuery || statusFilter !== "all" || dateRange?.from || dateRange?.to
+                        {programFilter !== "all" || statusFilter !== "all" || dateRange?.from || dateRange?.to
                           ? "검색 결과가 없습니다"
                           : "신청 내역이 없습니다"}
                       </p>

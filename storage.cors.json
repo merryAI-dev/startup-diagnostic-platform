@@ -1,0 +1,20 @@
+[
+  {
+    "origin": [
+      "http://localhost:5173",
+      "https://startup-diagnostic-platform.vercel.app"
+    ],
+    "method": [
+      "GET",
+      "HEAD"
+    ],
+    "responseHeader": [
+      "Content-Type",
+      "Content-Length",
+      "Content-Disposition",
+      "ETag",
+      "x-goog-meta-*"
+    ],
+    "maxAgeSeconds": 3600
+  }
+]

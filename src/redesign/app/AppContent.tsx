@@ -4703,6 +4703,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
               <AdminApplications
                 applications={scopedApplications}
                 agendas={agendaList}
+                programs={programList}
                 onUpdateStatus={handleUpdateApplicationStatus}
                 onUpdateApplication={handleUpdateApplication}
                 onConfirmApplication={handleConfirmApplication}
