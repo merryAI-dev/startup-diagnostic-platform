@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react"
-import { Check, Clock3, Mail, Phone, UserCog } from "lucide-react"
+import { Check, Clock3, Mail, Pencil, Phone, UserCog } from "lucide-react"
 import { Agenda, Consultant, ConsultantAvailability } from "@/redesign/app/lib/types"
 import { Badge } from "@/redesign/app/components/ui/badge"
 import { Button } from "@/redesign/app/components/ui/button"
@@ -34,7 +34,7 @@ import { cn } from "@/redesign/app/components/ui/utils"
 interface AdminConsultantsProps {
   consultants: Consultant[]
   agendas: Agenda[]
-  onUpdateConsultant: (id: string, data: Partial<Consultant>) => void
+  onUpdateConsultant: (id: string, data: Partial<Consultant>) => Promise<void> | void
 }
 
 const SCHEDULE_DAYS = [
@@ -101,6 +101,9 @@ export function AdminConsultants({
   const [searchQuery, setSearchQuery] = useState("")
   const [agendaFilter, setAgendaFilter] = useState("all")
   const [page, setPage] = useState(1)
+  const [meetingLinkDrafts, setMeetingLinkDrafts] = useState<Record<string, string>>({})
+  const [editingMeetingLinkIds, setEditingMeetingLinkIds] = useState<string[]>([])
+  const [savingMeetingLinkIds, setSavingMeetingLinkIds] = useState<string[]>([])
 
   const selectedConsultant = useMemo(
     () => consultants.find((consultant) => consultant.id === selectedConsultantId) ?? null,
@@ -158,6 +161,18 @@ export function AdminConsultants({
     }
   }, [filteredConsultants.length, page])
 
+  useEffect(() => {
+    setMeetingLinkDrafts((prev) => {
+      const next: Record<string, string> = {}
+      consultants.forEach((consultant) => {
+        next[consultant.id] = editingMeetingLinkIds.includes(consultant.id)
+          ? prev[consultant.id] ?? consultant.fixedMeetingLink ?? ""
+          : consultant.fixedMeetingLink ?? ""
+      })
+      return next
+    })
+  }, [consultants, editingMeetingLinkIds])
+
   function toggleSlot(dayOfWeek: number, slotStart: string) {
     setDraftScheduleAvailability((prev) => {
       const base = prev ?? normalizedSelectedAvailability
@@ -196,6 +211,38 @@ export function AdminConsultants({
     })
     setIsAgendaMapDialogOpen(false)
     setDraftAgendaIds(null)
+  }
+
+  async function commitMeetingLink(consultant: Consultant) {
+    const nextValue = (meetingLinkDrafts[consultant.id] ?? "").trim()
+    const currentValue = consultant.fixedMeetingLink?.trim() ?? ""
+    if (nextValue === currentValue) return
+
+    setSavingMeetingLinkIds((prev) => [...prev, consultant.id])
+    try {
+      await Promise.resolve(
+        onUpdateConsultant(consultant.id, {
+          fixedMeetingLink: nextValue,
+        }),
+      )
+    } finally {
+      setSavingMeetingLinkIds((prev) => prev.filter((id) => id !== consultant.id))
+    }
+  }
+
+  function startMeetingLinkEdit(consultant: Consultant) {
+    setMeetingLinkDrafts((prev) => ({
+      ...prev,
+      [consultant.id]: consultant.fixedMeetingLink ?? "",
+    }))
+    setEditingMeetingLinkIds((prev) =>
+      prev.includes(consultant.id) ? prev : [...prev, consultant.id],
+    )
+  }
+
+  async function finishMeetingLinkEdit(consultant: Consultant) {
+    await commitMeetingLink(consultant)
+    setEditingMeetingLinkIds((prev) => prev.filter((id) => id !== consultant.id))
   }
 
   return (
@@ -280,11 +327,12 @@ export function AdminConsultants({
           <Card className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
             <CardContent className="min-h-0 flex-1 p-0">
               <div className="min-h-0 h-full overflow-auto">
-                <Table className="min-w-[900px]">
+                <Table className="min-w-[1120px]">
                   <TableHeader className="[&_tr]:sticky [&_tr]:top-0 [&_tr]:z-10 [&_tr]:bg-white">
                     <TableRow className="hover:bg-white">
                       <TableHead className="bg-white">컨설턴트</TableHead>
                       <TableHead className="bg-white">연락처</TableHead>
+                      <TableHead className="bg-white">화상링크</TableHead>
                       <TableHead className="bg-white">상태</TableHead>
                       <TableHead className="bg-white">아젠다</TableHead>
                       <TableHead className="bg-white text-right">관리</TableHead>
@@ -294,7 +342,7 @@ export function AdminConsultants({
                     {filteredConsultants.length === 0 && (
                       <TableRow>
                         <TableCell
-                          colSpan={5}
+                          colSpan={6}
                           className="h-24 text-center text-sm text-muted-foreground"
                         >
                           검색 결과가 없습니다.
@@ -302,6 +350,8 @@ export function AdminConsultants({
                       </TableRow>
                     )}
                     {paginatedConsultants.map((consultant) => {
+                      const isEditingMeetingLink = editingMeetingLinkIds.includes(consultant.id)
+                      const isSavingMeetingLink = savingMeetingLinkIds.includes(consultant.id)
                       const agendaLabels = (consultant.agendaIds ?? [])
                         .map((agendaId) => agendas.find((item) => item.id === agendaId)?.name)
                         .filter(Boolean) as string[]
@@ -326,6 +376,62 @@ export function AdminConsultants({
                             <div className="flex items-center gap-2">
                               <Phone className="w-3.5 h-3.5" />
                               <span>{consultant.phone || "-"}</span>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex min-w-[320px] items-center gap-2">
+                              {isEditingMeetingLink ? (
+                                <Input
+                                  value={
+                                    meetingLinkDrafts[consultant.id] ??
+                                    consultant.fixedMeetingLink ??
+                                    ""
+                                  }
+                                  onChange={(event) =>
+                                    setMeetingLinkDrafts((prev) => ({
+                                      ...prev,
+                                      [consultant.id]: event.target.value,
+                                    }))
+                                  }
+                                  onKeyDown={(event) => {
+                                    if (event.key === "Enter") {
+                                      event.preventDefault()
+                                      void finishMeetingLinkEdit(consultant)
+                                    }
+                                  }}
+                                  placeholder="https://zoom.us/j/..."
+                                  disabled={isSavingMeetingLink}
+                                  className="h-9"
+                                />
+                              ) : (
+                                <span
+                                  className="flex-1 truncate px-1 text-sm text-slate-600"
+                                  title={consultant.fixedMeetingLink || "미입력"}
+                                >
+                                  {consultant.fixedMeetingLink || "미입력"}
+                                </span>
+                              )}
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="icon"
+                                className="h-9 w-9 shrink-0"
+                                disabled={isSavingMeetingLink}
+                                onClick={() => {
+                                  if (isEditingMeetingLink) {
+                                    void finishMeetingLinkEdit(consultant)
+                                    return
+                                  }
+                                  startMeetingLinkEdit(consultant)
+                                }}
+                                aria-label={isEditingMeetingLink ? "화상링크 저장" : "화상링크 편집"}
+                              >
+                                {isEditingMeetingLink ? (
+                                  <Check className="h-4 w-4" />
+                                ) : (
+                                  <Pencil className="h-4 w-4" />
+                                )}
+                              </Button>
                             </div>
                           </TableCell>
                           <TableCell>
