@@ -29,6 +29,10 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.role == "consultant";
     }
 
+    function isInternalOperator() {
+      return isAdmin() || isConsultant();
+    }
+
     function isCompanyOwner(companyId) {
       return isSignedIn()
         && get(/databases/$(database)/documents/companies/$(companyId)).data.ownerUid == request.auth.uid;
@@ -125,7 +129,7 @@ service cloud.firestore {
     }
 
     match /companies/{companyId} {
-      allow read: if isCompanyMember(companyId) || isAdmin();
+      allow read: if isCompanyMember(companyId) || isInternalOperator();
       allow create: if isSignedIn()
         && (
           request.resource.data.ownerUid == request.auth.uid
@@ -147,13 +151,13 @@ service cloud.firestore {
     }
 
     match /companies/{companyId}/companyInfo/{docId} {
-      allow read: if isCompanyMember(companyId) || isAdmin();
+      allow read: if isCompanyMember(companyId) || isInternalOperator();
       allow create, update: if isCompanyMember(companyId) || isAdmin();
       allow delete: if false;
     }
 
     match /companies/{companyId}/selfAssessment/{docId} {
-      allow read: if isCompanyMember(companyId) || isAdmin();
+      allow read: if isCompanyMember(companyId) || isInternalOperator();
       allow create, update: if isCompanyMember(companyId);
       allow delete: if false;
     }
