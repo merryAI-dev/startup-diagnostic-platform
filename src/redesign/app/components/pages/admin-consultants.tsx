@@ -21,7 +21,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/redesign/app/components/ui/select"
-import { Switch } from "@/redesign/app/components/ui/switch"
 import {
   Table,
   TableBody,
@@ -330,26 +329,16 @@ export function AdminConsultants({
                             </div>
                           </TableCell>
                           <TableCell>
-                            <div className="flex items-center gap-3">
-                              <Switch
-                                checked={consultant.status === "active"}
-                                onCheckedChange={(checked) =>
-                                  onUpdateConsultant(consultant.id, {
-                                    status: checked ? "active" : "inactive",
-                                  })
-                                }
-                              />
-                              <Badge
-                                variant="secondary"
-                                className={
-                                  consultant.status === "active"
-                                    ? "bg-emerald-100 text-emerald-700"
-                                    : "bg-slate-100 text-slate-600"
-                                }
-                              >
-                                {consultant.status === "active" ? "활성" : "비활성"}
-                              </Badge>
-                            </div>
+                            <Badge
+                              variant="secondary"
+                              className={
+                                consultant.status === "active"
+                                  ? "bg-emerald-100 text-emerald-700"
+                                  : "bg-slate-100 text-slate-600"
+                              }
+                            >
+                              {consultant.status === "active" ? "활성" : "비활성"}
+                            </Badge>
                           </TableCell>
                           <TableCell>
                             <div className="flex flex-wrap gap-1.5">

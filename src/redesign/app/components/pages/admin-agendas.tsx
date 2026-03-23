@@ -15,7 +15,6 @@ import {
 import { Input } from "@/redesign/app/components/ui/input"
 import { Label } from "@/redesign/app/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/redesign/app/components/ui/select"
-import { Switch } from "@/redesign/app/components/ui/switch"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/redesign/app/components/ui/table"
 import { Textarea } from "@/redesign/app/components/ui/textarea"
 import { PaginationControls } from "@/redesign/app/components/ui/pagination-controls"
@@ -24,7 +23,6 @@ interface AdminAgendasProps {
   agendas: Agenda[]
   consultants: Consultant[]
   onAddAgenda: (data: Omit<Agenda, "id">) => void
-  onToggleActive: (agendaId: string, active: boolean) => void
   onUpdateAgenda: (agendaId: string, data: Partial<Agenda>) => void
 }
 
@@ -56,7 +54,6 @@ export function AdminAgendas({
   agendas,
   consultants,
   onAddAgenda,
-  onToggleActive,
   onUpdateAgenda,
 }: AdminAgendasProps) {
   const pageTitleClassName = "text-2xl font-semibold text-slate-900"
@@ -317,22 +314,16 @@ export function AdminAgendas({
                           </div>
                         </TableCell>
                         <TableCell>
-                          <div className="flex items-center gap-3">
-                            <Switch
-                              checked={active}
-                              onCheckedChange={(checked) => onToggleActive(agenda.id, checked)}
-                            />
-                            <Badge
-                              variant="secondary"
-                              className={
-                                active
-                                  ? "bg-emerald-100 text-emerald-700"
-                                  : "bg-slate-100 text-slate-600"
-                              }
-                            >
-                              {active ? "활성" : "비활성"}
-                            </Badge>
-                          </div>
+                          <Badge
+                            variant="secondary"
+                            className={
+                              active
+                                ? "bg-emerald-100 text-emerald-700"
+                                : "bg-slate-100 text-slate-600"
+                            }
+                          >
+                            {active ? "활성" : "비활성"}
+                          </Badge>
                         </TableCell>
                         <TableCell className="text-right">
                           <div className="flex items-center justify-end gap-2">
