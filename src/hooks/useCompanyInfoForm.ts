@@ -391,24 +391,14 @@ export function useCompanyInfoForm(companyId: string) {
 
   const investmentRowsComplete = useMemo(() => {
     if (isPreStartup) return true
-    const meaningfulRows = investmentRows.filter((row) => {
-      return (
-        isFilled(row.stage)
-        || isFilled(row.date)
-        || hasNumber(row.postMoney)
-        || isFilled(row.majorShareholder)
-      )
-    })
+    if (investmentRows.length === 0) return true
 
-    return (
-      meaningfulRows.length > 0
-      && meaningfulRows.every(
-        (row) =>
-          isFilled(row.stage)
-          && isFilled(row.date)
-          && hasNumber(row.postMoney)
-          && isFilled(row.majorShareholder)
-      )
+    return investmentRows.every(
+      (row) =>
+        isFilled(row.stage)
+        && isFilled(row.date)
+        && hasNumber(row.postMoney)
+        && isFilled(row.majorShareholder)
     )
   }, [investmentRows, isPreStartup])
 
@@ -431,8 +421,9 @@ export function useCompanyInfoForm(companyId: string) {
     [requiredKeys, form]
   )
 
-  const missingRequired = missingRequiredFields.length + (investmentRowsComplete ? 0 : 1)
-  const invalidRequired = invalidRequiredFields.length
+  const missingRequired = missingRequiredFields.length
+  const investmentRowsNeedInput = investmentRows.length > 0 && !investmentRowsComplete
+  const invalidRequired = invalidRequiredFields.length + (investmentRowsNeedInput ? 1 : 0)
   const canSubmit = missingRequired === 0 && invalidRequired === 0
 
   useEffect(() => {
@@ -560,9 +551,6 @@ export function useCompanyInfoForm(companyId: string) {
 
   function removeInvestmentRow(target: number) {
     setInvestmentRows((prev) => {
-      if (prev.length <= 1) {
-        return prev
-      }
       return prev.filter((_, index) => index !== target)
     })
   }
@@ -744,9 +732,11 @@ export function useCompanyInfoForm(companyId: string) {
     invalidRequired,
     missingRequiredLabels: [
       ...missingRequiredFields.map((field) => FIELD_LABELS[field]),
-      ...(!investmentRowsComplete ? ["투자이력"] : []),
     ],
-    invalidRequiredLabels: invalidRequiredFields.map((field) => FIELD_LABELS[field]),
+    invalidRequiredLabels: [
+      ...invalidRequiredFields.map((field) => FIELD_LABELS[field]),
+      ...(investmentRowsNeedInput ? ["투자이력"] : []),
+    ],
     hasSavedData,
     hasFinalSavedData,
     savedCompanyProgramIds,
