@@ -3472,7 +3472,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       secondaryPhone: values.secondaryPhone.trim(),
       fixedMeetingLink: values.fixedMeetingLink.trim(),
       expertise: parseExpertiseInput(values.expertise),
-      bio: values.bio.trim() || `${name} 컨설턴트`,
+      bio: values.bio.trim(),
       status: currentConsultant?.status ?? "active",
       agendaIds:
         (currentConsultant?.agendaIds?.length ?? 0) > 0 ? currentConsultant?.agendaIds : undefined,
@@ -3631,6 +3631,12 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
 
   const handleUpdateConsultant = async (id: string, data: Partial<Consultant>) => {
     const nextConsultantStatus = data.status
+    const isMeetingLinkOnlyUpdate =
+      data.fixedMeetingLink !== undefined &&
+      data.status === undefined &&
+      data.agendaIds === undefined &&
+      data.availability === undefined &&
+      Object.keys(data).length === 1
     setConsultants((prev) => prev.map((c) => (c.id === id ? { ...c, ...data } : c)))
 
     if (isFirebaseConfigured) {
@@ -3684,7 +3690,9 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       if (!slotsSynced) return
     }
 
-    toast.success("컨설턴트 정보가 업데이트되었습니다")
+    toast.success(
+      isMeetingLinkOnlyUpdate ? "화상링크가 저장되었습니다" : "컨설턴트 정보가 업데이트되었습니다",
+    )
   }
 
   const handleAddAgenda = async (data: Omit<Agenda, "id">) => {
@@ -4703,6 +4711,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
               <AdminApplications
                 applications={scopedApplications}
                 agendas={agendaList}
+                programs={programList}
                 onUpdateStatus={handleUpdateApplicationStatus}
                 onUpdateApplication={handleUpdateApplication}
                 onConfirmApplication={handleConfirmApplication}

@@ -98,6 +98,9 @@ export function ConsultantProfilePage({
   const [formValues, setFormValues] = useState<ConsultantProfileFormValues>(() =>
     buildInitialValues(consultant, defaultEmail)
   );
+  const [touchedFields, setTouchedFields] = useState<
+    Partial<Record<keyof ConsultantProfileFormValues, boolean>>
+  >({});
 
   const initialValues = useMemo(
     () => buildInitialValues(consultant, defaultEmail),
@@ -200,16 +203,19 @@ export function ConsultantProfilePage({
 
   useEffect(() => {
     setFormValues(initialValues);
+    setTouchedFields({});
   }, [initialValues]);
 
+  const requiresMeetingLink = false;
+  const requiresBio = false;
   const isInvalid =
     !formValues.name.trim() ||
     !formValues.organization.trim() ||
     !formValues.email.trim() ||
     !formValues.phone.trim() ||
-    !formValues.fixedMeetingLink.trim() ||
+    (requiresMeetingLink && !formValues.fixedMeetingLink.trim()) ||
     !formValues.expertise.trim() ||
-    !formValues.bio.trim();
+    (requiresBio && !formValues.bio.trim());
 
   function updateField<K extends keyof ConsultantProfileFormValues>(
     key: K,
@@ -232,6 +238,30 @@ export function ConsultantProfilePage({
       *
     </span>
   );
+  const isFieldRequired = (key: keyof ConsultantProfileFormValues) => {
+    if (key === "fixedMeetingLink") return requiresMeetingLink;
+    if (key === "bio") return requiresBio;
+    return !["secondaryEmail", "secondaryPhone"].includes(key);
+  };
+  const isFieldInvalid = (key: keyof ConsultantProfileFormValues) =>
+    Boolean(touchedFields[key] && isFieldRequired(key) && !formValues[key].trim());
+  const getFieldClassName = (key: keyof ConsultantProfileFormValues) =>
+    cn(
+      embedded && [
+        "rounded-lg border bg-white px-3 py-2 text-sm text-slate-800",
+        "placeholder:text-slate-300",
+        "focus-visible:ring-1",
+        isFieldInvalid(key)
+          ? "border-rose-300 bg-rose-50 text-rose-900 placeholder:text-rose-300 focus-visible:border-rose-400 focus-visible:ring-rose-200/60"
+          : "border-slate-200 focus-visible:border-slate-300 focus-visible:ring-slate-200/60",
+      ]
+    );
+  const handleFieldBlur = (key: keyof ConsultantProfileFormValues) => {
+    setTouchedFields((prev) => ({
+      ...prev,
+      [key]: true,
+    }));
+  };
 
   const sectionCardClassName = cn(
     "w-full overflow-hidden border-slate-200 bg-white shadow-sm shadow-slate-200/60",
@@ -277,7 +307,10 @@ export function ConsultantProfilePage({
                 id="consultant-name"
                 value={formValues.name}
                 onChange={(event) => updateField("name", event.target.value)}
+                onBlur={() => handleFieldBlur("name")}
                 placeholder="홍길동"
+                className={getFieldClassName("name")}
+                aria-invalid={isFieldInvalid("name")}
                 required
               />
             </div>
@@ -291,7 +324,10 @@ export function ConsultantProfilePage({
                 id="consultant-organization"
                 value={formValues.organization}
                 onChange={(event) => updateField("organization", event.target.value)}
+                onBlur={() => handleFieldBlur("organization")}
                 placeholder="MYSC"
+                className={getFieldClassName("organization")}
+                aria-invalid={isFieldInvalid("organization")}
               />
             </div>
 
@@ -305,6 +341,9 @@ export function ConsultantProfilePage({
                 type="email"
                 value={formValues.email}
                 onChange={(event) => updateField("email", event.target.value)}
+                onBlur={() => handleFieldBlur("email")}
+                className={getFieldClassName("email")}
+                aria-invalid={isFieldInvalid("email")}
                 required
               />
             </div>
@@ -321,7 +360,10 @@ export function ConsultantProfilePage({
                 onChange={(event) =>
                   updateField("phone", formatPhoneNumber(event.target.value))
                 }
+                onBlur={() => handleFieldBlur("phone")}
                 placeholder="010-0000-0000"
+                className={getFieldClassName("phone")}
+                aria-invalid={isFieldInvalid("phone")}
               />
             </div>
 
@@ -334,6 +376,8 @@ export function ConsultantProfilePage({
                 type="email"
                 value={formValues.secondaryEmail}
                 onChange={(event) => updateField("secondaryEmail", event.target.value)}
+                onBlur={() => handleFieldBlur("secondaryEmail")}
+                className={getFieldClassName("secondaryEmail")}
               />
             </div>
 
@@ -348,22 +392,28 @@ export function ConsultantProfilePage({
                 onChange={(event) =>
                   updateField("secondaryPhone", formatPhoneNumber(event.target.value))
                 }
+                onBlur={() => handleFieldBlur("secondaryPhone")}
                 placeholder="010-0000-0000"
+                className={getFieldClassName("secondaryPhone")}
               />
             </div>
 
-            <div className="md:col-span-2">
-              <Label className="mb-2 block" htmlFor="consultant-meeting-link">
-                고정 화상회의 링크
-                {requiredMark}
-              </Label>
-              <Input
-                id="consultant-meeting-link"
-                value={formValues.fixedMeetingLink}
-                onChange={(event) => updateField("fixedMeetingLink", event.target.value)}
-                placeholder="https://zoom.us/j/..."
-              />
-            </div>
+            {embedded ? null : (
+              <div className="md:col-span-2">
+                <Label className="mb-2 block" htmlFor="consultant-meeting-link">
+                  고정 화상회의 링크
+                </Label>
+                <Input
+                  id="consultant-meeting-link"
+                  value={formValues.fixedMeetingLink}
+                  onChange={(event) => updateField("fixedMeetingLink", event.target.value)}
+                  onBlur={() => handleFieldBlur("fixedMeetingLink")}
+                  placeholder="https://zoom.us/j/..."
+                  className={getFieldClassName("fixedMeetingLink")}
+                  aria-invalid={isFieldInvalid("fixedMeetingLink")}
+                />
+              </div>
+            )}
 
             <div className="md:col-span-2">
               <Label className="mb-2 block" htmlFor="consultant-expertise">
@@ -374,22 +424,26 @@ export function ConsultantProfilePage({
                 id="consultant-expertise"
                 value={formValues.expertise}
                 onChange={(event) => updateField("expertise", event.target.value)}
+                onBlur={() => handleFieldBlur("expertise")}
                 placeholder="예: 투자유치, 임팩트측정, BM"
+                className={getFieldClassName("expertise")}
+                aria-invalid={isFieldInvalid("expertise")}
               />
             </div>
 
             <div className="md:col-span-2">
               <Label className="mb-2 block" htmlFor="consultant-bio">
                 메모
-                {requiredMark}
               </Label>
               <Textarea
                 id="consultant-bio"
                 rows={4}
                 value={formValues.bio}
                 onChange={(event) => updateField("bio", event.target.value)}
+                onBlur={() => handleFieldBlur("bio")}
                 placeholder="컨설팅 소개 및 메모"
-                required
+                className={getFieldClassName("bio")}
+                aria-invalid={isFieldInvalid("bio")}
               />
             </div>
           </form>
