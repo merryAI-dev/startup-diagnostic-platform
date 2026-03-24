@@ -1,0 +1,6 @@
+{
+  "projects": {
+    "stage": "startup-diagnosis-platform",
+    "live": "startup-acceleration-platform"
+  }
+}

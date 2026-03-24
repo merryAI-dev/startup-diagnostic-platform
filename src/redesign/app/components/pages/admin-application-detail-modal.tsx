@@ -24,6 +24,11 @@ import {
 import type { CompanyInfoRecord } from "@/types/company";
 import type { SelfAssessmentSections } from "@/types/selfAssessment";
 import { Application, ApplicationStatus } from "@/redesign/app/lib/types";
+import {
+  endOfLocalDateKey,
+  parseLocalDateKey,
+  parseLocalDateTimeKey,
+} from "@/redesign/app/lib/date-keys";
 import { StatusChip } from "@/redesign/app/components/status-chip";
 import { Badge } from "@/redesign/app/components/ui/badge";
 import { Button } from "@/redesign/app/components/ui/button";
@@ -99,14 +104,14 @@ export function AdminApplicationDetailModal({
   const sessionEndTime = useMemo(() => {
     const durationHours = application.duration ?? 1;
     if (application.scheduledDate && application.scheduledTime) {
-      const start = new Date(`${application.scheduledDate}T${application.scheduledTime}`);
-      if (!Number.isNaN(start.getTime())) {
+      const start = parseLocalDateTimeKey(application.scheduledDate, application.scheduledTime);
+      if (start) {
         return new Date(start.getTime() + durationHours * 60 * 60 * 1000);
       }
     }
     if (application.scheduledDate) {
-      const fallback = new Date(`${application.scheduledDate}T23:59`);
-      if (!Number.isNaN(fallback.getTime())) {
+      const fallback = endOfLocalDateKey(application.scheduledDate);
+      if (fallback) {
         return fallback;
       }
     }
@@ -604,7 +609,7 @@ export function AdminApplicationDetailModal({
                         <div>
                           <p className="text-xs text-muted-foreground mb-1">일정 날짜</p>
                           <p className="text-sm font-medium">
-                            {format(new Date(application.scheduledDate), "yyyy년 M월 d일 (E)", {
+                            {format(parseLocalDateKey(application.scheduledDate)!, "yyyy년 M월 d일 (E)", {
                               locale: ko,
                             })}
                           </p>
@@ -633,8 +638,8 @@ export function AdminApplicationDetailModal({
                       <div>
                         <p className="text-xs text-muted-foreground mb-1">희망 기간</p>
                         <p className="text-sm font-medium">
-                          {format(new Date(application.periodFrom), "M월 d일", { locale: ko })} ~{" "}
-                          {format(new Date(application.periodTo!), "M월 d일", { locale: ko })}
+                          {format(parseLocalDateKey(application.periodFrom)!, "M월 d일", { locale: ko })} ~{" "}
+                          {format(parseLocalDateKey(application.periodTo!)!, "M월 d일", { locale: ko })}
                         </p>
                       </div>
                     </div>

@@ -12,6 +12,11 @@ import { useEffect, useMemo, useState } from "react";
 import { FileUpload } from "@/redesign/app/components/file-upload";
 import { FileItem } from "@/redesign/app/lib/types";
 import {
+  endOfLocalDateKey,
+  parseLocalDateKey,
+  parseLocalDateTimeKey,
+} from "@/redesign/app/lib/date-keys";
+import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -24,6 +29,7 @@ import {
 
 interface ApplicationDetailProps {
   application: Application;
+  showNoAssignableConsultantNotice?: boolean;
   messages: Message[];
   onBack: () => void;
   onSendMessage: (content: string, files: FileItem[]) => void;
@@ -49,6 +55,7 @@ function normalizeConsultantDisplayName(value?: string | null): string {
 
 export function ApplicationDetail({
   application,
+  showNoAssignableConsultantNotice = false,
   messages,
   onBack,
   onSendMessage,
@@ -90,14 +97,14 @@ export function ApplicationDetail({
   const getSessionEndTime = () => {
     const durationHours = application.duration ?? 1;
     if (application.scheduledDate && application.scheduledTime) {
-      const start = new Date(`${application.scheduledDate}T${application.scheduledTime}`);
-      if (!Number.isNaN(start.getTime())) {
+      const start = parseLocalDateTimeKey(application.scheduledDate, application.scheduledTime);
+      if (start) {
         return new Date(start.getTime() + durationHours * 60 * 60 * 1000);
       }
     }
     if (application.scheduledDate) {
-      const fallback = new Date(`${application.scheduledDate}T23:59`);
-      if (!Number.isNaN(fallback.getTime())) {
+      const fallback = endOfLocalDateKey(application.scheduledDate);
+      if (fallback) {
         return fallback;
       }
     }
@@ -276,6 +283,12 @@ export function ApplicationDetail({
         </div>
       </div>
 
+      {showNoAssignableConsultantNotice && isCompanyUser && isPendingLike ? (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          현재 수락 가능한 컨설턴트가 없습니다. 일정조정과 관련하여 관리자에게 문의해주세요.
+        </div>
+      ) : null}
+
       {isCompanyUser ? (
         <div className="rounded-lg border bg-white p-5 space-y-5">
           <div>
@@ -284,7 +297,7 @@ export function ApplicationDetail({
               {application.scheduledDate ? (
                 <>
                   <p>
-                    {format(new Date(application.scheduledDate), "yyyy년 M월 d일 (E)", {
+                    {format(parseLocalDateKey(application.scheduledDate)!, "yyyy년 M월 d일 (E)", {
                       locale: ko,
                     })}
                   </p>
@@ -293,8 +306,8 @@ export function ApplicationDetail({
               ) : application.periodFrom ? (
                 <p>
                   희망 기간:{" "}
-                  {format(new Date(application.periodFrom), "M월 d일", { locale: ko })} ~{" "}
-                  {format(new Date(application.periodTo!), "M월 d일", { locale: ko })}
+                  {format(parseLocalDateKey(application.periodFrom)!, "M월 d일", { locale: ko })} ~{" "}
+                  {format(parseLocalDateKey(application.periodTo!)!, "M월 d일", { locale: ko })}
                 </p>
               ) : (
                 <p className="text-muted-foreground">일정 조율 중</p>
@@ -463,7 +476,7 @@ export function ApplicationDetail({
                           <Calendar className="w-4 h-4 text-muted-foreground" />
                           <span>
                             {format(
-                              new Date(application.scheduledDate),
+                              parseLocalDateKey(application.scheduledDate)!,
                               "yyyy년 M월 d일 (E)",
                               { locale: ko }
                             )}
@@ -479,11 +492,11 @@ export function ApplicationDetail({
                         <Calendar className="w-4 h-4 text-muted-foreground" />
                         <span>
                           희망 기간:{" "}
-                          {format(new Date(application.periodFrom), "M월 d일", {
+                          {format(parseLocalDateKey(application.periodFrom)!, "M월 d일", {
                             locale: ko,
                           })}{" "}
                           ~{" "}
-                          {format(new Date(application.periodTo!), "M월 d일", {
+                          {format(parseLocalDateKey(application.periodTo!)!, "M월 d일", {
                             locale: ko,
                           })}
                         </span>

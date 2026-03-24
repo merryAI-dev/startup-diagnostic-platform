@@ -6,6 +6,7 @@ import { Application, User, Program } from "@/redesign/app/lib/types";
 import { ProgramQuotaCard } from "@/redesign/app/components/ui/program-quota-card";
 import { format } from "date-fns";
 import { ko } from "date-fns/locale";
+import { parseLocalDateKey } from "@/redesign/app/lib/date-keys";
 
 interface DashboardProps {
   applications: Application[];
@@ -30,8 +31,8 @@ export function Dashboard({ applications, user, programs, onNavigate }: Dashboar
 
   const upcomingEvent = confirmedApplications
     .sort((a, b) => {
-      const dateA = new Date(a.scheduledDate!).getTime();
-      const dateB = new Date(b.scheduledDate!).getTime();
+      const dateA = parseLocalDateKey(a.scheduledDate!)?.getTime() ?? 0;
+      const dateB = parseLocalDateKey(b.scheduledDate!)?.getTime() ?? 0;
       return dateA - dateB;
     })[0];
 
@@ -78,7 +79,7 @@ export function Dashboard({ applications, user, programs, onNavigate }: Dashboar
                   <div className="flex items-center gap-2">
                     <Calendar className="w-4 h-4 text-muted-foreground" />
                     <span>
-                      {format(new Date(upcomingEvent.scheduledDate!), "M월 d일 (E)", {
+                      {format(parseLocalDateKey(upcomingEvent.scheduledDate!)!, "M월 d일 (E)", {
                         locale: ko,
                       })}
                     </span>
@@ -135,8 +136,8 @@ export function Dashboard({ applications, user, programs, onNavigate }: Dashboar
                       </p>
                       {app.type === "irregular" && app.periodFrom && (
                         <p className="text-xs text-muted-foreground">
-                          희망 기간: {format(new Date(app.periodFrom), "M월 d일", { locale: ko })} ~{" "}
-                          {format(new Date(app.periodTo!), "M월 d일", { locale: ko })}
+                          희망 기간: {format(parseLocalDateKey(app.periodFrom)!, "M월 d일", { locale: ko })} ~{" "}
+                          {format(parseLocalDateKey(app.periodTo!)!, "M월 d일", { locale: ko })}
                         </p>
                       )}
                     </div>

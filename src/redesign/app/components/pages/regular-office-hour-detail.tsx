@@ -3,9 +3,10 @@ import { Button } from "@/redesign/app/components/ui/button";
 import { Card, CardContent } from "@/redesign/app/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/redesign/app/components/ui/tabs";
 import { RegularOfficeHour, Application } from "@/redesign/app/lib/types";
-import { format, isBefore, parseISO, startOfDay } from "date-fns";
+import { format, isBefore, startOfDay } from "date-fns";
 import { ko } from "date-fns/locale";
 import { StatusChip } from "@/redesign/app/components/status-chip";
+import { parseLocalDateKey } from "@/redesign/app/lib/date-keys";
 
 interface RegularOfficeHourDetailProps {
   officeHour: RegularOfficeHour;
@@ -32,7 +33,10 @@ export function RegularOfficeHourDetail({
     return slot.startTime >= currentTimeKey;
   });
   const hasFutureAvailableDate = hasRequestableSlot || officeHour.availableDates.some(
-    (date) => !isBefore(parseISO(date), startOfDay(now))
+    (date) => {
+      const parsed = parseLocalDateKey(date);
+      return parsed ? !isBefore(parsed, startOfDay(now)) : false;
+    }
   );
   const myApplications = applications.filter(
     (app) => app.officeHourId === officeHour.id
@@ -115,7 +119,7 @@ export function RegularOfficeHourDetail({
                             <div className="flex items-center gap-2">
                               <Calendar className="w-4 h-4 text-muted-foreground" />
                               <span>
-                                {format(new Date(app.scheduledDate!), "M월 d일 (E)", {
+                                {format(parseLocalDateKey(app.scheduledDate!)!, "M월 d일 (E)", {
                                   locale: ko,
                                 })}
                               </span>

@@ -1,6 +1,6 @@
 import { Application } from "@/redesign/app/lib/types"
 
-const DEFAULT_SESSION_DURATION_HOURS = 2
+const DEFAULT_SESSION_DURATION_HOURS = 1
 
 export function getApplicationDurationHours(application: Application) {
   const duration = application.duration

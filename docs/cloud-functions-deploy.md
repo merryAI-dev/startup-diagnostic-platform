@@ -11,41 +11,69 @@ Required deployed functions:
 - `runApplicationMaintenance`
 - `scheduledApplicationMaintenance`
 
+## Firebase project aliases
+
+This repository uses the following aliases in [.firebaserc](/Users/mysc/Desktop/startup-diagnostic-platform/.firebaserc):
+
+- `stage` -> `startup-diagnosis-platform`
+- `live` -> `startup-acceleration-platform`
+
 ## Before first deploy
 
 1. Create or choose the target Firebase project.
 2. Make sure billing is enabled for the project.
 3. Log in to Firebase CLI.
-4. Select the target project:
+4. Make sure both projects have required secrets configured independently.
+
+Example:
 
 ```bash
-firebase use --add
-```
-
-Or deploy with an explicit project id:
-
-```bash
-firebase deploy --project <project-id> --only functions
+firebase functions:secrets:set GEMINI_API_KEY --project startup-diagnosis-platform
+firebase functions:secrets:set GEMINI_API_KEY --project startup-acceleration-platform
 ```
 
 ## Deploy commands
 
-Deploy all functions:
+Deploy all functions to `stage`:
 
 ```bash
-npm run deploy:functions
+npm run deploy:stage:functions
 ```
 
-Deploy only the reservation core:
+Deploy all functions to `live`:
 
 ```bash
-npm run deploy:functions:core
+npm run deploy:live:functions
 ```
 
-Deploy Firestore and Storage rules:
+Deploy all functions to both projects:
 
 ```bash
-npm run deploy:rules
+npm run deploy:both:functions
+```
+
+Deploy only the reservation core to both projects:
+
+```bash
+npm run deploy:both:core
+```
+
+Deploy only the Gemini report function to both projects:
+
+```bash
+npm run deploy:both:report
+```
+
+Deploy Firestore and Storage rules to both projects:
+
+```bash
+npm run deploy:both:rules
+```
+
+Deploy office-hour core + report function + rules to both projects:
+
+```bash
+npm run deploy:both:app
 ```
 
 ## Runtime expectations

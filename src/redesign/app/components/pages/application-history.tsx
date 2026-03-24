@@ -8,6 +8,7 @@ import { format } from "date-fns";
 import { ko } from "date-fns/locale";
 import { EmptyState } from "@/redesign/app/components/empty-state";
 import { FileText } from "lucide-react";
+import { parseLocalDateKey } from "@/redesign/app/lib/date-keys";
 
 interface ApplicationHistoryProps {
   applications: Application[];
@@ -73,7 +74,7 @@ export function ApplicationHistory({
                       <>
                         <div className="flex items-center gap-1">
                           <Calendar className="w-3 h-3" />
-                          {format(new Date(app.scheduledDate), "M월 d일 (E)", {
+                          {format(parseLocalDateKey(app.scheduledDate)!, "M월 d일 (E)", {
                             locale: ko,
                           })}
                         </div>
@@ -85,8 +86,8 @@ export function ApplicationHistory({
                     ) : app.periodFrom ? (
                       <span>
                         희망 기간:{" "}
-                        {format(new Date(app.periodFrom), "M월 d일", { locale: ko })} ~{" "}
-                        {format(new Date(app.periodTo!), "M월 d일", { locale: ko })}
+                        {format(parseLocalDateKey(app.periodFrom)!, "M월 d일", { locale: ko })} ~{" "}
+                        {format(parseLocalDateKey(app.periodTo!)!, "M월 d일", { locale: ko })}
                       </span>
                     ) : (
                       <span>일정 미정</span>
