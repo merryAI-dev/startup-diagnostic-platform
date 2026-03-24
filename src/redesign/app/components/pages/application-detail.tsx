@@ -29,6 +29,7 @@ import {
 
 interface ApplicationDetailProps {
   application: Application;
+  showNoAssignableConsultantNotice?: boolean;
   messages: Message[];
   onBack: () => void;
   onSendMessage: (content: string, files: FileItem[]) => void;
@@ -54,6 +55,7 @@ function normalizeConsultantDisplayName(value?: string | null): string {
 
 export function ApplicationDetail({
   application,
+  showNoAssignableConsultantNotice = false,
   messages,
   onBack,
   onSendMessage,
@@ -280,6 +282,12 @@ export function ApplicationDetail({
           </div>
         </div>
       </div>
+
+      {showNoAssignableConsultantNotice && isCompanyUser && isPendingLike ? (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          현재 수락 가능한 컨설턴트가 없습니다. 일정조정과 관련하여 관리자에게 문의해주세요.
+        </div>
+      ) : null}
 
       {isCompanyUser ? (
         <div className="rounded-lg border bg-white p-5 space-y-5">

@@ -98,6 +98,7 @@ import {
 } from "@/redesign/app/lib/functions"
 import {
   getAssignableConsultantsAt,
+  hasScheduledConsultantForPendingApplication,
   hasApplicantConflictAt,
 } from "@/redesign/app/lib/application-availability"
 import {
@@ -354,6 +355,10 @@ function normalizeConsultantDisplayName(value?: string | null): string {
     .replace(/\s*컨설턴트\s*$/u, "")
     .trim()
     .toLowerCase()
+}
+
+function buildAvailabilitySlotKey(dayOfWeek: number, timeKey: string): string {
+  return `${dayOfWeek}:${normalizeTimeKey(timeKey)}`
 }
 
 function normalizeTimeKey(value?: string): string {
@@ -794,7 +799,15 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     isPage(["admin-agendas", "admin-consultants", "admin-programs"])
   const needsConsultants =
     resolvedRole === "consultant" ||
-    isPage(["consultants", "regular-wizard", "admin-consultants", "admin-users", "pending-reports"])
+    isPage([
+      "consultants",
+      "regular-wizard",
+      "application",
+      "dashboard",
+      "admin-consultants",
+      "admin-users",
+      "pending-reports",
+    ])
   const needsOfficeHourSlots =
     needsRegularOfficeHours || isPage(["application", "pending-reports"])
   const needsCompanyLookup = resolvedRole === "admin" && needsApplications
@@ -1460,6 +1473,26 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       consultantDocsLoading ||
       agendaDocsLoading
     )
+  const pendingWithoutAssignableConsultantIds = useMemo(() => {
+    const ids = new Set<string>()
+
+    resolvedApplications.forEach((application) => {
+      if (normalizeApplicationStatus(application.status) !== "pending") return
+      if (!application.agendaId || !application.scheduledDate || !application.scheduledTime) return
+      if (
+        application.consultantId ||
+        (application.consultant && application.consultant !== "담당자 배정 중")
+      ) {
+        return
+      }
+
+      if (!hasScheduledConsultantForPendingApplication({ application, consultants })) {
+        ids.add(application.id)
+      }
+    })
+
+    return ids
+  }, [consultants, resolvedApplications])
 
   const consultantProgramIds = useMemo(() => {
     if (resolvedRole !== "consultant") return new Set<string>()
@@ -3556,6 +3589,57 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       return
     }
 
+    const currentAvailableSlotKeys = new Set(
+      (currentConsultant?.availability ?? [])
+        .flatMap((day) =>
+          day.slots
+            .filter((slot) => slot.available)
+            .map((slot) => buildAvailabilitySlotKey(day.dayOfWeek, slot.start)),
+        ),
+    )
+    const nextAvailableSlotKeys = new Set(
+      availability.flatMap((day) =>
+        day.slots
+          .filter((slot) => slot.available)
+          .map((slot) => buildAvailabilitySlotKey(day.dayOfWeek, slot.start)),
+      ),
+    )
+    const removedSlotKeys = new Set(
+      Array.from(currentAvailableSlotKeys).filter((key) => !nextAvailableSlotKeys.has(key)),
+    )
+
+    if (removedSlotKeys.size > 0) {
+      const currentConsultantNameKey = normalizeConsultantDisplayName(currentConsultant?.name ?? fallbackName)
+      const hasConfirmedConflict = applications.some((application) => {
+        if (normalizeApplicationStatus(application.status) !== "confirmed") return false
+        if (!application.scheduledDate || !application.scheduledTime) return false
+
+        const isAssignedToCurrent =
+          (consultantId && application.consultantId === consultantId) ||
+          (
+            currentConsultantNameKey !== "" &&
+            normalizeConsultantDisplayName(application.consultant) === currentConsultantNameKey
+          )
+        if (!isAssignedToCurrent) return false
+
+        const start = parseLocalDateTimeKey(application.scheduledDate, application.scheduledTime)
+        if (!start) return false
+        const durationHours = application.duration ?? 1
+        const end = new Date(start.getTime() + durationHours * 60 * 60 * 1000)
+        if (end <= new Date()) return false
+
+        const slotKey = buildAvailabilitySlotKey(start.getDay(), application.scheduledTime)
+        return removedSlotKeys.has(slotKey)
+      })
+
+      if (hasConfirmedConflict) {
+        toast.error(
+          "확정된 일정이 있는 시간입니다. 제거하려는 시간에 이미 확정된 오피스아워 일정이 있습니다. 일정 조정 또는 신청 관리 확인 후 다시 변경해주세요.",
+        )
+        return
+      }
+    }
+
     const nextConsultant: Consultant = {
       ...currentConsultant,
       id: consultantId,
@@ -4315,6 +4399,9 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
           {currentPage === "dashboard" && (
             <DashboardCalendar
               applications={scopedApplications}
+              applicationsWithoutAssignableConsultantIds={Array.from(
+                pendingWithoutAssignableConsultantIds,
+              )}
               user={user}
               programs={scopedProgramList}
               agendas={agendaList}
@@ -4407,6 +4494,10 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
           {currentPage === "application" && selectedApplication && (
             <ApplicationDetail
               application={selectedApplication}
+              showNoAssignableConsultantNotice={
+                resolvedRole === "user" &&
+                pendingWithoutAssignableConsultantIds.has(selectedApplication.id)
+              }
               messages={applicationMessages}
               onBack={() =>
                 handleNavigate(resolvedRole === "consultant" ? "consultant-calendar" : "dashboard")

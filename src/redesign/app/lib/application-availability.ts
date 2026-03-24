@@ -133,6 +133,23 @@ export function getAssignableConsultantsAt(params: {
   })
 }
 
+export function hasScheduledConsultantForPendingApplication(params: {
+  application: Application
+  consultants: Consultant[]
+}): boolean {
+  const { application, consultants } = params
+  if (!application.agendaId || !application.scheduledDate || !application.scheduledTime) {
+    return false
+  }
+
+  return consultants.some(
+    (consultant) =>
+      consultant.status === "active" &&
+      (consultant.agendaIds ?? []).includes(application.agendaId!) &&
+      isConsultantAvailableAt(consultant, application.scheduledDate!, application.scheduledTime!),
+  )
+}
+
 export function hasApplicantConflictAt(params: {
   applications: Application[]
   dateKey: string
