@@ -14,6 +14,13 @@ import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { SELF_ASSESSMENT_SECTIONS } from "@/data/selfAssessment";
 import { db } from "@/firebase/client";
+import {
+  EMPTY_COMPANY_ANALYSIS_REPORT_FORM,
+  splitNumberedReportSections,
+  splitReportParagraphs,
+  toCompanyAnalysisReportForm,
+  type CompanyAnalysisReportForm,
+} from "@/types/companyAnalysisReport";
 import type { CompanyInfoRecord } from "@/types/company";
 import type { SelfAssessmentSections } from "@/types/selfAssessment";
 import { Application, ApplicationStatus } from "@/redesign/app/lib/types";
@@ -31,6 +38,19 @@ import { Input } from "@/redesign/app/components/ui/input";
 import { Label } from "@/redesign/app/components/ui/label";
 import { Separator } from "@/redesign/app/components/ui/separator";
 import { Textarea } from "@/redesign/app/components/ui/textarea";
+
+function getRadarLabelLines(label: string) {
+  const normalized = label.trim();
+  if (!normalized) return [""];
+  if (normalized.includes("(")) {
+    return normalized.replace("(", "\n(").split("\n");
+  }
+  if (normalized.length > 8) {
+    const midpoint = Math.ceil(normalized.length / 2);
+    return [normalized.slice(0, midpoint), normalized.slice(midpoint)];
+  }
+  return [normalized];
+}
 
 interface AdminApplicationDetailModalProps {
   application: Application;
@@ -73,19 +93,9 @@ export function AdminApplicationDetailModal({
   const [companyInfo, setCompanyInfo] = useState<CompanyInfoRecord | null>(null);
   const [selfAssessment, setSelfAssessment] = useState<SelfAssessmentSections>({});
   const [loadingCompany, setLoadingCompany] = useState(false);
-  const [reportForm, setReportForm] = useState({
-    companyName: "",
-    createdAt: "",
-    summaryCapability: "",
-    summaryMarket: "",
-    improvements: "",
-    acPriority1: "",
-    acPriority2: "",
-    acPriority3: "",
-    milestone56: "",
-    milestone78: "",
-    milestone910: "",
-  });
+  const [reportForm, setReportForm] = useState<CompanyAnalysisReportForm>(
+    EMPTY_COMPANY_ANALYSIS_REPORT_FORM
+  );
   const sessionEndTime = useMemo(() => {
     const durationHours = application.duration ?? 1;
     if (application.scheduledDate && application.scheduledTime) {
@@ -223,6 +233,7 @@ export function AdminApplicationDetailModal({
       setCompanyInfo(null);
       setSelfAssessment({});
       setCompanySummary(null);
+      setReportForm(EMPTY_COMPANY_ANALYSIS_REPORT_FORM);
 
       try {
         let resolvedCompanyId: string | null = null;
@@ -291,17 +302,28 @@ export function AdminApplicationDetailModal({
           });
         }
 
-        const [infoSnap, assessmentSnap] = await Promise.all([
+        const [infoSnap, assessmentSnap, reportSnap] = await Promise.all([
           getDoc(doc(db, "companies", resolvedCompanyId, "companyInfo", "info")),
           getDoc(doc(db, "companies", resolvedCompanyId, "selfAssessment", "info")),
+          getDoc(doc(db, "companies", resolvedCompanyId, "analysisReport", "current")),
         ]);
         if (!mounted) return;
 
-        setCompanyInfo(infoSnap.exists() ? (infoSnap.data() as CompanyInfoRecord) : null);
+        const nextCompanyInfo = infoSnap.exists() ? (infoSnap.data() as CompanyInfoRecord) : null;
+        setCompanyInfo(nextCompanyInfo);
         const assessmentData = assessmentSnap.exists()
           ? (assessmentSnap.data() as { sections?: SelfAssessmentSections })
           : null;
         setSelfAssessment(assessmentData?.sections ?? {});
+        const fallbackCompanyName =
+          nextCompanyInfo?.basic?.companyInfo ??
+          resolvedCompanyName ??
+          application.companyName ??
+          "";
+        const savedReport = reportSnap.exists()
+          ? (reportSnap.data() as Partial<CompanyAnalysisReportForm>)
+          : null;
+        setReportForm(toCompanyAnalysisReportForm(savedReport, fallbackCompanyName));
       } catch (error) {
         console.warn("Failed to load company info:", error);
       } finally {
@@ -317,16 +339,6 @@ export function AdminApplicationDetailModal({
       mounted = false;
     };
   }, [application.companyId, application.createdByUid, application.companyName]);
-
-  useEffect(() => {
-    const nextCompanyName =
-      companyInfo?.basic?.companyInfo ?? companySummary?.name ?? application.companyName ?? "";
-    setReportForm((prev) => ({
-      ...prev,
-      companyName: nextCompanyName,
-      createdAt: prev.createdAt || new Date().toLocaleString("ko-KR"),
-    }));
-  }, [companyInfo, companySummary, application.companyName]);
 
   const formatValue = (value?: string | number | null) => {
     if (value === null || value === undefined || value === "") return "-";
@@ -397,9 +409,9 @@ export function AdminApplicationDetailModal({
   }, [assessmentSummary, activeSectionFilter]);
 
   const radarData = useMemo(() => {
-    const size = 220;
+    const size = 300;
     const center = size / 2;
-    const radius = size / 2 - 16;
+    const radius = size / 2 - 40;
     const axes = assessmentSummary.grouped.map((section, index) => {
       const angle =
         (Math.PI * 2 * index) / assessmentSummary.grouped.length - Math.PI / 2;
@@ -410,14 +422,34 @@ export function AdminApplicationDetailModal({
       const ratio = total > 0 ? score / total : 0;
       const x = center + Math.cos(angle) * radius * ratio;
       const y = center + Math.sin(angle) * radius * ratio;
-      const labelX = center + Math.cos(angle) * (radius + 14);
-      const labelY = center + Math.sin(angle) * (radius + 14);
+      const labelX = center + Math.cos(angle) * (radius + 28);
+      const labelY = center + Math.sin(angle) * (radius + 28);
       return { angle, x, y, label: section.sectionTitle, labelX, labelY };
     });
     const points = axes.map((axis) => `${axis.x},${axis.y}`).join(" ");
 
     return { size, center, radius, axes, points };
   }, [assessmentSummary]);
+
+  const improvementSections = useMemo(
+    () => splitNumberedReportSections(reportForm.improvements),
+    [reportForm.improvements]
+  );
+
+  const diagnosticSummaryText = useMemo(() => {
+    const sections = [
+      reportForm.summaryCapability.trim(),
+      reportForm.summaryMarket.trim(),
+    ].filter(Boolean);
+    return sections.length > 0 ? sections.join("\n\n") : "-";
+  }, [reportForm.summaryCapability, reportForm.summaryMarket]);
+
+  const improvementsText = useMemo(() => {
+    if (improvementSections.length > 0) {
+      return improvementSections.join("\n\n");
+    }
+    return reportForm.improvements.trim() || "-";
+  }, [improvementSections, reportForm.improvements]);
 
   return (
     <>
@@ -1087,14 +1119,14 @@ export function AdminApplicationDetailModal({
                       </label>
                     </div>
 
-                    <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                    <div className="rounded-2xl border border-slate-200 bg-white p-2">
                       <div className="text-sm font-semibold text-slate-700">현황 분석 점수</div>
-                      <div className="mt-4 grid gap-4 lg:grid-cols-[240px_1fr]">
-                        <div className="flex items-center justify-start pl-2">
+                      <div className="mt-1 grid gap-0.5 lg:grid-cols-[296px_1fr] lg:items-center">
+                        <div className="-mt-3 flex items-start justify-start -ml-8">
                           <svg
                             width={radarData.size}
                             height={radarData.size}
-                            viewBox={`-24 -24 ${radarData.size + 48} ${radarData.size + 48}`}
+                            viewBox={`-68 -68 ${radarData.size + 136} ${radarData.size + 136}`}
                           >
                             {[1, 0.75, 0.5, 0.25].map((ratio) => {
                               const points = radarData.axes
@@ -1149,35 +1181,42 @@ export function AdminApplicationDetailModal({
                                 key={`label-${index}`}
                                 x={axis.labelX}
                                 y={axis.labelY}
-                                textAnchor={axis.labelX < radarData.center ? "end" : "start"}
-                                dominantBaseline="middle"
-                                fontSize="9"
+                                textAnchor="middle"
+                                fontSize="14"
                                 fill="#475569"
                               >
-                                {axis.label}
+                                {getRadarLabelLines(axis.label).map((line, lineIndex) => (
+                                  <tspan
+                                    key={`${axis.label}-${lineIndex}`}
+                                    x={axis.labelX}
+                                    dy={lineIndex === 0 ? 0 : 16}
+                                  >
+                                    {line}
+                                  </tspan>
+                                ))}
                               </text>
                             ))}
                           </svg>
                         </div>
-                        <div className="grid gap-2 sm:grid-cols-2">
+                        <div className="-ml-2 grid grid-cols-2 gap-1.5 self-center sm:grid-cols-3 lg:-ml-3 lg:mr-1">
                           {assessmentSummary.grouped.map((section) => (
                             <div
                               key={`score-${section.sectionTitle}`}
-                              className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2 text-xs text-slate-600"
+                              className="flex min-h-[52px] flex-col justify-center rounded-md border border-slate-200 bg-white px-2 py-0.5 text-[11px] text-slate-600 shadow-sm"
                             >
-                              <div className="font-semibold text-slate-700 whitespace-normal break-words text-[11px] leading-snug">
+                              <div className="overflow-visible whitespace-nowrap text-center text-[10px] font-semibold leading-tight tracking-tight text-slate-700">
                                 {section.sectionTitle}
                               </div>
-                              <div className="mt-1 whitespace-normal break-words text-[11px] text-slate-600">
+                              <div className="mt-0.5 whitespace-nowrap text-center text-[10px] leading-tight tracking-tight text-slate-600">
                                 {formatScore(section.sectionScore)}/{formatScore(section.sectionTotal)}점
                               </div>
                             </div>
                           ))}
-                          <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
-                            <div className="font-semibold whitespace-normal break-words text-[11px] leading-snug">
+                          <div className="flex min-h-[52px] flex-col justify-center rounded-md border border-emerald-200 bg-emerald-100 px-2 py-0.5 text-[11px] text-emerald-800 shadow-sm sm:col-start-3">
+                            <div className="text-center font-semibold leading-tight">
                               총점
                             </div>
-                            <div className="mt-1 whitespace-normal break-words text-[11px]">
+                            <div className="mt-0.5 text-center text-[11px] leading-tight">
                               {formatScore(assessmentSummary.totalScore)}/100점
                             </div>
                           </div>
@@ -1185,64 +1224,51 @@ export function AdminApplicationDetailModal({
                       </div>
                     </div>
 
-                    <div className="grid gap-4 sm:grid-cols-2">
-                      <label className="text-xs text-slate-500">
-                        기업상황요약 - 기업 역량
-                        <textarea
-                          rows={3}
-                          className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700"
-                          value={reportForm.summaryCapability}
-                          readOnly
-                        />
-                      </label>
-                      <label className="text-xs text-slate-500">
-                        기업상황요약 - 시장검증
-                        <textarea
-                          rows={3}
-                          className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700"
-                          value={reportForm.summaryMarket}
-                          readOnly
-                        />
-                      </label>
-                    </div>
+                    <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                      <div className="text-sm font-semibold text-slate-700">
+                        기업상황요약
+                      </div>
+                      <div className="mt-4 space-y-5">
+                        <div className="space-y-4">
+                          <div className="text-xs font-semibold tracking-[0.08em] text-slate-400">
+                            기업진단
+                          </div>
+                          <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-4 whitespace-pre-wrap text-[13px] leading-6 text-slate-700">
+                            {diagnosticSummaryText}
+                          </div>
+                        </div>
 
-                    <label className="text-xs text-slate-500">
-                      개선 필요사항 (항목별 요약)
-                      <textarea
-                        rows={4}
-                        className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700"
-                        value={reportForm.improvements}
-                        readOnly
-                      />
-                    </label>
+                        <div className="border-t border-slate-100" />
+
+                        <div className="space-y-4">
+                          <div className="text-xs font-semibold tracking-[0.08em] text-slate-400">
+                            개선 필요사항
+                          </div>
+                          <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-4 whitespace-pre-wrap text-[13px] leading-6 text-slate-700">
+                            {improvementsText}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
 
                     <div className="rounded-2xl border border-slate-200 bg-white p-4">
                       <div className="text-sm font-semibold text-slate-700">AC 프로그램 제안</div>
-                      <div className="mt-3 grid gap-3 sm:grid-cols-3">
-                        <label className="text-xs text-slate-500">
-                          1순위
-                          <input
-                            className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700"
-                            value={reportForm.acPriority1}
-                            readOnly
-                          />
-                        </label>
-                        <label className="text-xs text-slate-500">
-                          2순위
-                          <input
-                            className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700"
-                            value={reportForm.acPriority2}
-                            readOnly
-                          />
-                        </label>
-                        <label className="text-xs text-slate-500">
-                          3순위
-                          <input
-                            className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700"
-                            value={reportForm.acPriority3}
-                            readOnly
-                          />
-                        </label>
+                      <div className="mt-3 space-y-3">
+                        {[
+                          ["1순위", reportForm.acPriority1],
+                          ["2순위", reportForm.acPriority2],
+                          ["3순위", reportForm.acPriority3],
+                        ].map(([label, value]) => (
+                          <div
+                            key={label}
+                            className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-4"
+                          >
+                            <div className="text-xs font-semibold text-slate-500">{label}</div>
+                            <div className="mt-2 whitespace-pre-wrap text-[13px] leading-6 text-slate-700">
+                              {value || "-"}
+                            </div>
+                          </div>
+                        ))}
                       </div>
                     </div>
 
@@ -1250,34 +1276,24 @@ export function AdminApplicationDetailModal({
                       <div className="text-sm font-semibold text-slate-700">
                         엑셀러레이팅 마일스톤 제안
                       </div>
-                      <div className="mt-3 grid gap-3 sm:grid-cols-3">
-                        <label className="text-xs text-slate-500">
-                          5~6월
-                          <textarea
-                            rows={3}
-                            className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700"
-                            value={reportForm.milestone56}
-                            readOnly
-                          />
-                        </label>
-                        <label className="text-xs text-slate-500">
-                          7~8월
-                          <textarea
-                            rows={3}
-                            className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700"
-                            value={reportForm.milestone78}
-                            readOnly
-                          />
-                        </label>
-                        <label className="text-xs text-slate-500">
-                          9~10월
-                          <textarea
-                            rows={3}
-                            className="mt-1 w-full rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700"
-                            value={reportForm.milestone910}
-                            readOnly
-                          />
-                        </label>
+                      <div className="mt-3 space-y-4">
+                        {[
+                          ["5~6월", reportForm.milestone56],
+                          ["7~8월", reportForm.milestone78],
+                          ["9~10월", reportForm.milestone910],
+                        ].map(([label, value]) => (
+                          <div
+                            key={label}
+                            className="grid gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-4 lg:grid-cols-[88px_minmax(0,1fr)]"
+                          >
+                            <div className="inline-flex h-6 items-center justify-center self-start rounded-full border border-slate-200 bg-white px-2 text-[10px] font-medium tracking-[0.01em] text-slate-600">
+                              {label}
+                            </div>
+                            <div className="whitespace-pre-wrap text-[13px] leading-6 text-slate-700">
+                              {value || "-"}
+                            </div>
+                          </div>
+                        ))}
                       </div>
                     </div>
                   </div>
