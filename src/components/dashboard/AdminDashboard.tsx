@@ -4,15 +4,27 @@ import {
   doc,
   getDoc,
   getDocs,
+  setDoc,
+  serverTimestamp,
   updateDoc,
 } from "firebase/firestore"
 import { getDownloadURL, ref as storageRef } from "firebase/storage"
+import ExcelJS from "exceljs"
+import { FileSpreadsheet, Save, Wand2 } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { toast } from "sonner"
 import { SELF_ASSESSMENT_SECTIONS } from "@/data/selfAssessment"
 import { db, storage } from "@/firebase/client"
+import { generateCompanyAnalysisReportViaFunction } from "@/redesign/app/lib/functions"
 import { PaginationControls } from "@/redesign/app/components/ui/pagination-controls"
+import {
+  EMPTY_COMPANY_ANALYSIS_REPORT_FORM,
+  splitNumberedReportSections,
+  splitReportParagraphs,
+  toCompanyAnalysisReportForm,
+  type CompanyAnalysisReportForm,
+} from "@/types/companyAnalysisReport"
 import type { CompanyInfoRecord } from "@/types/company"
 import type { SelfAssessmentSections } from "@/types/selfAssessment"
 
@@ -44,6 +56,119 @@ type ProgramSummary = {
 
 const COMPANY_PAGE_SIZE = 8
 
+function getRadarLabelLines(label: string) {
+  const normalized = label.trim()
+  if (!normalized) return [""]
+  if (normalized.includes("(")) {
+    return normalized.replace("(", "\n(").split("\n")
+  }
+  if (normalized.length > 8) {
+    const midpoint = Math.ceil(normalized.length / 2)
+    return [normalized.slice(0, midpoint), normalized.slice(midpoint)]
+  }
+  return [normalized]
+}
+
+function buildRadarChartSvg(radarData: {
+  size: number
+  center: number
+  radius: number
+  points: string
+  axes: Array<{
+    angle: number
+    x: number
+    y: number
+    labelX: number
+    labelY: number
+    label: string
+  }>
+}) {
+  const expandedWidth = radarData.size + 120
+  const expandedHeight = radarData.size + 120
+  const offsetX = 60
+  const offsetY = 60
+  const shiftedPoints = radarData.points
+    .split(" ")
+    .map((point) => {
+      const [xRaw, yRaw] = point.split(",")
+      const x = Number(xRaw ?? 0)
+      const y = Number(yRaw ?? 0)
+      return `${x + offsetX},${y + offsetY}`
+    })
+    .join(" ")
+
+  return `
+    <svg xmlns="http://www.w3.org/2000/svg" width="${expandedWidth}" height="${expandedHeight}" viewBox="0 0 ${expandedWidth} ${expandedHeight}">
+      <rect width="100%" height="100%" fill="#ffffff" />
+      ${[1, 0.75, 0.5, 0.25].map((ratio) => {
+        const points = radarData.axes
+          .map((axis) => {
+            const x = radarData.center + Math.cos(axis.angle) * radarData.radius * ratio + offsetX
+            const y = radarData.center + Math.sin(axis.angle) * radarData.radius * ratio + offsetY
+            return `${x},${y}`
+          })
+          .join(" ")
+        return `<polygon points="${points}" fill="none" stroke="#e2e8f0" stroke-width="1" />`
+      }).join("")}
+      ${radarData.axes.map((axis) => `
+        <line
+          x1="${radarData.center + offsetX}"
+          y1="${radarData.center + offsetY}"
+          x2="${radarData.center + Math.cos(axis.angle) * radarData.radius + offsetX}"
+          y2="${radarData.center + Math.sin(axis.angle) * radarData.radius + offsetY}"
+          stroke="#e2e8f0"
+          stroke-width="1"
+        />
+      `).join("")}
+      <polygon points="${shiftedPoints}" fill="rgba(15,118,110,0.18)" stroke="#0f766e" stroke-width="2" />
+      ${radarData.axes.map((axis) => `
+        <circle cx="${axis.x + offsetX}" cy="${axis.y + offsetY}" r="3" fill="#0f766e" />
+      `).join("")}
+      ${radarData.axes.map((axis) => {
+        const lines = getRadarLabelLines(axis.label)
+        return `
+          <text
+            x="${axis.labelX + offsetX}"
+            y="${axis.labelY + offsetY}"
+            text-anchor="middle"
+            font-size="12"
+            font-family="Malgun Gothic, Apple SD Gothic Neo, sans-serif"
+            fill="#475569"
+          >
+            ${lines.map((line, index) => `
+              <tspan x="${axis.labelX + offsetX}" dy="${index === 0 ? 0 : 14}">${line}</tspan>
+            `).join("")}
+          </text>
+        `
+      }).join("")}
+    </svg>
+  `.trim()
+}
+
+async function renderSvgToPngDataUrl(svg: string) {
+  const dataUrl = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`
+  const image = new Image()
+  image.decoding = "async"
+
+  await new Promise<void>((resolve, reject) => {
+    image.onload = () => resolve()
+    image.onerror = () => reject(new Error("Failed to render radar chart"))
+    image.src = dataUrl
+  })
+
+  const canvas = document.createElement("canvas")
+  canvas.width = image.naturalWidth || image.width
+  canvas.height = image.naturalHeight || image.height
+  const context = canvas.getContext("2d")
+  if (!context) {
+    throw new Error("Canvas context is not available")
+  }
+  context.fillStyle = "#ffffff"
+  context.fillRect(0, 0, canvas.width, canvas.height)
+  context.drawImage(image, 0, 0)
+  return canvas.toDataURL("image/png")
+}
+
 export function AdminDashboard({
   user,
   onLogout,
@@ -69,20 +194,11 @@ export function AdminDashboard({
   const [loadingPrograms, setLoadingPrograms] = useState(false)
   const [ticketDrafts, setTicketDrafts] = useState<Record<string, { internal: string; external: string }>>({})
   const [savingTickets, setSavingTickets] = useState(false)
+  const [isGeneratingReport, setIsGeneratingReport] = useState(false)
+  const [savingReport, setSavingReport] = useState(false)
+  const [downloadingReport, setDownloadingReport] = useState(false)
   const [activeSectionFilter, setActiveSectionFilter] = useState<string>("문제")
-  const [reportForm, setReportForm] = useState({
-    companyName: "",
-    createdAt: "",
-    summaryCapability: "",
-    summaryMarket: "",
-    improvements: "",
-    acPriority1: "",
-    acPriority2: "",
-    acPriority3: "",
-    milestone56: "",
-    milestone78: "",
-    milestone910: "",
-  })
+  const [reportForm, setReportForm] = useState<CompanyAnalysisReportForm>(EMPTY_COMPANY_ANALYSIS_REPORT_FORM)
 
   useEffect(() => {
     let mounted = true
@@ -180,24 +296,25 @@ export function AdminDashboard({
         setSelfAssessment({})
         setCompanyFiles([])
         setTicketDrafts({})
+        setReportForm(EMPTY_COMPANY_ANALYSIS_REPORT_FORM)
         return
       }
       setLoadingDetails(true)
       try {
-        const [infoSnap, assessmentSnap, filesSnap, companySnap] = await Promise.all([
+        const [infoSnap, assessmentSnap, filesSnap, companySnap, reportSnap] = await Promise.all([
           getDoc(doc(db, "companies", selectedCompanyId, "companyInfo", "info")),
           getDoc(
             doc(db, "companies", selectedCompanyId, "selfAssessment", "info")
           ),
           getDocs(collection(db, "companies", selectedCompanyId, "files")),
           getDoc(doc(db, "companies", selectedCompanyId)),
+          getDoc(doc(db, "companies", selectedCompanyId, "analysisReport", "current")),
         ])
         if (!mounted) return
-        setCompanyInfo(
-          infoSnap.exists()
-            ? (infoSnap.data() as CompanyInfoRecord)
-            : null
-        )
+        const nextCompanyInfo = infoSnap.exists()
+          ? (infoSnap.data() as CompanyInfoRecord)
+          : null
+        setCompanyInfo(nextCompanyInfo)
         const assessmentData = assessmentSnap.exists()
           ? (assessmentSnap.data() as { sections?: SelfAssessmentSections })
           : null
@@ -248,6 +365,13 @@ export function AdminDashboard({
           }
         })
         setTicketDrafts(nextDrafts)
+        const companyName =
+          nextCompanyInfo?.basic?.companyInfo ||
+          (companySnap.exists() ? ((companySnap.data() as { name?: string | null }).name ?? "") : "")
+        const savedReport = reportSnap.exists()
+          ? (reportSnap.data() as Partial<CompanyAnalysisReportForm>)
+          : null
+        setReportForm(toCompanyAnalysisReportForm(savedReport, companyName))
       } finally {
         if (mounted) {
           setLoadingDetails(false)
@@ -259,16 +383,6 @@ export function AdminDashboard({
       mounted = false
     }
   }, [programs, selectedCompanyId])
-
-  useEffect(() => {
-    const nextCompanyName = companyInfo?.basic?.companyInfo ?? ""
-    setReportForm((prev) => ({
-      ...prev,
-      companyName: nextCompanyName,
-      createdAt:
-        prev.createdAt || new Date().toLocaleString("ko-KR"),
-    }))
-  }, [companyInfo, selectedCompanyId])
 
   const formatValue = (value?: string | number | null) => {
     if (value === null || value === undefined || value === "") return "-"
@@ -398,9 +512,9 @@ export function AdminDashboard({
   }, [selfAssessment])
 
   const radarData = useMemo(() => {
-    const size = 240
+    const size = 320
     const center = size / 2
-    const radius = size / 2 - 18
+    const radius = size / 2 - 44
     const axes = assessmentSummary.grouped.map((section, index) => {
       const angle = (Math.PI * 2 * index) / assessmentSummary.grouped.length - Math.PI / 2
       const total = assessmentSummary.sectionTotals[section.sectionKey] ?? section.sectionTotal
@@ -408,8 +522,8 @@ export function AdminDashboard({
       const ratio = total > 0 ? score / total : 0
       const x = center + Math.cos(angle) * radius * ratio
       const y = center + Math.sin(angle) * radius * ratio
-      const labelX = center + Math.cos(angle) * (radius + 10)
-      const labelY = center + Math.sin(angle) * (radius + 10)
+      const labelX = center + Math.cos(angle) * (radius + 30)
+      const labelY = center + Math.sin(angle) * (radius + 30)
       return {
         angle,
         x,
@@ -425,6 +539,391 @@ export function AdminDashboard({
     const points = axes.map((axis) => `${axis.x},${axis.y}`).join(" ")
     return { size, center, radius, axes, points }
   }, [assessmentSummary])
+
+  const improvementSections = useMemo(
+    () => splitNumberedReportSections(reportForm.improvements),
+    [reportForm.improvements]
+  )
+
+  const diagnosticSummaryText = useMemo(() => {
+    const sections = [
+      reportForm.summaryCapability.trim(),
+      reportForm.summaryMarket.trim(),
+    ].filter(Boolean)
+    return sections.length > 0 ? sections.join("\n\n") : ""
+  }, [reportForm.summaryCapability, reportForm.summaryMarket])
+
+  const improvementsText = useMemo(() => {
+    if (improvementSections.length > 0) {
+      return improvementSections.join("\n\n")
+    }
+    return reportForm.improvements.trim()
+  }, [improvementSections, reportForm.improvements])
+
+  const handleDiagnosticSummaryChange = (value: string) => {
+    const normalized = value.replace(/\r\n/g, "\n").trim()
+    if (!normalized) {
+      setReportForm((prev) => ({
+        ...prev,
+        summaryCapability: "",
+        summaryMarket: "",
+      }))
+      return
+    }
+
+    const paragraphs = splitReportParagraphs(normalized)
+    if (paragraphs.length <= 1) {
+      setReportForm((prev) => ({
+        ...prev,
+        summaryCapability: normalized,
+        summaryMarket: "",
+      }))
+      return
+    }
+
+    const midpoint = Math.ceil(paragraphs.length / 2)
+    setReportForm((prev) => ({
+      ...prev,
+      summaryCapability: paragraphs.slice(0, midpoint).join("\n\n"),
+      summaryMarket: paragraphs.slice(midpoint).join("\n\n"),
+    }))
+  }
+
+  const handleGenerateAiDraft = async () => {
+    if (!companyInfo) {
+      toast.error("기업 정보가 없어 AI 초안을 생성할 수 없습니다")
+      return
+    }
+
+    setIsGeneratingReport(true)
+    try {
+      const assessmentDetails = assessmentSummary.grouped.flatMap((section) =>
+        section.questions.map((item) => ({
+          sectionTitle: item.sectionTitle,
+          subsectionTitle: item.subsectionTitle,
+          questionText: item.questionText,
+          answerLabel: item.answerLabel,
+          reason: item.reason,
+          score: item.score,
+        })),
+      )
+
+      const result = await generateCompanyAnalysisReportViaFunction({
+        companyName:
+          reportForm.companyName ||
+          companyInfo.basic?.companyInfo ||
+          companies.find((company) => company.id === selectedCompanyId)?.name ||
+          "회사명 미정",
+        companyInfo,
+        assessmentSummary: {
+          totalScore: assessmentSummary.totalScore,
+          grouped: assessmentSummary.grouped.map((section) => ({
+            sectionTitle: section.sectionTitle,
+            sectionScore: section.sectionScore,
+            sectionTotal: section.sectionTotal,
+          })),
+        },
+        assessmentDetails,
+      })
+
+      setReportForm((prev) => ({
+        ...prev,
+        ...result.report,
+        createdAt: new Date().toLocaleString("ko-KR"),
+      }))
+      toast.success("AI 보고서 초안이 생성되었습니다")
+    } catch (error) {
+      console.error("Failed to generate AI company report:", error)
+      toast.error("AI 보고서 초안 생성에 실패했습니다")
+    } finally {
+      setIsGeneratingReport(false)
+    }
+  }
+
+  const handleSaveReport = async () => {
+    if (!selectedCompanyId) {
+      toast.error("회사를 먼저 선택해주세요")
+      return
+    }
+
+    setSavingReport(true)
+    try {
+      const companyName =
+        companyInfo?.basic?.companyInfo ||
+        companies.find((company) => company.id === selectedCompanyId)?.name ||
+        reportForm.companyName ||
+        "회사명 미정"
+      const savedAt = new Date().toLocaleString("ko-KR")
+
+      const nextReportForm = {
+        ...reportForm,
+        companyName,
+        createdAt: savedAt,
+      }
+
+      await setDoc(
+        doc(db, "companies", selectedCompanyId, "analysisReport", "current"),
+        {
+          ...nextReportForm,
+          companyId: selectedCompanyId,
+          updatedAt: serverTimestamp(),
+          updatedByUid: user.uid,
+        },
+        { merge: true }
+      )
+
+      setReportForm(nextReportForm)
+      toast.success("분석 보고서가 저장되었습니다")
+    } catch (error) {
+      console.error("Failed to save company analysis report:", error)
+      toast.error("분석 보고서 저장에 실패했습니다")
+    } finally {
+      setSavingReport(false)
+    }
+  }
+
+  const handleDownloadReportExcel = async () => {
+    if (!selectedCompanyId) {
+      toast.error("회사를 먼저 선택해주세요")
+      return
+    }
+
+    setDownloadingReport(true)
+    try {
+      const workbook = new ExcelJS.Workbook()
+      workbook.creator = "MYSC"
+      workbook.created = new Date()
+
+      const worksheet = workbook.addWorksheet("기업진단분석보고서")
+      worksheet.columns = [
+        { width: 3 },
+        { width: 18 },
+        { width: 18 },
+        { width: 18 },
+        { width: 18 },
+        { width: 18 },
+        { width: 18 },
+        { width: 15 },
+        { width: 15 },
+        { width: 15 },
+      ]
+
+      worksheet.mergeCells("B1:J1")
+      const titleCell = worksheet.getCell("B1")
+      titleCell.value = "기업진단분석보고서"
+      titleCell.font = { name: "Malgun Gothic", size: 16, bold: true }
+      titleCell.alignment = { vertical: "middle", horizontal: "left" }
+      worksheet.getRow(1).height = 26
+
+      const applyBorderRange = (
+        rowNumber: number,
+        startColumn: number,
+        endColumn: number,
+        borderColor = "FFCBD5E1"
+      ) => {
+        for (let column = startColumn; column <= endColumn; column += 1) {
+          worksheet.getRow(rowNumber).getCell(column).border = {
+            top: { style: "thin", color: { argb: "FFCBD5E1" } },
+            left: { style: "thin", color: { argb: borderColor } },
+            bottom: { style: "thin", color: { argb: borderColor } },
+            right: { style: "thin", color: { argb: borderColor } },
+          }
+        }
+      }
+
+      const estimateRowHeight = (
+        text: string,
+        charsPerLine: number,
+        minHeight = 24,
+        maxHeight = 110
+      ) => {
+        const lineCount = String(text || "")
+          .split("\n")
+          .reduce((count, line) => {
+            const normalized = line.trim()
+            return count + Math.max(1, Math.ceil((normalized.length || 1) / charsPerLine))
+          }, 0)
+
+        return Math.min(maxHeight, Math.max(minHeight, lineCount * 16 + 6))
+      }
+
+      const writeLabelValueRow = (
+        rowIndex: number,
+        label: string,
+        value: string,
+        charsPerLine = 120
+      ) => {
+        const row = worksheet.getRow(rowIndex)
+        row.getCell(2).value = label
+        worksheet.mergeCells(`C${rowIndex}:J${rowIndex}`)
+        row.getCell(3).value = value
+        row.getCell(2).font = { name: "Malgun Gothic", size: 10, bold: true }
+        row.getCell(3).font = { name: "Malgun Gothic", size: 10 }
+        row.getCell(2).alignment = { vertical: "top", wrapText: true }
+        row.getCell(3).alignment = { vertical: "top", wrapText: true }
+        row.getCell(2).fill = {
+          type: "pattern",
+          pattern: "solid",
+          fgColor: { argb: "FFF8FAFC" },
+        }
+        row.height = estimateRowHeight(value, charsPerLine)
+        applyBorderRange(rowIndex, 2, 10)
+      }
+
+      const writeSectionHeader = (rowIndex: number, title: string) => {
+        worksheet.mergeCells(`B${rowIndex}:J${rowIndex}`)
+        const cell = worksheet.getCell(`B${rowIndex}`)
+        cell.value = title
+        cell.font = { name: "Malgun Gothic", size: 11, bold: true }
+        cell.alignment = { vertical: "middle", horizontal: "left" }
+        cell.fill = {
+          type: "pattern",
+          pattern: "solid",
+          fgColor: { argb: "FFEFF6FF" },
+        }
+        worksheet.getRow(rowIndex).height = 20
+        applyBorderRange(rowIndex, 2, 10)
+      }
+
+      const radarChartSvg = buildRadarChartSvg(radarData)
+      const radarChartImage = await renderSvgToPngDataUrl(radarChartSvg)
+      const radarChartImageId = workbook.addImage({
+        base64: radarChartImage,
+        extension: "png",
+      })
+
+      let rowIndex = 3
+      writeLabelValueRow(rowIndex, "기업명", reportForm.companyName || "")
+      rowIndex += 1
+      writeLabelValueRow(rowIndex, "작성일시", reportForm.createdAt || "")
+      rowIndex += 2
+
+      writeSectionHeader(rowIndex, "현황 분석 점수")
+      rowIndex += 1
+
+      const mainSheetChartRow = rowIndex
+      const mainSheetChartHeightRows = 14
+      worksheet.addImage(radarChartImageId, {
+        tl: { col: 1.1, row: mainSheetChartRow - 0.35 },
+        ext: { width: 470, height: 320 },
+        editAs: "oneCell",
+      })
+      for (let row = mainSheetChartRow; row < mainSheetChartRow + mainSheetChartHeightRows; row += 1) {
+        worksheet.getRow(row).height = 18
+      }
+
+      const writeScoreSummaryRow = (
+        rowNumber: number,
+        label: string,
+        value: string,
+        highlighted = false
+      ) => {
+        const row = worksheet.getRow(rowNumber)
+        worksheet.mergeCells(`H${rowNumber}:I${rowNumber}`)
+        row.getCell(8).value = label
+        row.getCell(10).value = value
+        row.getCell(8).font = { name: "Malgun Gothic", size: 10, bold: true }
+        row.getCell(10).font = {
+          name: "Malgun Gothic",
+          size: 10,
+          bold: highlighted,
+        }
+        row.getCell(8).alignment = { vertical: "middle", wrapText: false }
+        row.getCell(10).alignment = { vertical: "middle", wrapText: false, horizontal: "right" }
+        const fillColor = highlighted ? "FFF0FDF4" : "FFF8FAFC"
+        const borderColor = highlighted ? "FFA7F3D0" : "FFCBD5E1"
+        row.getCell(8).fill = {
+          type: "pattern",
+          pattern: "solid",
+          fgColor: { argb: fillColor },
+        }
+        row.getCell(10).fill = {
+          type: "pattern",
+          pattern: "solid",
+          fgColor: { argb: highlighted ? "FFECFDF5" : "FFFFFFFF" },
+        }
+        row.height = 20
+        applyBorderRange(rowNumber, 8, 10, borderColor)
+      }
+
+      worksheet.mergeCells(`H${mainSheetChartRow}:J${mainSheetChartRow}`)
+      const scoreTableTitleCell = worksheet.getCell(`H${mainSheetChartRow}`)
+      scoreTableTitleCell.value = "항목별 점수"
+      scoreTableTitleCell.font = { name: "Malgun Gothic", size: 10, bold: true }
+      scoreTableTitleCell.alignment = { vertical: "middle", horizontal: "left" }
+      scoreTableTitleCell.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "FFF8FAFC" },
+      }
+      worksheet.getRow(mainSheetChartRow).height = 20
+      applyBorderRange(mainSheetChartRow, 8, 10)
+
+      let mainSheetScoreRow = mainSheetChartRow + 1
+      writeScoreSummaryRow(mainSheetScoreRow, "총점", `${formatScore(assessmentSummary.totalScore)}/100점`, true)
+      mainSheetScoreRow += 1
+      assessmentSummary.grouped.forEach((section) => {
+        writeScoreSummaryRow(
+          mainSheetScoreRow,
+          section.sectionTitle,
+          `${formatScore(section.sectionScore)}/${formatScore(section.sectionTotal)}점`
+        )
+        mainSheetScoreRow += 1
+      })
+
+      rowIndex = mainSheetChartRow + mainSheetChartHeightRows + 1
+
+      writeSectionHeader(rowIndex, "기업상황요약")
+      rowIndex += 1
+      writeLabelValueRow(rowIndex, "기업진단", diagnosticSummaryText || "", 135)
+      rowIndex += 1
+      writeLabelValueRow(rowIndex, "개선 필요사항", improvementsText || "", 135)
+      rowIndex += 2
+
+      writeSectionHeader(rowIndex, "AC 프로그램 제안")
+      rowIndex += 1
+      writeLabelValueRow(rowIndex, "1순위", reportForm.acPriority1 || "", 135)
+      rowIndex += 1
+      writeLabelValueRow(rowIndex, "2순위", reportForm.acPriority2 || "", 135)
+      rowIndex += 1
+      writeLabelValueRow(rowIndex, "3순위", reportForm.acPriority3 || "", 135)
+      rowIndex += 2
+
+      writeSectionHeader(rowIndex, "엑셀러레이팅 마일스톤 제안")
+      rowIndex += 1
+      writeLabelValueRow(rowIndex, "5~6월", reportForm.milestone56 || "", 135)
+      rowIndex += 1
+      writeLabelValueRow(rowIndex, "7~8월", reportForm.milestone78 || "", 135)
+      rowIndex += 1
+      writeLabelValueRow(rowIndex, "9~10월", reportForm.milestone910 || "", 135)
+
+      const buffer = await workbook.xlsx.writeBuffer()
+      const blob = new Blob([buffer], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      })
+      const safeCompanyName = (reportForm.companyName || "company-report")
+        .replace(/[\\/:*?"<>|]/g, "-")
+        .trim()
+      const safeCreatedAt = (reportForm.createdAt || new Date().toLocaleDateString("ko-KR"))
+        .replace(/[\\/:*?"<>|]/g, "-")
+        .trim()
+      const filename = `${safeCompanyName}_기업진단분석보고서_${safeCreatedAt}.xlsx`
+      const url = window.URL.createObjectURL(blob)
+      const link = document.createElement("a")
+      link.href = url
+      link.download = filename
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      window.URL.revokeObjectURL(url)
+      toast.success("분석 보고서를 엑셀로 다운로드했습니다")
+    } catch (error) {
+      console.error("Failed to download company analysis report:", error)
+      toast.error("엑셀 다운로드에 실패했습니다")
+    } finally {
+      setDownloadingReport(false)
+    }
+  }
 
   return (
     <div className="bg-transparent h-full">
@@ -989,54 +1488,77 @@ export function AdminDashboard({
                 </div>
               ) : (
                 <div className="min-h-0 flex-1 overflow-y-auto space-y-6">
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
-                    <div className="text-sm font-semibold text-slate-800">
-                      기업진단분석보고서
+                  <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4 shadow-sm">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <div className="text-sm font-semibold text-slate-800">
+                          기업진단분석보고서
+                        </div>
+                        <p className="mt-1 text-xs text-slate-500">
+                          기업 정보와 현황 진단을 바탕으로 AI 초안을 생성한 뒤 수정할 수 있습니다.
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => void handleGenerateAiDraft()}
+                          disabled={isGeneratingReport || !companyInfo}
+                          className="inline-flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800 transition hover:border-amber-300 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          <Wand2 className="h-3.5 w-3.5" />
+                          {isGeneratingReport ? "AI 초안 생성 중..." : "AI 초안 생성"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void handleDownloadReportExcel()}
+                          disabled={downloadingReport || !selectedCompanyId}
+                          className="inline-flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-800 transition hover:border-emerald-300 hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          <FileSpreadsheet className="h-3.5 w-3.5" />
+                          {downloadingReport ? "다운로드 준비 중..." : "엑셀 다운로드"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void handleSaveReport()}
+                          disabled={savingReport || !selectedCompanyId}
+                          className="inline-flex items-center gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3 py-2 text-xs font-semibold text-sky-800 transition hover:border-sky-300 hover:bg-sky-100 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          <Save className="h-3.5 w-3.5" />
+                          {savingReport ? "저장 중..." : "보고서 저장"}
+                        </button>
+                      </div>
                     </div>
-                    <p className="mt-1 text-xs text-slate-500">
-                      기업 정보를 기반으로 분석 보고서를 작성합니다.
-                    </p>
                   </div>
 
                   <div className="grid gap-4 sm:grid-cols-2">
-                    <label className="text-xs text-slate-500">
-                      기업명
-                      <input
-                        className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
-                        value={reportForm.companyName}
-                        onChange={(e) =>
-                          setReportForm((prev) => ({
-                            ...prev,
-                            companyName: e.target.value,
-                          }))
-                        }
-                      />
-                    </label>
-                    <label className="text-xs text-slate-500">
-                      작성일시
-                      <input
-                        className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
-                        value={reportForm.createdAt}
-                        onChange={(e) =>
-                          setReportForm((prev) => ({
-                            ...prev,
-                            createdAt: e.target.value,
-                          }))
-                        }
-                      />
-                    </label>
+                    <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+                      <div className="text-xs font-semibold tracking-[0.08em] text-slate-400">
+                        기업명
+                      </div>
+                      <div className="mt-2 text-sm text-slate-700">
+                        {reportForm.companyName || "-"}
+                      </div>
+                    </div>
+                    <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+                      <div className="text-xs font-semibold tracking-[0.08em] text-slate-400">
+                        작성일시
+                      </div>
+                      <div className="mt-2 text-sm text-slate-700">
+                        {reportForm.createdAt || "-"}
+                      </div>
+                    </div>
                   </div>
 
-                  <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                  <div className="rounded-2xl border border-slate-200 bg-white p-2">
                     <div className="text-sm font-semibold text-slate-700">
                       현황 분석 점수
                     </div>
-                    <div className="mt-4 grid gap-4 lg:grid-cols-[300px_1fr]">
-                      <div className="flex items-center justify-start pl-2">
+                    <div className="mt-1 grid gap-0.5 lg:grid-cols-[316px_1fr] lg:items-center">
+                      <div className="-mt-3 flex items-start justify-start -ml-8">
                         <svg
                           width={radarData.size}
                           height={radarData.size}
-                          viewBox={`-24 -24 ${radarData.size + 48} ${radarData.size + 48}`}
+                          viewBox={`-72 -72 ${radarData.size + 144} ${radarData.size + 144}`}
                         >
                           {[1, 0.75, 0.5, 0.25].map((ratio) => {
                             const points = radarData.axes
@@ -1097,35 +1619,40 @@ export function AdminDashboard({
                               key={`label-${index}`}
                               x={axis.labelX}
                               y={axis.labelY}
-                              textAnchor={
-                                axis.labelX < radarData.center ? "end" : "start"
-                              }
-                              dominantBaseline="middle"
-                              fontSize="9"
+                              textAnchor="middle"
+                              fontSize="14"
                               fill="#475569"
                             >
-                              {axis.label}
+                              {getRadarLabelLines(axis.label).map((line, lineIndex) => (
+                                <tspan
+                                  key={`${axis.label}-${lineIndex}`}
+                                  x={axis.labelX}
+                                  dy={lineIndex === 0 ? 0 : 16}
+                                >
+                                  {line}
+                                </tspan>
+                              ))}
                             </text>
                           ))}
                         </svg>
                       </div>
-                      <div className="grid gap-2 sm:grid-cols-2">
+                      <div className="-ml-2 grid grid-cols-2 gap-1.5 self-center sm:grid-cols-3 lg:-ml-3 lg:mr-1">
                         {assessmentSummary.grouped.map((section) => (
                           <div
                             key={`score-${section.sectionTitle}`}
-                            className="rounded-xl border border-slate-100 bg-slate-50 px-3 py-2 text-xs text-slate-600"
+                            className="flex min-h-[52px] flex-col justify-center rounded-md border border-slate-200 bg-white px-2 py-0.5 text-[11px] text-slate-600 shadow-sm"
                           >
-                            <div className="font-semibold text-slate-700 whitespace-normal break-words text-[11px] leading-snug">
+                            <div className="overflow-visible whitespace-nowrap text-center text-[10px] font-semibold leading-tight tracking-tight text-slate-700">
                               {section.sectionTitle}
                             </div>
-                            <div className="mt-1 whitespace-normal break-words text-[11px] text-slate-600">
+                            <div className="mt-0.5 whitespace-nowrap text-center text-[10px] leading-tight tracking-tight text-slate-600">
                               {formatScore(section.sectionScore)}/{formatScore(section.sectionTotal)}점
                             </div>
                           </div>
                         ))}
-                        <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
-                          <div className="font-semibold whitespace-normal break-words text-[11px] leading-snug">총점</div>
-                          <div className="mt-1 whitespace-normal break-words text-[11px]">
+                        <div className="flex min-h-[52px] flex-col justify-center rounded-md border border-emerald-200 bg-emerald-100 px-2 py-0.5 text-[11px] text-emerald-800 shadow-sm sm:col-start-3">
+                          <div className="text-center font-semibold leading-tight">총점</div>
+                          <div className="mt-0.5 text-center text-[11px] leading-tight">
                             {formatScore(assessmentSummary.totalScore)}/100점
                           </div>
                         </div>
@@ -1133,61 +1660,54 @@ export function AdminDashboard({
                     </div>
                   </div>
 
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    <label className="text-xs text-slate-500">
-                      기업상황요약 - 기업 역량
-                      <textarea
-                        rows={3}
-                        className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
-                        value={reportForm.summaryCapability}
-                        onChange={(e) =>
-                          setReportForm((prev) => ({
-                            ...prev,
-                            summaryCapability: e.target.value,
-                          }))
-                        }
-                      />
-                    </label>
-                    <label className="text-xs text-slate-500">
-                      기업상황요약 - 시장검증
-                      <textarea
-                        rows={3}
-                        className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
-                        value={reportForm.summaryMarket}
-                        onChange={(e) =>
-                          setReportForm((prev) => ({
-                            ...prev,
-                            summaryMarket: e.target.value,
-                          }))
-                        }
-                      />
-                    </label>
-                  </div>
+                  <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                    <div className="text-sm font-semibold text-slate-700">
+                      기업상황요약
+                    </div>
+                    <div className="mt-4 space-y-5">
+                      <div className="space-y-4">
+                        <div className="text-xs font-semibold tracking-[0.08em] text-slate-400">
+                          기업진단
+                        </div>
+                        <textarea
+                          rows={4}
+                          className="w-full rounded-xl border border-slate-200 bg-white px-4 py-4 text-[13px] leading-6 text-slate-700"
+                          value={diagnosticSummaryText}
+                          onChange={(e) => handleDiagnosticSummaryChange(e.target.value)}
+                        />
+                      </div>
 
-                  <label className="text-xs text-slate-500">
-                    개선 필요사항 (항목별 요약)
-                    <textarea
-                      rows={4}
-                      className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
-                      value={reportForm.improvements}
-                      onChange={(e) =>
-                        setReportForm((prev) => ({
-                          ...prev,
-                          improvements: e.target.value,
-                        }))
-                      }
-                    />
-                  </label>
+                      <div className="border-t border-slate-100" />
+
+                      <div className="space-y-4">
+                        <div className="text-xs font-semibold tracking-[0.08em] text-slate-400">
+                          개선 필요사항
+                        </div>
+                        <textarea
+                          rows={5}
+                          className="w-full rounded-xl border border-slate-200 bg-white px-4 py-4 text-[13px] leading-6 text-slate-700"
+                          value={improvementsText}
+                          onChange={(e) =>
+                            setReportForm((prev) => ({
+                              ...prev,
+                              improvements: e.target.value,
+                            }))
+                          }
+                        />
+                      </div>
+                    </div>
+                  </div>
 
                   <div className="rounded-2xl border border-slate-200 bg-white p-4">
                     <div className="text-sm font-semibold text-slate-700">
                       AC 프로그램 제안
                     </div>
-                    <div className="mt-3 grid gap-3 sm:grid-cols-3">
+                    <div className="mt-3 space-y-3">
                       <label className="text-xs text-slate-500">
                         1순위
-                        <input
-                          className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
+                        <textarea
+                          rows={2}
+                          className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-[13px] leading-6 text-slate-700"
                           value={reportForm.acPriority1}
                           onChange={(e) =>
                             setReportForm((prev) => ({
@@ -1199,8 +1719,9 @@ export function AdminDashboard({
                       </label>
                       <label className="text-xs text-slate-500">
                         2순위
-                        <input
-                          className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
+                        <textarea
+                          rows={2}
+                          className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-[13px] leading-6 text-slate-700"
                           value={reportForm.acPriority2}
                           onChange={(e) =>
                             setReportForm((prev) => ({
@@ -1212,8 +1733,9 @@ export function AdminDashboard({
                       </label>
                       <label className="text-xs text-slate-500">
                         3순위
-                        <input
-                          className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
+                        <textarea
+                          rows={2}
+                          className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-[13px] leading-6 text-slate-700"
                           value={reportForm.acPriority3}
                           onChange={(e) =>
                             setReportForm((prev) => ({
@@ -1227,17 +1749,19 @@ export function AdminDashboard({
                   </div>
 
                   <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                    <div className="text-sm font-semibold text-slate-700">
-                      엑셀러레이팅 마일스톤 제안
-                    </div>
-                    <div className="mt-3 grid gap-3 sm:grid-cols-3">
-                      <label className="text-xs text-slate-500">
-                        5~6월
-                        <textarea
-                          rows={3}
-                          className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
-                          value={reportForm.milestone56}
-                          onChange={(e) =>
+                      <div className="text-sm font-semibold text-slate-700">
+                        엑셀러레이팅 마일스톤 제안
+                      </div>
+                      <div className="mt-3 space-y-4">
+                        <label className="grid gap-2 text-xs text-slate-500 lg:grid-cols-[96px_minmax(0,1fr)] lg:items-start">
+                          <span className="inline-flex h-6 items-center justify-center self-start rounded-full border border-slate-200 bg-white px-2 text-[10px] font-medium tracking-[0.01em] text-slate-600">
+                            5~6월
+                          </span>
+                          <textarea
+                            rows={4}
+                            className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-[13px] leading-6 text-slate-700"
+                            value={reportForm.milestone56}
+                            onChange={(e) =>
                             setReportForm((prev) => ({
                               ...prev,
                               milestone56: e.target.value,
@@ -1245,25 +1769,29 @@ export function AdminDashboard({
                           }
                         />
                       </label>
-                      <label className="text-xs text-slate-500">
-                        7~8월
+                      <label className="grid gap-2 text-xs text-slate-500 lg:grid-cols-[96px_minmax(0,1fr)] lg:items-start">
+                        <span className="inline-flex h-6 items-center justify-center self-start rounded-full border border-slate-200 bg-white px-2 text-[10px] font-medium tracking-[0.01em] text-slate-600">
+                          7~8월
+                        </span>
                         <textarea
-                          rows={3}
-                          className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
+                          rows={4}
+                          className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-[13px] leading-6 text-slate-700"
                           value={reportForm.milestone78}
                           onChange={(e) =>
                             setReportForm((prev) => ({
                               ...prev,
-                              milestone78: e.target.value,
-                            }))
-                          }
-                        />
-                      </label>
-                      <label className="text-xs text-slate-500">
-                        9~10월
+                            milestone78: e.target.value,
+                          }))
+                        }
+                      />
+                    </label>
+                      <label className="grid gap-2 text-xs text-slate-500 lg:grid-cols-[96px_minmax(0,1fr)] lg:items-start">
+                        <span className="inline-flex h-6 items-center justify-center self-start rounded-full border border-slate-200 bg-white px-2 text-[10px] font-medium tracking-[0.01em] text-slate-600">
+                          9~10월
+                        </span>
                         <textarea
-                          rows={3}
-                          className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
+                          rows={4}
+                          className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-[13px] leading-6 text-slate-700"
                           value={reportForm.milestone910}
                           onChange={(e) =>
                             setReportForm((prev) => ({

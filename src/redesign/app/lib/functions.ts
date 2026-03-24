@@ -57,6 +57,38 @@ type ApprovePendingUserResult = {
   companyId?: string | null;
 };
 
+export type GenerateCompanyAnalysisReportPayload = {
+  companyName: string;
+  companyInfo: unknown;
+  assessmentSummary: unknown;
+  assessmentDetails: Array<{
+    sectionTitle: string;
+    subsectionTitle: string;
+    questionText: string;
+    answerLabel: string;
+    reason: string;
+    score: number;
+  }>;
+};
+
+type GenerateCompanyAnalysisReportResult = {
+  report: {
+    summaryCapability: string;
+    summaryMarket: string;
+    improvements: string;
+    acPriority1: string;
+    acPriority2: string;
+    acPriority3: string;
+    milestone56: string;
+    milestone78: string;
+    milestone910: string;
+  };
+  meta: {
+    model: string;
+    generatedAt: string;
+  };
+};
+
 export async function submitRegularApplicationViaFunction(
   payload: SubmitRegularApplicationPayload
 ) {
@@ -128,5 +160,21 @@ export async function approvePendingUserViaFunction(userId: string) {
   );
 
   const result = await callable({ userId });
+  return result.data;
+}
+
+export async function generateCompanyAnalysisReportViaFunction(
+  payload: GenerateCompanyAnalysisReportPayload
+) {
+  if (!isFirebaseConfigured || !functions) {
+    throw new Error("Firebase Functions is not configured");
+  }
+
+  const callable = httpsCallable<
+    GenerateCompanyAnalysisReportPayload,
+    GenerateCompanyAnalysisReportResult
+  >(functions, "generateCompanyAnalysisReport");
+
+  const result = await callable(payload);
   return result.data;
 }
