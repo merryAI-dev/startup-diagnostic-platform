@@ -904,37 +904,31 @@ function CompanySignupInfo({
     if (key === "businessNumber") return !isBusinessNumber(value)
     return false
   })
-  const meaningfulInvestmentRows = investmentRows.filter((row) => {
-    return (
-      parseInvestmentStages(row.stage).length > 0
-      || isFilled(row.date)
-      || hasNumber(row.postMoney)
-      || isFilled(row.majorShareholder)
-    )
-  })
+  const hasInvestmentRows = investmentRows.length > 0
   const investmentRowsComplete =
     isPreStartup
-    || (
-      meaningfulInvestmentRows.length > 0
-      && meaningfulInvestmentRows.every(
-        (row) =>
-          parseInvestmentStages(row.stage).length > 0
-          && isFilled(row.date)
-          && hasNumber(row.postMoney)
-          && isFilled(row.majorShareholder)
-      )
+    || !hasInvestmentRows
+    || investmentRows.every(
+      (row) =>
+        parseInvestmentStages(row.stage).length > 0
+        && isFilled(row.date)
+        && hasNumber(row.postMoney)
+        && isFilled(row.majorShareholder)
     )
+  const investmentRowsNeedInput = hasInvestmentRows && !investmentRowsComplete
   const canSubmit =
     missingRequiredFields.length === 0
     && invalidRequiredFields.length === 0
     && investmentRowsComplete
-  const missingRequired = missingRequiredFields.length + (investmentRowsComplete ? 0 : 1)
-  const invalidRequired = invalidRequiredFields.length
+  const missingRequired = missingRequiredFields.length
+  const invalidRequired = invalidRequiredFields.length + (investmentRowsNeedInput ? 1 : 0)
   const missingRequiredLabels = [
     ...missingRequiredFields.map((field) => FIELD_LABELS[field]),
-    ...(!investmentRowsComplete ? ["투자이력"] : []),
   ]
-  const invalidRequiredLabels = invalidRequiredFields.map((field) => FIELD_LABELS[field])
+  const invalidRequiredLabels = [
+    ...invalidRequiredFields.map((field) => FIELD_LABELS[field]),
+    ...(investmentRowsNeedInput ? ["투자이력"] : []),
+  ]
 
   function markTouched(field: keyof CompanyInfoForm) {
     setTouched((prev) => ({ ...prev, [field]: true }))
@@ -972,7 +966,6 @@ function CompanySignupInfo({
 
   function removeInvestmentRow(target: number) {
     setInvestmentRows((prev) => {
-      if (prev.length <= 1) return prev
       return prev.filter((_, index) => index !== target)
     })
     setActiveInvestmentStageRow((prev) => {
@@ -2381,7 +2374,6 @@ function CompanySignupInfo({
                               type="button"
                               className="mt-5 shrink-0 rounded-md border border-rose-200 p-2 text-rose-600 hover:border-rose-300 hover:bg-rose-50 hover:text-rose-700 disabled:cursor-not-allowed disabled:opacity-60"
                               onClick={() => removeInvestmentRow(idx)}
-                              disabled={investmentRows.length <= 1}
                               aria-label="삭제"
                             >
                               <Trash2 className="h-3.5 w-3.5" />
