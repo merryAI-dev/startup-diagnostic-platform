@@ -7,6 +7,7 @@ import { Input } from "@/redesign/app/components/ui/input";
 import { StatusChip } from "@/redesign/app/components/status-chip";
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameMonth, isSameDay, addMonths, subMonths, startOfWeek, endOfWeek, isToday } from "date-fns";
 import { ko } from "date-fns/locale";
+import { parseLocalDateKey } from "@/redesign/app/lib/date-keys";
 
 interface ApplicationHistoryCalendarProps {
   applications: Application[];
@@ -47,14 +48,17 @@ export function ApplicationHistoryCalendar({ applications, onNavigate }: Applica
   const getApplicationsForDate = (date: Date) => {
     return filteredApplications.filter((app) => {
       if (!app.scheduledDate) return false;
-      return isSameDay(new Date(app.scheduledDate), date);
+      const scheduledDate = parseLocalDateKey(app.scheduledDate);
+      return Boolean(scheduledDate && isSameDay(scheduledDate, date));
     });
   };
 
   // 타임라인용 월별 그룹핑
   const applicationsByMonth = filteredApplications.reduce((acc, app) => {
     if (!app.scheduledDate) return acc;
-    const monthKey = format(new Date(app.scheduledDate), "yyyy-MM");
+    const scheduledDate = parseLocalDateKey(app.scheduledDate);
+    if (!scheduledDate) return acc;
+    const monthKey = format(scheduledDate, "yyyy-MM");
     if (!acc[monthKey]) acc[monthKey] = [];
     acc[monthKey].push(app);
     return acc;
@@ -163,7 +167,7 @@ export function ApplicationHistoryCalendar({ applications, onNavigate }: Applica
           <div className="max-w-4xl mx-auto">
             {sortedMonths.map((monthKey) => {
               const apps = applicationsByMonth[monthKey] ?? [];
-              const monthDate = new Date(monthKey + "-01");
+              const monthDate = parseLocalDateKey(`${monthKey}-01`) ?? new Date();
               
               return (
                 <div key={monthKey} className="mb-8">
@@ -177,8 +181,8 @@ export function ApplicationHistoryCalendar({ applications, onNavigate }: Applica
                   <div className="space-y-3">
                     {apps
                       .sort((a, b) => {
-                        const dateA = a.scheduledDate ? new Date(a.scheduledDate).getTime() : 0;
-                        const dateB = b.scheduledDate ? new Date(b.scheduledDate).getTime() : 0;
+                        const dateA = a.scheduledDate ? (parseLocalDateKey(a.scheduledDate)?.getTime() ?? 0) : 0;
+                        const dateB = b.scheduledDate ? (parseLocalDateKey(b.scheduledDate)?.getTime() ?? 0) : 0;
                         return dateB - dateA;
                       })
                       .map((app, idx) => {
@@ -209,7 +213,7 @@ export function ApplicationHistoryCalendar({ applications, onNavigate }: Applica
                                 {app.scheduledDate && (
                                   <>
                                     <div className="text-sm font-medium text-gray-900">
-                                      {format(new Date(app.scheduledDate), "M월 d일 (E)", { locale: ko })}
+                                      {format(parseLocalDateKey(app.scheduledDate)!, "M월 d일 (E)", { locale: ko })}
                                     </div>
                                     {app.scheduledTime && (
                                       <div className="text-sm text-muted-foreground">{app.scheduledTime}</div>
@@ -428,7 +432,7 @@ export function ApplicationHistoryCalendar({ applications, onNavigate }: Applica
                       <StatusChip status={app.status} size="sm" />
                       {app.scheduledDate && (
                         <div className="text-xs text-muted-foreground">
-                          {format(new Date(app.scheduledDate), "M/d")}
+                          {format(parseLocalDateKey(app.scheduledDate)!, "M/d")}
                         </div>
                       )}
                     </div>

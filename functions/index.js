@@ -341,10 +341,18 @@ function isDateKey(value) {
   return /^\d{4}-\d{2}-\d{2}$/.test(normalizeString(value));
 }
 
+function parseSeoulDateTime(dateKey, timeKey = "00:00") {
+  const normalizedDate = normalizeString(dateKey);
+  const normalizedTime = normalizeTimeKey(timeKey);
+  if (!normalizedDate || !normalizedTime) return null;
+  const parsed = new Date(`${normalizedDate}T${normalizedTime}:00+09:00`);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
 function parseDateKey(value) {
   if (!isDateKey(value)) return null;
-  const parsed = new Date(`${normalizeString(value)}T00:00:00`);
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
+  // Use midday in Seoul to keep the calendar date stable even when the runtime timezone is UTC.
+  return parseSeoulDateTime(value, "12:00");
 }
 
 function getProgramWeekdayNumbers(weekdays) {
@@ -406,11 +414,11 @@ function getSessionEndTime(application, slotDoc) {
   const dateKey = normalizeString(application?.scheduledDate || slotDoc?.date);
   const timeKey = normalizeTimeKey(application?.scheduledTime || slotDoc?.startTime);
   if (dateKey && timeKey) {
-    const start = new Date(`${dateKey}T${timeKey}`);
-    if (!Number.isNaN(start.getTime())) {
+    const start = parseSeoulDateTime(dateKey, timeKey);
+    if (start) {
       if (slotDoc?.endTime) {
-        const end = new Date(`${dateKey}T${normalizeTimeKey(slotDoc.endTime)}`);
-        if (!Number.isNaN(end.getTime())) {
+        const end = parseSeoulDateTime(dateKey, slotDoc.endTime);
+        if (end) {
           return end;
         }
       }
@@ -421,8 +429,8 @@ function getSessionEndTime(application, slotDoc) {
   }
 
   if (dateKey) {
-    const fallback = new Date(`${dateKey}T23:59`);
-    if (!Number.isNaN(fallback.getTime())) {
+    const fallback = parseSeoulDateTime(dateKey, "23:59");
+    if (fallback) {
       return fallback;
     }
   }
@@ -437,8 +445,8 @@ function hasSessionEnded(application, slotDoc, now = new Date()) {
 
 function isConsultantAvailableAt(consultant, dateKey, time) {
   if (!isDateKey(dateKey) || !time) return false;
-  const targetDate = new Date(`${dateKey}T00:00:00`);
-  if (Number.isNaN(targetDate.getTime())) return false;
+  const targetDate = parseDateKey(dateKey);
+  if (!targetDate) return false;
   const dayOfWeek = targetDate.getDay();
   const availabilityList = Array.isArray(consultant.availability) ? consultant.availability : [];
   const dayAvailability = availabilityList.find((item) => item?.dayOfWeek === dayOfWeek);
@@ -551,6 +559,49 @@ async function hasBlockingApplicationForSlotGroup(
     }
     return relatedSlotIds.has(normalizeString(candidate.officeHourSlotId));
   });
+}
+
+async function getSameTimeApplicationsSnapshot(transaction, application) {
+  const scheduledDate = normalizeString(application?.scheduledDate);
+  const scheduledTime = normalizeTimeKey(application?.scheduledTime);
+  if (!scheduledDate || !scheduledTime) {
+    return null;
+  }
+
+  return transaction.get(
+    db
+      .collection("officeHourApplications")
+      .where("scheduledDate", "==", scheduledDate)
+      .where("scheduledTime", "==", scheduledTime)
+  );
+}
+
+function reconcileRelatedSlotStatuses(
+  transaction,
+  relatedSlotSnaps,
+  sameTimeApplicationDocs,
+  excludedApplicationId = "",
+  forceBookedSlotIds = new Set()
+) {
+  relatedSlotSnaps.forEach((slotSnap) => {
+    const shouldRemainBooked =
+      forceBookedSlotIds.has(slotSnap.id) ||
+      sameTimeApplicationDocs.some((doc) => {
+        if (doc.id === excludedApplicationId) return false;
+        const candidate = doc.data() || {};
+        if (!SLOT_BLOCKING_APPLICATION_STATUSES.has(normalizeApplicationStatus(candidate.status))) {
+          return false;
+        }
+        return normalizeString(candidate.officeHourSlotId) === slotSnap.id;
+      });
+
+    transaction.update(slotSnap.ref, {
+      status: shouldRemainBooked ? "booked" : "open",
+      updatedAt: FieldValue.serverTimestamp(),
+    });
+  });
+
+  return collectSlotIds(relatedSlotSnaps);
 }
 
 function normalizeConsultantDoc(consultantSnap) {
@@ -748,7 +799,11 @@ async function reserveApplicationSlotForConsultant(
   );
 
   if (shouldOpenPreviousSlots) {
-    updateSlotSnapshots(transaction, previousRelatedSlotSnaps, "open");
+    updateSlotSnapshots(
+      transaction,
+      previousRelatedSlotSnaps.filter((slotSnap) => slotSnap.id !== targetSlotRef.id),
+      "open"
+    );
   }
 
   return {
@@ -1902,6 +1957,8 @@ exports.transitionApplicationStatus = onCall(
         relatedSlotSnaps[0] ||
         null;
       const assignedSlotDoc = assignedSlotSnap?.data?.() || null;
+      const sameTimeApplicationsSnap = await getSameTimeApplicationsSnapshot(transaction, application);
+      const sameTimeApplicationDocs = sameTimeApplicationsSnap?.docs ?? [];
 
       if (action === "claim" || action === "confirm") {
         if (hasSessionEnded(application, assignedSlotDoc)) {
@@ -1921,6 +1978,7 @@ exports.transitionApplicationStatus = onCall(
           rejectionReason: FieldValue.delete(),
           updatedAt: FieldValue.serverTimestamp(),
         });
+        updateSlotSnapshots(transaction, relatedSlotSnaps, "booked");
 
         return {
           applicationId,
@@ -2001,12 +2059,20 @@ exports.transitionApplicationStatus = onCall(
             rejectionReason: FieldValue.delete(),
           });
 
+          const slotIdsUpdated = await reconcileRelatedSlotStatuses(
+            transaction,
+            relatedSlotSnaps,
+            sameTimeApplicationDocs,
+            applicationId,
+            new Set([reservedSlot.slotRef.id])
+          );
+
           return {
             applicationId,
             status: "confirmed",
             consultant: normalizeString(consultant.name) || "컨설턴트",
             consultantId: consultant.id,
-            slotIdsUpdated: Array.from(reservedSlot.slotIdsUpdated),
+            slotIdsUpdated: Array.from(slotIdsUpdated),
             autoRejectedIds,
           };
         }
@@ -2037,21 +2103,29 @@ exports.transitionApplicationStatus = onCall(
             consultant
           );
 
+          const reservedSlot = await reserveApplicationSlotForConsultant(
+            transaction,
+            application,
+            applicationId,
+            consultant,
+            assignedSlotDoc
+          );
+
           transaction.update(applicationRef, {
             status: "confirmed",
             consultant: normalizeString(consultant.name) || "컨설턴트",
             consultantId: consultant.id,
+            officeHourSlotId: reservedSlot.slotRef.id,
             updatedAt: FieldValue.serverTimestamp(),
             rejectionReason: FieldValue.delete(),
           });
-          updateSlotSnapshots(transaction, relatedSlotSnaps, "booked");
 
           return {
             applicationId,
             status: "confirmed",
             consultant: normalizeString(consultant.name) || "컨설턴트",
             consultantId: consultant.id,
-            slotIdsUpdated: Array.from(relatedSlotIds),
+            slotIdsUpdated: Array.from(reservedSlot.slotIdsUpdated),
             autoRejectedIds,
           };
         }
@@ -2068,6 +2142,7 @@ exports.transitionApplicationStatus = onCall(
             rejectionReason: FieldValue.delete(),
             updatedAt: FieldValue.serverTimestamp(),
           });
+          updateSlotSnapshots(transaction, relatedSlotSnaps, "booked");
 
           return {
             applicationId,

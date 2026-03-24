@@ -7,6 +7,7 @@ import { format } from "date-fns";
 import { ko } from "date-fns/locale";
 import { EmptyState } from "@/redesign/app/components/empty-state";
 import { CalendarClock } from "lucide-react";
+import { parseLocalDateKey } from "@/redesign/app/lib/date-keys";
 
 interface IrregularOfficeHoursProps {
   applications: Application[];
@@ -96,14 +97,14 @@ export function IrregularOfficeHours({
                       {app.periodFrom && (
                         <p className="text-xs text-muted-foreground">
                           희망 기간:{" "}
-                          {format(new Date(app.periodFrom), "M월 d일", { locale: ko })} ~{" "}
-                          {format(new Date(app.periodTo!), "M월 d일", { locale: ko })}
+                          {format(parseLocalDateKey(app.periodFrom)!, "M월 d일", { locale: ko })} ~{" "}
+                          {format(parseLocalDateKey(app.periodTo!)!, "M월 d일", { locale: ko })}
                         </p>
                       )}
                       {app.scheduledDate && (
                         <p className="text-sm">
                           확정 일정:{" "}
-                          {format(new Date(app.scheduledDate), "M월 d일 (E)", {
+                          {format(parseLocalDateKey(app.scheduledDate)!, "M월 d일 (E)", {
                             locale: ko,
                           })}{" "}
                           {app.scheduledTime}

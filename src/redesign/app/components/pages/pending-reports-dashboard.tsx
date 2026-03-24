@@ -23,6 +23,7 @@ import { ko } from "date-fns/locale";
 import type { DateRange } from "react-day-picker";
 import { storage as firebaseStorage } from "@/redesign/app/lib/firebase";
 import { toast } from "sonner";
+import { parseLocalDateTimeKey } from "@/redesign/app/lib/date-keys";
 
 const parseLocalDate = (value?: string | null) => {
   if (!value) return null;
@@ -30,6 +31,15 @@ const parseLocalDate = (value?: string | null) => {
   if (!year || !month || !day) return null;
   const date = new Date(year, month - 1, day);
   return Number.isNaN(date.getTime()) ? null : date;
+};
+
+const formatLocalDateText = (
+  value: string | null | undefined,
+  pattern: string,
+  fallback = "-",
+) => {
+  const date = parseLocalDate(value);
+  return date ? format(date, pattern, { locale: ko }) : fallback;
 };
 
 const parseReportContent = (raw?: string | null) => {
@@ -253,13 +263,11 @@ export function PendingReportsDashboard({
   };
 
   const handleSendReminderEmail = (row: ReportRow) => {
-    const scheduledDate = row.application.scheduledDate
-      ? format(
-          parseLocalDate(row.application.scheduledDate) ?? new Date(row.application.scheduledDate),
-          "yyyy년 M월 d일",
-          { locale: ko }
-        )
-      : "일정 확인 필요";
+    const scheduledDate = formatLocalDateText(
+      row.application.scheduledDate,
+      "yyyy년 M월 d일",
+      "일정 확인 필요",
+    );
     const companyName = row.application.companyName?.trim() || row.application.applicantName?.trim() || "기업";
     const subject = `[MYSC] 오피스아워 일지 작성 요청 - ${row.application.officeHourTitle}`;
     const body = [
@@ -323,20 +331,8 @@ export function PendingReportsDashboard({
     try {
       const content = parseReportContent(report.content);
       const participantText = (report.participants ?? []).join(", ");
-      const scheduledDate = application.scheduledDate
-        ? format(
-            parseLocalDate(application.scheduledDate) ?? new Date(application.scheduledDate),
-            "yyyy-MM-dd",
-            { locale: ko }
-          )
-        : "-";
-      const writtenDate = report.date
-        ? format(
-            parseLocalDate(report.date) ?? new Date(report.date),
-            "yyyy-MM-dd",
-            { locale: ko }
-          )
-        : "-";
+      const scheduledDate = formatLocalDateText(application.scheduledDate, "yyyy-MM-dd");
+      const writtenDate = formatLocalDateText(report.date, "yyyy-MM-dd");
 
       const rows: Array<[string, string]> = [
         ["사업", programName],
@@ -509,8 +505,8 @@ export function PendingReportsDashboard({
     const durationHours = app.duration ?? 1;
 
     if (app.scheduledDate && app.scheduledTime) {
-      const start = new Date(`${app.scheduledDate}T${app.scheduledTime}`);
-      if (!Number.isNaN(start.getTime())) {
+      const start = parseLocalDateTimeKey(app.scheduledDate, app.scheduledTime);
+      if (start) {
         return new Date(start.getTime() + durationHours * 60 * 60 * 1000);
       }
     }
@@ -862,21 +858,12 @@ export function PendingReportsDashboard({
                         </TableCell>
                         <TableCell className="text-sm text-muted-foreground">
                           {row.application.scheduledDate
-                            ? format(
-                              parseLocalDate(row.application.scheduledDate)
-                                ?? new Date(row.application.scheduledDate),
-                              "yyyy.MM.dd",
-                              { locale: ko }
-                            )
+                            ? formatLocalDateText(row.application.scheduledDate, "yyyy.MM.dd")
                             : "-"}
                         </TableCell>
                         <TableCell className="text-sm text-muted-foreground">
                           {row.report?.date
-                            ? format(
-                              parseLocalDate(row.report.date) ?? new Date(row.report.date),
-                              "yyyy.MM.dd",
-                              { locale: ko }
-                            )
+                            ? formatLocalDateText(row.report.date, "yyyy.MM.dd")
                             : "-"}
                         </TableCell>
                         <TableCell className="text-center">
@@ -1022,11 +1009,9 @@ export function PendingReportsDashboard({
                     <div className="text-xs text-muted-foreground">진행일</div>
                     <div className="font-medium">
                       {selectedReportItem.application.scheduledDate
-                        ? format(
-                          parseLocalDate(selectedReportItem.application.scheduledDate)
-                            ?? new Date(selectedReportItem.application.scheduledDate),
+                        ? formatLocalDateText(
+                          selectedReportItem.application.scheduledDate,
                           "yyyy년 M월 d일",
-                          { locale: ko }
                         )
                         : "-"}
                     </div>
@@ -1035,12 +1020,7 @@ export function PendingReportsDashboard({
                     <div className="text-xs text-muted-foreground">작성일</div>
                     <div className="font-medium">
                       {selectedReportItem.report.date
-                        ? format(
-                          parseLocalDate(selectedReportItem.report.date)
-                            ?? new Date(selectedReportItem.report.date),
-                          "yyyy년 M월 d일",
-                          { locale: ko }
-                        )
+                        ? formatLocalDateText(selectedReportItem.report.date, "yyyy년 M월 d일")
                         : "-"}
                     </div>
                   </div>

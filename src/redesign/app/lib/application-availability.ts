@@ -1,4 +1,5 @@
 import type { Application, Consultant, OfficeHourSlot } from "@/redesign/app/lib/types"
+import { parseLocalDateKey } from "@/redesign/app/lib/date-keys"
 
 export function normalizeTimeKey(value?: string): string {
   if (!value) return ""
@@ -24,8 +25,8 @@ export function isConsultantAvailableAt(
   time: string,
 ): boolean {
   if (!dateKey || !time) return false
-  const targetDate = new Date(dateKey)
-  if (Number.isNaN(targetDate.getTime())) return false
+  const targetDate = parseLocalDateKey(dateKey)
+  if (!targetDate) return false
   const dayOfWeek = targetDate.getDay()
   const dayAvailability = consultant.availability.find(
     (availability) => availability.dayOfWeek === dayOfWeek,
@@ -86,23 +87,6 @@ export function getAssignableConsultantsAt(params: {
       consultant.status === "active" && (consultant.agendaIds ?? []).includes(agendaId),
   )
 
-  const hasPendingUnassignedApplication = applications.some((application) => {
-    const normalizedStatus = normalizeApplicationStatus(application.status)
-    if (normalizedStatus !== "pending") return false
-    if (application.agendaId !== agendaId) return false
-    if (!application.scheduledDate || application.scheduledDate !== dateKey) return false
-    if (!application.scheduledTime) return false
-    if (normalizeTimeKey(application.scheduledTime) !== normalizedTime) return false
-    if (application.consultantId) return false
-
-    const consultantName = application.consultant?.trim() ?? ""
-    return consultantName === "" || consultantName === "담당자 배정 중"
-  })
-
-  if (hasPendingUnassignedApplication) {
-    return []
-  }
-
   return linkedConsultants.filter((consultant) => {
     if (slotConsultantId && consultant.id !== slotConsultantId) {
       return false
@@ -123,6 +107,16 @@ export function getAssignableConsultantsAt(params: {
       if (!application.scheduledDate || !application.scheduledTime) return false
       if (application.scheduledDate !== dateKey) return false
       if (normalizeTimeKey(application.scheduledTime) !== normalizedTime) return false
+
+      const isUnassignedPending =
+        normalizedStatus === "pending" &&
+        application.agendaId === agendaId &&
+        !application.consultantId &&
+        (!application.consultant || application.consultant === "담당자 배정 중")
+
+      if (isUnassignedPending) {
+        return true
+      }
 
       const reservedConsultantId =
         getReservedConsultantId(application, officeHourSlots) ??

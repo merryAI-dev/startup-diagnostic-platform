@@ -100,6 +100,12 @@ import {
   getAssignableConsultantsAt,
   hasApplicantConflictAt,
 } from "@/redesign/app/lib/application-availability"
+import {
+  endOfLocalDateKey,
+  formatLocalDateKey as formatSafeLocalDateKey,
+  parseLocalDateKey as parseSafeLocalDateKey,
+  parseLocalDateTimeKey,
+} from "@/redesign/app/lib/date-keys"
 import { firestoreService } from "@/redesign/app/lib/firestore-service"
 import { storage as firebaseStorage } from "@/redesign/app/lib/firebase"
 import {
@@ -1088,12 +1094,12 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
   const [goals, setGoals] = useState<Goal[]>(mockGoals)
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>(mockTeamMembers)
 
-  const { data: consultantDocs } = useFirestoreCollection<Consultant>(COLLECTIONS.CONSULTANTS, {
+  const { data: consultantDocs, loading: consultantDocsLoading } = useFirestoreCollection<Consultant>(COLLECTIONS.CONSULTANTS, {
     orderByField: "name",
     orderDirection: "asc",
     enabled: isFirebaseConfigured && !isCompanyInfoRoute && needsConsultants,
   })
-  const { data: agendaDocs } = useFirestoreCollection<Agenda>(COLLECTIONS.AGENDAS, {
+  const { data: agendaDocs, loading: agendaDocsLoading } = useFirestoreCollection<Agenda>(COLLECTIONS.AGENDAS, {
     orderByField: "name",
     orderDirection: "asc",
     enabled: isFirebaseConfigured && !isCompanyInfoRoute && needsAgendas,
@@ -1445,6 +1451,15 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       officeHourApplicationDocsLoading ||
       (currentPage === "application" && !!selectedApplicationId && selectedApplicationDocLoading)
     )
+  const regularWizardRealtimeLoading =
+    isFirebaseConfigured &&
+    currentPage === "regular-wizard" &&
+    (
+      officeHourApplicationDocsLoading ||
+      officeHourSlotDocsLoading ||
+      consultantDocsLoading ||
+      agendaDocsLoading
+    )
 
   const consultantProgramIds = useMemo(() => {
     if (resolvedRole !== "consultant") return new Set<string>()
@@ -1788,18 +1803,18 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       : undefined
 
     if (app.scheduledDate && app.scheduledTime) {
-      const start = new Date(`${app.scheduledDate}T${app.scheduledTime}`)
-      if (!Number.isNaN(start.getTime())) {
+      const start = parseLocalDateTimeKey(app.scheduledDate, app.scheduledTime)
+      if (start) {
         return new Date(start.getTime() + durationHours * 60 * 60 * 1000)
       }
     }
 
     if (slot) {
-      const start = new Date(`${slot.date}T${slot.startTime}`)
-      if (!Number.isNaN(start.getTime())) {
+      const start = parseLocalDateTimeKey(slot.date, slot.startTime)
+      if (start) {
         if (slot.endTime) {
-          const end = new Date(`${slot.date}T${slot.endTime}`)
-          if (!Number.isNaN(end.getTime())) {
+          const end = parseLocalDateTimeKey(slot.date, slot.endTime)
+          if (end) {
             return end
           }
         }
@@ -1808,8 +1823,8 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     }
 
     if (app.scheduledDate) {
-      const fallback = new Date(`${app.scheduledDate}T23:59`)
-      if (!Number.isNaN(fallback.getTime())) {
+      const fallback = endOfLocalDateKey(app.scheduledDate)
+      if (fallback) {
         return fallback
       }
     }
@@ -2048,7 +2063,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
           if (!app) return n
           const deadlineInfo = getReportDeadlineInfo(app)
           const sessionDate = app.scheduledDate
-            ? new Date(app.scheduledDate).toLocaleDateString("ko-KR")
+            ? (parseSafeLocalDateKey(app.scheduledDate)?.toLocaleDateString("ko-KR") ?? "알 수 없음")
             : "알 수 없음"
           const statusText = deadlineInfo
             ? deadlineInfo.isOverdue
@@ -2075,7 +2090,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
         .map((app) => {
           const deadlineInfo = getReportDeadlineInfo(app)
           const sessionDate = app.scheduledDate
-            ? new Date(app.scheduledDate).toLocaleDateString("ko-KR")
+            ? (parseSafeLocalDateKey(app.scheduledDate)?.toLocaleDateString("ko-KR") ?? "알 수 없음")
             : "알 수 없음"
           const statusText = deadlineInfo
             ? deadlineInfo.isOverdue
@@ -2105,7 +2120,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
   const openReportFormForApplication = (applicationId: string) => {
     if (applicationId === "irregular-manual") {
       const now = new Date()
-      const today = now.toISOString().slice(0, 10)
+      const today = formatSafeLocalDateKey(now)
       const manualApp: Application = {
         id: `manual-${Date.now()}`,
         type: "irregular",
@@ -4344,6 +4359,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
               applications={resolvedApplications}
               consultants={consultants}
               agendas={agendaList}
+              isRealtimeDataLoading={regularWizardRealtimeLoading}
               allowedWeekdays={
                 programList.find((program) => program.id === selectedOfficeHour.programId)?.weekdays
               }
@@ -4718,8 +4734,11 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
                 onRejectApplication={handleRejectApplication}
                 onRequestApplication={handleRequestApplication}
                 currentUserRole={resolvedRole}
+                currentConsultantId={currentConsultant?.id ?? null}
                 currentConsultantName={currentConsultant?.name ?? null}
                 currentConsultantAgendaIds={currentConsultant?.agendaIds ?? []}
+                currentConsultantAvailability={currentConsultant?.availability ?? []}
+                officeHourSlots={officeHourSlotList}
               />
             </ProtectedRoute>
           )}
@@ -4830,7 +4849,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
                       sessionFormat: "online",
                       agenda: report.topic?.trim() || "비정기 오피스아워",
                       requestContent: "",
-                      scheduledDate: report.date || new Date().toISOString().slice(0, 10),
+                      scheduledDate: report.date || formatSafeLocalDateKey(new Date()),
                       programId: report.programId,
                       createdAt: report.createdAt,
                       updatedAt: report.updatedAt,

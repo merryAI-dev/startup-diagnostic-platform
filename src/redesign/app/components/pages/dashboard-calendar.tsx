@@ -52,6 +52,11 @@ import {
   isToday,
 } from "date-fns";
 import { ko } from "date-fns/locale";
+import {
+  endOfLocalDateKey,
+  parseLocalDateKey,
+  parseLocalDateTimeKey,
+} from "@/redesign/app/lib/date-keys";
 
 interface DashboardCalendarProps {
   applications: Application[];
@@ -203,14 +208,14 @@ export function DashboardCalendar({
   const getSessionEndTime = (app: Application) => {
     const durationHours = app.duration ?? 1;
     if (app.scheduledDate && app.scheduledTime) {
-      const start = new Date(`${app.scheduledDate}T${app.scheduledTime}`);
-      if (!Number.isNaN(start.getTime())) {
+      const start = parseLocalDateTimeKey(app.scheduledDate, app.scheduledTime);
+      if (start) {
         return new Date(start.getTime() + durationHours * 60 * 60 * 1000);
       }
     }
     if (app.scheduledDate) {
-      const fallback = new Date(`${app.scheduledDate}T23:59`);
-      if (!Number.isNaN(fallback.getTime())) {
+      const fallback = endOfLocalDateKey(app.scheduledDate);
+      if (fallback) {
         return fallback;
       }
     }
@@ -308,7 +313,8 @@ export function DashboardCalendar({
   const getEventsForDate = (date: Date) => {
     return confirmedApplications.filter((app) => {
       if (!app.scheduledDate) return false;
-      return isSameDay(new Date(app.scheduledDate), date);
+      const scheduledDate = parseLocalDateKey(app.scheduledDate);
+      return Boolean(scheduledDate && isSameDay(scheduledDate, date));
     });
   };
 
@@ -319,14 +325,15 @@ export function DashboardCalendar({
   const upcomingEvents = confirmedApplications
     .filter((app) => {
       if (!app.scheduledDate) return false;
-      const eventDate = new Date(app.scheduledDate);
+      const eventDate = parseLocalDateKey(app.scheduledDate);
+      if (!eventDate) return false;
       const today = new Date();
       const weekLater = new Date(today.getTime() + 7 * 24 * 60 * 60 * 1000);
       return eventDate >= today && eventDate <= weekLater;
     })
     .sort((a, b) => {
-      const dateA = new Date(a.scheduledDate!).getTime();
-      const dateB = new Date(b.scheduledDate!).getTime();
+      const dateA = parseLocalDateKey(a.scheduledDate!)?.getTime() ?? 0;
+      const dateB = parseLocalDateKey(b.scheduledDate!)?.getTime() ?? 0;
       return dateA - dateB;
     });
 
@@ -368,10 +375,12 @@ export function DashboardCalendar({
 
   const formatScheduleLabel = (application: Application) => {
     if (application.scheduledDate && application.scheduledTime) {
-      return `${format(new Date(application.scheduledDate), "M월 d일 (E)", { locale: ko })} ${application.scheduledTime}`;
+      const scheduledDate = parseLocalDateKey(application.scheduledDate);
+      if (!scheduledDate) return application.scheduledTime;
+      return `${format(scheduledDate, "M월 d일 (E)", { locale: ko })} ${application.scheduledTime}`;
     }
     if (application.periodFrom && application.periodTo) {
-      return `${format(new Date(application.periodFrom), "M월 d일", { locale: ko })} - ${format(new Date(application.periodTo), "M월 d일", { locale: ko })}`;
+      return `${format(parseLocalDateKey(application.periodFrom)!, "M월 d일", { locale: ko })} - ${format(parseLocalDateKey(application.periodTo)!, "M월 d일", { locale: ko })}`;
     }
     return "일정 조율 중";
   };
@@ -911,7 +920,7 @@ export function DashboardCalendar({
                     <div className="flex items-center gap-2 mb-1 text-xs text-muted-foreground">
                       <CalendarIcon className="w-3 h-3" />
                       <span>
-                        {format(new Date(event.scheduledDate!), "M월 d일 (E)", { locale: ko })}
+                        {format(parseLocalDateKey(event.scheduledDate!)!, "M월 d일 (E)", { locale: ko })}
                       </span>
                       <span>{event.scheduledTime}</span>
                     </div>

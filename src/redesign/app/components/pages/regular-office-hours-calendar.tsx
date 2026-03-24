@@ -3,8 +3,9 @@ import { ChevronLeft, ChevronRight, Calendar, List } from "lucide-react";
 import { RegularOfficeHour } from "@/redesign/app/lib/types";
 import { Button } from "@/redesign/app/components/ui/button";
 import { Badge } from "@/redesign/app/components/ui/badge";
-import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameMonth, isSameDay, addMonths, subMonths, startOfWeek, endOfWeek, isToday, parseISO, addDays, isBefore, startOfDay } from "date-fns";
+import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameMonth, isSameDay, addMonths, subMonths, startOfWeek, endOfWeek, isToday, addDays, isBefore, startOfDay } from "date-fns";
 import { ko } from "date-fns/locale";
+import { parseLocalDateKey } from "@/redesign/app/lib/date-keys";
 
 interface RegularOfficeHoursCalendarProps {
   officeHours: RegularOfficeHour[];
@@ -43,7 +44,10 @@ export function RegularOfficeHoursCalendar({
     .map((officeHour) => ({
       ...officeHour,
       availableDates: (officeHour.availableDates ?? []).filter(
-        (date) => !isBefore(parseISO(date), todayStart)
+        (date) => {
+          const parsed = parseLocalDateKey(date);
+          return parsed ? !isBefore(parsed, todayStart) : false;
+        }
       ),
     }))
     .filter((officeHour) => officeHour.availableDates.length > 0);
@@ -56,11 +60,18 @@ export function RegularOfficeHoursCalendar({
     }))
   );
   const availableDateKeys = useMemo(
-    () => new Set(expandedSessions.map((session) => format(parseISO(session.date), "yyyy-MM-dd"))),
+    () => new Set(
+      expandedSessions
+        .map((session) => parseLocalDateKey(session.date))
+        .filter((value): value is Date => Boolean(value))
+        .map((date) => format(date, "yyyy-MM-dd"))
+    ),
     [expandedSessions]
   );
   const firstExpandedSession = expandedSessions[0];
-  const firstAvailableDate = firstExpandedSession ? parseISO(firstExpandedSession.date) : null;
+  const firstAvailableDate = firstExpandedSession
+    ? parseLocalDateKey(firstExpandedSession.date)
+    : null;
 
   useEffect(() => {
     if (!selectedDate) {
@@ -76,7 +87,7 @@ export function RegularOfficeHoursCalendar({
   useEffect(() => {
     if (!firstAvailableDate) return;
     const currentMonthHasSession = expandedSessions.some((session) =>
-      isSameMonth(parseISO(session.date), currentMonth)
+      Boolean(parseLocalDateKey(session.date) && isSameMonth(parseLocalDateKey(session.date)!, currentMonth))
     );
     if (!currentMonthHasSession) {
       setCurrentMonth(firstAvailableDate);
@@ -86,7 +97,8 @@ export function RegularOfficeHoursCalendar({
   // 특정 날짜의 오피스아워
   const getOfficeHoursForDate = (date: Date) => {
     return expandedSessions.filter((session) => {
-      const sessionDate = parseISO(session.date);
+      const sessionDate = parseLocalDateKey(session.date);
+      if (!sessionDate) return false;
       return isSameDay(sessionDate, date);
     });
   };
@@ -95,13 +107,15 @@ export function RegularOfficeHoursCalendar({
 
   // 요일별 그룹핑
   const sessionsByDay = expandedSessions.reduce((acc, session) => {
-    const dayOfWeek = format(parseISO(session.date), "E", { locale: ko });
+    const parsedDate = parseLocalDateKey(session.date);
+    if (!parsedDate) return acc;
+    const dayOfWeek = format(parsedDate, "E", { locale: ko });
     if (!acc[dayOfWeek]) acc[dayOfWeek] = [];
     acc[dayOfWeek].push(session);
     return acc;
   }, {} as Record<string, typeof expandedSessions>);
   const currentMonthSessionCount = expandedSessions.filter((session) =>
-    isSameMonth(parseISO(session.date), currentMonth)
+    Boolean(parseLocalDateKey(session.date) && isSameMonth(parseLocalDateKey(session.date)!, currentMonth))
   ).length;
 
   return (
@@ -345,7 +359,7 @@ export function RegularOfficeHoursCalendar({
                           </div>
                           <div className="text-right">
                             <div className="text-xs text-muted-foreground mt-0.5">
-                              {format(parseISO(session.date), "M월 d일", { locale: ko })}
+                              {format(parseLocalDateKey(session.date)!, "M월 d일", { locale: ko })}
                             </div>
                           </div>
                         </div>
