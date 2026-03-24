@@ -2,13 +2,21 @@
 
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
+const { defineSecret } = require("firebase-functions/params");
 const { initializeApp } = require("firebase-admin/app");
 const { FieldValue, getFirestore } = require("firebase-admin/firestore");
+const {
+  COMPANY_ANALYSIS_REPORT_SCHEMA,
+  COMPANY_ANALYSIS_SYSTEM_INSTRUCTION,
+  buildCompanyAnalysisUserPrompt,
+} = require("./ai/company-report-prompt");
+const { generateStructuredJson } = require("./ai/gemini");
 
 initializeApp();
 
 const db = getFirestore();
 const REGION = process.env.FUNCTION_REGION || "asia-northeast3";
+const GEMINI_API_KEY = defineSecret("GEMINI_API_KEY");
 const ACTIVE_APPLICATION_STATUSES = new Set(["pending", "confirmed", "completed"]);
 const RESERVED_APPLICATION_STATUSES = new Set(["pending", "confirmed"]);
 const SLOT_BLOCKING_APPLICATION_STATUSES = new Set(["pending", "confirmed", "completed"]);
@@ -114,6 +122,28 @@ function isPastScheduledStart(dateKey, timeKey, now = new Date()) {
 
 function normalizeConsultantDisplayName(value) {
   return normalizeString(value).replace(/\s*컨설턴트\s*$/u, "").toLowerCase();
+}
+
+function sanitizeAiPayload(value) {
+  if (Array.isArray(value)) {
+    return value.map((item) => sanitizeAiPayload(item));
+  }
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [key, sanitizeAiPayload(item)])
+    );
+  }
+  if (typeof value === "string") {
+    return value.trim();
+  }
+  if (
+    typeof value === "number" ||
+    typeof value === "boolean" ||
+    value === null
+  ) {
+    return value;
+  }
+  return null;
 }
 
 function toNumber(value) {
@@ -1700,6 +1730,84 @@ exports.approvePendingUser = onCall(
         companyId: approvedRole === "company" ? approvedCompanyId : null,
       };
     });
+  }
+);
+
+exports.generateCompanyAnalysisReport = onCall(
+  {
+    region: REGION,
+    timeoutSeconds: 60,
+    memory: "512MiB",
+    secrets: [GEMINI_API_KEY],
+  },
+  async (request) => {
+    if (!request.auth?.uid) {
+      throw new HttpsError("unauthenticated", "로그인이 필요합니다.");
+    }
+
+    const uid = request.auth.uid;
+    const payload = request.data ?? {};
+    const companyName = normalizeString(payload.companyName);
+    const companyInfo = sanitizeAiPayload(payload.companyInfo);
+    const assessmentSummary = sanitizeAiPayload(payload.assessmentSummary);
+    const assessmentDetails = Array.isArray(payload.assessmentDetails)
+      ? sanitizeAiPayload(payload.assessmentDetails)
+      : [];
+
+    if (!companyName) {
+      throw new HttpsError("invalid-argument", "companyName is required");
+    }
+    if (!companyInfo || typeof companyInfo !== "object" || Array.isArray(companyInfo)) {
+      throw new HttpsError("invalid-argument", "companyInfo is required");
+    }
+
+    const profileSnap = await db.collection("profiles").doc(uid).get();
+    if (!profileSnap.exists) {
+      throw new HttpsError("failed-precondition", "프로필 정보를 찾을 수 없습니다.");
+    }
+
+    const profile = profileSnap.data() || {};
+    if (normalizeString(profile.role) !== "admin" || profile.active !== true) {
+      throw new HttpsError("permission-denied", "AI 보고서 생성 권한이 없습니다.");
+    }
+
+    const apiKey = GEMINI_API_KEY.value();
+    if (!apiKey) {
+      throw new HttpsError("failed-precondition", "GEMINI_API_KEY is not configured");
+    }
+
+    try {
+      const userPrompt = buildCompanyAnalysisUserPrompt({
+        companyName,
+        companyInfo,
+        assessmentSummary,
+        assessmentDetails,
+      });
+
+      const report = await generateStructuredJson({
+        apiKey,
+        model: "gemini-2.5-flash",
+        systemInstruction: COMPANY_ANALYSIS_SYSTEM_INSTRUCTION,
+        userPrompt,
+        responseSchema: COMPANY_ANALYSIS_REPORT_SCHEMA,
+      });
+
+      return {
+        report,
+        meta: {
+          model: "gemini-2.5-flash",
+          generatedAt: new Date().toISOString(),
+        },
+      };
+    } catch (error) {
+      console.error("generateCompanyAnalysisReport failed", {
+        uid,
+        companyName,
+        errorMessage: error instanceof Error ? error.message : String(error),
+        errorStack: error instanceof Error ? error.stack : null,
+      });
+      throw new HttpsError("internal", "AI 보고서 생성에 실패했습니다.");
+    }
   }
 );
 

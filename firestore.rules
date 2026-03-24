@@ -179,6 +179,12 @@ service cloud.firestore {
       allow update: if false;
     }
 
+    match /companies/{companyId}/analysisReport/{docId} {
+      allow read: if isInternalOperator();
+      allow create, update: if isAdmin();
+      allow delete: if false;
+    }
+
     match /consultants/{consultantId} {
       allow read: if isActiveUser() || (isSignedIn() && consultantId == request.auth.uid);
       allow create: if isAdmin()
