@@ -8,11 +8,12 @@ import { Badge } from "@/redesign/app/components/ui/badge";
 import { DateRangePicker } from "@/redesign/app/components/ui/date-range-picker";
 import { PaginationControls } from "@/redesign/app/components/ui/pagination-controls";
 import { StatusChip } from "@/redesign/app/components/status-chip";
-import { Agenda, Application, ApplicationStatus, Program } from "@/redesign/app/lib/types";
+import { Agenda, Application, ApplicationStatus, ConsultantAvailability, OfficeHourSlot, Program } from "@/redesign/app/lib/types";
 import { format } from "date-fns";
 import { ko } from "date-fns/locale";
 import { AdminApplicationDetailModal } from "@/redesign/app/components/pages/admin-application-detail-modal";
 import type { DateRange } from "react-day-picker";
+import { parseLocalDateKey } from "@/redesign/app/lib/date-keys";
 
 interface AdminApplicationsProps {
   applications: Application[];
@@ -24,8 +25,11 @@ interface AdminApplicationsProps {
   onRejectApplication?: (id: string, reason: string) => void;
   onRequestApplication?: (id: string) => void;
   currentUserRole?: string;
+  currentConsultantId?: string | null;
   currentConsultantName?: string | null;
   currentConsultantAgendaIds?: string[];
+  currentConsultantAvailability?: ConsultantAvailability[];
+  officeHourSlots?: OfficeHourSlot[];
 }
 
 export function AdminApplications({
@@ -38,8 +42,11 @@ export function AdminApplications({
   onRejectApplication,
   onRequestApplication,
   currentUserRole,
+  currentConsultantId,
   currentConsultantName,
   currentConsultantAgendaIds = [],
+  currentConsultantAvailability = [],
+  officeHourSlots = [],
 }: AdminApplicationsProps) {
   const PAGE_SIZE = 10;
   const pageTitleClassName = "text-2xl font-semibold text-slate-900";
@@ -117,6 +124,89 @@ export function AdminApplications({
     return names;
   }, [agendas, currentConsultantAgendaIds]);
 
+  const normalizeConsultantDisplayName = (value?: string | null) =>
+    (value ?? "")
+      .replace(/\s*컨설턴트\s*$/u, "")
+      .trim()
+      .toLowerCase();
+
+  const normalizeTimeKey = (value?: string | null) => {
+    if (!value) return "";
+    const [hourRaw, minuteRaw] = value.trim().split(":");
+    const hour = Number(hourRaw);
+    const minute = Number(minuteRaw);
+    if (Number.isNaN(hour) || Number.isNaN(minute)) return value.trim();
+    return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+  };
+
+  const isAssignedToCurrentConsultant = (app: Application) => {
+    if (!isConsultantUser) return false;
+    if (currentConsultantId && app.consultantId === currentConsultantId) {
+      return true;
+    }
+
+    if (app.officeHourSlotId) {
+      const reservedSlot = officeHourSlots.find((slot) => slot.id === app.officeHourSlotId);
+      if (reservedSlot?.consultantId && currentConsultantId && reservedSlot.consultantId === currentConsultantId) {
+        return true;
+      }
+    }
+
+    const currentNameKey = normalizeConsultantDisplayName(currentConsultantName);
+    return (
+      currentNameKey !== "" &&
+      currentNameKey === normalizeConsultantDisplayName(app.consultant)
+    );
+  };
+
+  const isCurrentConsultantAvailableAt = (app: Application) => {
+    if (!isConsultantUser) return true;
+    if (!app.scheduledDate || !app.scheduledTime) return true;
+    const parsedDate = parseLocalDateKey(app.scheduledDate);
+    if (!parsedDate) return false;
+    const dayAvailability = currentConsultantAvailability.find(
+      (availability) => availability.dayOfWeek === parsedDate.getDay()
+    );
+    if (!dayAvailability) return false;
+    const targetTime = normalizeTimeKey(app.scheduledTime);
+    return dayAvailability.slots.some(
+      (slot) => normalizeTimeKey(slot.start) === targetTime && slot.available
+    );
+  };
+
+  const hasCurrentConsultantConflict = (targetApp: Application) => {
+    if (!isConsultantUser) return false;
+    if (!targetApp.scheduledDate || !targetApp.scheduledTime) return false;
+    const targetTime = normalizeTimeKey(targetApp.scheduledTime);
+    return applications.some((app) => {
+      if (app.id === targetApp.id) return false;
+      if (!isAssignedToCurrentConsultant(app)) return false;
+      if (
+        app.status !== "pending" &&
+        app.status !== "review" &&
+        app.status !== "confirmed" &&
+        app.status !== "completed"
+      ) {
+        return false;
+      }
+      if (!app.scheduledDate || !app.scheduledTime) return false;
+      return (
+        app.scheduledDate === targetApp.scheduledDate &&
+        normalizeTimeKey(app.scheduledTime) === targetTime
+      );
+    });
+  };
+
+  const matchesConsultantAgenda = (app: Application) => {
+    if (!isConsultantUser) return true;
+    if (currentConsultantAgendaIds.length === 0 && consultantAgendaNames.size === 0) {
+      return false;
+    }
+    const agendaIdOk = app.agendaId ? currentConsultantAgendaIds.includes(app.agendaId) : false;
+    const agendaNameOk = app.agenda ? consultantAgendaNames.has(app.agenda) : false;
+    return agendaIdOk || agendaNameOk;
+  };
+
   const programNameById = useMemo(
     () => new Map(programs.map((program) => [program.id, program.name])),
     [programs],
@@ -148,10 +238,26 @@ export function AdminApplications({
 
   // Filter applications
   const filteredApplications = applications.filter((app) => {
-    const matchesConsultantAgenda = !isConsultantUser
-      || ((currentConsultantAgendaIds.length > 0 || consultantAgendaNames.size > 0)
-        && ((app.agendaId && currentConsultantAgendaIds.includes(app.agendaId))
-          || (app.agenda && consultantAgendaNames.has(app.agenda))));
+    const passesConsultantScope = !isConsultantUser || (() => {
+      if (isAssignedToCurrentConsultant(app)) {
+        return true;
+      }
+
+      const isPendingLike = app.status === "pending" || app.status === "review";
+      const isUnassigned =
+        !app.consultantId &&
+        (!app.consultant || app.consultant === "담당자 배정 중");
+
+      if (!isPendingLike || !isUnassigned) {
+        return false;
+      }
+
+      return (
+        matchesConsultantAgenda(app) &&
+        isCurrentConsultantAvailableAt(app) &&
+        !hasCurrentConsultantConflict(app)
+      );
+    })();
 
     const applicationProgramLabel = getApplicationProgramLabel(app);
     const matchesProgram = programFilter === "all" || applicationProgramLabel === programFilter;
@@ -163,7 +269,7 @@ export function AdminApplications({
         ? isDateInRange(parseDateValue(app.scheduledDate))
         : doesPeriodOverlapRange(app.periodFrom, app.periodTo);
 
-    return matchesConsultantAgenda && matchesProgram && matchesStatus && matchesDate;
+    return passesConsultantScope && matchesProgram && matchesStatus && matchesDate;
   });
 
   // Sort by most recent
@@ -298,7 +404,7 @@ export function AdminApplications({
                         <div className="space-y-1">
                           <div className="flex items-center gap-1 text-xs">
                             <Calendar className="w-3 h-3" />
-                            <span>{format(new Date(app.scheduledDate), "M/d (E)", { locale: ko })}</span>
+                            <span>{format(parseLocalDateKey(app.scheduledDate)!, "M/d (E)", { locale: ko })}</span>
                           </div>
                           {app.scheduledTime && (
                             <div className="flex items-center gap-1 text-xs text-muted-foreground">
@@ -309,8 +415,8 @@ export function AdminApplications({
                         </div>
                       ) : app.periodFrom ? (
                         <div className="text-xs text-muted-foreground">
-                          {format(new Date(app.periodFrom), "M/d", { locale: ko })} ~{" "}
-                          {format(new Date(app.periodTo!), "M/d", { locale: ko })}
+                          {format(parseLocalDateKey(app.periodFrom)!, "M/d", { locale: ko })} ~{" "}
+                          {format(parseLocalDateKey(app.periodTo!)!, "M/d", { locale: ko })}
                         </div>
                       ) : (
                         <span className="text-xs text-muted-foreground">-</span>
@@ -331,8 +437,8 @@ export function AdminApplications({
               ))
             ) : (
                 <TableRow>
-                  <TableCell colSpan={8} className="text-center py-12">
-                    <div className="flex flex-col items-center gap-2">
+                  <TableCell colSpan={8} className="h-[420px] p-0">
+                    <div className="flex h-full w-full flex-col items-center justify-center gap-2 text-center">
                       <Search className="w-12 h-12 text-muted-foreground" />
                       <p className="text-sm text-muted-foreground">
                         {programFilter !== "all" || statusFilter !== "all" || dateRange?.from || dateRange?.to

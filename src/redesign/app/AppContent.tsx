@@ -98,8 +98,15 @@ import {
 } from "@/redesign/app/lib/functions"
 import {
   getAssignableConsultantsAt,
+  hasScheduledConsultantForPendingApplication,
   hasApplicantConflictAt,
 } from "@/redesign/app/lib/application-availability"
+import {
+  endOfLocalDateKey,
+  formatLocalDateKey as formatSafeLocalDateKey,
+  parseLocalDateKey as parseSafeLocalDateKey,
+  parseLocalDateTimeKey,
+} from "@/redesign/app/lib/date-keys"
 import { firestoreService } from "@/redesign/app/lib/firestore-service"
 import { storage as firebaseStorage } from "@/redesign/app/lib/firebase"
 import {
@@ -348,6 +355,10 @@ function normalizeConsultantDisplayName(value?: string | null): string {
     .replace(/\s*컨설턴트\s*$/u, "")
     .trim()
     .toLowerCase()
+}
+
+function buildAvailabilitySlotKey(dayOfWeek: number, timeKey: string): string {
+  return `${dayOfWeek}:${normalizeTimeKey(timeKey)}`
 }
 
 function normalizeTimeKey(value?: string): string {
@@ -788,7 +799,15 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     isPage(["admin-agendas", "admin-consultants", "admin-programs"])
   const needsConsultants =
     resolvedRole === "consultant" ||
-    isPage(["consultants", "regular-wizard", "admin-consultants", "admin-users", "pending-reports"])
+    isPage([
+      "consultants",
+      "regular-wizard",
+      "application",
+      "dashboard",
+      "admin-consultants",
+      "admin-users",
+      "pending-reports",
+    ])
   const needsOfficeHourSlots =
     needsRegularOfficeHours || isPage(["application", "pending-reports"])
   const needsCompanyLookup = resolvedRole === "admin" && needsApplications
@@ -1088,12 +1107,12 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
   const [goals, setGoals] = useState<Goal[]>(mockGoals)
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>(mockTeamMembers)
 
-  const { data: consultantDocs } = useFirestoreCollection<Consultant>(COLLECTIONS.CONSULTANTS, {
+  const { data: consultantDocs, loading: consultantDocsLoading } = useFirestoreCollection<Consultant>(COLLECTIONS.CONSULTANTS, {
     orderByField: "name",
     orderDirection: "asc",
     enabled: isFirebaseConfigured && !isCompanyInfoRoute && needsConsultants,
   })
-  const { data: agendaDocs } = useFirestoreCollection<Agenda>(COLLECTIONS.AGENDAS, {
+  const { data: agendaDocs, loading: agendaDocsLoading } = useFirestoreCollection<Agenda>(COLLECTIONS.AGENDAS, {
     orderByField: "name",
     orderDirection: "asc",
     enabled: isFirebaseConfigured && !isCompanyInfoRoute && needsAgendas,
@@ -1445,6 +1464,35 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       officeHourApplicationDocsLoading ||
       (currentPage === "application" && !!selectedApplicationId && selectedApplicationDocLoading)
     )
+  const regularWizardRealtimeLoading =
+    isFirebaseConfigured &&
+    currentPage === "regular-wizard" &&
+    (
+      officeHourApplicationDocsLoading ||
+      officeHourSlotDocsLoading ||
+      consultantDocsLoading ||
+      agendaDocsLoading
+    )
+  const pendingWithoutAssignableConsultantIds = useMemo(() => {
+    const ids = new Set<string>()
+
+    resolvedApplications.forEach((application) => {
+      if (normalizeApplicationStatus(application.status) !== "pending") return
+      if (!application.agendaId || !application.scheduledDate || !application.scheduledTime) return
+      if (
+        application.consultantId ||
+        (application.consultant && application.consultant !== "담당자 배정 중")
+      ) {
+        return
+      }
+
+      if (!hasScheduledConsultantForPendingApplication({ application, consultants })) {
+        ids.add(application.id)
+      }
+    })
+
+    return ids
+  }, [consultants, resolvedApplications])
 
   const consultantProgramIds = useMemo(() => {
     if (resolvedRole !== "consultant") return new Set<string>()
@@ -1788,18 +1836,18 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       : undefined
 
     if (app.scheduledDate && app.scheduledTime) {
-      const start = new Date(`${app.scheduledDate}T${app.scheduledTime}`)
-      if (!Number.isNaN(start.getTime())) {
+      const start = parseLocalDateTimeKey(app.scheduledDate, app.scheduledTime)
+      if (start) {
         return new Date(start.getTime() + durationHours * 60 * 60 * 1000)
       }
     }
 
     if (slot) {
-      const start = new Date(`${slot.date}T${slot.startTime}`)
-      if (!Number.isNaN(start.getTime())) {
+      const start = parseLocalDateTimeKey(slot.date, slot.startTime)
+      if (start) {
         if (slot.endTime) {
-          const end = new Date(`${slot.date}T${slot.endTime}`)
-          if (!Number.isNaN(end.getTime())) {
+          const end = parseLocalDateTimeKey(slot.date, slot.endTime)
+          if (end) {
             return end
           }
         }
@@ -1808,8 +1856,8 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     }
 
     if (app.scheduledDate) {
-      const fallback = new Date(`${app.scheduledDate}T23:59`)
-      if (!Number.isNaN(fallback.getTime())) {
+      const fallback = endOfLocalDateKey(app.scheduledDate)
+      if (fallback) {
         return fallback
       }
     }
@@ -2048,7 +2096,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
           if (!app) return n
           const deadlineInfo = getReportDeadlineInfo(app)
           const sessionDate = app.scheduledDate
-            ? new Date(app.scheduledDate).toLocaleDateString("ko-KR")
+            ? (parseSafeLocalDateKey(app.scheduledDate)?.toLocaleDateString("ko-KR") ?? "알 수 없음")
             : "알 수 없음"
           const statusText = deadlineInfo
             ? deadlineInfo.isOverdue
@@ -2075,7 +2123,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
         .map((app) => {
           const deadlineInfo = getReportDeadlineInfo(app)
           const sessionDate = app.scheduledDate
-            ? new Date(app.scheduledDate).toLocaleDateString("ko-KR")
+            ? (parseSafeLocalDateKey(app.scheduledDate)?.toLocaleDateString("ko-KR") ?? "알 수 없음")
             : "알 수 없음"
           const statusText = deadlineInfo
             ? deadlineInfo.isOverdue
@@ -2105,7 +2153,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
   const openReportFormForApplication = (applicationId: string) => {
     if (applicationId === "irregular-manual") {
       const now = new Date()
-      const today = now.toISOString().slice(0, 10)
+      const today = formatSafeLocalDateKey(now)
       const manualApp: Application = {
         id: `manual-${Date.now()}`,
         type: "irregular",
@@ -3541,6 +3589,57 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       return
     }
 
+    const currentAvailableSlotKeys = new Set(
+      (currentConsultant?.availability ?? [])
+        .flatMap((day) =>
+          day.slots
+            .filter((slot) => slot.available)
+            .map((slot) => buildAvailabilitySlotKey(day.dayOfWeek, slot.start)),
+        ),
+    )
+    const nextAvailableSlotKeys = new Set(
+      availability.flatMap((day) =>
+        day.slots
+          .filter((slot) => slot.available)
+          .map((slot) => buildAvailabilitySlotKey(day.dayOfWeek, slot.start)),
+      ),
+    )
+    const removedSlotKeys = new Set(
+      Array.from(currentAvailableSlotKeys).filter((key) => !nextAvailableSlotKeys.has(key)),
+    )
+
+    if (removedSlotKeys.size > 0) {
+      const currentConsultantNameKey = normalizeConsultantDisplayName(currentConsultant?.name ?? fallbackName)
+      const hasConfirmedConflict = applications.some((application) => {
+        if (normalizeApplicationStatus(application.status) !== "confirmed") return false
+        if (!application.scheduledDate || !application.scheduledTime) return false
+
+        const isAssignedToCurrent =
+          (consultantId && application.consultantId === consultantId) ||
+          (
+            currentConsultantNameKey !== "" &&
+            normalizeConsultantDisplayName(application.consultant) === currentConsultantNameKey
+          )
+        if (!isAssignedToCurrent) return false
+
+        const start = parseLocalDateTimeKey(application.scheduledDate, application.scheduledTime)
+        if (!start) return false
+        const durationHours = application.duration ?? 1
+        const end = new Date(start.getTime() + durationHours * 60 * 60 * 1000)
+        if (end <= new Date()) return false
+
+        const slotKey = buildAvailabilitySlotKey(start.getDay(), application.scheduledTime)
+        return removedSlotKeys.has(slotKey)
+      })
+
+      if (hasConfirmedConflict) {
+        toast.error(
+          "확정된 일정이 있는 시간입니다. 제거하려는 시간에 이미 확정된 오피스아워 일정이 있습니다. 일정 조정 또는 신청 관리 확인 후 다시 변경해주세요.",
+        )
+        return
+      }
+    }
+
     const nextConsultant: Consultant = {
       ...currentConsultant,
       id: consultantId,
@@ -4300,6 +4399,9 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
           {currentPage === "dashboard" && (
             <DashboardCalendar
               applications={scopedApplications}
+              applicationsWithoutAssignableConsultantIds={Array.from(
+                pendingWithoutAssignableConsultantIds,
+              )}
               user={user}
               programs={scopedProgramList}
               agendas={agendaList}
@@ -4344,6 +4446,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
               applications={resolvedApplications}
               consultants={consultants}
               agendas={agendaList}
+              isRealtimeDataLoading={regularWizardRealtimeLoading}
               allowedWeekdays={
                 programList.find((program) => program.id === selectedOfficeHour.programId)?.weekdays
               }
@@ -4391,6 +4494,10 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
           {currentPage === "application" && selectedApplication && (
             <ApplicationDetail
               application={selectedApplication}
+              showNoAssignableConsultantNotice={
+                resolvedRole === "user" &&
+                pendingWithoutAssignableConsultantIds.has(selectedApplication.id)
+              }
               messages={applicationMessages}
               onBack={() =>
                 handleNavigate(resolvedRole === "consultant" ? "consultant-calendar" : "dashboard")
@@ -4718,8 +4825,11 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
                 onRejectApplication={handleRejectApplication}
                 onRequestApplication={handleRequestApplication}
                 currentUserRole={resolvedRole}
+                currentConsultantId={currentConsultant?.id ?? null}
                 currentConsultantName={currentConsultant?.name ?? null}
                 currentConsultantAgendaIds={currentConsultant?.agendaIds ?? []}
+                currentConsultantAvailability={currentConsultant?.availability ?? []}
+                officeHourSlots={officeHourSlotList}
               />
             </ProtectedRoute>
           )}
@@ -4830,7 +4940,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
                       sessionFormat: "online",
                       agenda: report.topic?.trim() || "비정기 오피스아워",
                       requestContent: "",
-                      scheduledDate: report.date || new Date().toISOString().slice(0, 10),
+                      scheduledDate: report.date || formatSafeLocalDateKey(new Date()),
                       programId: report.programId,
                       createdAt: report.createdAt,
                       updatedAt: report.updatedAt,

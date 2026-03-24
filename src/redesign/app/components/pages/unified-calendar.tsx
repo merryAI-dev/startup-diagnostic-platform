@@ -37,6 +37,7 @@ import { AdminApplicationDetailModal } from "@/redesign/app/components/pages/adm
 import { cn } from "@/redesign/app/components/ui/utils";
 import { toast } from "sonner";
 import type { DayContentProps } from "react-day-picker";
+import { endOfLocalDateKey, parseLocalDateTimeKey } from "@/redesign/app/lib/date-keys";
 
 interface UnifiedCalendarProps {
   currentUser: User;
@@ -326,14 +327,14 @@ export function UnifiedCalendar({
   const getSessionEndTime = (app: Application) => {
     const durationHours = app.duration ?? 1;
     if (app.scheduledDate && app.scheduledTime) {
-      const start = new Date(`${app.scheduledDate}T${app.scheduledTime}`);
-      if (!Number.isNaN(start.getTime())) {
+      const start = parseLocalDateTimeKey(app.scheduledDate, app.scheduledTime);
+      if (start) {
         return new Date(start.getTime() + durationHours * 60 * 60 * 1000);
       }
     }
     if (app.scheduledDate) {
-      const fallback = new Date(`${app.scheduledDate}T23:59`);
-      if (!Number.isNaN(fallback.getTime())) {
+      const fallback = endOfLocalDateKey(app.scheduledDate);
+      if (fallback) {
         return fallback;
       }
     }
@@ -515,9 +516,9 @@ export function UnifiedCalendar({
       })
       .flatMap(([_, events]) => events)
       .sort((a, b) => {
-        const dateA = new Date(`${a.scheduledDate}T${a.scheduledTime || "00:00"}`);
-        const dateB = new Date(`${b.scheduledDate}T${b.scheduledTime || "00:00"}`);
-        return dateA.getTime() - dateB.getTime();
+        const dateA = parseLocalDateTimeKey(a.scheduledDate, a.scheduledTime || "00:00");
+        const dateB = parseLocalDateTimeKey(b.scheduledDate, b.scheduledTime || "00:00");
+        return (dateA?.getTime() ?? 0) - (dateB?.getTime() ?? 0);
       });
   }, [eventsByDate]);
 

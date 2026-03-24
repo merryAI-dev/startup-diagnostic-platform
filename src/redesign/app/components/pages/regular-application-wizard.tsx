@@ -29,13 +29,14 @@ import {
   ProgramWeekday,
 } from "@/redesign/app/lib/types";
 import { getTimeSlots } from "@/redesign/app/lib/data";
+import { formatLocalDateKey, parseLocalDateKey } from "@/redesign/app/lib/date-keys";
 import {
   getAssignableConsultantsAt,
   hasApplicantConflictAt,
   normalizeApplicationStatus,
   normalizeTimeKey,
 } from "@/redesign/app/lib/application-availability";
-import { format, isBefore, parseISO, startOfDay } from "date-fns";
+import { format, isBefore, startOfDay } from "date-fns";
 import { ko } from "date-fns/locale";
 import { cn } from "@/redesign/app/components/ui/utils";
 
@@ -46,6 +47,7 @@ interface RegularApplicationWizardProps {
   applications: Application[];
   consultants: Consultant[];
   agendas: Agenda[];
+  isRealtimeDataLoading?: boolean;
   allowedWeekdays?: ProgramWeekday[];
   remainingInternalTickets: number;
   remainingExternalTickets: number;
@@ -132,6 +134,7 @@ export function RegularApplicationWizard({
   applications,
   consultants,
   agendas,
+  isRealtimeDataLoading = false,
   allowedWeekdays = ["TUE", "THU"],
   remainingInternalTickets,
   remainingExternalTickets,
@@ -218,11 +221,13 @@ export function RegularApplicationWizard({
       const slots = programOfficeHourSlots.filter((slot) => slot.date.startsWith(item.month));
       if (slots.length === 0) {
         (item.availableDates ?? []).forEach((date) => {
-          const normalizedDate = format(parseISO(date), "yyyy-MM-dd");
-          const dayOfWeek = parseISO(normalizedDate).getDay();
+          const parsedDate = parseLocalDateKey(date);
+          if (!parsedDate) return;
+          const normalizedDate = formatLocalDateKey(parsedDate);
+          const dayOfWeek = parsedDate.getDay();
           if (!allowedWeekdayNumbers.has(dayOfWeek)) return;
           if (selectedAgendaId) {
-            const hasAnyAssignableTime = getTimeSlots(parseISO(normalizedDate).toISOString()).some(
+            const hasAnyAssignableTime = getTimeSlots(normalizedDate).some(
               (timeSlot) =>
                 !isPastScheduledStart(normalizedDate, timeSlot.time) &&
                 getAssignableConsultantsAt({
@@ -242,8 +247,10 @@ export function RegularApplicationWizard({
       }
 
       slots.forEach((slot) => {
-        const dateKey = format(parseISO(slot.date), "yyyy-MM-dd");
-        const dayOfWeek = parseISO(dateKey).getDay();
+        const parsedDate = parseLocalDateKey(slot.date);
+        if (!parsedDate) return;
+        const dateKey = formatLocalDateKey(parsedDate);
+        const dayOfWeek = parsedDate.getDay();
         const matchesAgenda =
           !selectedAgendaId || !slot.agendaIds || slot.agendaIds.includes(selectedAgendaId);
         if (!allowedWeekdayNumbers.has(dayOfWeek) || !matchesAgenda) {
@@ -315,7 +322,7 @@ export function RegularApplicationWizard({
 
     }
 
-    return getTimeSlots(selectedDate.toISOString()).map((slot) => {
+    return getTimeSlots(selectedDateKey).map((slot) => {
       const meta = byTime.get(slot.time);
       const assignableConsultants =
         selectedAgendaId.length > 0
@@ -426,12 +433,35 @@ export function RegularApplicationWizard({
     }
   };
   const activeAgendas = agendas.filter((agenda) => agenda.active !== false);
+  const isScheduleDataLoading = isRealtimeDataLoading;
 
   useEffect(() => {
     if (isExternalAgendaSelected && sessionFormat !== "online") {
       setSessionFormat("online");
     }
   }, [isExternalAgendaSelected, sessionFormat]);
+
+  useEffect(() => {
+    if (!selectedDate) return;
+    const selectedDateKey = formatLocalDateKey(selectedDate);
+    if (availableDateKeys.has(selectedDateKey)) return;
+    setSelectedDate(undefined);
+    setSelectedTime("");
+    setSelectedSlotId(undefined);
+  }, [availableDateKeys, selectedDate]);
+
+  useEffect(() => {
+    if (!selectedDate || !selectedTime) return;
+    const selectedSlot = timeSlots.find((slot) => slot.time === selectedTime);
+    if (!selectedSlot?.available) {
+      setSelectedTime("");
+      setSelectedSlotId(undefined);
+      return;
+    }
+    if (selectedSlot.slotId !== selectedSlotId) {
+      setSelectedSlotId(selectedSlot.slotId);
+    }
+  }, [selectedDate, selectedSlotId, selectedTime, timeSlots]);
 
   return (
     <div className="p-8 space-y-6">
@@ -536,9 +566,17 @@ export function RegularApplicationWizard({
                     />
                   </div>
 
-                  {selectedDate && (
+                  <div className="flex-1">
+                    <Label className="mb-3 block">시간 선택</Label>
+                    {isScheduleDataLoading ? (
+                      <div className="flex min-h-[320px] items-center justify-center rounded-md border bg-slate-50">
+                        <div className="flex flex-col items-center gap-3 text-center text-sm text-slate-500">
+                          <div className="h-8 w-8 animate-spin rounded-full border-2 border-slate-200 border-t-slate-700" />
+                          <p>최신 신청 현황과 가능 시간을 불러오는 중입니다.</p>
+                        </div>
+                      </div>
+                    ) : selectedDate ? (
                     <div className="flex-1">
-                      <Label className="mb-3 block">시간 선택</Label>
                       <div className="grid grid-cols-2 gap-2">
                         {timeSlots.map((slot) => (
                           <button
@@ -572,7 +610,12 @@ export function RegularApplicationWizard({
                         ))}
                       </div>
                     </div>
-                  )}
+                    ) : (
+                      <div className="flex min-h-[320px] items-center justify-center rounded-md border border-dashed bg-slate-50/80 px-4 text-center text-sm text-slate-500">
+                        신청 가능한 날짜를 먼저 선택해주세요.
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
@@ -783,7 +826,7 @@ export function RegularApplicationWizard({
               <Button
                 data-testid="regular-wizard-next"
                 onClick={handleNext}
-                disabled={!isStepValid()}
+                disabled={!isStepValid() || (currentStep === 2 && isScheduleDataLoading)}
               >
                 다음
               </Button>

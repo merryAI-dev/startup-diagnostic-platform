@@ -2,6 +2,7 @@ import { Calendar, Clock, AlertCircle, CheckCircle2, MessageSquare, TrendingUp, 
 import { Card, CardContent, CardHeader, CardTitle } from "@/redesign/app/components/ui/card";
 import { Button } from "@/redesign/app/components/ui/button";
 import { StatusChip } from "@/redesign/app/components/status-chip";
+import { parseLocalDateKey } from "@/redesign/app/lib/date-keys";
 import { Application, Message } from "@/redesign/app/lib/types";
 import { format } from "date-fns";
 import { ko } from "date-fns/locale";
@@ -202,7 +203,7 @@ export function AdminDashboard({ applications, messages, onNavigate }: AdminDash
                           <div className="flex items-center gap-2 text-xs text-muted-foreground">
                             <Calendar className="w-3 h-3" />
                             <span>
-                              {format(new Date(app.scheduledDate), "M월 d일 (E)", { locale: ko })}
+                              {format(parseLocalDateKey(app.scheduledDate)!, "M월 d일 (E)", { locale: ko })}
                             </span>
                             {app.scheduledTime && (
                               <>
