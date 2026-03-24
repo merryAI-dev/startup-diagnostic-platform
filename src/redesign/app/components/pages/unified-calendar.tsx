@@ -959,7 +959,7 @@ export function UnifiedCalendar({
               className={cn(
                 "grid gap-4",
                 isConsultant
-                  ? "xl:grid-cols-[320px_minmax(0,1.35fr)_320px] 2xl:grid-cols-[340px_minmax(0,1.5fr)_340px]"
+                  ? "2xl:grid-cols-[320px_minmax(0,1.35fr)_320px] min-[1800px]:grid-cols-[340px_minmax(0,1.5fr)_340px]"
                   : "md:grid-cols-3",
               )}
             >
@@ -1026,7 +1026,7 @@ export function UnifiedCalendar({
                     className={cn(
                       isConsultant ? "grid gap-3" : "grid gap-4",
                       isConsultant
-                        ? "xl:grid-cols-[minmax(0,1.35fr)_340px] 2xl:grid-cols-[minmax(0,1.45fr)_360px]"
+                        ? "min-[1450px]:grid-cols-[minmax(0,1.2fr)_300px] min-[1680px]:grid-cols-[minmax(0,1.35fr)_340px]"
                         : "lg:grid-cols-[minmax(0,1.3fr)_280px] xl:grid-cols-[minmax(0,1.45fr)_300px]",
                     )}
                   >
@@ -1057,7 +1057,7 @@ export function UnifiedCalendar({
                       components={{ DayContent: renderDayContent }}
                     />
 
-                    <div className="rounded-lg border border-slate-200 bg-slate-50/60 p-4">
+                    <div className="min-w-0 rounded-lg border border-slate-200 bg-slate-50/60 p-4">
                       <h3 className="font-semibold text-[#0A2540] mb-3">
                         {selectedDate.toLocaleDateString("ko-KR", { month: "long", day: "numeric" })}
                       </h3>
@@ -1136,7 +1136,7 @@ export function UnifiedCalendar({
               </div>
 
               {/* 선택된 날짜의 일정 */}
-              <div className="flex flex-col gap-4 md:col-span-1">
+              <div className="flex min-w-0 flex-col gap-4 md:col-span-1">
                 {isConsultant && (
                   renderPendingRequestsCard()
                 )}

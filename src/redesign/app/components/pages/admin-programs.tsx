@@ -1,5 +1,5 @@
 import { type FormEvent, useEffect, useMemo, useState } from "react"
-import { CalendarDays, CheckCircle2, Clock3, Plus, Target, Users, X, XCircle } from "lucide-react"
+import { CalendarDays, CheckCircle2, Clock3, Plus, Search, Target, Users, X, XCircle } from "lucide-react"
 import { Agenda, Application, Program } from "@/redesign/app/lib/types"
 import { getCompletedHoursByProgram } from "@/redesign/app/lib/program-metrics"
 import { StatusChip } from "@/redesign/app/components/status-chip"
@@ -154,6 +154,7 @@ export function AdminPrograms({
   const [selectedProgramId, setSelectedProgramId] = useState<string | null>(null)
   const [editingProgramId, setEditingProgramId] = useState<string | null>(null)
   const [companySearch, setCompanySearch] = useState("")
+  const [searchQuery, setSearchQuery] = useState("")
   const [selectedAvailableIds, setSelectedAvailableIds] = useState<string[]>([])
   const [selectedCompanyIds, setSelectedCompanyIds] = useState<string[]>([])
   const [page, setPage] = useState(1)
@@ -266,10 +267,19 @@ export function AdminPrograms({
     return [...items].sort((a, b) => getTimeValue(b.createdAt) - getTimeValue(a.createdAt))
   }, [applicationsByProgram, selectedProgram])
 
+  const filteredProgramStats = useMemo(() => {
+    const normalizedQuery = searchQuery.trim().toLowerCase()
+    if (!normalizedQuery) return programStats
+
+    return programStats.filter((item) =>
+      item.program.name.toLowerCase().includes(normalizedQuery),
+    )
+  }, [programStats, searchQuery])
+
   const paginatedProgramStats = useMemo(() => {
     const startIndex = (page - 1) * PAGE_SIZE
-    return programStats.slice(startIndex, startIndex + PAGE_SIZE)
-  }, [page, programStats])
+    return filteredProgramStats.slice(startIndex, startIndex + PAGE_SIZE)
+  }, [filteredProgramStats, page])
 
   const editingProgram = useMemo(
     () => programs.find((program) => program.id === editingProgramId) ?? null,
@@ -334,14 +344,14 @@ export function AdminPrograms({
 
   useEffect(() => {
     setPage(1)
-  }, [programs.length])
+  }, [programs.length, searchQuery])
 
   useEffect(() => {
-    const totalPages = Math.max(1, Math.ceil(programStats.length / PAGE_SIZE))
+    const totalPages = Math.max(1, Math.ceil(filteredProgramStats.length / PAGE_SIZE))
     if (page > totalPages) {
       setPage(totalPages)
     }
-  }, [page, programStats.length])
+  }, [filteredProgramStats.length, page])
 
   function handleSubmitProgram(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -475,7 +485,15 @@ export function AdminPrograms({
           {isManagementMode ? (
             <Card className="flex min-h-0 flex-1 flex-col overflow-hidden bg-white">
               <CardHeader className="shrink-0 border-b bg-white">
-                <CardTitle>사업 목록</CardTitle>
+                <div className="relative w-full sm:w-[320px]">
+                  <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    placeholder="사업명으로 검색"
+                    value={searchQuery}
+                    onChange={(event) => setSearchQuery(event.target.value)}
+                    className="pl-9"
+                  />
+                </div>
               </CardHeader>
               <div className="min-h-0 flex-1 overflow-auto">
                 <Table>
@@ -489,13 +507,13 @@ export function AdminPrograms({
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {programStats.length === 0 && (
+                    {filteredProgramStats.length === 0 && (
                       <TableRow>
                         <TableCell
                           colSpan={5}
                           className="h-24 text-center text-sm text-muted-foreground"
                         >
-                          등록된 사업이 없습니다.
+                          {searchQuery.trim() ? "검색 결과가 없습니다." : "등록된 사업이 없습니다."}
                         </TableCell>
                       </TableRow>
                     )}
@@ -543,7 +561,7 @@ export function AdminPrograms({
                 <PaginationControls
                   page={page}
                   pageSize={PAGE_SIZE}
-                  totalItems={programStats.length}
+                  totalItems={filteredProgramStats.length}
                   onPageChange={setPage}
                   alwaysShow
                 />

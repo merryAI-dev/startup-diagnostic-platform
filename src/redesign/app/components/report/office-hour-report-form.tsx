@@ -66,6 +66,85 @@ function isStorageFileUrl(value: string) {
   );
 }
 
+function isWorkbookFriendlyImageType(contentType: string) {
+  const normalized = contentType.toLowerCase();
+  return (
+    normalized.includes("png")
+    || normalized.includes("jpeg")
+    || normalized.includes("jpg")
+    || normalized.includes("gif")
+  );
+}
+
+function buildNormalizedImageName(fileName: string) {
+  const baseName = fileName.replace(/\.[^.]+$/u, "").trim() || "report-photo";
+  return `${baseName}.png`;
+}
+
+async function convertImageFileToPng(file: File) {
+  const objectUrl = URL.createObjectURL(file);
+
+  try {
+    const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const next = new Image();
+      next.onload = () => resolve(next);
+      next.onerror = () => reject(new Error("이미지 디코딩에 실패했습니다."));
+      next.src = objectUrl;
+    });
+
+    const canvas = document.createElement("canvas");
+    canvas.width = image.naturalWidth || image.width;
+    canvas.height = image.naturalHeight || image.height;
+
+    const context = canvas.getContext("2d");
+    if (!context) {
+      throw new Error("이미지 변환 컨텍스트를 생성할 수 없습니다.");
+    }
+
+    context.drawImage(image, 0, 0);
+
+    const blob = await new Promise<Blob | null>((resolve) => {
+      canvas.toBlob(resolve, "image/png");
+    });
+
+    if (!blob) {
+      throw new Error("PNG 변환에 실패했습니다.");
+    }
+
+    return new File([blob], buildNormalizedImageName(file.name), {
+      type: "image/png",
+      lastModified: file.lastModified,
+    });
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+}
+
+async function normalizePhotoForUpload(file: File) {
+  if (isWorkbookFriendlyImageType(file.type || "")) {
+    return {
+      file,
+      normalized: false,
+      conversionFailed: false,
+    } as const;
+  }
+
+  try {
+    const normalizedFile = await convertImageFileToPng(file);
+    return {
+      file: normalizedFile,
+      normalized: true,
+      conversionFailed: false,
+    } as const;
+  } catch {
+    return {
+      file,
+      normalized: false,
+      conversionFailed: true,
+    } as const;
+  }
+}
+
 export function OfficeHourReportForm({ 
   application, 
   open, 
@@ -230,13 +309,26 @@ export function OfficeHourReportForm({
         if (isFirebaseConfigured && storage) {
           const storageInstance = storage;
           const uploadBase = `reports/${application.id}/${Date.now()}`;
+          let conversionFailures = 0;
           uploadedPhotoUrls = await Promise.all(
             pendingPhotos.map(async (item, index) => {
-              const fileRef = ref(storageInstance, `${uploadBase}-${index}-${item.file.name}`);
-              await uploadBytes(fileRef, item.file);
+              const normalizedPhoto = await normalizePhotoForUpload(item.file);
+              if (normalizedPhoto.conversionFailed) {
+                conversionFailures += 1;
+              }
+              const fileRef = ref(
+                storageInstance,
+                `${uploadBase}-${index}-${normalizedPhoto.file.name}`
+              );
+              await uploadBytes(fileRef, normalizedPhoto.file);
               return getDownloadURL(fileRef);
             })
           );
+          if (conversionFailures > 0) {
+            toast.warning(
+              `사진 ${conversionFailures}개는 형식 변환에 실패해 원본으로 저장되었습니다. 엑셀 삽입이 제한될 수 있습니다.`
+            );
+          }
         } else {
           uploadedPhotoUrls = pendingPhotos.map((item) => item.previewUrl);
         }
