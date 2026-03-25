@@ -1,6 +1,7 @@
 import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore"
 import { useEffect, useMemo, useState } from "react"
 import { db } from "@/firebase/client"
+import { replaceCompanyPrograms } from "@/lib/company-program-membership"
 import type {
   CompanyInfoForm,
   CompanyInfoRecord,
@@ -675,15 +676,12 @@ export function useCompanyInfoForm(companyId: string) {
         },
         { merge: true }
       )
-      await setDoc(
-        doc(db, "companies", companyId),
-        {
-          name: companyInfo.basic.companyInfo || null,
-          programs: companyProgramIds,
-          updatedAt: serverTimestamp(),
-        },
-        { merge: true }
-      )
+      await replaceCompanyPrograms({
+        db,
+        companyId,
+        nextProgramIds: companyProgramIds,
+        companyName: companyInfo.basic.companyInfo || null,
+      })
       setSavedForm(form)
       setSavedCompanyProgramIds(companyProgramIds)
       setSavedInvestmentRows(investmentRows)
