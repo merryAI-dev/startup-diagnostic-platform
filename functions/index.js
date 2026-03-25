@@ -236,6 +236,50 @@ function toPendingInvestmentRows(value) {
   }));
 }
 
+function normalizeStringArray(values) {
+  if (!Array.isArray(values)) return [];
+  return Array.from(
+    new Set(values.map((value) => normalizeString(value)).filter(Boolean))
+  );
+}
+
+async function syncCompanyProgramsInTransaction(transaction, params) {
+  const companyId = normalizeString(params.companyId);
+  const ownerUid = normalizeString(params.ownerUid);
+  const currentProgramIds = normalizeStringArray(params.currentProgramIds);
+  const nextProgramIds = normalizeStringArray(params.nextProgramIds);
+  const affectedProgramIds = Array.from(new Set([...currentProgramIds, ...nextProgramIds]));
+
+  if (!companyId || affectedProgramIds.length === 0) {
+    return;
+  }
+
+  const aliases = Array.from(new Set([companyId, ownerUid].filter(Boolean)));
+  const programRefs = affectedProgramIds.map((programId) => db.collection("programs").doc(programId));
+  const programSnaps = await Promise.all(programRefs.map((ref) => transaction.get(ref)));
+
+  programSnaps.forEach((programSnap, index) => {
+    const programRef = programRefs[index];
+    const programId = affectedProgramIds[index];
+    const programData = programSnap.exists ? programSnap.data() || {} : {};
+    const currentCompanyIds = normalizeStringArray(programData.companyIds);
+    const nextCompanyIds = currentCompanyIds.filter((value) => !aliases.includes(value));
+
+    if (nextProgramIds.includes(programId)) {
+      nextCompanyIds.push(companyId);
+    }
+
+    transaction.set(
+      programRef,
+      {
+        companyIds: normalizeStringArray(nextCompanyIds),
+        updatedAt: FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
+  });
+}
+
 function buildCompanyInfoRecord(form, investmentRows) {
   return {
     basic: {
@@ -1728,6 +1772,9 @@ exports.approvePendingUser = onCall(
           ? signupRequest.programIds.map((value) => normalizeString(value)).filter(Boolean)
           : [];
         const companyRef = db.collection("companies").doc(approvedCompanyId);
+        const companySnap = await transaction.get(companyRef);
+        const existingCompany = companySnap.exists ? companySnap.data() || {} : {};
+        const currentProgramIds = normalizeStringArray(existingCompany.programs);
         const companyInfoRef = db
           .collection("companies")
           .doc(approvedCompanyId)
@@ -1745,6 +1792,12 @@ exports.approvePendingUser = onCall(
           },
           { merge: true }
         );
+        await syncCompanyProgramsInTransaction(transaction, {
+          companyId: approvedCompanyId,
+          ownerUid: targetUserId,
+          currentProgramIds,
+          nextProgramIds: approvedProgramIds,
+        });
         transaction.set(
           companyInfoRef,
           {
