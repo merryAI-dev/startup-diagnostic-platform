@@ -191,6 +191,7 @@ export function AdminDashboard({
     "info"
   )
   const [programs, setPrograms] = useState<ProgramSummary[]>([])
+  const [selectedCompanyProgramIds, setSelectedCompanyProgramIds] = useState<string[]>([])
   const [loadingPrograms, setLoadingPrograms] = useState(false)
   const [ticketDrafts, setTicketDrafts] = useState<Record<string, { internal: string; external: string }>>({})
   const [savingTickets, setSavingTickets] = useState(false)
@@ -295,6 +296,7 @@ export function AdminDashboard({
         setCompanyInfo(null)
         setSelfAssessment({})
         setCompanyFiles([])
+        setSelectedCompanyProgramIds([])
         setTicketDrafts({})
         setReportForm(EMPTY_COMPANY_ANALYSIS_REPORT_FORM)
         return
@@ -342,12 +344,17 @@ export function AdminDashboard({
         )
         setCompanyFiles(files)
         const overrideData = companySnap.exists()
-          ? (companySnap.data() as { programTicketOverrides?: Record<string, { internal?: number; external?: number }> })
+          ? (companySnap.data() as {
+            programTicketOverrides?: Record<string, { internal?: number; external?: number }>
+            programs?: string[]
+          })
           : {}
         const overrides = overrideData.programTicketOverrides ?? {}
-        const participating = programs.filter((program) =>
-          program.companyIds?.includes(selectedCompanyId)
-        )
+        const companyProgramIds = Array.isArray(overrideData.programs)
+          ? overrideData.programs.filter((value): value is string => typeof value === "string")
+          : []
+        setSelectedCompanyProgramIds(companyProgramIds)
+        const participating = programs.filter((program) => companyProgramIds.includes(program.id))
         const nextDrafts: Record<string, { internal: string; external: string }> = {}
         participating.forEach((program) => {
           const override = overrides[program.id]
@@ -399,9 +406,9 @@ export function AdminDashboard({
   }, [companyInfo])
 
   const participatingPrograms = useMemo(() => {
-    if (!selectedCompanyId) return []
-    return programs.filter((program) => program.companyIds?.includes(selectedCompanyId))
-  }, [programs, selectedCompanyId])
+    if (selectedCompanyProgramIds.length === 0) return []
+    return programs.filter((program) => selectedCompanyProgramIds.includes(program.id))
+  }, [programs, selectedCompanyProgramIds])
 
   const handleTicketChange = (programId: string, field: "internal" | "external", value: string) => {
     setTicketDrafts((prev) => ({

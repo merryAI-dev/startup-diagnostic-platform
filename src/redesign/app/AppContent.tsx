@@ -108,7 +108,7 @@ import {
   parseLocalDateTimeKey,
 } from "@/redesign/app/lib/date-keys"
 import { firestoreService } from "@/redesign/app/lib/firestore-service"
-import { storage as firebaseStorage } from "@/redesign/app/lib/firebase"
+import { db as redesignDb, storage as firebaseStorage } from "@/redesign/app/lib/firebase"
 import {
   mockNotifications,
   mockChatRooms,
@@ -117,6 +117,10 @@ import {
   mockGoals,
   mockTeamMembers,
 } from "@/redesign/app/lib/advanced-mock-data"
+import {
+  getCompanyIdsByProgram,
+  replaceProgramCompanies,
+} from "@/lib/company-program-membership"
 import {
   type CompanyInfoForm,
   type CompanyInfoRecord,
@@ -819,6 +823,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     id: string
     name?: string | null
     programs?: string[]
+    ownerUid?: string | null
   }>("companies", {
     enabled:
       isFirebaseConfigured &&
@@ -831,10 +836,6 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
   }>("companies", {
     constraints: [where("ownerUid", "==", firebaseUser?.uid ?? "")],
     enabled: needsCompanyOwnershipLookup,
-  })
-  const { data: companyUserDocs } = useFirestoreCollection<User>(COLLECTIONS.USERS, {
-    constraints: [where("role", "==", "user")],
-    enabled: isFirebaseConfigured && !isCompanyInfoRoute && needsCompanyDirectory,
   })
   const companyNameById = useMemo(() => {
     const map = new Map<string, string>()
@@ -861,26 +862,14 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
   }, [profileList])
   const companyDirectory = useMemo(() => {
     if (isFirebaseConfigured) {
-      const programsByCompanyId = new Map(
-        companyUserDocs.map((doc) => [doc.id, doc.programs ?? []]),
-      )
       const filteredCompanyDocs = needsCompanyDirectory
         ? companyDocs.filter((doc) => liveCompanyIds.has(doc.id))
         : companyDocs
-      const filteredCompanyUserDocs = needsCompanyDirectory
-        ? companyUserDocs.filter((doc) => liveCompanyIds.has(doc.id))
-        : companyUserDocs
-      if (filteredCompanyDocs.length > 0 || needsCompanyDirectory) {
-        return filteredCompanyDocs.map((doc) => ({
-          id: doc.id,
-          name: doc.name?.trim() || companyNameById.get(doc.id) || "회사명 미입력",
-          programs: doc.programs ?? programsByCompanyId.get(doc.id) ?? [],
-        }))
-      }
-      return filteredCompanyUserDocs.map((doc) => ({
+      return filteredCompanyDocs.map((doc) => ({
         id: doc.id,
-        name: doc.companyName?.trim() || companyNameById.get(doc.id) || "회사명 미입력",
+        name: doc.name?.trim() || companyNameById.get(doc.id) || "회사명 미입력",
         programs: doc.programs ?? [],
+        ownerUid: doc.ownerUid ?? null,
       }))
     }
     return users
@@ -889,11 +878,11 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
         id: u.id,
         name: u.companyName?.trim() || "회사명 미입력",
         programs: u.programs ?? [],
+        ownerUid: null,
       }))
   }, [
     companyDocs,
     companyNameById,
-    companyUserDocs,
     isFirebaseConfigured,
     liveCompanyIds,
     needsCompanyDirectory,
@@ -971,7 +960,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       resolvedRole === "user"
         ? Array.isArray(companyMetaDoc?.programs)
           ? companyMetaDoc.programs
-          : (fallbackUser.programs ?? [])
+          : []
         : (fallbackUser.programs ?? [])
     return {
       ...fallbackUser,
@@ -1382,44 +1371,11 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
 
   const companyProgramIds = useMemo(() => {
     if (resolvedRole !== "user") return new Set<string>()
-    if (Array.isArray(companyMetaDoc?.programs)) {
-      return new Set(companyMetaDoc.programs)
-    }
-    const ids = new Set<string>()
-    const candidateIds = new Set(
-      [companyRecordId, firebaseUser?.uid, profile?.companyId, user.id].filter(
-        (value): value is string => Boolean(value),
-      ),
-    )
-    if (candidateIds.size > 0) {
-      programList.forEach((program) => {
-        if (!program.companyIds || program.companyIds.length === 0) return
-        const matched = program.companyIds.some((id) => candidateIds.has(id))
-        if (matched) ids.add(program.id)
-      })
-    }
-    if (ids.size > 0) return ids
-    if (user.programs && user.programs.length > 0) {
-      return new Set(user.programs)
-    }
-    if (user.programName) {
-      programList.forEach((program) => {
-        if (program.name === user.programName) {
-          ids.add(program.id)
-        }
-      })
-    }
-    return ids
+    if (!Array.isArray(companyMetaDoc?.programs)) return new Set<string>()
+    return new Set(companyMetaDoc.programs)
   }, [
     companyMetaDoc?.programs,
-    companyRecordId,
-    firebaseUser?.uid,
-    profile?.companyId,
-    programList,
     resolvedRole,
-    user.id,
-    user.programName,
-    user.programs,
   ])
 
   const scopedRegularOfficeHourList = useMemo(() => {
@@ -4018,13 +3974,13 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     const targetProgram = programList.find((program) => program.id === programId)
     if (!targetProgram) {
       toast.error("사업 정보를 찾을 수 없습니다")
-      return
+      return false
     }
     const uniqueCompanyIds = Array.from(new Set(companyIds))
     const companyLimit = targetProgram.companyLimit ?? 0
     if (companyLimit > 0 && uniqueCompanyIds.length > companyLimit) {
       toast.error(`참여 기업 수는 최대 ${companyLimit}개까지 가능합니다`)
-      return
+      return false
     }
 
     setProgramList((prev) =>
@@ -4034,48 +3990,26 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     )
 
     if (isFirebaseConfigured) {
-      const ok = await programCrud.update(programId, {
-        companyIds: uniqueCompanyIds,
-      } as Partial<Omit<Program, "id">>)
-      if (!ok) {
-        toast.error("참여 기업 업데이트에 실패했습니다")
-        return
+      if (!redesignDb) {
+        toast.error("데이터베이스를 사용할 수 없습니다")
+        return false
       }
-
-      const affectedCompanyIds = Array.from(
-        new Set([...(targetProgram.companyIds ?? []), ...uniqueCompanyIds]),
-      )
-      if (affectedCompanyIds.length > 0) {
-        const companyProgramsById = new Map(
-          companyDirectory.map((company) => [company.id, company.programs ?? []] as const),
-        )
-        const syncResults = await Promise.all(
-          affectedCompanyIds.map((companyId) => {
-            const nextPrograms = new Set(companyProgramsById.get(companyId) ?? [])
-            if (uniqueCompanyIds.includes(companyId)) {
-              nextPrograms.add(programId)
-            } else {
-              nextPrograms.delete(programId)
-            }
-            return firestoreService.setDocument(
-              "companies",
-              companyId,
-              {
-                programs: Array.from(nextPrograms),
-                updatedAt: new Date(),
-              },
-              true,
-            )
-          }),
-        )
-        if (syncResults.some((result) => !result)) {
-          toast.error("회사 참여사업 동기화에 실패했습니다")
-          return
-        }
+      try {
+        await replaceProgramCompanies({
+          db: redesignDb,
+          programId,
+          nextCompanyIds: uniqueCompanyIds,
+          companies: companyDirectory,
+        })
+      } catch (error) {
+        console.error("Failed to replace program companies:", error)
+        toast.error("참여 기업 업데이트에 실패했습니다")
+        return false
       }
     }
 
     toast.success("참여 기업 구성이 업데이트되었습니다")
+    return true
   }
 
   const handleGenerateProgramSlots = async (programId: string) => {

@@ -2,6 +2,7 @@ import { type FormEvent, useEffect, useMemo, useState } from "react"
 import { CalendarDays, CheckCircle2, Clock3, Plus, Search, Target, Users, X, XCircle } from "lucide-react"
 import { Agenda, Application, Program } from "@/redesign/app/lib/types"
 import { getCompletedHoursByProgram } from "@/redesign/app/lib/program-metrics"
+import { getCompanyIdsByProgram } from "@/lib/company-program-membership"
 import { StatusChip } from "@/redesign/app/components/status-chip"
 import { Badge } from "@/redesign/app/components/ui/badge"
 import { Button } from "@/redesign/app/components/ui/button"
@@ -37,10 +38,10 @@ interface AdminProgramsProps {
   programs: Program[]
   applications: Application[]
   agendas: Agenda[]
-  companies: { id: string; name: string; programs?: string[] }[]
+  companies: { id: string; name: string; programs?: string[]; ownerUid?: string | null }[]
   onAddProgram: (data: Omit<Program, "id">) => void
   onUpdateProgram: (id: string, data: Partial<Program>) => void
-  onUpdateProgramCompanies: (id: string, companyIds: string[]) => void
+  onUpdateProgramCompanies: (id: string, companyIds: string[]) => Promise<boolean> | boolean
   viewMode?: "management" | "list"
   onNavigate?: (page: string) => void
 }
@@ -153,8 +154,10 @@ export function AdminPrograms({
   const [detailForm, setDetailForm] = useState<ProgramFormState>(() => createDefaultProgramForm())
   const [selectedProgramId, setSelectedProgramId] = useState<string | null>(null)
   const [editingProgramId, setEditingProgramId] = useState<string | null>(null)
+  const [editingCompanyIds, setEditingCompanyIds] = useState<string[]>([])
   const [companySearch, setCompanySearch] = useState("")
   const [searchQuery, setSearchQuery] = useState("")
+  const [companyUpdateSaving, setCompanyUpdateSaving] = useState(false)
   const [selectedAvailableIds, setSelectedAvailableIds] = useState<string[]>([])
   const [selectedCompanyIds, setSelectedCompanyIds] = useState<string[]>([])
   const [page, setPage] = useState(1)
@@ -176,14 +179,7 @@ export function AdminPrograms({
     const map = new Map<string, string[]>()
 
     programs.forEach((program) => {
-      const explicitCompanyIds = companies
-        .filter((company) => company.programs?.includes(program.id))
-        .map((company) => company.id)
-      const legacyCompanyIds = (program.companyIds ?? []).filter((companyId) => {
-        const targetCompany = companies.find((company) => company.id === companyId)
-        return !targetCompany || !Array.isArray(targetCompany.programs)
-      })
-      map.set(program.id, Array.from(new Set([...explicitCompanyIds, ...legacyCompanyIds])))
+      map.set(program.id, getCompanyIdsByProgram(companies, program.id))
     })
 
     return map
@@ -300,19 +296,19 @@ export function AdminPrograms({
   }, [companyIdsByProgram, editingProgram])
   const selectedCompanies = useMemo(() => {
     if (!editingProgram) return []
-    return editingProgramCompanyIds.map(
+    return editingCompanyIds.map(
       (id) => companyById.get(id) || { id, name: "회사명 미입력" },
     )
-  }, [companyById, editingProgram, editingProgramCompanyIds])
+  }, [companyById, editingCompanyIds, editingProgram])
   const availableCompanies = useMemo(() => {
     if (!editingProgram) return []
-    const currentIds = new Set(editingProgramCompanyIds)
+    const currentIds = new Set(editingCompanyIds)
     return sortedCompanies.filter((company) => {
       if (currentIds.has(company.id)) return false
       if (!companySearchQuery) return true
       return company.name.toLowerCase().includes(companySearchQuery)
     })
-  }, [companySearchQuery, editingProgram, editingProgramCompanyIds, sortedCompanies])
+  }, [companySearchQuery, editingCompanyIds, editingProgram, sortedCompanies])
 
   useEffect(() => {
     if (programs.length === 0) {
@@ -332,15 +328,33 @@ export function AdminPrograms({
   useEffect(() => {
     if (!editingProgram) {
       setDetailForm(createDefaultProgramForm())
+      setEditingCompanyIds([])
       setSelectedAvailableIds([])
       setSelectedCompanyIds([])
       return
     }
     const nextForm = toProgramForm(editingProgram)
     setDetailForm(nextForm)
+    setEditingCompanyIds(editingProgramCompanyIds)
     setSelectedAvailableIds([])
     setSelectedCompanyIds([])
-  }, [editingProgram])
+  }, [editingProgram, editingProgramCompanyIds])
+
+  async function updateEditingProgramCompanies(nextCompanyIds: string[]) {
+    if (!editingProgram) return
+    setCompanyUpdateSaving(true)
+    try {
+      const ok = await Promise.resolve(
+        onUpdateProgramCompanies(editingProgram.id, nextCompanyIds),
+      )
+      if (ok === false) return
+      setEditingCompanyIds(nextCompanyIds)
+      setSelectedAvailableIds([])
+      setSelectedCompanyIds([])
+    } finally {
+      setCompanyUpdateSaving(false)
+    }
+  }
 
   useEffect(() => {
     setPage(1)
@@ -419,38 +433,36 @@ export function AdminPrograms({
     setIsEditDialogOpen(true)
   }
 
-  function addCompanyToProgram(companyId: string) {
+  async function addCompanyToProgram(companyId: string) {
     if (!editingProgram) return
-    const currentIds = editingProgramCompanyIds
+    const currentIds = editingCompanyIds
     if (currentIds.includes(companyId)) return
     const nextCompanyIds = [...currentIds, companyId]
-    onUpdateProgramCompanies(editingProgram.id, nextCompanyIds)
+    await updateEditingProgramCompanies(nextCompanyIds)
   }
 
-  function removeCompanyFromProgram(companyId: string) {
+  async function removeCompanyFromProgram(companyId: string) {
     if (!editingProgram) return
-    const currentIds = editingProgramCompanyIds
+    const currentIds = editingCompanyIds
     const nextCompanyIds = currentIds.filter((id) => id !== companyId)
-    onUpdateProgramCompanies(editingProgram.id, nextCompanyIds)
+    await updateEditingProgramCompanies(nextCompanyIds)
   }
 
-  function addSelectedCompanies() {
+  async function addSelectedCompanies() {
     if (!editingProgram) return
     if (selectedAvailableIds.length === 0) return
-    const currentIds = editingProgramCompanyIds
+    const currentIds = editingCompanyIds
     const nextCompanyIds = Array.from(new Set([...currentIds, ...selectedAvailableIds]))
-    onUpdateProgramCompanies(editingProgram.id, nextCompanyIds)
-    setSelectedAvailableIds([])
+    await updateEditingProgramCompanies(nextCompanyIds)
   }
 
-  function removeSelectedCompanies() {
+  async function removeSelectedCompanies() {
     if (!editingProgram) return
     if (selectedCompanyIds.length === 0) return
-    const currentIds = editingProgramCompanyIds
+    const currentIds = editingCompanyIds
     const removalSet = new Set(selectedCompanyIds)
     const nextCompanyIds = currentIds.filter((id) => !removalSet.has(id))
-    onUpdateProgramCompanies(editingProgram.id, nextCompanyIds)
-    setSelectedCompanyIds([])
+    await updateEditingProgramCompanies(nextCompanyIds)
   }
 
   const pageTitle = isManagementMode ? "사업 관리" : "사업별 프로그램"
@@ -1221,6 +1233,7 @@ export function AdminPrograms({
                       variant="outline"
                       className="bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
                       disabled={
+                        companyUpdateSaving ||
                         selectedAvailableIds.length === 0 ||
                         ((editingProgram.companyLimit ?? 0) > 0 &&
                           selectedCompanies.length >= (editingProgram.companyLimit ?? 0))
@@ -1234,7 +1247,7 @@ export function AdminPrograms({
                       size="sm"
                       variant="outline"
                       className="bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
-                      disabled={selectedCompanyIds.length === 0}
+                      disabled={companyUpdateSaving || selectedCompanyIds.length === 0}
                       onClick={removeSelectedCompanies}
                     >
                       ←
@@ -1272,7 +1285,8 @@ export function AdminPrograms({
                               <span className="flex-1">{company.name}</span>
                               <button
                                 type="button"
-                                onClick={() => removeCompanyFromProgram(company.id)}
+                                disabled={companyUpdateSaving}
+                                onClick={() => void removeCompanyFromProgram(company.id)}
                                 className="rounded hover:bg-slate-200/70"
                                 aria-label={`${company.name} 제거`}
                               >
