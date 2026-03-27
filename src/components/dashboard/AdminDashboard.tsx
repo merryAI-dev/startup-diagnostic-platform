@@ -94,6 +94,7 @@ type MetricsSnapshot = {
   year: number
   data: MonthlyMetrics[]
   customFields: CustomMetricField[]
+  visibleBaseMetricKeys: string[]
   updatedAt?: unknown
 }
 
@@ -122,6 +123,7 @@ const CUSTOM_METRIC_CHART_COLORS = [
   "#0284c7",
   "#ca8a04",
 ]
+const DEFAULT_VISIBLE_BASE_METRIC_KEYS = BASE_METRIC_CHART_FIELDS.map((field) => field.key)
 
 function getRadarLabelLines(label: string) {
   const normalized = label.trim()
@@ -296,6 +298,9 @@ function normalizeMetricsSnapshot(
   const data = Array.isArray(source.data) ? source.data : []
   const inferredCustomFields = inferCustomMetricFields(data)
   const customFields = normalizeCustomMetricFields(source.customFields, inferredCustomFields)
+  const visibleBaseMetricKeys = Array.isArray(source.visibleBaseMetricKeys)
+    ? DEFAULT_VISIBLE_BASE_METRIC_KEYS.filter((key) => source.visibleBaseMetricKeys?.includes(key))
+    : DEFAULT_VISIBLE_BASE_METRIC_KEYS
 
   return {
     companyId,
@@ -303,6 +308,7 @@ function normalizeMetricsSnapshot(
     year,
     data: normalizeMonthlyMetrics(data, year),
     customFields,
+    visibleBaseMetricKeys: visibleBaseMetricKeys.length > 0 ? visibleBaseMetricKeys : DEFAULT_VISIBLE_BASE_METRIC_KEYS,
     updatedAt: source.updatedAt,
   }
 }
@@ -717,6 +723,9 @@ export function AdminDashboard({
   const hasMetricsDocument = Boolean(companyMetrics)
 
   const metricChartFields = useMemo<MetricChartField[]>(() => {
+    const visibleBaseFields = BASE_METRIC_CHART_FIELDS.filter((field) =>
+      companyMetrics?.visibleBaseMetricKeys?.includes(field.key) ?? true,
+    )
     const customFields = companyMetrics?.customFields.map((field, index) => ({
       key: field.key,
       label: field.label,
@@ -724,8 +733,8 @@ export function AdminDashboard({
       color: CUSTOM_METRIC_CHART_COLORS[index % CUSTOM_METRIC_CHART_COLORS.length] ?? "#64748b",
     })) ?? []
 
-    return [...BASE_METRIC_CHART_FIELDS, ...customFields]
-  }, [companyMetrics?.customFields])
+    return [...visibleBaseFields, ...customFields]
+  }, [companyMetrics?.customFields, companyMetrics?.visibleBaseMetricKeys])
 
   const selectedMetricChartField = useMemo(
     () => metricChartFields.find((field) => field.key === selectedMetricChartKey) ?? metricChartFields[0] ?? null,
@@ -741,15 +750,9 @@ export function AdminDashboard({
       return companyMetrics.data.map((row) => ({
         label: `${row.month}월`,
         ...Object.fromEntries(
-          BASE_METRIC_CHART_FIELDS.map((field) => [
+          metricChartFields.map((field) => [
             field.key,
             getMetricCellValue(row, field.key),
-          ]),
-        ),
-        ...Object.fromEntries(
-          companyMetrics.customFields.map((field) => [
-            field.key,
-            row.otherMetrics?.[field.key] ?? 0,
           ]),
         ),
       }))
