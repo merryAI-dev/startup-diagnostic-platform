@@ -10,8 +10,8 @@ import {
 } from "firebase/firestore"
 import { getDownloadURL, ref as storageRef } from "firebase/storage"
 import ExcelJS from "exceljs"
-import { FileSpreadsheet, Save, Wand2 } from "lucide-react"
-import { useEffect, useMemo, useState } from "react"
+import { CheckCircle2, FileSpreadsheet, Save, Wand2 } from "lucide-react"
+import { Fragment, useEffect, useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { toast } from "sonner"
 import {
@@ -63,6 +63,8 @@ type CompanySummary = {
   id: string
   name: string | null
   ownerUid: string
+  hasExportVoucher: boolean
+  hasInnovationVoucher: boolean
 }
 
 type ProfileSummary = {
@@ -105,6 +107,21 @@ type MetricChartField = {
   color: string
 }
 
+type CompanyInfoField = {
+  label: string
+  value: string
+  span?: "half" | "full"
+  group?: string
+}
+
+type CompanyInfoSection = {
+  title: string
+  description?: string
+  fields: CompanyInfoField[]
+}
+
+type VoucherFilterTag = "export" | "innovation"
+
 const COMPANY_PAGE_SIZE = 8
 const METRIC_MONTHS = Array.from({ length: 12 }, (_, index) => index + 1)
 const BASE_METRIC_CHART_FIELDS: MetricChartField[] = [
@@ -124,6 +141,70 @@ const CUSTOM_METRIC_CHART_COLORS = [
   "#ca8a04",
 ]
 const DEFAULT_VISIBLE_BASE_METRIC_KEYS = BASE_METRIC_CHART_FIELDS.map((field) => field.key)
+
+function excelColumnName(columnNumber: number) {
+  let column = columnNumber
+  let result = ""
+  while (column > 0) {
+    const remainder = (column - 1) % 26
+    result = String.fromCharCode(65 + remainder) + result
+    column = Math.floor((column - 1) / 26)
+  }
+  return result || "A"
+}
+
+function buildCompanyInfoTableRows(fields: CompanyInfoField[]) {
+  const rows: CompanyInfoField[][] = []
+  let currentRow: CompanyInfoField[] = []
+
+  fields.forEach((field) => {
+    if (field.span === "full") {
+      if (currentRow.length > 0) {
+        rows.push(currentRow)
+        currentRow = []
+      }
+      rows.push([field])
+      return
+    }
+
+    currentRow.push(field)
+    if (currentRow.length === 2) {
+      rows.push(currentRow)
+      currentRow = []
+    }
+  })
+
+  if (currentRow.length > 0) {
+    rows.push(currentRow)
+  }
+
+  return rows
+}
+
+function groupCompanyInfoFields(fields: CompanyInfoField[]) {
+  const ungrouped: CompanyInfoField[] = []
+  const grouped = new Map<string, CompanyInfoField[]>()
+
+  fields.forEach((field) => {
+    if (!field.group) {
+      ungrouped.push(field)
+      return
+    }
+
+    const existing = grouped.get(field.group) ?? []
+    existing.push(field)
+    grouped.set(field.group, existing)
+  })
+
+  return {
+    ungrouped,
+    groupedEntries: Array.from(grouped.entries()),
+  }
+}
+
+function isVoucherHeld(value: unknown) {
+  return typeof value === "string" && value.trim() === "예"
+}
 
 function getRadarLabelLines(label: string) {
   const normalized = label.trim()
@@ -226,6 +307,18 @@ function createEmptyMonth(year: number, month: number): MonthlyMetrics {
     monthlyActiveUsers: 0,
     otherMetrics: {},
   }
+}
+
+function formatCompanyInfoDateLabel(value: unknown) {
+  const date = normalizeUnknownDate(value)
+  if (!date) return "-"
+  return new Intl.DateTimeFormat("ko-KR", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date)
 }
 
 function normalizeMonthlyMetrics(data: MonthlyMetrics[], year: number): MonthlyMetrics[] {
@@ -458,6 +551,7 @@ export function AdminDashboard({
   const [loadingCompanies, setLoadingCompanies] = useState(true)
   const [loadingDetails, setLoadingDetails] = useState(false)
   const [companyQuery, setCompanyQuery] = useState("")
+  const [voucherFilterTags, setVoucherFilterTags] = useState<VoucherFilterTag[]>([])
   const [companyPage, setCompanyPage] = useState(1)
   const [activeTab, setActiveTab] = useState<"info" | "assessment" | "metrics" | "report" | "officeHours">(
     "info"
@@ -476,6 +570,7 @@ export function AdminDashboard({
   const [isGeneratingReport, setIsGeneratingReport] = useState(false)
   const [savingReport, setSavingReport] = useState(false)
   const [downloadingReport, setDownloadingReport] = useState(false)
+  const [downloadingCompanyWorkbook, setDownloadingCompanyWorkbook] = useState(false)
   const [activeSectionFilter, setActiveSectionFilter] = useState<string>("문제")
   const [reportForm, setReportForm] = useState<CompanyAnalysisReportForm>(EMPTY_COMPANY_ANALYSIS_REPORT_FORM)
 
@@ -501,17 +596,37 @@ export function AdminDashboard({
             .map((data) => data.companyId!.trim()),
         )
         if (!mounted) return
-        const list = companySnapshot.docs
-          .filter((docSnap) => liveCompanyIds.has(docSnap.id))
+        const liveCompanyDocs = companySnapshot.docs.filter((docSnap) => liveCompanyIds.has(docSnap.id))
+        const companyInfoEntries = await Promise.all(
+          liveCompanyDocs.map(async (docSnap) => {
+            const companyInfoSnap = await getDoc(doc(db, "companies", docSnap.id, "companyInfo", "info"))
+            const companyInfoData = companyInfoSnap.exists()
+              ? (companyInfoSnap.data() as Partial<CompanyInfoRecord>)
+              : null
+            return [
+              docSnap.id,
+              {
+                hasExportVoucher: isVoucherHeld(companyInfoData?.vouchers?.exportVoucherHeld),
+                hasInnovationVoucher: isVoucherHeld(companyInfoData?.vouchers?.innovationVoucherHeld),
+              },
+            ] as const
+          }),
+        )
+        if (!mounted) return
+        const voucherStatusByCompanyId = new Map(companyInfoEntries)
+        const list = liveCompanyDocs
           .map((docSnap) => {
             const data = docSnap.data() as {
               name?: string | null
               ownerUid?: string
             }
+            const voucherStatus = voucherStatusByCompanyId.get(docSnap.id)
             return {
               id: docSnap.id,
               name: data.name?.trim() || "회사명 미정",
               ownerUid: data.ownerUid ?? "",
+              hasExportVoucher: voucherStatus?.hasExportVoucher ?? false,
+              hasInnovationVoucher: voucherStatus?.hasInnovationVoucher ?? false,
             }
           })
           .sort((a, b) => (a.name ?? "").localeCompare(b.name ?? "", "ko-KR"))
@@ -683,6 +798,10 @@ export function AdminDashboard({
     if (typeof value === "number") return value.toLocaleString()
     return value
   }
+  const formatListValue = (values?: string[] | null) => {
+    if (!values || values.length === 0) return "-"
+    return values.join(", ")
+  }
   const formatScore = (value: number) => {
     const rounded = Math.round(value * 10) / 10
     return Number.isInteger(rounded) ? `${rounded}` : rounded.toFixed(1)
@@ -690,6 +809,143 @@ export function AdminDashboard({
 
   const investmentRows = useMemo(() => {
     return companyInfo?.investments ?? []
+  }, [companyInfo])
+
+  const participatingProgramNames = useMemo(() => {
+    if (selectedCompanyProgramIds.length === 0) return []
+    return programs
+      .filter((program) => selectedCompanyProgramIds.includes(program.id))
+      .map((program) => program.name.trim())
+      .filter((name) => name.length > 0)
+  }, [programs, selectedCompanyProgramIds])
+
+  const companyInfoSections = useMemo<CompanyInfoSection[]>(() => {
+    if (!companyInfo) return []
+    const coRepresentativeEnabled = companyInfo.basic?.ceo?.coRepresentative?.enabled === true
+
+    return [
+      {
+        title: "기본 정보",
+        description: "회사 기본 식별 정보와 서비스 개요",
+        fields: [
+          { label: "회사 유형", value: formatValue(companyInfo.basic?.companyType) },
+          { label: "회사명", value: formatValue(companyInfo.basic?.companyInfo) },
+          { label: "대표 솔루션", value: formatValue(companyInfo.basic?.representativeSolution), span: "full" },
+          { label: "웹사이트", value: formatValue(companyInfo.basic?.website), span: "full" },
+          { label: "법인 설립일", value: formatValue(companyInfo.basic?.foundedAt) },
+          { label: "창업기수", value: formatValue(companyInfo.basic?.founderSerialNumber) },
+          { label: "사업자등록번호", value: formatValue(companyInfo.basic?.businessNumber) },
+          { label: "주업태", value: formatValue(companyInfo.basic?.primaryBusiness) },
+          { label: "주업종", value: formatValue(companyInfo.basic?.primaryIndustry) },
+        ],
+      },
+      {
+        title: "대표자 정보",
+        description: "대표자 및 주요 담당자 기본 정보",
+        fields: [
+          { label: "대표자", value: formatValue(companyInfo.basic?.ceo?.name) },
+          { label: "대표 이메일", value: formatValue(companyInfo.basic?.ceo?.email) },
+          { label: "대표 전화번호", value: formatValue(companyInfo.basic?.ceo?.phone) },
+          { label: "대표 나이", value: formatValue(companyInfo.basic?.ceo?.age) },
+          { label: "대표 성별", value: formatValue(companyInfo.basic?.ceo?.gender) },
+          { label: "대표 국적", value: formatValue(companyInfo.basic?.ceo?.nationality) },
+        ],
+      },
+      ...(coRepresentativeEnabled
+        ? [{
+            title: "공동대표 정보",
+            description: "공동대표 등록 여부와 상세 정보",
+            fields: [
+              { label: "공동대표 성명", value: formatValue(companyInfo.basic?.ceo?.coRepresentative?.name) },
+              { label: "공동대표 생년월일", value: formatValue(companyInfo.basic?.ceo?.coRepresentative?.birthDate) },
+              { label: "공동대표 성별", value: formatValue(companyInfo.basic?.ceo?.coRepresentative?.gender) },
+              { label: "공동대표 직책", value: formatValue(companyInfo.basic?.ceo?.coRepresentative?.title) },
+            ],
+          } satisfies CompanyInfoSection]
+        : []),
+      {
+        title: "소재지 및 인력",
+        description: "사업장 위치와 현재 인력 현황",
+        fields: [
+          { label: "본점 소재지", value: formatValue(companyInfo.locations?.headOffice), span: "full" },
+          { label: "지점/연구소 소재지", value: formatValue(companyInfo.locations?.branchOrLab), span: "full" },
+          { label: "정규직", value: formatValue(companyInfo.workforce?.fullTime) },
+          { label: "계약직", value: formatValue(companyInfo.workforce?.contract) },
+        ],
+      },
+      {
+        title: "재무 및 투자희망",
+        description: "매출, 자본, 희망 투자 관련 수치",
+        fields: [
+          { label: "매출액(2025)", value: formatValue(companyInfo.finance?.revenue?.y2025) },
+          { label: "매출액(2026)", value: formatValue(companyInfo.finance?.revenue?.y2026) },
+          { label: "자본총계", value: formatValue(companyInfo.finance?.capitalTotal) },
+          { label: "2026년 희망 투자액", value: formatValue(companyInfo.fundingPlan?.desiredAmount2026) },
+          { label: "투자전 희망 기업가치", value: formatValue(companyInfo.fundingPlan?.preValue) },
+        ],
+      },
+      {
+        title: "인증 및 바우처",
+        description: "인증, 지정, 바우처 보유 현황",
+        fields: [
+          { label: "인증/지정여부", value: formatValue(companyInfo.certifications?.designation) },
+          { label: "TIPS/LIPS 이력", value: formatValue(companyInfo.certifications?.tipsLipsHistory) },
+          {
+            label: "수출바우처 보유 여부",
+            value: formatValue(companyInfo.vouchers?.exportVoucherHeld),
+            group: "수출바우처",
+          },
+          {
+            label: "수출바우처 확보 금액",
+            value: formatValue(companyInfo.vouchers?.exportVoucherAmount),
+            group: "수출바우처",
+          },
+          {
+            label: "수출바우처 소진율",
+            value: formatValue(companyInfo.vouchers?.exportVoucherUsageRate),
+            group: "수출바우처",
+          },
+          {
+            label: "혁신바우처 보유 여부",
+            value: formatValue(companyInfo.vouchers?.innovationVoucherHeld),
+            group: "혁신바우처",
+          },
+          {
+            label: "혁신바우처 확보 금액",
+            value: formatValue(companyInfo.vouchers?.innovationVoucherAmount),
+            group: "혁신바우처",
+          },
+          {
+            label: "혁신바우처 소진율",
+            value: formatValue(companyInfo.vouchers?.innovationVoucherUsageRate),
+            group: "혁신바우처",
+          },
+        ],
+      },
+      {
+        title: "임팩트 및 글로벌",
+        description: "SDGs, 해외 진출, MYSC 기대사항",
+        fields: [
+          { label: "대표 SDGs 1", value: formatValue(companyInfo.impact?.sdgPriority1) },
+          { label: "대표 SDGs 2", value: formatValue(companyInfo.impact?.sdgPriority2) },
+          {
+            label: "해외 지사 또는 진출 희망국가",
+            value: formatListValue(companyInfo.globalExpansion?.targetCountries),
+            span: "full",
+          },
+          { label: "MYSC 기대사항", value: formatValue(companyInfo.impact?.myscExpectation), span: "full" },
+        ],
+      },
+    ]
+  }, [companyInfo])
+
+  const companyInfoSaveInfoItems = useMemo(() => {
+    if (!companyInfo) return []
+    return [
+      { label: "저장 상태", value: formatValue(companyInfo.metadata?.saveType) },
+      { label: "최초 저장", value: formatCompanyInfoDateLabel(companyInfo.metadata?.createdAt) },
+      { label: "마지막 수정", value: formatCompanyInfoDateLabel(companyInfo.metadata?.updatedAt) },
+    ]
   }, [companyInfo])
 
   const selectedCompanyName = useMemo(() => {
@@ -850,12 +1106,20 @@ export function AdminDashboard({
 
   const filteredCompanies = useMemo(() => {
     const query = companyQuery.trim().toLowerCase()
-    if (!query) return companies
     return companies.filter((company) => {
       const name = (company.name ?? "").toLowerCase()
-      return name.includes(query)
+      if (query && !name.includes(query)) {
+        return false
+      }
+      if (voucherFilterTags.includes("export") && !company.hasExportVoucher) {
+        return false
+      }
+      if (voucherFilterTags.includes("innovation") && !company.hasInnovationVoucher) {
+        return false
+      }
+      return true
     })
-  }, [companies, companyQuery])
+  }, [companies, companyQuery, voucherFilterTags])
 
   const totalCompanyPages = Math.max(
     1,
@@ -869,11 +1133,30 @@ export function AdminDashboard({
 
   useEffect(() => {
     setCompanyPage(1)
-  }, [companyQuery])
+  }, [companyQuery, voucherFilterTags])
 
   useEffect(() => {
     setCompanyPage((prev) => Math.min(prev, totalCompanyPages))
   }, [totalCompanyPages])
+
+  useEffect(() => {
+    if (filteredCompanies.length === 0) {
+      if (selectedCompanyId !== null) {
+        setSelectedCompanyId(null)
+      }
+      return
+    }
+
+    if (!selectedCompanyId || !filteredCompanies.some((company) => company.id === selectedCompanyId)) {
+      setSelectedCompanyId(filteredCompanies[0]?.id ?? null)
+    }
+  }, [filteredCompanies, selectedCompanyId])
+
+  const toggleVoucherFilterTag = (tag: VoucherFilterTag) => {
+    setVoucherFilterTags((prev) =>
+      prev.includes(tag) ? prev.filter((value) => value !== tag) : [...prev, tag],
+    )
+  }
 
   const assessmentSummary = useMemo(() => {
     let totalScore = 0
@@ -1334,6 +1617,323 @@ export function AdminDashboard({
     }
   }
 
+  const handleDownloadCompanyWorkbook = async () => {
+    if (!selectedCompanyId) {
+      toast.error("회사를 먼저 선택해주세요")
+      return
+    }
+
+    setDownloadingCompanyWorkbook(true)
+    try {
+      const workbook = new ExcelJS.Workbook()
+      workbook.creator = "MYSC"
+      workbook.created = new Date()
+
+      const border = {
+        top: { style: "thin" as const, color: { argb: "FFE2E8F0" } },
+        left: { style: "thin" as const, color: { argb: "FFE2E8F0" } },
+        bottom: { style: "thin" as const, color: { argb: "FFE2E8F0" } },
+        right: { style: "thin" as const, color: { argb: "FFE2E8F0" } },
+      }
+
+      const createSheet = (name: string, widths: number[]) => {
+        const worksheet = workbook.addWorksheet(name.slice(0, 31))
+        worksheet.columns = widths.map((width) => ({ width }))
+        worksheet.properties.defaultRowHeight = 20
+        return worksheet
+      }
+
+      const estimateRowHeight = (values: Array<string | number | null | undefined>, charsPerLine = 40) => {
+        const longest = values
+          .map((value) => String(value ?? ""))
+          .reduce((max, value) => Math.max(max, value.length), 0)
+        return Math.max(20, Math.min(72, Math.ceil(Math.max(longest, 1) / charsPerLine) * 16))
+      }
+
+      const writeSheetTitle = (worksheet: ExcelJS.Worksheet, title: string, subtitle?: string) => {
+        const lastColumn = excelColumnName(Math.max(worksheet.columnCount, 1))
+        worksheet.mergeCells(`A1:${lastColumn}1`)
+        worksheet.getCell("A1").value = title
+        worksheet.getCell("A1").font = { name: "Malgun Gothic", size: 16, bold: true }
+        worksheet.getCell("A1").alignment = { vertical: "middle", horizontal: "left" }
+        worksheet.getRow(1).height = 26
+
+        if (subtitle) {
+          worksheet.mergeCells(`A2:${lastColumn}2`)
+          worksheet.getCell("A2").value = subtitle
+          worksheet.getCell("A2").font = { name: "Malgun Gothic", size: 10, color: { argb: "FF64748B" } }
+          worksheet.getCell("A2").alignment = { vertical: "middle", horizontal: "left" }
+          worksheet.getRow(2).height = 20
+          return 4
+        }
+
+        return 3
+      }
+
+      const writeSectionTitle = (worksheet: ExcelJS.Worksheet, rowNumber: number, title: string) => {
+        const lastColumn = excelColumnName(Math.max(worksheet.columnCount, 1))
+        worksheet.mergeCells(`A${rowNumber}:${lastColumn}${rowNumber}`)
+        const cell = worksheet.getCell(`A${rowNumber}`)
+        cell.value = title
+        cell.font = { name: "Malgun Gothic", size: 11, bold: true }
+        cell.alignment = { vertical: "middle", horizontal: "left" }
+        cell.fill = {
+          type: "pattern",
+          pattern: "solid",
+          fgColor: { argb: "FFF8FAFC" },
+        }
+        cell.border = border
+        worksheet.getRow(rowNumber).height = 22
+        for (let index = 2; index <= worksheet.columnCount; index += 1) {
+          worksheet.getRow(rowNumber).getCell(index).border = border
+          worksheet.getRow(rowNumber).getCell(index).fill = cell.fill
+        }
+        return rowNumber + 1
+      }
+
+      const writeKeyValueRows = (
+        worksheet: ExcelJS.Worksheet,
+        startRow: number,
+        rows: Array<[string, string]>,
+      ) => {
+        let rowNumber = startRow
+        rows.forEach(([label, value]) => {
+          const row = worksheet.getRow(rowNumber)
+          row.getCell(1).value = label
+          row.getCell(1).font = { name: "Malgun Gothic", size: 10, bold: true }
+          row.getCell(1).fill = {
+            type: "pattern",
+            pattern: "solid",
+            fgColor: { argb: "FFF8FAFC" },
+          }
+          row.getCell(1).alignment = { vertical: "top", horizontal: "left", wrapText: true }
+          row.getCell(1).border = border
+          worksheet.mergeCells(`B${rowNumber}:${excelColumnName(Math.max(worksheet.columnCount, 2))}${rowNumber}`)
+          row.getCell(2).value = value || "-"
+          row.getCell(2).font = { name: "Malgun Gothic", size: 10 }
+          row.getCell(2).alignment = { vertical: "top", horizontal: "left", wrapText: true }
+          row.getCell(2).border = border
+          for (let index = 3; index <= worksheet.columnCount; index += 1) {
+            row.getCell(index).border = border
+          }
+          row.height = estimateRowHeight([label, value], 60)
+          rowNumber += 1
+        })
+        return rowNumber
+      }
+
+      const writeTable = (
+        worksheet: ExcelJS.Worksheet,
+        startRow: number,
+        headers: string[],
+        rows: Array<Array<string | number | ExcelJS.CellHyperlinkValue | null | undefined>>,
+      ) => {
+        const headerRow = worksheet.getRow(startRow)
+        headers.forEach((header, index) => {
+          const cell = headerRow.getCell(index + 1)
+          cell.value = header
+          cell.font = { name: "Malgun Gothic", size: 10, bold: true }
+          cell.alignment = { vertical: "middle", horizontal: "center" }
+          cell.fill = {
+            type: "pattern",
+            pattern: "solid",
+            fgColor: { argb: "FFF8FAFC" },
+          }
+          cell.border = border
+        })
+        headerRow.height = 22
+
+        rows.forEach((values, rowIndex) => {
+          const row = worksheet.getRow(startRow + rowIndex + 1)
+          values.forEach((value, columnIndex) => {
+            const cell = row.getCell(columnIndex + 1)
+            cell.value = value ?? "-"
+            cell.font = { name: "Malgun Gothic", size: 10 }
+            cell.alignment = {
+              vertical: "top",
+              horizontal: typeof value === "number" ? "right" : "left",
+              wrapText: true,
+            }
+            cell.border = border
+          })
+          row.height = estimateRowHeight(values.map((value) => (typeof value === "object" && value && "text" in value ? value.text : String(value ?? ""))), 36)
+        })
+
+        worksheet.views = [{ state: "frozen", ySplit: startRow }]
+        return startRow + rows.length + 2
+      }
+
+      const toDisplay = (value: string | number | null | undefined) => String(formatValue(value))
+      const toFileSize = (size: number) => `${(size / (1024 * 1024)).toFixed(1)}MB`
+      const generatedAt = new Intl.DateTimeFormat("ko-KR", {
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+      }).format(new Date())
+
+      const latestMetricRow =
+        hasMetricsDocument && recentMetricsRows.length > 0
+          ? recentMetricsRows[recentMetricsRows.length - 1]
+          : null
+
+      const infoSheet = createSheet("기업정보", [22, 54])
+      let rowIndex = writeSheetTitle(infoSheet, "기업정보", `${selectedCompanyName} 기본 정보 · ${generatedAt}`)
+      rowIndex = writeSectionTitle(infoSheet, rowIndex, "기본 정보")
+      rowIndex = writeKeyValueRows(infoSheet, rowIndex, [
+        ["회사명", toDisplay(companyInfo?.basic?.companyInfo)],
+        ["대표자", toDisplay(companyInfo?.basic?.ceo?.name)],
+        ["대표 이메일", toDisplay(companyInfo?.basic?.ceo?.email)],
+        ["대표 전화번호", toDisplay(companyInfo?.basic?.ceo?.phone)],
+        ["법인 설립일", toDisplay(companyInfo?.basic?.foundedAt)],
+        ["사업자등록번호", toDisplay(companyInfo?.basic?.businessNumber)],
+        ["주업태", toDisplay(companyInfo?.basic?.primaryBusiness)],
+        ["주업종", toDisplay(companyInfo?.basic?.primaryIndustry)],
+      ])
+      rowIndex += 1
+      rowIndex = writeSectionTitle(infoSheet, rowIndex, "소재지 및 인력")
+      rowIndex = writeKeyValueRows(infoSheet, rowIndex, [
+        ["본점 소재지", toDisplay(companyInfo?.locations?.headOffice)],
+        ["지점/연구소 소재지", toDisplay(companyInfo?.locations?.branchOrLab)],
+        ["정규직", toDisplay(companyInfo?.workforce?.fullTime)],
+        ["계약직", toDisplay(companyInfo?.workforce?.contract)],
+      ])
+      rowIndex += 1
+      rowIndex = writeSectionTitle(infoSheet, rowIndex, "재무 및 인증")
+      rowIndex = writeKeyValueRows(infoSheet, rowIndex, [
+        ["매출액(2025)", toDisplay(companyInfo?.finance?.revenue?.y2025)],
+        ["매출액(2026)", toDisplay(companyInfo?.finance?.revenue?.y2026)],
+        ["자본총계", toDisplay(companyInfo?.finance?.capitalTotal)],
+        ["인증/지정여부", toDisplay(companyInfo?.certifications?.designation)],
+        ["TIPS/LIPS", toDisplay(companyInfo?.certifications?.tipsLipsHistory)],
+        ["2026년 희망 투자액", toDisplay(companyInfo?.fundingPlan?.desiredAmount2026)],
+        ["투자전 희망 기업가치", toDisplay(companyInfo?.fundingPlan?.preValue)],
+      ])
+      rowIndex += 1
+      rowIndex = writeSectionTitle(infoSheet, rowIndex, "투자 이력")
+      writeTable(
+        infoSheet,
+        rowIndex,
+        ["단계", "일시", "금액", "주요주주"],
+        investmentRows.length > 0
+          ? investmentRows.map((row) => [
+              row.stage || "-",
+              row.date || "-",
+              row.postMoney || "-",
+              row.majorShareholder || "-",
+            ])
+          : [["-", "입력된 투자 이력이 없습니다.", "-", "-"]],
+      )
+
+      const assessmentSheet = createSheet("현황진단", [18, 16, 54, 12, 12, 54])
+      rowIndex = writeSheetTitle(assessmentSheet, "현황 진단", `${selectedCompanyName} 자가진단 결과`)
+      rowIndex = writeSectionTitle(assessmentSheet, rowIndex, "점수 요약")
+      rowIndex = writeTable(
+        assessmentSheet,
+        rowIndex,
+        ["대분류", "점수", "총점"],
+        [
+          ...assessmentSummary.grouped.map((section) => [
+            section.sectionTitle,
+            formatScore(section.sectionScore),
+            formatScore(section.sectionTotal),
+          ]),
+          ["총점", formatScore(assessmentSummary.totalScore), "100"],
+        ],
+      )
+      rowIndex = writeSectionTitle(assessmentSheet, rowIndex, "문항 상세")
+      writeTable(
+        assessmentSheet,
+        rowIndex,
+        ["대분류", "중분류", "문항", "응답", "점수", "사유"],
+        assessmentSummary.grouped.flatMap((section) =>
+          section.questions.map((item) => [
+            item.sectionTitle,
+            item.subsectionTitle,
+            item.questionText,
+            item.answerLabel,
+            formatScore(item.score),
+            item.reason || "-",
+          ]),
+        ),
+      )
+
+      const metricsSheet = createSheet(
+        "실적",
+        [12, ...metricChartFields.map((field) => Math.max(14, field.label.length + 6))],
+      )
+      rowIndex = writeSheetTitle(metricsSheet, "실적 관리", hasMetricsDocument ? `최근 업데이트 ${metricsUpdatedLabel ?? "기록 없음"}` : "월별 실적 문서 없음")
+      if (!hasMetricsDocument) {
+        rowIndex = writeSectionTitle(metricsSheet, rowIndex, "안내")
+        rowIndex = writeKeyValueRows(metricsSheet, rowIndex, [["상태", "월별 실적 문서는 아직 입력되지 않았습니다."]])
+        rowIndex += 1
+      }
+      writeTable(
+        metricsSheet,
+        rowIndex,
+        ["월", ...metricChartFields.map((field) => field.label)],
+        (hasMetricsDocument ? recentMetricsRows : emptyMetricsMonthSlots.map(({ year, month }) => createEmptyMonth(year, month))).map((row) => [
+          `${row.year}-${String(row.month).padStart(2, "0")}`,
+          ...metricChartFields.map((field) =>
+            hasMetricsDocument
+              ? formatMetricValue(getMetricCellValue(row, field.key), field.format)
+              : "-",
+          ),
+        ]),
+      )
+
+      const reportSheet = createSheet("분석보고서", [24, 70])
+      rowIndex = writeSheetTitle(reportSheet, "분석 보고서", `${selectedCompanyName} 관리자 작성 내용`)
+      rowIndex = writeSectionTitle(reportSheet, rowIndex, "기본 정보")
+      rowIndex = writeKeyValueRows(reportSheet, rowIndex, [
+        ["기업명", reportForm.companyName || selectedCompanyName],
+        ["작성일시", reportForm.createdAt || "-"],
+      ])
+      rowIndex += 1
+      rowIndex = writeSectionTitle(reportSheet, rowIndex, "기업상황요약")
+      rowIndex = writeKeyValueRows(reportSheet, rowIndex, [
+        ["기업진단", diagnosticSummaryText || "-"],
+        ["개선 필요사항", improvementsText || "-"],
+      ])
+      rowIndex += 1
+      rowIndex = writeSectionTitle(reportSheet, rowIndex, "AC 프로그램 제안")
+      rowIndex = writeKeyValueRows(reportSheet, rowIndex, [
+        ["1순위", reportForm.acPriority1 || "-"],
+        ["2순위", reportForm.acPriority2 || "-"],
+        ["3순위", reportForm.acPriority3 || "-"],
+      ])
+      rowIndex += 1
+      rowIndex = writeSectionTitle(reportSheet, rowIndex, "엑셀러레이팅 마일스톤")
+      writeKeyValueRows(reportSheet, rowIndex, [
+        ["5~6월", reportForm.milestone56 || "-"],
+        ["7~8월", reportForm.milestone78 || "-"],
+        ["9~10월", reportForm.milestone910 || "-"],
+      ])
+
+      const buffer = await workbook.xlsx.writeBuffer()
+      const blob = new Blob([buffer], {
+        type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      })
+      const safeCompanyName = selectedCompanyName.replace(/[\\/:*?"<>|]/g, "-").trim() || "company"
+      const safeDate = generatedAt.replace(/[\\/:*?"<>|]/g, "-").trim()
+      const url = window.URL.createObjectURL(blob)
+      const link = document.createElement("a")
+      link.href = url
+      link.download = `${safeCompanyName}_기업관리통합_${safeDate}.xlsx`
+      document.body.appendChild(link)
+      link.click()
+      document.body.removeChild(link)
+      window.URL.revokeObjectURL(url)
+      toast.success("기업 관리 통합 엑셀을 다운로드했습니다")
+    } catch (error) {
+      console.error("Failed to download company workbook:", error)
+      toast.error("기업 관리 통합 엑셀 다운로드에 실패했습니다")
+    } finally {
+      setDownloadingCompanyWorkbook(false)
+    }
+  }
+
   return (
     <div className="bg-transparent h-full">
       <div className="flex h-full flex-col">
@@ -1359,8 +1959,31 @@ export function AdminDashboard({
                 value={companyQuery}
                 onChange={(e) => setCompanyQuery(e.target.value)}
               />
-              <div className="mt-2 text-xs text-slate-500">
-                총 {filteredCompanies.length.toLocaleString()}개
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => toggleVoucherFilterTag("export")}
+                  className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold transition ${
+                    voucherFilterTags.includes("export")
+                      ? "border-emerald-500 bg-emerald-50 text-emerald-700"
+                      : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                  }`}
+                >
+                  {voucherFilterTags.includes("export") ? <CheckCircle2 className="h-3.5 w-3.5" /> : null}
+                  수출바우처 보유
+                </button>
+                <button
+                  type="button"
+                  onClick={() => toggleVoucherFilterTag("innovation")}
+                  className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold transition ${
+                    voucherFilterTags.includes("innovation")
+                      ? "border-emerald-500 bg-emerald-50 text-emerald-700"
+                      : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                  }`}
+                >
+                  {voucherFilterTags.includes("innovation") ? <CheckCircle2 className="h-3.5 w-3.5" /> : null}
+                  혁신바우처 보유
+                </button>
               </div>
             </div>
             <div className="flex-1 overflow-y-auto p-3">
@@ -1415,9 +2038,20 @@ export function AdminDashboard({
                       ? "오피스아워"
                       : "기업진단분석보고서"}
               </div>
-              {loadingDetails ? (
-                <span className="text-xs text-slate-400">불러오는 중...</span>
-              ) : null}
+              <div className="flex items-center gap-2">
+                {loadingDetails ? (
+                  <span className="text-xs text-slate-400">불러오는 중...</span>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={() => void handleDownloadCompanyWorkbook()}
+                  disabled={!selectedCompanyId || loadingDetails || downloadingCompanyWorkbook}
+                  className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <FileSpreadsheet className="h-3.5 w-3.5" />
+                  {downloadingCompanyWorkbook ? "내보내는 중..." : "통합 다운로드"}
+                </button>
+              </div>
             </div>
             <div className="flex flex-wrap items-end gap-2 border-b border-slate-100 px-4">
               <button
@@ -1478,222 +2112,249 @@ export function AdminDashboard({
                     기업 정보가 없습니다.
                   </div>
                 ) : (
-                  <div className="min-h-0 flex-1 space-y-4 overflow-y-auto text-sm text-slate-700">
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      <div>
-                        <div className="text-xs text-slate-400">회사명</div>
-                        <div className="font-semibold">
-                          {formatValue(companyInfo.basic?.companyInfo)}
-                        </div>
-                      </div>
-                      <div>
-                        <div className="text-xs text-slate-400">대표자</div>
-                        <div className="font-semibold">
-                          {formatValue(companyInfo.basic?.ceo?.name)}
-                        </div>
-                      </div>
-                      <div>
-                        <div className="text-xs text-slate-400">대표 이메일</div>
-                        <div className="font-semibold">
-                          {formatValue(companyInfo.basic?.ceo?.email)}
-                        </div>
-                      </div>
-                      <div>
-                        <div className="text-xs text-slate-400">대표 전화번호</div>
-                        <div className="font-semibold">
-                          {formatValue(companyInfo.basic?.ceo?.phone)}
-                        </div>
-                      </div>
-                      <div>
-                        <div className="text-xs text-slate-400">법인 설립일</div>
-                        <div className="font-semibold">
-                          {formatValue(companyInfo.basic?.foundedAt)}
-                        </div>
-                      </div>
-                      <div>
-                        <div className="text-xs text-slate-400">
-                          사업자등록번호
-                        </div>
-                        <div className="font-semibold">
-                          {formatValue(companyInfo.basic?.businessNumber)}
-                        </div>
-                      </div>
-                      <div>
-                        <div className="text-xs text-slate-400">주업태</div>
-                        <div className="font-semibold">
-                          {formatValue(companyInfo.basic?.primaryBusiness)}
-                        </div>
-                      </div>
-                      <div>
-                        <div className="text-xs text-slate-400">주업종</div>
-                        <div className="font-semibold">
-                          {formatValue(companyInfo.basic?.primaryIndustry)}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      <div>
-                        <div className="text-xs text-slate-400">본점 소재지</div>
-                        <div className="font-semibold">
-                          {formatValue(companyInfo.locations?.headOffice)}
-                        </div>
-                      </div>
-                      <div>
-                        <div className="text-xs text-slate-400">
-                          지점/연구소 소재지
-                        </div>
-                        <div className="font-semibold">
-                          {formatValue(companyInfo.locations?.branchOrLab)}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      <div>
-                        <div className="text-xs text-slate-400">정규직</div>
-                        <div className="font-semibold">
-                          {formatValue(companyInfo.workforce?.fullTime)}
-                        </div>
-                      </div>
-                      <div>
-                        <div className="text-xs text-slate-400">계약직</div>
-                        <div className="font-semibold">
-                          {formatValue(companyInfo.workforce?.contract)}
-                        </div>
-                      </div>
-                      <div>
-                        <div className="text-xs text-slate-400">
-                          매출액(2025)
-                        </div>
-                        <div className="font-semibold">
-                          {formatValue(companyInfo.finance?.revenue?.y2025)}
-                        </div>
-                      </div>
-                      <div>
-                        <div className="text-xs text-slate-400">
-                          매출액(2026)
-                        </div>
-                        <div className="font-semibold">
-                          {formatValue(companyInfo.finance?.revenue?.y2026)}
-                        </div>
-                      </div>
-                      <div>
-                        <div className="text-xs text-slate-400">자본총계</div>
-                        <div className="font-semibold">
-                          {formatValue(companyInfo.finance?.capitalTotal)}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      <div>
-                        <div className="text-xs text-slate-400">
-                          인증/지정여부
-                        </div>
-                        <div className="font-semibold">
-                          {formatValue(companyInfo.certifications?.designation)}
-                        </div>
-                      </div>
-                      <div>
-                        <div className="text-xs text-slate-400">TIPS/LIPS</div>
-                        <div className="font-semibold">
-                          {formatValue(companyInfo.certifications?.tipsLipsHistory)}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="grid gap-3 sm:grid-cols-2">
-                      <div>
-                        <div className="text-xs text-slate-400">
-                          2026년 희망 투자액
-                        </div>
-                        <div className="font-semibold">
-                          {formatValue(companyInfo.fundingPlan?.desiredAmount2026)}
-                        </div>
-                      </div>
-                      <div>
-                        <div className="text-xs text-slate-400">
-                          투자전 희망 기업가치
-                        </div>
-                        <div className="font-semibold">
-                          {formatValue(companyInfo.fundingPlan?.preValue)}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="rounded-xl border border-slate-100 bg-slate-50 p-4">
-                      <div className="text-xs font-semibold text-slate-600">
-                        업로드 자료
-                      </div>
-                      {companyFiles.length === 0 ? (
-                        <div className="mt-2 text-xs text-slate-400">
-                          업로드된 파일이 없습니다.
-                        </div>
-                      ) : (
-                        <div className="mt-3 space-y-2 text-xs">
-                          {companyFiles.map((file) => (
-                            <div
-                              key={file.id}
-                              className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2"
-                            >
-                              <span className="flex-1 text-slate-700">
-                                {file.name}
+                  <div className="min-h-0 flex-1 overflow-y-auto text-sm text-slate-700">
+                    <div className="space-y-4 pb-1">
+                      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-[radial-gradient(circle_at_top_left,_rgba(148,163,184,0.18),_transparent_42%),linear-gradient(135deg,_#ffffff_0%,_#f8fafc_55%,_#eef2ff_100%)] p-4">
+                        <div className="flex flex-wrap items-start justify-between gap-4">
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate text-xl font-semibold tracking-[-0.02em] text-slate-900">
+                              {selectedCompanyName}
+                            </div>
+                            <div className="mt-1 text-sm text-slate-500">
+                              기업 기본 정보와 제출 자료를 한 화면에서 확인합니다.
+                            </div>
+                            <div className="mt-4 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                              <span className="font-medium text-slate-400">참여 사업</span>
+                              <span className="rounded-full border border-slate-200 bg-white/80 px-2.5 py-1 font-medium text-slate-600">
+                                {participatingProgramNames.length > 0
+                                  ? `${participatingProgramNames.length}개 · ${participatingProgramNames.join(", ")}`
+                                  : "-"}
                               </span>
-                              <span className="text-slate-400">
-                                {(file.size / (1024 * 1024)).toFixed(1)}MB
-                              </span>
-                              {file.downloadUrl ? (
-                                <a
-                                  href={file.downloadUrl}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="text-slate-600 hover:text-slate-900"
+                            </div>
+                          </div>
+                          <div className="min-w-[260px] rounded-2xl border border-white/70 bg-white/80 px-4 py-3 shadow-sm backdrop-blur sm:max-w-[320px]">
+                            <div className="flex flex-col gap-1.5 text-[11px] text-slate-500">
+                            {companyInfoSaveInfoItems.map((item) => (
+                              <div key={item.label} className="flex items-center justify-between gap-3">
+                                <span className="font-medium text-slate-400">{item.label}</span>
+                                <span
+                                  className={`text-right ${
+                                    item.value === "-" ? "text-slate-400" : "text-slate-700"
+                                  }`}
                                 >
-                                  보기/다운로드
-                                </a>
-                              ) : (
-                                <span className="text-slate-400">
-                                  링크 준비중
+                                  {item.value}
                                 </span>
-                              )}
+                              </div>
+                            ))}
                             </div>
-                          ))}
+                          </div>
                         </div>
-                      )}
-                    </div>
+                      </div>
 
-                    <div>
-                      <div className="text-xs text-slate-400">투자 이력</div>
-                      {investmentRows.length === 0 ? (
-                        <div className="mt-2 text-sm text-slate-500">
-                          입력된 투자 이력이 없습니다.
-                        </div>
-                      ) : (
-                        <div className="mt-2 space-y-2">
-                          {investmentRows.map((row, index) => (
-                            <div
-                              key={`${row.stage}-${index}`}
-                              className="rounded-xl border border-slate-100 bg-slate-50 p-3 text-xs text-slate-600"
-                            >
-                              <div className="font-semibold text-slate-700">
-                                {row.stage || "단계 미입력"}
+                      <div className="space-y-4">
+                        {companyInfoSections.map((section) => (
+                          <div
+                            key={section.title}
+                            className="rounded-2xl border border-slate-200 bg-white p-4"
+                          >
+                            {(() => {
+                              const { ungrouped, groupedEntries } = groupCompanyInfoFields(section.fields)
+                              return (
+                                <>
+                            <div>
+                              <div className="text-sm font-semibold text-slate-900">
+                                {section.title}
                               </div>
-                              <div className="mt-1 grid gap-1 sm:grid-cols-3">
-                                <span>
-                                  일시: {formatValue(row.date)}
-                                </span>
-                                <span>
-                                  금액: {formatValue(row.postMoney)}
-                                </span>
-                                <span>
-                                  주요주주: {formatValue(row.majorShareholder)}
-                                </span>
-                              </div>
+                              {section.description ? (
+                                <div className="mt-1 text-xs text-slate-500">
+                                  {section.description}
+                                </div>
+                              ) : null}
                             </div>
-                          ))}
-                        </div>
-                      )}
+                            {ungrouped.length > 0 ? (
+                              <div className="mt-3 overflow-hidden rounded-xl border border-slate-200">
+                                <table className="w-full table-fixed border-collapse bg-white text-sm">
+                                  <colgroup>
+                                    <col className="w-[120px]" />
+                                    <col />
+                                    <col className="w-[120px]" />
+                                    <col />
+                                  </colgroup>
+                                  <tbody>
+                                    {buildCompanyInfoTableRows(ungrouped).map((row, rowIndex) => {
+                                    const firstField = row[0]
+                                    if (!firstField) return null
+
+                                    return (
+                                      <tr
+                                        key={`${section.title}-row-${rowIndex}`}
+                                        className={rowIndex > 0 ? "border-t border-slate-100" : ""}
+                                      >
+                                        {row.length === 1 ? (
+                                          <>
+                                            <th className="bg-slate-50 px-3 py-2.5 text-left align-top text-[11px] font-medium text-slate-500">
+                                              {firstField.label}
+                                            </th>
+                                            <td
+                                              colSpan={3}
+                                              className={`px-3 py-2.5 align-top text-sm font-semibold break-words ${
+                                                firstField.value === "-" ? "text-slate-400" : "text-slate-800"
+                                              }`}
+                                              title={firstField.value}
+                                            >
+                                              {firstField.value}
+                                            </td>
+                                          </>
+                                        ) : (
+                                          <>
+                                            {row.map((field) => (
+                                              <Fragment key={`${section.title}-${field.label}`}>
+                                                <th className="bg-slate-50 px-3 py-2.5 text-left align-top text-[11px] font-medium text-slate-500">
+                                                  {field.label}
+                                                </th>
+                                                <td
+                                                  className={`px-3 py-2.5 align-top text-sm font-semibold break-words ${
+                                                    field.value === "-" ? "text-slate-400" : "text-slate-800"
+                                                  }`}
+                                                  title={field.value}
+                                                >
+                                                  {field.value}
+                                                </td>
+                                              </Fragment>
+                                            ))}
+                                          </>
+                                        )}
+                                      </tr>
+                                    )
+                                  })}
+                                  </tbody>
+                                </table>
+                              </div>
+                            ) : null}
+                            {groupedEntries.length > 0 ? (
+                              <div className="mt-3 grid gap-3 lg:grid-cols-2">
+                                {groupedEntries.map(([groupLabel, fields]) => (
+                                  <div
+                                    key={`${section.title}-${groupLabel}`}
+                                    className="overflow-hidden rounded-xl border border-slate-200"
+                                  >
+                                    <div className="border-b border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-600">
+                                      {groupLabel}
+                                    </div>
+                                    <table className="w-full table-fixed border-collapse bg-white text-sm">
+                                      <colgroup>
+                                        <col className="w-[140px]" />
+                                        <col />
+                                      </colgroup>
+                                      <tbody>
+                                        {fields.map((field, index) => (
+                                          <tr
+                                            key={`${section.title}-${groupLabel}-${field.label}`}
+                                            className={index > 0 ? "border-t border-slate-100" : ""}
+                                          >
+                                            <th className="bg-slate-50 px-3 py-2.5 text-left align-top text-[11px] font-medium text-slate-500">
+                                              {field.label.replace(`${groupLabel} `, "")}
+                                            </th>
+                                            <td
+                                              className={`px-3 py-2.5 align-top text-sm font-semibold break-words ${
+                                                field.value === "-" ? "text-slate-400" : "text-slate-800"
+                                              }`}
+                                              title={field.value}
+                                            >
+                                              {field.value}
+                                            </td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : null}
+                                </>
+                              )
+                            })()}
+                          </div>
+                        ))}
+
+                          <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                            <div className="text-sm font-semibold text-slate-900">
+                              업로드 자료
+                            </div>
+                            <div className="mt-1 text-xs text-slate-500">
+                              기업이 제출한 첨부 파일
+                            </div>
+                            {companyFiles.length === 0 ? (
+                              <div className="mt-4 rounded-xl border border-slate-100 bg-slate-50/70 px-3 py-3 text-sm text-slate-400">
+                                업로드된 파일이 없습니다.
+                              </div>
+                            ) : (
+                              <div className="mt-3 overflow-hidden rounded-xl border border-slate-200 bg-white">
+                                {companyFiles.map((file) => (
+                                  <div
+                                    key={file.id}
+                                    className="flex items-center gap-3 px-3 py-2.5 text-xs border-t border-slate-100 first:border-t-0"
+                                  >
+                                    <div className="min-w-0 flex-1 truncate font-medium text-slate-700" title={file.name}>
+                                      {file.name}
+                                    </div>
+                                    <div className="shrink-0 text-[11px] text-slate-400">
+                                      {(file.size / (1024 * 1024)).toFixed(1)}MB
+                                    </div>
+                                    {file.downloadUrl ? (
+                                      <a
+                                        href={file.downloadUrl}
+                                        target="_blank"
+                                        rel="noreferrer"
+                                        className="shrink-0 text-[11px] font-medium text-slate-600 transition hover:text-slate-900"
+                                      >
+                                        보기/다운로드
+                                      </a>
+                                    ) : (
+                                      <span className="shrink-0 text-[11px] text-slate-400">링크 준비중</span>
+                                    )}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                            <div className="text-sm font-semibold text-slate-900">
+                              투자 이력
+                            </div>
+                            <div className="mt-1 text-xs text-slate-500">
+                              단계, 일시, 금액, 주요주주
+                            </div>
+                            {investmentRows.length === 0 ? (
+                              <div className="mt-4 rounded-xl border border-slate-100 bg-slate-50/70 px-3 py-3 text-sm text-slate-400">
+                                입력된 투자 이력이 없습니다.
+                              </div>
+                            ) : (
+                              <div className="mt-3 overflow-hidden rounded-xl border border-slate-200 bg-white">
+                                {investmentRows.map((row, index) => (
+                                  <div
+                                    key={`${row.stage}-${index}`}
+                                    className="grid grid-cols-[minmax(0,1.1fr)_88px_96px_minmax(0,1fr)] items-center gap-3 px-3 py-2.5 text-xs border-t border-slate-100 first:border-t-0"
+                                  >
+                                    <div className="min-w-0 truncate font-medium text-slate-800" title={row.stage || "단계 미입력"}>
+                                      {row.stage || "단계 미입력"}
+                                    </div>
+                                    <div className="truncate text-slate-500" title={formatValue(row.date)}>
+                                      {formatValue(row.date)}
+                                    </div>
+                                    <div className="truncate text-slate-600" title={formatValue(row.postMoney)}>
+                                      {formatValue(row.postMoney)}
+                                    </div>
+                                    <div className="min-w-0 truncate text-slate-500" title={formatValue(row.majorShareholder)}>
+                                      {formatValue(row.majorShareholder)}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                      </div>
                     </div>
                   </div>
                 )
@@ -2442,13 +3103,13 @@ export function AdminDashboard({
                             className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-[13px] leading-6 text-slate-700"
                             value={reportForm.milestone56}
                             onChange={(e) =>
-                            setReportForm((prev) => ({
-                              ...prev,
-                              milestone56: e.target.value,
-                            }))
-                          }
-                        />
-                      </label>
+                              setReportForm((prev) => ({
+                                ...prev,
+                                milestone56: e.target.value,
+                              }))
+                            }
+                          />
+                        </label>
                       <label className="grid gap-2 text-xs text-slate-500 lg:grid-cols-[96px_minmax(0,1fr)] lg:items-start">
                         <span className="inline-flex h-6 items-center justify-center self-start rounded-full border border-slate-200 bg-white px-2 text-[10px] font-medium tracking-[0.01em] text-slate-600">
                           7~8월
@@ -2460,11 +3121,11 @@ export function AdminDashboard({
                           onChange={(e) =>
                             setReportForm((prev) => ({
                               ...prev,
-                            milestone78: e.target.value,
-                          }))
-                        }
-                      />
-                    </label>
+                              milestone78: e.target.value,
+                            }))
+                          }
+                        />
+                      </label>
                       <label className="grid gap-2 text-xs text-slate-500 lg:grid-cols-[96px_minmax(0,1fr)] lg:items-start">
                         <span className="inline-flex h-6 items-center justify-center self-start rounded-full border border-slate-200 bg-white px-2 text-[10px] font-medium tracking-[0.01em] text-slate-600">
                           9~10월
