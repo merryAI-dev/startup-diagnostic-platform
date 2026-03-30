@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useLocation, useNavigate } from "react-router-dom"
 import { toast } from "sonner"
 import { addDays, differenceInDays, isBefore, startOfDay } from "date-fns"
-import { deleteField, serverTimestamp, where } from "firebase/firestore"
+import { deleteField, serverTimestamp } from "firebase/firestore"
 import { deleteObject, getDownloadURL, ref, uploadBytes } from "firebase/storage"
 import { useAuth as useAppAuth } from "@/context/AuthContext"
 import { signOutUser } from "@/firebase/auth"
@@ -817,8 +817,6 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
   const needsCompanyLookup = resolvedRole === "admin" && needsApplications
   const needsCompanyDirectory =
     resolvedRole === "admin" && isPage(["admin-programs", "admin-program-list"])
-  const needsCompanyOwnershipLookup =
-    isFirebaseConfigured && resolvedRole === "user" && !!firebaseUser?.uid
   const { data: companyDocs } = useFirestoreCollection<{
     id: string
     name?: string | null
@@ -829,13 +827,6 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       isFirebaseConfigured &&
       !isCompanyInfoRoute &&
       (needsCompanyLookup || needsCompanyDirectory || needsUsers),
-  })
-  const { data: ownedCompanyDocs, loading: ownedCompanyDocsLoading } = useFirestoreCollection<{
-    id: string
-    ownerUid?: string | null
-  }>("companies", {
-    constraints: [where("ownerUid", "==", firebaseUser?.uid ?? "")],
-    enabled: needsCompanyOwnershipLookup,
   })
   const companyNameById = useMemo(() => {
     const map = new Map<string, string>()
@@ -913,23 +904,10 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     [companyNameById],
   )
   const companyRecordId = useMemo(() => {
-    if (
-      isFirebaseConfigured &&
-      resolvedRole === "user" &&
-      !profile?.companyId &&
-      ownedCompanyDocsLoading
-    ) {
-      return null
-    }
-    const ownedId = ownedCompanyDocs[0]?.id ?? null
-    return ownedId ?? profile?.companyId ?? firebaseUser?.uid ?? null
+    return profile?.companyId ?? firebaseUser?.uid ?? null
   }, [
     firebaseUser?.uid,
-    isFirebaseConfigured,
-    ownedCompanyDocs,
-    ownedCompanyDocsLoading,
     profile?.companyId,
-    resolvedRole,
   ])
   const { data: companyInfoDoc } = useFirestoreDocument<CompanyInfoDoc>(
     companyRecordId ? `companies/${companyRecordId}/companyInfo` : "",
