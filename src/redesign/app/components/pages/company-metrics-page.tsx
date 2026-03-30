@@ -92,6 +92,7 @@ type MetricsPageState = {
   year: number;
   data: MonthlyMetrics[];
   customFields: CustomMetricField[];
+  visibleBaseMetricKeys: BaseMetricKey[];
 };
 
 type PersistedMetricsDocument = MetricsPageState & {
@@ -128,6 +129,7 @@ const BASE_METRIC_FIELDS: MetricField[] = [
   { key: "certifications", label: "인증", format: "number", source: "base", tone: "bg-slate-500" },
   { key: "monthlyActiveUsers", label: "MAU", format: "number", source: "base", tone: "bg-cyan-500" },
 ];
+const DEFAULT_VISIBLE_BASE_METRIC_KEYS = BASE_METRIC_FIELDS.map((field) => field.key as BaseMetricKey);
 
 function createEmptyMonth(year: number, month: number): MonthlyMetrics {
   return {
@@ -181,6 +183,7 @@ function createEmptyMetricsState(year = new Date().getFullYear()): MetricsPageSt
     year,
     data: normalizeMonthlyData([], year),
     customFields: [],
+    visibleBaseMetricKeys: [...DEFAULT_VISIBLE_BASE_METRIC_KEYS],
   };
 }
 
@@ -208,6 +211,21 @@ function normalizeCustomFields(
   return customFields.length > 0 ? customFields : fallback;
 }
 
+function normalizeVisibleBaseMetricKeys(value: unknown): BaseMetricKey[] {
+  if (!Array.isArray(value)) {
+    return [...DEFAULT_VISIBLE_BASE_METRIC_KEYS];
+  }
+
+  const allowedKeys = new Set<BaseMetricKey>(DEFAULT_VISIBLE_BASE_METRIC_KEYS);
+  const visibleKeys = value.filter(
+    (key): key is BaseMetricKey => typeof key === "string" && allowedKeys.has(key as BaseMetricKey),
+  );
+
+  return visibleKeys.length > 0
+    ? DEFAULT_VISIBLE_BASE_METRIC_KEYS.filter((key) => visibleKeys.includes(key))
+    : [...DEFAULT_VISIBLE_BASE_METRIC_KEYS];
+}
+
 function normalizeMetricsState(
   source: Partial<MetricsPageState> | null | undefined,
   fallbackYear = new Date().getFullYear(),
@@ -227,11 +245,13 @@ function normalizeMetricsState(
     : fallback.data;
   const inferredCustomFields = inferCustomFields(data);
   const customFields = normalizeCustomFields(source.customFields, inferredCustomFields);
+  const visibleBaseMetricKeys = normalizeVisibleBaseMetricKeys(source.visibleBaseMetricKeys);
 
   return {
     year,
     data,
     customFields,
+    visibleBaseMetricKeys,
   };
 }
 
@@ -533,26 +553,38 @@ export function CompanyMetricsPage({ currentUser, companyId }: CompanyMetricsPag
 
   const savedMetricFields = useMemo<MetricField[]>(
     () => [
-      ...BASE_METRIC_FIELDS,
+      ...BASE_METRIC_FIELDS.filter((field) =>
+        savedMetricsState.visibleBaseMetricKeys.includes(field.key as BaseMetricKey),
+      ),
       ...savedMetricsState.customFields.map((field) => ({
         ...field,
         source: "custom" as const,
         tone: "bg-indigo-500",
       })),
     ],
-    [savedMetricsState.customFields],
+    [savedMetricsState.customFields, savedMetricsState.visibleBaseMetricKeys],
   );
 
   const draftMetricFields = useMemo<MetricField[]>(
     () => [
-      ...BASE_METRIC_FIELDS,
+      ...BASE_METRIC_FIELDS.filter((field) =>
+        draftMetricsState.visibleBaseMetricKeys.includes(field.key as BaseMetricKey),
+      ),
       ...draftMetricsState.customFields.map((field) => ({
         ...field,
         source: "custom" as const,
         tone: "bg-indigo-500",
       })),
     ],
-    [draftMetricsState.customFields],
+    [draftMetricsState.customFields, draftMetricsState.visibleBaseMetricKeys],
+  );
+
+  const hiddenBaseMetricFields = useMemo(
+    () =>
+      BASE_METRIC_FIELDS.filter(
+        (field) => !draftMetricsState.visibleBaseMetricKeys.includes(field.key as BaseMetricKey),
+      ),
+    [draftMetricsState.visibleBaseMetricKeys],
   );
 
   const metricsAttachments = useMemo(
@@ -575,7 +607,7 @@ export function CompanyMetricsPage({ currentUser, companyId }: CompanyMetricsPag
 
   useEffect(() => {
     if (!savedMetricFields.some((field) => field.key === selectedMetricKey)) {
-      setSelectedMetricKey(DEFAULT_SELECTED_METRIC_KEY);
+      setSelectedMetricKey(savedMetricFields[0]?.key ?? DEFAULT_SELECTED_METRIC_KEY);
     }
   }, [savedMetricFields, selectedMetricKey]);
 
@@ -597,7 +629,7 @@ export function CompanyMetricsPage({ currentUser, companyId }: CompanyMetricsPag
   );
 
   const selectedMetric = useMemo(
-    () => getMetricFieldByKey(savedMetricFields, selectedMetricKey, 0),
+    () => savedMetricFields.find((field) => field.key === selectedMetricKey) ?? savedMetricFields[0] ?? BASE_METRIC_FIELDS[0]!,
     [savedMetricFields, selectedMetricKey],
   );
 
@@ -610,19 +642,30 @@ export function CompanyMetricsPage({ currentUser, companyId }: CompanyMetricsPag
     [savedMetricsState.data, selectedMetric.key],
   );
   const summaryFields = useMemo(() => {
-    const fixedFields = ["revenue", "employees", "customers"];
-    const fallbackFourth = selectedMetric.key === "revenue" || selectedMetric.key === "employees" || selectedMetric.key === "customers"
-      ? "patents"
-      : selectedMetric.key;
+    const picks: MetricField[] = [];
+    const preferredKeys = ["revenue", "employees", "customers"];
 
-    return [
-      getMetricFieldByKey(savedMetricFields, "revenue", 0),
-      getMetricFieldByKey(savedMetricFields, "employees", 1),
-      getMetricFieldByKey(savedMetricFields, "customers", 2),
-      savedMetricFields.find((field) => field.key === fallbackFourth)
-        ?? savedMetricFields.find((field) => !fixedFields.includes(field.key))
-        ?? BASE_METRIC_FIELDS[3]!,
-    ];
+    preferredKeys.forEach((key) => {
+      const field = savedMetricFields.find((item) => item.key === key);
+      if (field) {
+        picks.push(field);
+      }
+    });
+
+    if (!picks.some((field) => field.key === selectedMetric.key)) {
+      const selectedField = savedMetricFields.find((field) => field.key === selectedMetric.key);
+      if (selectedField) {
+        picks.push(selectedField);
+      }
+    }
+
+    savedMetricFields.forEach((field) => {
+      if (!picks.some((item) => item.key === field.key) && picks.length < 4) {
+        picks.push(field);
+      }
+    });
+
+    return picks.slice(0, 4);
   }, [savedMetricFields, selectedMetric.key]);
 
   const handleMetricChange = (month: number, key: string, rawValue: string) => {
@@ -644,7 +687,7 @@ export function CompanyMetricsPage({ currentUser, companyId }: CompanyMetricsPag
       return;
     }
 
-    const duplicated = draftMetricFields.some((field) => field.label === label);
+    const duplicated = [...draftMetricFields, ...hiddenBaseMetricFields].some((field) => field.label === label);
     if (duplicated) {
       toast.error("같은 이름의 컬럼이 이미 있습니다.");
       return;
@@ -675,31 +718,58 @@ export function CompanyMetricsPage({ currentUser, companyId }: CompanyMetricsPag
   };
 
   const handleDeleteField = (key: string) => {
-    const targetField = draftMetricsState.customFields.find((field) => field.key === key);
+    const targetField = draftMetricFields.find((field) => field.key === key);
+    if (!targetField || draftMetricFields.length <= 1) {
+      if (draftMetricFields.length <= 1) {
+        toast.error("최소 한 개의 컬럼은 남아 있어야 합니다.");
+      }
+      return;
+    }
+
+    if (targetField.source === "base") {
+      setDraftMetricsState((prev) => ({
+        ...prev,
+        visibleBaseMetricKeys: prev.visibleBaseMetricKeys.filter((fieldKey) => fieldKey !== key),
+      }));
+    } else {
+      setDraftMetricsState((prev) => ({
+        ...prev,
+        customFields: prev.customFields.filter((field) => field.key !== key),
+        data: prev.data.map((item) => {
+          const nextOtherMetrics = { ...(item.otherMetrics ?? {}) };
+          delete nextOtherMetrics[key];
+
+          return {
+            ...item,
+            otherMetrics: nextOtherMetrics,
+          };
+        }),
+      }));
+    }
+
+    if (selectedMetricKey === key) {
+      setSelectedMetricKey(draftMetricFields.find((field) => field.key !== key)?.key ?? DEFAULT_SELECTED_METRIC_KEY);
+    }
+
+    setIsDirty(true);
+    toast.success(`${targetField.label} 컬럼을 삭제했습니다.`);
+  };
+
+  const handleRestoreBaseField = (key: BaseMetricKey) => {
+    const targetField = BASE_METRIC_FIELDS.find((field) => field.key === key);
     if (!targetField) {
       return;
     }
 
     setDraftMetricsState((prev) => ({
       ...prev,
-      customFields: prev.customFields.filter((field) => field.key !== key),
-      data: prev.data.map((item) => {
-        const nextOtherMetrics = { ...(item.otherMetrics ?? {}) };
-        delete nextOtherMetrics[key];
-
-        return {
-          ...item,
-          otherMetrics: nextOtherMetrics,
-        };
-      }),
+      visibleBaseMetricKeys: DEFAULT_VISIBLE_BASE_METRIC_KEYS.filter(
+        (baseKey) => baseKey === key || prev.visibleBaseMetricKeys.includes(baseKey),
+      ),
     }));
-
-    if (selectedMetricKey === key) {
-      setSelectedMetricKey(DEFAULT_SELECTED_METRIC_KEY);
-    }
-
+    setSelectedMetricKey(key);
     setIsDirty(true);
-    toast.success(`${targetField.label} 컬럼을 삭제했습니다.`);
+    toast.success(`${targetField.label} 컬럼을 다시 추가했습니다.`);
   };
 
   const handleSave = async () => {
@@ -724,6 +794,7 @@ export function CompanyMetricsPage({ currentUser, companyId }: CompanyMetricsPag
         year: draftMetricsState.year,
         data: draftMetricsState.data,
         customFields: draftMetricsState.customFields,
+        visibleBaseMetricKeys: draftMetricsState.visibleBaseMetricKeys,
       },
       true,
     );
@@ -1071,7 +1142,7 @@ export function CompanyMetricsPage({ currentUser, companyId }: CompanyMetricsPag
               <div className="space-y-1">
                 <CardTitle className="text-base">월별 실적 입력</CardTitle>
                 <CardDescription className="text-xs leading-5">
-                  기본 지표는 유지되고, 사용자 지표는 추가 후 삭제할 수 있습니다.
+                  컬럼 추가/삭제는 저장 버튼을 눌러야 실제 반영됩니다.
                 </CardDescription>
               </div>
               <div className="flex flex-col items-end gap-1.5">
@@ -1101,27 +1172,6 @@ export function CompanyMetricsPage({ currentUser, companyId }: CompanyMetricsPag
               </div>
             </div>
 
-            <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_120px_auto]">
-              <Input
-                value={newFieldLabel}
-                onChange={(event) => setNewFieldLabel(event.target.value)}
-                placeholder="새 컬럼 이름 예: 투자유치현황"
-                className="h-8"
-              />
-              <Select value={newFieldFormat} onValueChange={(value: MetricFormat) => setNewFieldFormat(value)}>
-                <SelectTrigger size="sm">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="number">숫자</SelectItem>
-                  <SelectItem value="currency">금액</SelectItem>
-                </SelectContent>
-              </Select>
-              <Button type="button" size="sm" onClick={handleAddField}>
-                <Plus className="h-4 w-4" />
-                컬럼 추가
-              </Button>
-            </div>
           </CardHeader>
 
           <CardContent className="flex flex-1 flex-col px-5 pt-4">
@@ -1249,7 +1299,7 @@ export function CompanyMetricsPage({ currentUser, companyId }: CompanyMetricsPag
                               {field.source === "base" ? "기본" : "사용자"}
                             </Badge>
                           </div>
-                          {field.source === "custom" && (
+                          {draftMetricFields.length > 1 && (
                             <Button
                               type="button"
                               variant="ghost"
@@ -1288,6 +1338,46 @@ export function CompanyMetricsPage({ currentUser, companyId }: CompanyMetricsPag
                   ))}
                 </TableBody>
               </Table>
+            </div>
+
+            <div className="mt-4 space-y-2 border-t pt-4">
+              <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_120px_auto]">
+                <Input
+                  value={newFieldLabel}
+                  onChange={(event) => setNewFieldLabel(event.target.value)}
+                  placeholder="새 컬럼 이름 예: 투자유치현황"
+                  className="h-8"
+                />
+                <Select value={newFieldFormat} onValueChange={(value: MetricFormat) => setNewFieldFormat(value)}>
+                  <SelectTrigger size="sm">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="number">숫자</SelectItem>
+                    <SelectItem value="currency">금액</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Button type="button" size="sm" onClick={handleAddField}>
+                  <Plus className="h-4 w-4" />
+                  컬럼 추가
+                </Button>
+              </div>
+              {hiddenBaseMetricFields.length > 0 && (
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {hiddenBaseMetricFields.map((field) => (
+                    <Button
+                      key={field.key}
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="h-7 px-2.5 text-xs"
+                      onClick={() => handleRestoreBaseField(field.key as BaseMetricKey)}
+                    >
+                      {field.label} 다시 추가
+                    </Button>
+                  ))}
+                </div>
+              )}
             </div>
           </CardContent>
         </Card>

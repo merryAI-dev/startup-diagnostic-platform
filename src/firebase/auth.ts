@@ -2,6 +2,7 @@ import {
   fetchSignInMethodsForEmail,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
+  sendPasswordResetEmail,
   signOut,
 } from "firebase/auth"
 import { auth } from "@/firebase/client"
@@ -16,6 +17,11 @@ export function signUpWithEmail(email: string, password: string) {
 
 export function getSignInMethods(email: string) {
   return fetchSignInMethodsForEmail(auth, email.trim())
+}
+
+export function requestPasswordReset(email: string) {
+  auth.languageCode = "ko"
+  return sendPasswordResetEmail(auth, email.trim())
 }
 
 export function signOutUser() {

@@ -14,10 +14,35 @@ import { FileSpreadsheet, Save, Wand2 } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { toast } from "sonner"
+import {
+  CartesianGrid,
+  Line,
+  LineChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts"
 import { SELF_ASSESSMENT_SECTIONS } from "@/data/selfAssessment"
 import { db, storage } from "@/firebase/client"
 import { generateCompanyAnalysisReportViaFunction } from "@/redesign/app/lib/functions"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/redesign/app/components/ui/dialog"
 import { PaginationControls } from "@/redesign/app/components/ui/pagination-controls"
+import { formatCurrency, formatNumber } from "@/redesign/app/lib/company-metrics-data"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/redesign/app/components/ui/select"
 import {
   EMPTY_COMPANY_ANALYSIS_REPORT_FORM,
   splitNumberedReportSections,
@@ -27,6 +52,7 @@ import {
 } from "@/types/companyAnalysisReport"
 import type { CompanyInfoRecord } from "@/types/company"
 import type { SelfAssessmentSections } from "@/types/selfAssessment"
+import type { MonthlyMetrics } from "@/redesign/app/lib/types"
 
 type AdminDashboardProps = {
   user: User
@@ -54,7 +80,50 @@ type ProgramSummary = {
   companyIds?: string[]
 }
 
+type MetricFormat = "number" | "currency"
+
+type CustomMetricField = {
+  key: string
+  label: string
+  format: MetricFormat
+}
+
+type MetricsSnapshot = {
+  companyId: string
+  companyName: string
+  year: number
+  data: MonthlyMetrics[]
+  customFields: CustomMetricField[]
+  visibleBaseMetricKeys: string[]
+  updatedAt?: unknown
+}
+
+type MetricChartField = {
+  key: string
+  label: string
+  format: MetricFormat
+  color: string
+}
+
 const COMPANY_PAGE_SIZE = 8
+const METRIC_MONTHS = Array.from({ length: 12 }, (_, index) => index + 1)
+const BASE_METRIC_CHART_FIELDS: MetricChartField[] = [
+  { key: "revenue", label: "매출", format: "currency", color: "#2563eb" },
+  { key: "employees", label: "팀원 수", format: "number", color: "#0f766e" },
+  { key: "customers", label: "고객 수", format: "number", color: "#8b5cf6" },
+  { key: "monthlyActiveUsers", label: "MAU", format: "number", color: "#d97706" },
+  { key: "patents", label: "특허", format: "number", color: "#dc2626" },
+  { key: "certifications", label: "인증", format: "number", color: "#0891b2" },
+]
+const CUSTOM_METRIC_CHART_COLORS = [
+  "#7c3aed",
+  "#db2777",
+  "#16a34a",
+  "#ea580c",
+  "#0284c7",
+  "#ca8a04",
+]
+const DEFAULT_VISIBLE_BASE_METRIC_KEYS = BASE_METRIC_CHART_FIELDS.map((field) => field.key)
 
 function getRadarLabelLines(label: string) {
   const normalized = label.trim()
@@ -145,6 +214,208 @@ function buildRadarChartSvg(radarData: {
   `.trim()
 }
 
+function createEmptyMonth(year: number, month: number): MonthlyMetrics {
+  return {
+    month,
+    year,
+    revenue: 0,
+    employees: 0,
+    patents: 0,
+    certifications: 0,
+    customers: 0,
+    monthlyActiveUsers: 0,
+    otherMetrics: {},
+  }
+}
+
+function normalizeMonthlyMetrics(data: MonthlyMetrics[], year: number): MonthlyMetrics[] {
+  const dataByMonth = new Map(data.map((item) => [item.month, item]))
+
+  return METRIC_MONTHS.map((month) => {
+    const existing = dataByMonth.get(month)
+    if (!existing) {
+      return createEmptyMonth(year, month)
+    }
+
+    return {
+      ...createEmptyMonth(year, month),
+      ...existing,
+      month,
+      year,
+      monthlyActiveUsers: existing.monthlyActiveUsers ?? 0,
+      otherMetrics: { ...(existing.otherMetrics ?? {}) },
+    }
+  })
+}
+
+function inferCustomMetricFields(data: MonthlyMetrics[]): CustomMetricField[] {
+  const keys = new Set<string>()
+  data.forEach((item) => {
+    Object.keys(item.otherMetrics ?? {}).forEach((key) => keys.add(key))
+  })
+
+  return Array.from(keys).map((key) => ({
+    key,
+    label: key,
+    format: "number" as const,
+  }))
+}
+
+function normalizeCustomMetricFields(
+  value: unknown,
+  fallback: CustomMetricField[],
+): CustomMetricField[] {
+  if (!Array.isArray(value)) {
+    return fallback
+  }
+
+  const fields = value
+    .filter(
+      (field): field is CustomMetricField =>
+        typeof field?.key === "string" &&
+        typeof field?.label === "string" &&
+        (field?.format === "number" || field?.format === "currency"),
+    )
+    .map((field) => ({
+      key: field.key,
+      label: field.label.trim() || field.key,
+      format: field.format,
+    }))
+
+  return fields.length > 0 ? fields : fallback
+}
+
+function normalizeMetricsSnapshot(
+  source: Partial<MetricsSnapshot> | null | undefined,
+  companyId: string,
+): MetricsSnapshot | null {
+  if (!source) return null
+
+  const year =
+    typeof source.year === "number" && Number.isFinite(source.year)
+      ? source.year
+      : new Date().getFullYear()
+  const data = Array.isArray(source.data) ? source.data : []
+  const inferredCustomFields = inferCustomMetricFields(data)
+  const customFields = normalizeCustomMetricFields(source.customFields, inferredCustomFields)
+  const visibleBaseMetricKeys = Array.isArray(source.visibleBaseMetricKeys)
+    ? DEFAULT_VISIBLE_BASE_METRIC_KEYS.filter((key) => source.visibleBaseMetricKeys?.includes(key))
+    : DEFAULT_VISIBLE_BASE_METRIC_KEYS
+
+  return {
+    companyId,
+    companyName: typeof source.companyName === "string" ? source.companyName : "",
+    year,
+    data: normalizeMonthlyMetrics(data, year),
+    customFields,
+    visibleBaseMetricKeys: visibleBaseMetricKeys.length > 0 ? visibleBaseMetricKeys : DEFAULT_VISIBLE_BASE_METRIC_KEYS,
+    updatedAt: source.updatedAt,
+  }
+}
+
+function formatMetricValue(value: number, format: MetricFormat) {
+  return format === "currency" ? formatCurrency(value) : formatNumber(value)
+}
+
+function getMetricCellValue(item: MonthlyMetrics, key: string) {
+  switch (key) {
+    case "revenue":
+      return item.revenue
+    case "employees":
+      return item.employees
+    case "customers":
+      return item.customers
+    case "monthlyActiveUsers":
+      return item.monthlyActiveUsers ?? 0
+    case "patents":
+      return item.patents
+    case "certifications":
+      return item.certifications
+    default:
+      return item.otherMetrics?.[key] ?? 0
+  }
+}
+
+function createMetricsCsv(
+  fields: MetricChartField[],
+  rows: MonthlyMetrics[],
+) {
+  const escapeCell = (value: string) => {
+    if (/[",\n]/.test(value)) {
+      return `"${value.replace(/"/g, '""')}"`
+    }
+    return value
+  }
+
+  const headers = ["월", ...fields.map((field) => field.label)]
+  const body = rows.map((row) => [
+    `${row.year}-${String(row.month).padStart(2, "0")}`,
+    ...fields.map((field) => formatMetricValue(getMetricCellValue(row, field.key), field.format)),
+  ])
+
+  return [headers, ...body]
+    .map((line) => line.map((cell) => escapeCell(String(cell))).join(","))
+    .join("\n")
+}
+
+function buildRecentMonthSlots(baseYear: number, baseMonth: number, count: number) {
+  return Array.from({ length: count }, (_, index) => {
+    const offset = count - 1 - index
+    let year = baseYear
+    let month = baseMonth - offset
+
+    while (month <= 0) {
+      month += 12
+      year -= 1
+    }
+
+    return { year, month }
+  })
+}
+
+function normalizeUnknownDate(value: unknown): Date | null {
+  if (!value) return null
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value
+  if (typeof value === "string" || typeof value === "number") {
+    const parsed = new Date(value)
+    return Number.isNaN(parsed.getTime()) ? null : parsed
+  }
+  if (typeof value === "object" && value !== null) {
+    const maybeTimestamp = value as {
+      toDate?: () => Date
+      toMillis?: () => number
+      seconds?: number
+      nanoseconds?: number
+    }
+    if (typeof maybeTimestamp.toDate === "function") {
+      try {
+        const parsed = maybeTimestamp.toDate.call(value)
+        if (parsed instanceof Date && !Number.isNaN(parsed.getTime())) {
+          return parsed
+        }
+      } catch {
+        // Ignore invalid timestamp-like objects.
+      }
+    }
+    if (typeof maybeTimestamp.toMillis === "function") {
+      try {
+        const parsed = new Date(maybeTimestamp.toMillis.call(value))
+        if (!Number.isNaN(parsed.getTime())) {
+          return parsed
+        }
+      } catch {
+        // Ignore invalid timestamp-like objects.
+      }
+    }
+    if (typeof maybeTimestamp.seconds === "number") {
+      const nanos = typeof maybeTimestamp.nanoseconds === "number" ? maybeTimestamp.nanoseconds : 0
+      const parsed = new Date(maybeTimestamp.seconds * 1000 + Math.floor(nanos / 1_000_000))
+      return Number.isNaN(parsed.getTime()) ? null : parsed
+    }
+  }
+  return null
+}
+
 async function renderSvgToPngDataUrl(svg: string) {
   const dataUrl = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`
   const image = new Image()
@@ -177,6 +448,7 @@ export function AdminDashboard({
   const [companies, setCompanies] = useState<CompanySummary[]>([])
   const [selectedCompanyId, setSelectedCompanyId] = useState<string | null>(null)
   const [companyInfo, setCompanyInfo] = useState<CompanyInfoRecord | null>(null)
+  const [companyMetrics, setCompanyMetrics] = useState<MetricsSnapshot | null>(null)
   const [companyFiles, setCompanyFiles] = useState<
     { id: string; name: string; size: number; downloadUrl: string | null }[]
   >([])
@@ -187,13 +459,19 @@ export function AdminDashboard({
   const [loadingDetails, setLoadingDetails] = useState(false)
   const [companyQuery, setCompanyQuery] = useState("")
   const [companyPage, setCompanyPage] = useState(1)
-  const [activeTab, setActiveTab] = useState<"info" | "assessment" | "report" | "officeHours">(
+  const [activeTab, setActiveTab] = useState<"info" | "assessment" | "metrics" | "report" | "officeHours">(
     "info"
   )
+  const [selectedMetricChartKey, setSelectedMetricChartKey] = useState("revenue")
   const [programs, setPrograms] = useState<ProgramSummary[]>([])
   const [selectedCompanyProgramIds, setSelectedCompanyProgramIds] = useState<string[]>([])
   const [loadingPrograms, setLoadingPrograms] = useState(false)
   const [ticketDrafts, setTicketDrafts] = useState<Record<string, { internal: string; external: string }>>({})
+  const [editingTicketProgramId, setEditingTicketProgramId] = useState<string | null>(null)
+  const [ticketModalDraft, setTicketModalDraft] = useState<{ internal: string; external: string }>({
+    internal: "0",
+    external: "0",
+  })
   const [savingTickets, setSavingTickets] = useState(false)
   const [isGeneratingReport, setIsGeneratingReport] = useState(false)
   const [savingReport, setSavingReport] = useState(false)
@@ -259,9 +537,9 @@ export function AdminDashboard({
     async function loadPrograms() {
       setLoadingPrograms(true)
       try {
-        const snapshot = await getDocs(collection(db, "programs"))
+        const programSnapshot = await getDocs(collection(db, "programs"))
         if (!mounted) return
-        const list = snapshot.docs.map((docSnap) => {
+        const list = programSnapshot.docs.map((docSnap) => {
           const data = docSnap.data() as {
             name?: string
             internalTicketLimit?: number
@@ -294,6 +572,7 @@ export function AdminDashboard({
     async function loadDetails() {
       if (!selectedCompanyId) {
         setCompanyInfo(null)
+        setCompanyMetrics(null)
         setSelfAssessment({})
         setCompanyFiles([])
         setSelectedCompanyProgramIds([])
@@ -303,7 +582,7 @@ export function AdminDashboard({
       }
       setLoadingDetails(true)
       try {
-        const [infoSnap, assessmentSnap, filesSnap, companySnap, reportSnap] = await Promise.all([
+        const [infoSnap, assessmentSnap, filesSnap, companySnap, reportSnap, metricsSnap] = await Promise.all([
           getDoc(doc(db, "companies", selectedCompanyId, "companyInfo", "info")),
           getDoc(
             doc(db, "companies", selectedCompanyId, "selfAssessment", "info")
@@ -311,12 +590,20 @@ export function AdminDashboard({
           getDocs(collection(db, "companies", selectedCompanyId, "files")),
           getDoc(doc(db, "companies", selectedCompanyId)),
           getDoc(doc(db, "companies", selectedCompanyId, "analysisReport", "current")),
+          getDoc(doc(db, "companies", selectedCompanyId, "metrics", "annual")),
         ])
         if (!mounted) return
         const nextCompanyInfo = infoSnap.exists()
           ? (infoSnap.data() as CompanyInfoRecord)
           : null
         setCompanyInfo(nextCompanyInfo)
+        const nextMetrics = metricsSnap.exists()
+          ? normalizeMetricsSnapshot(
+            metricsSnap.data() as Partial<MetricsSnapshot>,
+            selectedCompanyId,
+          )
+          : null
+        setCompanyMetrics(nextMetrics)
         const assessmentData = assessmentSnap.exists()
           ? (assessmentSnap.data() as { sections?: SelfAssessmentSections })
           : null
@@ -405,29 +692,117 @@ export function AdminDashboard({
     return companyInfo?.investments ?? []
   }, [companyInfo])
 
+  const selectedCompanyName = useMemo(() => {
+    const selectedCompany = companies.find((company) => company.id === selectedCompanyId)
+    return (
+      companyInfo?.basic?.companyInfo?.trim() ||
+      selectedCompany?.name?.trim() ||
+      "company"
+    )
+  }, [companies, companyInfo?.basic?.companyInfo, selectedCompanyId])
+
+  const metricsUpdatedLabel = useMemo(() => {
+    if (!companyMetrics?.updatedAt) return null
+    const date = normalizeUnknownDate(companyMetrics.updatedAt)
+    if (!date) return null
+    if (Number.isNaN(date.getTime())) return null
+    return new Intl.DateTimeFormat("ko-KR", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(date)
+  }, [companyMetrics?.updatedAt])
+
+  const recentMetricsRows = useMemo(() => {
+    if (!companyMetrics) return []
+    return companyMetrics.data
+  }, [companyMetrics])
+
+  const hasMetricsDocument = Boolean(companyMetrics)
+
+  const metricChartFields = useMemo<MetricChartField[]>(() => {
+    const visibleBaseFields = BASE_METRIC_CHART_FIELDS.filter((field) =>
+      companyMetrics?.visibleBaseMetricKeys?.includes(field.key) ?? true,
+    )
+    const customFields = companyMetrics?.customFields.map((field, index) => ({
+      key: field.key,
+      label: field.label,
+      format: field.format,
+      color: CUSTOM_METRIC_CHART_COLORS[index % CUSTOM_METRIC_CHART_COLORS.length] ?? "#64748b",
+    })) ?? []
+
+    return [...visibleBaseFields, ...customFields]
+  }, [companyMetrics?.customFields, companyMetrics?.visibleBaseMetricKeys])
+
+  const selectedMetricChartField = useMemo(
+    () => metricChartFields.find((field) => field.key === selectedMetricChartKey) ?? metricChartFields[0] ?? null,
+    [metricChartFields, selectedMetricChartKey],
+  )
+
+  const emptyMetricsMonthSlots = useMemo(() => {
+    return buildRecentMonthSlots(companyMetrics?.year ?? new Date().getFullYear(), 12, 12)
+  }, [companyMetrics?.year])
+
+  const metricsChartData = useMemo(() => {
+    if (companyMetrics) {
+      return companyMetrics.data.map((row) => ({
+        label: `${row.month}월`,
+        ...Object.fromEntries(
+          metricChartFields.map((field) => [
+            field.key,
+            getMetricCellValue(row, field.key),
+          ]),
+        ),
+      }))
+    }
+
+    return emptyMetricsMonthSlots.map((row) => ({
+      label: `${row.month}월`,
+      ...Object.fromEntries(metricChartFields.map((field) => [field.key, null])),
+    }))
+  }, [companyMetrics, emptyMetricsMonthSlots, metricChartFields])
+
+  useEffect(() => {
+    if (metricChartFields.length === 0) return
+    if (!metricChartFields.some((field) => field.key === selectedMetricChartKey)) {
+      setSelectedMetricChartKey(metricChartFields[0]?.key ?? "revenue")
+    }
+  }, [metricChartFields, selectedMetricChartKey])
+
+  const handleDownloadMetricsCsv = () => {
+    const csvContent = createMetricsCsv(
+      metricChartFields,
+      hasMetricsDocument ? recentMetricsRows : [],
+    )
+    const blob = new Blob([`\uFEFF${csvContent}`], {
+      type: "text/csv;charset=utf-8;",
+    })
+    const url = window.URL.createObjectURL(blob)
+    const link = document.createElement("a")
+    link.href = url
+    link.download = `${selectedCompanyName}-metrics.csv`
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    window.URL.revokeObjectURL(url)
+  }
+
   const participatingPrograms = useMemo(() => {
     if (selectedCompanyProgramIds.length === 0) return []
     return programs.filter((program) => selectedCompanyProgramIds.includes(program.id))
   }, [programs, selectedCompanyProgramIds])
 
-  const handleTicketChange = (programId: string, field: "internal" | "external", value: string) => {
-    setTicketDrafts((prev) => ({
-      ...prev,
-      [programId]: {
-        internal: prev[programId]?.internal ?? "0",
-        external: prev[programId]?.external ?? "0",
-        [field]: value.replace(/[^\d]/g, ""),
-      },
-    }))
-  }
-
-  const handleSaveTickets = async () => {
+  const persistTicketDrafts = async (
+    nextDrafts: Record<string, { internal: string; external: string }>,
+  ) => {
     if (!selectedCompanyId) return
     setSavingTickets(true)
     try {
       const overrides: Record<string, { internal?: number; external?: number }> = {}
       participatingPrograms.forEach((program) => {
-        const draft = ticketDrafts[program.id]
+        const draft = nextDrafts[program.id]
         if (!draft) return
         const internal = Number(draft.internal || 0)
         const external = Number(draft.external || 0)
@@ -440,10 +815,37 @@ export function AdminDashboard({
       await updateDoc(doc(db, "companies", selectedCompanyId), {
         programTicketOverrides: overrides,
       })
+      setTicketDrafts(nextDrafts)
       toast.success("티켓 수가 변경되었습니다")
     } finally {
       setSavingTickets(false)
     }
+  }
+
+  const openTicketEditModal = (programId: string) => {
+    const currentDraft = ticketDrafts[programId] ?? { internal: "0", external: "0" }
+    setEditingTicketProgramId(programId)
+    setTicketModalDraft(currentDraft)
+  }
+
+  const handleTicketModalChange = (field: "internal" | "external", value: string) => {
+    setTicketModalDraft((prev) => ({
+      ...prev,
+      [field]: value.replace(/[^\d]/g, ""),
+    }))
+  }
+
+  const handleSaveTicketModal = async () => {
+    if (!editingTicketProgramId) return
+    const nextDrafts = {
+      ...ticketDrafts,
+      [editingTicketProgramId]: {
+        internal: ticketModalDraft.internal || "0",
+        external: ticketModalDraft.external || "0",
+      },
+    }
+    await persistTicketDrafts(nextDrafts)
+    setEditingTicketProgramId(null)
   }
 
   const filteredCompanies = useMemo(() => {
@@ -941,7 +1343,7 @@ export function AdminDashboard({
               기업 관리
             </h1>
             <p className="mt-1 text-sm text-slate-500">
-              기업 기본 정보, 자가진단표, 업로드 자료와 티켓 현황을 관리합니다.
+              기업 기본 정보, 자가진단표, 실적, 업로드 자료와 티켓 현황을 관리합니다.
             </p>
           </div>
         </div>
@@ -1007,6 +1409,8 @@ export function AdminDashboard({
                   ? "기업 정보"
                   : activeTab === "assessment"
                     ? "현황 진단 (자가진단)"
+                    : activeTab === "metrics"
+                      ? "실적 관리"
                     : activeTab === "officeHours"
                       ? "오피스아워"
                       : "기업진단분석보고서"}
@@ -1045,6 +1449,16 @@ export function AdminDashboard({
                   }`}
               >
                 분석 보고서
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab("metrics")}
+                className={`-mb-px border-b-2 px-3 py-2 text-sm font-semibold transition-colors ${activeTab === "metrics"
+                  ? "border-slate-900 text-slate-900"
+                  : "border-transparent text-slate-500 hover:text-slate-700"
+                  }`}
+              >
+                실적 관리
               </button>
               <button
                 type="button"
@@ -1421,6 +1835,206 @@ export function AdminDashboard({
                     )
                   })()}
                 </div>
+              ) : activeTab === "metrics" ? (
+                selectedCompanyId ? (
+                  <div className="min-h-0 flex-1 space-y-4 overflow-y-auto">
+                    <div className="flex items-center justify-end whitespace-nowrap text-xs text-slate-500">
+                      최근 업데이트 {hasMetricsDocument ? (metricsUpdatedLabel ?? "기록 없음") : "실적 문서 없음"}
+                    </div>
+                    {!hasMetricsDocument ? (
+                      <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 text-xs text-amber-900">
+                        월별 실적 문서는 아직 입력되지 않았습니다.
+                      </div>
+                    ) : null}
+
+                    <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="whitespace-nowrap text-sm font-semibold text-slate-800">
+                          12개월 추이
+                        </div>
+                      </div>
+                      <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(360px,0.85fr)]">
+                        <div className="rounded-xl border border-slate-200 bg-white p-4">
+                          <div className="mb-3 flex items-center justify-end">
+                            <button
+                              type="button"
+                              onClick={handleDownloadMetricsCsv}
+                              className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+                            >
+                              <FileSpreadsheet className="h-4 w-4" />
+                              다운로드
+                            </button>
+                          </div>
+                          <div className="max-h-[420px] overflow-auto">
+                            <table className="min-w-full w-max border-separate border-spacing-0 text-sm">
+                              <thead>
+                              <tr className="text-left text-xs text-slate-400">
+                                <th className="sticky top-0 z-10 border-b border-slate-200 bg-white px-3 py-2 font-semibold whitespace-nowrap">월</th>
+                                {metricChartFields.map((field) => (
+                                  <th
+                                    key={field.key}
+                                    className="sticky top-0 z-10 border-b border-slate-200 bg-white px-3 py-2 font-semibold whitespace-nowrap"
+                                  >
+                                    {field.label}
+                                  </th>
+                                ))}
+                              </tr>
+                              </thead>
+                              <tbody>
+                                {(hasMetricsDocument ? recentMetricsRows : emptyMetricsMonthSlots).map((row) => (
+                                  <tr
+                                    key={`${row.year}-${row.month}`}
+                                    className={hasMetricsDocument ? "text-slate-700" : "text-slate-400"}
+                                  >
+                                    <td className="border-b border-slate-100 px-3 py-2 font-semibold whitespace-nowrap">
+                                      {hasMetricsDocument
+                                        ? `${row.month}월`
+                                        : `${row.year}.${String(row.month).padStart(2, "0")}`}
+                                    </td>
+                                    {metricChartFields.map((field) => (
+                                      <td
+                                        key={`${row.year}-${row.month}-${field.key}`}
+                                        className="border-b border-slate-100 px-3 py-2 whitespace-nowrap"
+                                      >
+                                        {hasMetricsDocument
+                                          ? formatMetricValue(
+                                              getMetricCellValue(row as MonthlyMetrics, field.key),
+                                              field.format,
+                                            )
+                                          : "-"}
+                                      </td>
+                                    ))}
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                        <div className="rounded-xl border border-slate-200 bg-white p-4">
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="whitespace-nowrap text-xs font-semibold tracking-[0.08em] text-slate-400">
+                              {selectedMetricChartField?.label ?? "-"} 추이
+                            </div>
+                            <Select
+                              value={selectedMetricChartKey}
+                              onValueChange={setSelectedMetricChartKey}
+                            >
+                              <SelectTrigger className="h-9 w-[180px] border border-slate-300 bg-white pr-4 shadow-none">
+                                <SelectValue placeholder="지표 선택" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {metricChartFields.map((field) => (
+                                  <SelectItem key={field.key} value={field.key}>
+                                    {field.label}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="mt-2 h-[320px]">
+                            <ResponsiveContainer width="100%" height="100%">
+                              <LineChart
+                                key={selectedMetricChartField?.key ?? "metric-chart"}
+                                data={metricsChartData}
+                                margin={{ top: 12, right: 8, left: 0, bottom: 0 }}
+                              >
+                                <CartesianGrid stroke="#e2e8f0" strokeDasharray="3 3" />
+                                <XAxis
+                                  dataKey="label"
+                                  tick={{ fill: "#64748b", fontSize: 12 }}
+                                  axisLine={false}
+                                  tickLine={false}
+                                  tickMargin={8}
+                                  interval={0}
+                                  minTickGap={0}
+                                />
+                                <YAxis hide />
+                                <Tooltip
+                                  formatter={(value: unknown) => {
+                                    if (typeof value !== "number" || !selectedMetricChartField) return "-"
+                                    return formatMetricValue(value, selectedMetricChartField.format)
+                                  }}
+                                  labelFormatter={(label) => `${label}`}
+                                />
+                                {selectedMetricChartField ? (
+                                  <Line
+                                    type="monotone"
+                                    dataKey={selectedMetricChartField.key}
+                                    name={selectedMetricChartField.label}
+                                    stroke={selectedMetricChartField.color}
+                                    strokeWidth={2.5}
+                                    dot={{ r: 3, fill: selectedMetricChartField.color }}
+                                    connectNulls={false}
+                                    isAnimationActive
+                                    animationDuration={350}
+                                    animationEasing="ease-out"
+                                  />
+                                ) : null}
+                              </LineChart>
+                            </ResponsiveContainer>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {companyFiles.length > 0 ? (
+                      <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                        <div className="text-sm font-semibold text-slate-800">
+                          업로드 자료
+                        </div>
+                        <div className="mt-3 space-y-2">
+                          {companyFiles.map((file) => (
+                            <div
+                              key={file.id}
+                              className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50/60 px-3 py-2.5"
+                            >
+                              <div className="min-w-0 flex flex-1 items-center gap-3">
+                                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-white text-slate-500 ring-1 ring-slate-200">
+                                  <FileSpreadsheet className="h-4 w-4" />
+                                </div>
+                                <div className="min-w-0">
+                                  <div className="truncate text-sm font-medium text-slate-800">
+                                    {file.name}
+                                  </div>
+                                  <div className="mt-0.5 text-[11px] text-slate-500 whitespace-nowrap">
+                                    {(file.size / (1024 * 1024)).toFixed(1)}MB
+                                  </div>
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-1.5">
+                                {file.downloadUrl ? (
+                                  <>
+                                    <a
+                                      href={file.downloadUrl}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-[11px] font-medium text-slate-700 transition hover:bg-slate-50"
+                                    >
+                                      확인
+                                    </a>
+                                    <a
+                                      href={file.downloadUrl}
+                                      download
+                                      className="rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-[11px] font-medium text-slate-700 transition hover:bg-slate-50"
+                                    >
+                                      다운로드
+                                    </a>
+                                  </>
+                                ) : (
+                                  <span className="text-[11px] text-slate-400">링크 없음</span>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : (
+                  <div className="rounded-xl border border-slate-100 bg-slate-50 p-4 text-xs text-slate-500">
+                    회사를 먼저 선택해주세요.
+                  </div>
+                )
               ) : activeTab === "officeHours" ? (
                 <div className="space-y-4">
                   <div className="flex items-center justify-between gap-3">
@@ -1430,14 +2044,6 @@ export function AdminDashboard({
                         기본 티켓은 사업 설정값이며, 기업별로 내부/외부 티켓을 조정할 수 있습니다.
                       </div>
                     </div>
-                    <button
-                      type="button"
-                      onClick={handleSaveTickets}
-                      disabled={savingTickets || loadingPrograms}
-                      className="rounded-lg bg-slate-900 px-4 py-2 text-xs font-semibold text-white disabled:bg-slate-300"
-                    >
-                      {savingTickets ? "저장 중..." : "저장"}
-                    </button>
                   </div>
 
                   {loadingPrograms ? (
@@ -1449,49 +2055,116 @@ export function AdminDashboard({
                       참여 중인 사업이 없습니다.
                     </div>
                   ) : (
-                    <div className="space-y-3">
+                    <div className="space-y-2">
                       {participatingPrograms.map((program) => {
                         const draft = ticketDrafts[program.id] ?? {
                           internal: String(program.internalTicketLimit ?? 0),
                           external: String(program.externalTicketLimit ?? 0),
                         }
                         return (
-                          <div key={program.id} className="rounded-xl border border-slate-200 bg-white p-4">
-                            <div className="flex items-center justify-between gap-4">
-                              <div>
-                                <div className="text-sm font-semibold text-slate-800">
+                          <div
+                            key={program.id}
+                            className="rounded-xl border border-slate-200 bg-slate-50/70 px-3.5 py-2.5 shadow-[0_1px_2px_rgba(15,23,42,0.04)]"
+                          >
+                            <div className="flex flex-wrap items-start justify-between gap-2.5">
+                              <div className="min-w-0 space-y-1">
+                                <div className="text-sm font-semibold text-slate-800 whitespace-nowrap">
                                   {program.name}
                                 </div>
-                                <div className="text-xs text-slate-500 mt-1">
-                                  기본 내부 {program.internalTicketLimit ?? 0} · 기본 외부 {program.externalTicketLimit ?? 0}
+                                <div className="space-y-1">
+                                  <div className="flex flex-wrap items-center gap-1.5 text-xs whitespace-nowrap">
+                                    <span className="inline-flex flex-col items-start gap-0.5">
+                                      <span className="pl-0.5 text-[10px] font-medium uppercase tracking-[0.08em] text-slate-400">기본</span>
+                                      <span className="rounded-md border border-slate-200 bg-white px-2.5 py-1 font-medium text-slate-600 shadow-[0_1px_1px_rgba(15,23,42,0.03)]">
+                                        내부 <span className="ml-1 font-semibold text-slate-700">{program.internalTicketLimit ?? 0}</span>
+                                        <span className="mx-1.5 text-slate-300">·</span>
+                                        외부 <span className="ml-1 font-semibold text-slate-700">{program.externalTicketLimit ?? 0}</span>
+                                      </span>
+                                    </span>
+                                    <span className="mt-4 inline-flex items-center text-slate-300" aria-hidden="true">
+                                      <span className="flex h-5 w-5 items-center justify-center rounded-full border border-slate-200 bg-white text-[10px] text-slate-400 shadow-[0_1px_1px_rgba(15,23,42,0.03)]">
+                                        →
+                                      </span>
+                                    </span>
+                                    <span className="inline-flex flex-col items-start gap-0.5">
+                                      <span className="pl-0.5 text-[10px] font-medium uppercase tracking-[0.08em] text-slate-400">현재</span>
+                                      <span className="rounded-md border border-blue-200 bg-blue-50 px-2.5 py-1 font-medium text-blue-700 shadow-[0_1px_1px_rgba(59,130,246,0.08)]">
+                                        내부 <span className="ml-1 font-semibold text-blue-700">{draft.internal || "0"}</span>
+                                        <span className="mx-1.5 text-blue-300">·</span>
+                                        외부 <span className="ml-1 font-semibold text-blue-700">{draft.external || "0"}</span>
+                                      </span>
+                                    </span>
+                                  </div>
                                 </div>
                               </div>
-                              <div className="flex items-center gap-3">
-                                <div className="text-xs text-slate-500">내부</div>
-                                <input
-                                  inputMode="numeric"
-                                  value={draft.internal}
-                                  onChange={(event) =>
-                                    handleTicketChange(program.id, "internal", event.target.value)
-                                  }
-                                  className="w-20 rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-700"
-                                />
-                                <div className="text-xs text-slate-500">외부</div>
-                                <input
-                                  inputMode="numeric"
-                                  value={draft.external}
-                                  onChange={(event) =>
-                                    handleTicketChange(program.id, "external", event.target.value)
-                                  }
-                                  className="w-20 rounded-md border border-slate-200 px-2 py-1 text-xs text-slate-700"
-                                />
-                              </div>
+                              <button
+                                type="button"
+                                onClick={() => openTicketEditModal(program.id)}
+                                className="rounded-md border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 transition hover:bg-slate-50"
+                              >
+                                수정
+                              </button>
                             </div>
                           </div>
                         )
                       })}
                     </div>
                   )}
+
+                  <Dialog
+                    open={Boolean(editingTicketProgramId)}
+                    onOpenChange={(open) => {
+                      if (!open) {
+                        setEditingTicketProgramId(null)
+                      }
+                    }}
+                  >
+                    <DialogContent className="sm:max-w-sm">
+                      <DialogHeader>
+                        <DialogTitle>티켓 수 변경</DialogTitle>
+                        <DialogDescription>
+                          내부/외부 티켓 수를 수정한 뒤 저장하세요.
+                        </DialogDescription>
+                      </DialogHeader>
+                      <div className="flex items-start gap-3 py-2">
+                        <label className="flex min-w-0 flex-1 flex-col gap-1.5 text-sm text-slate-700">
+                          <span className="text-xs font-medium text-slate-500">내부</span>
+                          <input
+                            inputMode="numeric"
+                            value={ticketModalDraft.internal}
+                            onChange={(event) => handleTicketModalChange("internal", event.target.value)}
+                            className="h-9 w-full rounded-md border border-slate-300 bg-white px-3 text-sm text-slate-800 focus:border-slate-400 focus:outline-none"
+                          />
+                        </label>
+                        <label className="flex min-w-0 flex-1 flex-col gap-1.5 text-sm text-slate-700">
+                          <span className="text-xs font-medium text-slate-500">외부</span>
+                          <input
+                            inputMode="numeric"
+                            value={ticketModalDraft.external}
+                            onChange={(event) => handleTicketModalChange("external", event.target.value)}
+                            className="h-9 w-full rounded-md border border-slate-300 bg-white px-3 text-sm text-slate-800 focus:border-slate-400 focus:outline-none"
+                          />
+                        </label>
+                      </div>
+                      <DialogFooter>
+                        <button
+                          type="button"
+                          onClick={() => setEditingTicketProgramId(null)}
+                          className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+                        >
+                          취소
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void handleSaveTicketModal()}
+                          disabled={savingTickets}
+                          className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:bg-slate-300"
+                        >
+                          {savingTickets ? "저장 중..." : "저장"}
+                        </button>
+                      </DialogFooter>
+                    </DialogContent>
+                  </Dialog>
                 </div>
               ) : (
                 <div className="min-h-0 flex-1 overflow-y-auto space-y-6">
