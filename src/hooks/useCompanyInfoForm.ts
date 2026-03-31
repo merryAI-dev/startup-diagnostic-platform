@@ -1,7 +1,7 @@
 import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore"
 import { useEffect, useMemo, useState } from "react"
 import { db } from "@/firebase/client"
-import { replaceCompanyPrograms } from "@/lib/company-program-membership"
+import { updateCompanyProgramsViaFunction } from "@/redesign/app/lib/functions"
 import type {
   CompanyInfoForm,
   CompanyInfoRecord,
@@ -259,6 +259,16 @@ function toTargetCountries(value: string) {
     .map((item) => item.trim())
     .filter(Boolean)
     .slice(0, 3)
+}
+
+function normalizeProgramIds(values: string[]) {
+  return Array.from(
+    new Set(
+      values
+        .map((value) => value.trim())
+        .filter((value) => value.length > 0),
+    ),
+  ).sort()
 }
 
 export function useCompanyInfoForm(companyId: string) {
@@ -676,12 +686,28 @@ export function useCompanyInfoForm(companyId: string) {
         },
         { merge: true }
       )
-      await replaceCompanyPrograms({
-        db,
-        companyId,
-        nextProgramIds: companyProgramIds,
-        companyName: companyInfo.basic.companyInfo || null,
-      })
+      const normalizedCurrentProgramIds = normalizeProgramIds(companyProgramIds)
+      const normalizedSavedProgramIds = normalizeProgramIds(savedCompanyProgramIds)
+      const programsChanged =
+        normalizedCurrentProgramIds.length !== normalizedSavedProgramIds.length ||
+        normalizedCurrentProgramIds.some((value, index) => value !== normalizedSavedProgramIds[index])
+
+      if (programsChanged) {
+        await updateCompanyProgramsViaFunction({
+          companyId,
+          programIds: companyProgramIds,
+          companyName: companyInfo.basic.companyInfo || null,
+        })
+      } else {
+        await setDoc(
+          doc(db, "companies", companyId),
+          {
+            name: companyInfo.basic.companyInfo || null,
+            updatedAt: serverTimestamp(),
+          },
+          { merge: true }
+        )
+      }
       setSavedForm(form)
       setSavedCompanyProgramIds(companyProgramIds)
       setSavedInvestmentRows(investmentRows)
