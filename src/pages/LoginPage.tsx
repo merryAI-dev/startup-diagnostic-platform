@@ -4,6 +4,7 @@ import { AuthCard } from "@/components/auth/AuthCard"
 import { useAuth } from "@/context/AuthContext"
 import { getSignupRequest, getUserProfile } from "@/firebase/profile"
 import { signInWithEmail, signOutUser } from "@/firebase/auth"
+import { readFirebaseErrorCode } from "@/firebase/errors"
 import type { Role } from "@/types/auth"
 import { PENDING_REQUEST_FLAG } from "@/constants/signup"
 
@@ -19,8 +20,8 @@ export function LoginPage() {
     let signupRequest = null
     try {
       ;[profile, signupRequest] = await Promise.all([getUserProfile(uid), getSignupRequest(uid)])
-    } catch (error: any) {
-      const code = error?.code ?? ""
+    } catch (error: unknown) {
+      const code = readFirebaseErrorCode(error)
       if (code === "permission-denied") {
         setError("프로필 접근 권한이 없습니다. 관리자에게 문의해주세요.")
       } else {
@@ -36,11 +37,7 @@ export function LoginPage() {
     }
 
     if (profile?.active === true) {
-      navigate(
-        profile.role === "admin" || profile.role === "consultant"
-          ? "/admin"
-          : "/company"
-      )
+      navigate(profile.role === "admin" || profile.role === "consultant" ? "/admin" : "/company")
       return true
     }
 
@@ -57,11 +54,7 @@ export function LoginPage() {
     return true
   }
 
-  async function handleEmailLogin(
-    _unusedRole: Role,
-    email: string,
-    password: string
-  ) {
+  async function handleEmailLogin(_unusedRole: Role, email: string, password: string) {
     if (isBusy) return
     setLoadingEmail(true)
     setError(null)
@@ -69,8 +62,8 @@ export function LoginPage() {
       const result = await signInWithEmail(email, password)
       await refreshProfile()
       await routeAfterLogin(result.user.uid)
-    } catch (err: any) {
-      const code = err?.code ?? ""
+    } catch (error: unknown) {
+      const code = readFirebaseErrorCode(error)
       if (code === "auth/user-not-found" || code === "auth/invalid-credential") {
         setError("가입되지 않은 계정이거나 이메일/비밀번호가 올바르지 않습니다.")
       } else if (code === "auth/wrong-password") {
@@ -92,6 +85,7 @@ export function LoginPage() {
           title="로그인"
           subtitle="이메일/비밀번호로 로그인하세요."
           onSubmit={handleEmailLogin}
+          onForgotPassword={() => navigate("/reset-password")}
           onSwap={() => navigate("/signup")}
           swapLabel="회원가입"
           role="company"

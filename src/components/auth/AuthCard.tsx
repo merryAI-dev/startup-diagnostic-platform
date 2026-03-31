@@ -18,6 +18,12 @@ type AuthCardProps = {
   loadingEmail?: boolean
   error?: string | null
   notice?: string | null
+  submitLabel?: string
+  swapPrompt?: string
+  showPasswordField?: boolean
+  onForgotPassword?: () => void
+  forgotPasswordPrompt?: string
+  forgotPasswordLabel?: string
 }
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
@@ -42,19 +48,8 @@ function Spinner({ className = "" }: { className?: string }) {
       fill="none"
       aria-hidden="true"
     >
-      <circle
-        className="opacity-25"
-        cx="12"
-        cy="12"
-        r="10"
-        stroke="currentColor"
-        strokeWidth="3"
-      />
-      <path
-        className="opacity-75"
-        fill="currentColor"
-        d="M4 12a8 8 0 018-8v3a5 5 0 00-5 5H4z"
-      />
+      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v3a5 5 0 00-5 5H4z" />
     </svg>
   )
 }
@@ -75,6 +70,12 @@ export function AuthCard({
   continueLabel = "다음 단계로",
   error = null,
   notice = null,
+  submitLabel,
+  swapPrompt,
+  showPasswordField = true,
+  onForgotPassword,
+  forgotPasswordPrompt = "비밀번호를 잊으셨나요?",
+  forgotPasswordLabel = "비밀번호 찾기",
 }: AuthCardProps) {
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
@@ -82,12 +83,14 @@ export function AuthCard({
   const [touched, setTouched] = useState({ email: false, password: false })
 
   const emailError = getEmailError(email)
-  const passwordError = getPasswordError(password)
+  const passwordError = showPasswordField ? getPasswordError(password) : null
   const showEmailError = touched.email && emailError
-  const showPasswordError = touched.password && passwordError
+  const showPasswordError = showPasswordField && touched.password && passwordError
   const isBusy = loadingEmail
   const selectedRole = role ?? "company"
   const shouldShowRoleSelector = showRoleSelector && !!role && !!setRole
+  const resolvedSwapPrompt =
+    swapPrompt ?? (swapLabel === "회원가입" ? "아직 계정이 없으신가요?" : "이미 계정이 있으신가요?")
 
   function handleSubmit() {
     if (!showEmailForm) return
@@ -95,7 +98,7 @@ export function AuthCard({
       setTouched({ email: true, password: true })
       return
     }
-    onSubmit(selectedRole, email.trim(), password)
+    onSubmit(selectedRole, email.trim(), showPasswordField ? password : "")
   }
 
   function handleContinue() {
@@ -105,7 +108,7 @@ export function AuthCard({
 
   return (
     <div className="grid gap-8 lg:grid-cols-2 place-items-center">
-      <div className="w-full max-w-md rounded-3xl border border-slate-200 bg-white p-8 shadow-sm">
+      <div className="flex w-full max-w-md flex-col rounded-3xl border border-slate-200 bg-white p-8 shadow-sm">
         <div className="space-y-2">
           <h1 className="text-2xl font-semibold text-slate-900">{title}</h1>
           <p className="text-sm text-slate-500">{subtitle}</p>
@@ -121,41 +124,37 @@ export function AuthCard({
               이메일
               <input
                 data-testid="auth-email"
-                className={`mt-1 w-full rounded-xl border px-4 py-2 text-sm focus:outline-none ${showEmailError
+                className={`mt-1 w-full rounded-xl border px-4 py-2 text-sm focus:outline-none ${
+                  showEmailError
                     ? "border-rose-300 focus:border-rose-400"
                     : "border-slate-200 focus:border-slate-400"
-                  }`}
+                }`}
                 placeholder="name@company.com"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                onBlur={() =>
-                  setTouched((prev) => ({ ...prev, email: true }))
-                }
+                onBlur={() => setTouched((prev) => ({ ...prev, email: true }))}
                 disabled={isBusy}
               />
-              {showEmailError ? (
-                <p className="mt-1 text-xs text-rose-600">{emailError}</p>
-              ) : null}
+              {showEmailError ? <p className="mt-1 text-xs text-rose-600">{emailError}</p> : null}
             </label>
           ) : null}
 
-          {showEmailForm ? (
+          {showEmailForm && showPasswordField ? (
             <label className="block text-sm text-slate-600">
               비밀번호
               <div className="relative mt-1">
                 <input
                   data-testid="auth-password"
                   type={showPassword ? "text" : "password"}
-                  className={`w-full rounded-xl border px-4 py-2 pr-10 text-sm focus:outline-none ${showPasswordError
+                  className={`w-full rounded-xl border px-4 py-2 pr-10 text-sm focus:outline-none ${
+                    showPasswordError
                       ? "border-rose-300 focus:border-rose-400"
                       : "border-slate-200 focus:border-slate-400"
-                    }`}
+                  }`}
                   placeholder="••••••••"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  onBlur={() =>
-                    setTouched((prev) => ({ ...prev, password: true }))
-                  }
+                  onBlur={() => setTouched((prev) => ({ ...prev, password: true }))}
                   disabled={isBusy}
                 />
                 <button
@@ -209,8 +208,7 @@ export function AuthCard({
 
           {showExtraStep && (
             <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-700">
-              가입 후 계정 상태가 승인 대기일 수 있으며, 역할에 따라
-              관리자 승인이 필요합니다.
+              가입 후 계정 상태가 승인 대기일 수 있으며, 역할에 따라 관리자 승인이 필요합니다.
             </div>
           )}
 
@@ -239,7 +237,7 @@ export function AuthCard({
                   <span className="sr-only">처리 중</span>
                 </span>
               ) : (
-                title
+                (submitLabel ?? title)
               )}
             </button>
           ) : null}
@@ -253,26 +251,40 @@ export function AuthCard({
               {continueLabel}
             </button>
           ) : null}
-
         </div>
 
-        <div className="mt-6 text-center text-sm text-slate-500">
-          {swapLabel}이 필요하신가요?{" "}
-          <button
-            data-testid="auth-swap"
-            className="font-semibold text-slate-900 hover:text-slate-700"
-            onClick={onSwap}
-          >
-            {swapLabel}
-          </button>
+        <div className="mt-6 ml-auto w-fit space-y-1 text-[11px] leading-4 text-right">
+          <div className="flex items-center justify-end gap-1.5">
+            <span className="text-slate-500">{resolvedSwapPrompt}</span>
+            <button
+              data-testid="auth-swap"
+              className="text-[11px] font-semibold text-slate-900 hover:text-slate-700"
+              onClick={onSwap}
+            >
+              {swapLabel}
+            </button>
+          </div>
+
+          {showEmailForm && showPasswordField && onForgotPassword ? (
+            <div className="flex items-center justify-end gap-1.5">
+              <span className="text-slate-500">{forgotPasswordPrompt}</span>
+              <button
+                type="button"
+                className="text-[11px] font-semibold text-slate-900 hover:text-slate-700"
+                onClick={onForgotPassword}
+                disabled={isBusy}
+              >
+                {forgotPasswordLabel}
+              </button>
+            </div>
+          ) : null}
         </div>
       </div>
 
       <div className="w-full h-full max-w-md rounded-3xl border border-slate-200 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-700 p-8 text-white shadow-sm">
         <h2 className="text-2xl font-semibold">진단 플랫폼 시작</h2>
         <p className="mt-3 text-sm text-slate-200">
-          로그인은 공통 인증으로 단순하게, 역할 선택은 가입 단계에서
-          명확하게 분리해 운영하세요.
+          로그인은 공통 인증으로 단순하게, 역할 선택은 가입 단계에서 명확하게 분리해 운영하세요.
         </p>
         <div className="mt-6 space-y-2 text-sm text-slate-200">
           <div>• 스타트업: 진단 설문 작성, 결과 확인, 리포트 다운로드</div>
