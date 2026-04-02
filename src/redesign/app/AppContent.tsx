@@ -11,6 +11,7 @@ import { CompanyDashboard } from "@/components/dashboard/CompanyDashboard"
 import { ProtectedRoute } from "@/redesign/app/components/auth/protected-route"
 import { Topbar } from "@/redesign/app/components/layout/topbar"
 import { SidebarNav } from "@/redesign/app/components/layout/sidebar-nav"
+import { ContentLoadingOverlay } from "@/redesign/app/components/ui/content-loading-overlay"
 import { DashboardCalendar } from "@/redesign/app/components/pages/dashboard-calendar"
 import { RegularOfficeHoursCalendar } from "@/redesign/app/components/pages/regular-office-hours-calendar"
 import { RegularOfficeHourDetail } from "@/redesign/app/components/pages/regular-office-hour-detail"
@@ -752,17 +753,49 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
   const { user: firebaseUser, profile, loading, refreshProfile } = useAppAuth()
   const navigate = useNavigate()
   const location = useLocation()
+  const rootSegment = location.pathname.split("/")[1] ?? ""
   const routeSegment = location.pathname.split("/")[2] ?? ""
   const routePage = routeSegment as AppPage
   const isCompanyInfoRoute = routeSegment === "company-info"
+  const loadingRole: UserRole =
+    roleOverride ??
+    (routeSegment.startsWith("consultant-")
+      ? "consultant"
+      : rootSegment === "admin"
+        ? "admin"
+        : "user")
+  const loadingUser =
+    initialUsers.find((candidate) => candidate.role === loadingRole) ?? initialUsers[0]!
+  const loadingPage =
+    routeSegment ||
+    (loadingRole === "consultant"
+      ? "consultant-calendar"
+      : loadingRole === "admin" || loadingRole === "staff"
+        ? "admin-dashboard"
+        : "dashboard")
   useEffect(() => {
     if (!isFirebaseConfigured) return
     console.log("[Firestore] active subscriptions:", firestoreService.getActiveSubscriptionCount())
   }, [routePage])
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+      <div className="flex h-screen min-h-0 flex-col">
+        <Topbar
+          user={loadingUser}
+          onNavigate={() => {}}
+          onLogout={async () => {}}
+        />
+        <div className="flex min-h-0 flex-1 overflow-hidden">
+          <SidebarNav
+            currentPage={loadingPage}
+            onNavigate={() => {}}
+            userRole={loadingRole}
+            disabledPages={new Set()}
+          />
+          <main className="relative flex min-h-0 min-w-0 flex-1 flex-col bg-gray-50">
+            <ContentLoadingOverlay />
+          </main>
+        </div>
       </div>
     )
   }
