@@ -243,25 +243,50 @@ function normalizeStringArray(values) {
   );
 }
 
-async function syncCompanyProgramsInTransaction(transaction, params) {
+function getAffectedProgramIds(currentProgramIds, nextProgramIds) {
+  return Array.from(
+    new Set([
+      ...normalizeStringArray(currentProgramIds),
+      ...normalizeStringArray(nextProgramIds),
+    ])
+  );
+}
+
+async function loadProgramDocsForSyncInTransaction(transaction, programIds) {
+  if (!Array.isArray(programIds) || programIds.length === 0) {
+    return new Map();
+  }
+
+  const programRefs = programIds.map((programId) => db.collection("programs").doc(programId));
+  const programSnaps = await Promise.all(programRefs.map((ref) => transaction.get(ref)));
+  const programDataById = new Map();
+
+  programSnaps.forEach((programSnap, index) => {
+    const programId = programIds[index];
+    programDataById.set(programId, programSnap.exists ? programSnap.data() || {} : {});
+  });
+
+  return programDataById;
+}
+
+function syncCompanyProgramsInTransaction(transaction, params) {
   const companyId = normalizeString(params.companyId);
   const ownerUid = normalizeString(params.ownerUid);
   const currentProgramIds = normalizeStringArray(params.currentProgramIds);
   const nextProgramIds = normalizeStringArray(params.nextProgramIds);
-  const affectedProgramIds = Array.from(new Set([...currentProgramIds, ...nextProgramIds]));
+  const affectedProgramIds = getAffectedProgramIds(currentProgramIds, nextProgramIds);
 
   if (!companyId || affectedProgramIds.length === 0) {
     return;
   }
 
   const aliases = Array.from(new Set([companyId, ownerUid].filter(Boolean)));
-  const programRefs = affectedProgramIds.map((programId) => db.collection("programs").doc(programId));
-  const programSnaps = await Promise.all(programRefs.map((ref) => transaction.get(ref)));
+  const programDataById =
+    params.programDataById instanceof Map ? params.programDataById : new Map();
 
-  programSnaps.forEach((programSnap, index) => {
-    const programRef = programRefs[index];
-    const programId = affectedProgramIds[index];
-    const programData = programSnap.exists ? programSnap.data() || {} : {};
+  affectedProgramIds.forEach((programId) => {
+    const programRef = db.collection("programs").doc(programId);
+    const programData = programDataById.get(programId) || {};
     const currentCompanyIds = normalizeStringArray(programData.companyIds);
     const nextCompanyIds = currentCompanyIds.filter((value) => !aliases.includes(value));
 
@@ -279,6 +304,90 @@ async function syncCompanyProgramsInTransaction(transaction, params) {
     );
   });
 }
+
+exports.updateCompanyPrograms = onCall(
+  {
+    region: REGION,
+  },
+  async (request) => {
+    if (!request.auth?.uid) {
+      throw new HttpsError("unauthenticated", "로그인이 필요합니다.");
+    }
+
+    const uid = request.auth.uid;
+    const companyId = normalizeString(request.data?.companyId);
+    const companyName = normalizeString(request.data?.companyName) || null;
+    const nextProgramIds = normalizeStringArray(request.data?.programIds);
+
+    if (!companyId) {
+      throw new HttpsError("invalid-argument", "회사 ID가 필요합니다.");
+    }
+
+    const profileRef = db.collection("profiles").doc(uid);
+    const companyRef = db.collection("companies").doc(companyId);
+
+    return db.runTransaction(async (transaction) => {
+      const [profileSnap, companySnap] = await Promise.all([
+        transaction.get(profileRef),
+        transaction.get(companyRef),
+      ]);
+
+      if (!profileSnap.exists) {
+        throw new HttpsError("permission-denied", "프로필을 찾을 수 없습니다.");
+      }
+      if (!companySnap.exists) {
+        throw new HttpsError("not-found", "회사를 찾을 수 없습니다.");
+      }
+
+      const profile = profileSnap.data() || {};
+      const company = companySnap.data() || {};
+      const role = normalizeApprovalRole(profile.role, "");
+      const requestedRole = normalizeApprovalRole(profile.requestedRole, "");
+      const isAdmin = role === "admin";
+      const isActive = profile.active !== false;
+      const ownerUid = normalizeString(company.ownerUid);
+      const profileCompanyId = normalizeString(profile.companyId);
+      const isCompanyMember =
+        isActive &&
+        (role === "company" || requestedRole === "company") &&
+        (profileCompanyId === companyId || ownerUid === uid);
+
+      if (!isAdmin && !isCompanyMember) {
+        throw new HttpsError("permission-denied", "참여사업을 변경할 권한이 없습니다.");
+      }
+
+      const currentProgramIds = normalizeStringArray(company.programs);
+      const affectedProgramIds = getAffectedProgramIds(currentProgramIds, nextProgramIds);
+      const programDataById = await loadProgramDocsForSyncInTransaction(
+        transaction,
+        affectedProgramIds
+      );
+
+      transaction.set(
+        companyRef,
+        {
+          ...(companyName !== null ? { name: companyName } : {}),
+          programs: nextProgramIds,
+          updatedAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
+
+      syncCompanyProgramsInTransaction(transaction, {
+        companyId,
+        ownerUid: ownerUid || uid,
+        currentProgramIds,
+        nextProgramIds,
+        programDataById,
+      });
+
+      return {
+        companyId,
+        programIds: nextProgramIds,
+      };
+    });
+  }
+);
 
 function buildCompanyInfoRecord(form, investmentRows) {
   return {
@@ -1775,6 +1884,11 @@ exports.approvePendingUser = onCall(
         const companySnap = await transaction.get(companyRef);
         const existingCompany = companySnap.exists ? companySnap.data() || {} : {};
         const currentProgramIds = normalizeStringArray(existingCompany.programs);
+        const affectedProgramIds = getAffectedProgramIds(currentProgramIds, approvedProgramIds);
+        const programDataById = await loadProgramDocsForSyncInTransaction(
+          transaction,
+          affectedProgramIds
+        );
         const companyInfoRef = db
           .collection("companies")
           .doc(approvedCompanyId)
@@ -1792,11 +1906,12 @@ exports.approvePendingUser = onCall(
           },
           { merge: true }
         );
-        await syncCompanyProgramsInTransaction(transaction, {
+        syncCompanyProgramsInTransaction(transaction, {
           companyId: approvedCompanyId,
           ownerUid: targetUserId,
           currentProgramIds,
           nextProgramIds: approvedProgramIds,
+          programDataById,
         });
         transaction.set(
           companyInfoRef,

@@ -57,6 +57,17 @@ type ApprovePendingUserResult = {
   companyId?: string | null;
 };
 
+type UpdateCompanyProgramsPayload = {
+  companyId: string;
+  programIds: string[];
+  companyName?: string | null;
+};
+
+type UpdateCompanyProgramsResult = {
+  companyId: string;
+  programIds: string[];
+};
+
 export type GenerateCompanyAnalysisReportPayload = {
   companyName: string;
   companyInfo: unknown;
@@ -171,6 +182,22 @@ export async function approvePendingUserViaFunction(userId: string) {
   );
 
   const result = await callable({ userId });
+  return result.data;
+}
+
+export async function updateCompanyProgramsViaFunction(
+  payload: UpdateCompanyProgramsPayload
+) {
+  if (!isFirebaseConfigured || !functions) {
+    throw new Error("Firebase Functions is not configured");
+  }
+
+  const callable = httpsCallable<
+    UpdateCompanyProgramsPayload,
+    UpdateCompanyProgramsResult
+  >(functions, "updateCompanyPrograms");
+
+  const result = await callable(payload);
   return result.data;
 }
 
