@@ -43,10 +43,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/redesign/app/components/ui/select"
+import { ContentLoadingOverlay } from "@/redesign/app/components/ui/content-loading-overlay"
 import {
+  COMPANY_ANALYSIS_AC_FIELDS,
+  COMPANY_ANALYSIS_BUSINESS_MODEL_FIELDS,
+  COMPANY_ANALYSIS_IMPROVEMENT_FIELDS,
+  COMPANY_ANALYSIS_MILESTONE_FIELDS,
+  COMPANY_ANALYSIS_SUMMARY_FIELDS,
   EMPTY_COMPANY_ANALYSIS_REPORT_FORM,
-  splitNumberedReportSections,
-  splitReportParagraphs,
   toCompanyAnalysisReportForm,
   type CompanyAnalysisReportForm,
 } from "@/types/companyAnalysisReport"
@@ -949,55 +953,6 @@ export function AdminDashboard({
     return { size, center, radius, axes, points }
   }, [assessmentSummary])
 
-  const improvementSections = useMemo(
-    () => splitNumberedReportSections(reportForm.improvements),
-    [reportForm.improvements]
-  )
-
-  const diagnosticSummaryText = useMemo(() => {
-    const sections = [
-      reportForm.summaryCapability.trim(),
-      reportForm.summaryMarket.trim(),
-    ].filter(Boolean)
-    return sections.length > 0 ? sections.join("\n\n") : ""
-  }, [reportForm.summaryCapability, reportForm.summaryMarket])
-
-  const improvementsText = useMemo(() => {
-    if (improvementSections.length > 0) {
-      return improvementSections.join("\n\n")
-    }
-    return reportForm.improvements.trim()
-  }, [improvementSections, reportForm.improvements])
-
-  const handleDiagnosticSummaryChange = (value: string) => {
-    const normalized = value.replace(/\r\n/g, "\n").trim()
-    if (!normalized) {
-      setReportForm((prev) => ({
-        ...prev,
-        summaryCapability: "",
-        summaryMarket: "",
-      }))
-      return
-    }
-
-    const paragraphs = splitReportParagraphs(normalized)
-    if (paragraphs.length <= 1) {
-      setReportForm((prev) => ({
-        ...prev,
-        summaryCapability: normalized,
-        summaryMarket: "",
-      }))
-      return
-    }
-
-    const midpoint = Math.ceil(paragraphs.length / 2)
-    setReportForm((prev) => ({
-      ...prev,
-      summaryCapability: paragraphs.slice(0, midpoint).join("\n\n"),
-      summaryMarket: paragraphs.slice(midpoint).join("\n\n"),
-    }))
-  }
-
   const handleGenerateAiDraft = async () => {
     if (!companyInfo) {
       toast.error("기업 정보가 없어 AI 초안을 생성할 수 없습니다")
@@ -1282,29 +1237,44 @@ export function AdminDashboard({
 
       rowIndex = mainSheetChartRow + mainSheetChartHeightRows + 1
 
-      writeSectionHeader(rowIndex, "기업상황요약")
+      writeSectionHeader(rowIndex, "비즈니스 모델")
       rowIndex += 1
-      writeLabelValueRow(rowIndex, "기업진단", diagnosticSummaryText || "", 135)
+      COMPANY_ANALYSIS_BUSINESS_MODEL_FIELDS.forEach(({ key, label }) => {
+        writeLabelValueRow(rowIndex, label, reportForm[key] || "", 135)
+        rowIndex += 1
+      })
       rowIndex += 1
-      writeLabelValueRow(rowIndex, "개선 필요사항", improvementsText || "", 135)
-      rowIndex += 2
 
-      writeSectionHeader(rowIndex, "AC 프로그램 제안")
+      writeSectionHeader(rowIndex, "기업상황 요약")
       rowIndex += 1
-      writeLabelValueRow(rowIndex, "1순위", reportForm.acPriority1 || "", 135)
+      COMPANY_ANALYSIS_SUMMARY_FIELDS.forEach(({ key, label }) => {
+        writeLabelValueRow(rowIndex, label, reportForm[key] || "", 135)
+        rowIndex += 1
+      })
       rowIndex += 1
-      writeLabelValueRow(rowIndex, "2순위", reportForm.acPriority2 || "", 135)
+
+      writeSectionHeader(rowIndex, "개선 필요사항")
       rowIndex += 1
-      writeLabelValueRow(rowIndex, "3순위", reportForm.acPriority3 || "", 135)
-      rowIndex += 2
+      COMPANY_ANALYSIS_IMPROVEMENT_FIELDS.forEach(({ key, label }) => {
+        writeLabelValueRow(rowIndex, label, reportForm[key] || "", 135)
+        rowIndex += 1
+      })
+      rowIndex += 1
+
+      writeSectionHeader(rowIndex, "액셀러레이팅 프로그램 활용 제안")
+      rowIndex += 1
+      COMPANY_ANALYSIS_AC_FIELDS.forEach(({ key, label }) => {
+        writeLabelValueRow(rowIndex, label, reportForm[key] || "", 135)
+        rowIndex += 1
+      })
+      rowIndex += 1
 
       writeSectionHeader(rowIndex, "엑셀러레이팅 마일스톤 제안")
       rowIndex += 1
-      writeLabelValueRow(rowIndex, "5~6월", reportForm.milestone56 || "", 135)
-      rowIndex += 1
-      writeLabelValueRow(rowIndex, "7~8월", reportForm.milestone78 || "", 135)
-      rowIndex += 1
-      writeLabelValueRow(rowIndex, "9~10월", reportForm.milestone910 || "", 135)
+      COMPANY_ANALYSIS_MILESTONE_FIELDS.forEach(({ key, label }) => {
+        writeLabelValueRow(rowIndex, label, reportForm[key] || "", 135)
+        rowIndex += 1
+      })
 
       const buffer = await workbook.xlsx.writeBuffer()
       const blob = new Blob([buffer], {
@@ -1415,9 +1385,6 @@ export function AdminDashboard({
                       ? "오피스아워"
                       : "기업진단분석보고서"}
               </div>
-              {loadingDetails ? (
-                <span className="text-xs text-slate-400">불러오는 중...</span>
-              ) : null}
             </div>
             <div className="flex flex-wrap items-end gap-2 border-b border-slate-100 px-4">
               <button
@@ -1471,7 +1438,10 @@ export function AdminDashboard({
                 오피스아워
               </button>
             </div>
-            <div className="flex-1 min-h-0 px-4 py-4 flex flex-col">
+            <div className="relative flex-1 min-h-0 px-4 py-4 flex flex-col">
+              {loadingDetails ? (
+                <ContentLoadingOverlay />
+              ) : null}
               {activeTab === "info" ? (
                 !companyInfo ? (
                   <div className="rounded-xl border border-slate-100 bg-slate-50 p-4 text-xs text-slate-500">
@@ -2341,90 +2311,92 @@ export function AdminDashboard({
                   </div>
 
                   <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                    <div className="text-sm font-semibold text-slate-700">
-                      기업상황요약
+                    <div className="text-sm font-semibold text-slate-700">비즈니스 모델</div>
+                    <div className="mt-4 grid gap-4">
+                      {COMPANY_ANALYSIS_BUSINESS_MODEL_FIELDS.map(({ key, label }) => (
+                        <label key={key} className="text-xs text-slate-500">
+                          {label}
+                          <textarea
+                            rows={3}
+                            className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-[13px] leading-6 text-slate-700"
+                            value={reportForm[key]}
+                            onChange={(e) =>
+                              setReportForm((prev) => ({
+                                ...prev,
+                                [key]: e.target.value,
+                              }))
+                            }
+                          />
+                        </label>
+                      ))}
                     </div>
-                    <div className="mt-4 space-y-5">
-                      <div className="space-y-4">
-                        <div className="text-xs font-semibold tracking-[0.08em] text-slate-400">
-                          기업진단
-                        </div>
-                        <textarea
-                          rows={4}
-                          className="w-full rounded-xl border border-slate-200 bg-white px-4 py-4 text-[13px] leading-6 text-slate-700"
-                          value={diagnosticSummaryText}
-                          onChange={(e) => handleDiagnosticSummaryChange(e.target.value)}
-                        />
-                      </div>
+                  </div>
 
-                      <div className="border-t border-slate-100" />
+                  <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                    <div className="text-sm font-semibold text-slate-700">기업상황 요약</div>
+                    <div className="mt-4 grid gap-4">
+                      {COMPANY_ANALYSIS_SUMMARY_FIELDS.map(({ key, label }) => (
+                        <label key={key} className="text-xs text-slate-500">
+                          {label}
+                          <textarea
+                            rows={3}
+                            className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-[13px] leading-6 text-slate-700"
+                            value={reportForm[key]}
+                            onChange={(e) =>
+                              setReportForm((prev) => ({
+                                ...prev,
+                                [key]: e.target.value,
+                              }))
+                            }
+                          />
+                        </label>
+                      ))}
+                    </div>
+                  </div>
 
-                      <div className="space-y-4">
-                        <div className="text-xs font-semibold tracking-[0.08em] text-slate-400">
-                          개선 필요사항
-                        </div>
-                        <textarea
-                          rows={5}
-                          className="w-full rounded-xl border border-slate-200 bg-white px-4 py-4 text-[13px] leading-6 text-slate-700"
-                          value={improvementsText}
-                          onChange={(e) =>
-                            setReportForm((prev) => ({
-                              ...prev,
-                              improvements: e.target.value,
-                            }))
-                          }
-                        />
-                      </div>
+                  <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                    <div className="text-sm font-semibold text-slate-700">개선 필요사항</div>
+                    <div className="mt-4 grid gap-4">
+                      {COMPANY_ANALYSIS_IMPROVEMENT_FIELDS.map(({ key, label }) => (
+                        <label key={key} className="text-xs text-slate-500">
+                          {label}
+                          <textarea
+                            rows={3}
+                            className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-[13px] leading-6 text-slate-700"
+                            value={reportForm[key]}
+                            onChange={(e) =>
+                              setReportForm((prev) => ({
+                                ...prev,
+                                [key]: e.target.value,
+                              }))
+                            }
+                          />
+                        </label>
+                      ))}
                     </div>
                   </div>
 
                   <div className="rounded-2xl border border-slate-200 bg-white p-4">
                     <div className="text-sm font-semibold text-slate-700">
-                      AC 프로그램 제안
+                      액셀러레이팅 프로그램 활용 제안
                     </div>
                     <div className="mt-3 space-y-3">
-                      <label className="text-xs text-slate-500">
-                        1순위
-                        <textarea
-                          rows={2}
-                          className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-[13px] leading-6 text-slate-700"
-                          value={reportForm.acPriority1}
-                          onChange={(e) =>
-                            setReportForm((prev) => ({
-                              ...prev,
-                              acPriority1: e.target.value,
-                            }))
-                          }
-                        />
-                      </label>
-                      <label className="text-xs text-slate-500">
-                        2순위
-                        <textarea
-                          rows={2}
-                          className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-[13px] leading-6 text-slate-700"
-                          value={reportForm.acPriority2}
-                          onChange={(e) =>
-                            setReportForm((prev) => ({
-                              ...prev,
-                              acPriority2: e.target.value,
-                            }))
-                          }
-                        />
-                      </label>
-                      <label className="text-xs text-slate-500">
-                        3순위
-                        <textarea
-                          rows={2}
-                          className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-[13px] leading-6 text-slate-700"
-                          value={reportForm.acPriority3}
-                          onChange={(e) =>
-                            setReportForm((prev) => ({
-                              ...prev,
-                              acPriority3: e.target.value,
-                            }))
-                          }
-                        />
-                      </label>
+                      {COMPANY_ANALYSIS_AC_FIELDS.map(({ key, label }) => (
+                        <label key={key} className="text-xs text-slate-500">
+                          {label}
+                          <textarea
+                            rows={2}
+                            className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-[13px] leading-6 text-slate-700"
+                            value={reportForm[key]}
+                            onChange={(e) =>
+                              setReportForm((prev) => ({
+                                ...prev,
+                                [key]: e.target.value,
+                              }))
+                            }
+                          />
+                        </label>
+                      ))}
                     </div>
                   </div>
 
@@ -2432,55 +2404,28 @@ export function AdminDashboard({
                       <div className="text-sm font-semibold text-slate-700">
                         엑셀러레이팅 마일스톤 제안
                       </div>
-                      <div className="mt-3 space-y-4">
-                        <label className="grid gap-2 text-xs text-slate-500 lg:grid-cols-[96px_minmax(0,1fr)] lg:items-start">
+                    <div className="mt-3 space-y-4">
+                      {COMPANY_ANALYSIS_MILESTONE_FIELDS.map(({ key, label }) => (
+                        <label
+                          key={key}
+                          className="grid gap-2 text-xs text-slate-500 lg:grid-cols-[96px_minmax(0,1fr)] lg:items-start"
+                        >
                           <span className="inline-flex h-6 items-center justify-center self-start rounded-full border border-slate-200 bg-white px-2 text-[10px] font-medium tracking-[0.01em] text-slate-600">
-                            5~6월
+                            {label}
                           </span>
                           <textarea
                             rows={4}
                             className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-[13px] leading-6 text-slate-700"
-                            value={reportForm.milestone56}
+                            value={reportForm[key]}
                             onChange={(e) =>
-                            setReportForm((prev) => ({
-                              ...prev,
-                              milestone56: e.target.value,
-                            }))
-                          }
-                        />
-                      </label>
-                      <label className="grid gap-2 text-xs text-slate-500 lg:grid-cols-[96px_minmax(0,1fr)] lg:items-start">
-                        <span className="inline-flex h-6 items-center justify-center self-start rounded-full border border-slate-200 bg-white px-2 text-[10px] font-medium tracking-[0.01em] text-slate-600">
-                          7~8월
-                        </span>
-                        <textarea
-                          rows={4}
-                          className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-[13px] leading-6 text-slate-700"
-                          value={reportForm.milestone78}
-                          onChange={(e) =>
-                            setReportForm((prev) => ({
-                              ...prev,
-                            milestone78: e.target.value,
-                          }))
-                        }
-                      />
-                    </label>
-                      <label className="grid gap-2 text-xs text-slate-500 lg:grid-cols-[96px_minmax(0,1fr)] lg:items-start">
-                        <span className="inline-flex h-6 items-center justify-center self-start rounded-full border border-slate-200 bg-white px-2 text-[10px] font-medium tracking-[0.01em] text-slate-600">
-                          9~10월
-                        </span>
-                        <textarea
-                          rows={4}
-                          className="mt-1 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-[13px] leading-6 text-slate-700"
-                          value={reportForm.milestone910}
-                          onChange={(e) =>
-                            setReportForm((prev) => ({
-                              ...prev,
-                              milestone910: e.target.value,
-                            }))
-                          }
-                        />
-                      </label>
+                              setReportForm((prev) => ({
+                                ...prev,
+                                [key]: e.target.value,
+                              }))
+                            }
+                          />
+                        </label>
+                      ))}
                     </div>
                   </div>
                 </div>

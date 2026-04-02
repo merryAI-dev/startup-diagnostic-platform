@@ -73,9 +73,20 @@ export type GenerateCompanyAnalysisReportPayload = {
 
 type GenerateCompanyAnalysisReportResult = {
   report: {
-    summaryCapability: string;
-    summaryMarket: string;
-    improvements: string;
+    businessProblemDefinition: string;
+    businessItemOverview: string;
+    businessRevenueModel: string;
+    businessExpansionPlan: string;
+    summaryOverview: string;
+    summarySolution: string;
+    summaryCommercialization: string;
+    summaryScalability: string;
+    summaryFunding: string;
+    summaryTeamOrganization: string;
+    summarySustainability: string;
+    improvementCommercialization: string;
+    improvementScalability: string;
+    improvementFunding: string;
     acPriority1: string;
     acPriority2: string;
     acPriority3: string;
