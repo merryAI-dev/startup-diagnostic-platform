@@ -15,9 +15,12 @@ import { toast } from "sonner";
 import { SELF_ASSESSMENT_SECTIONS } from "@/data/selfAssessment";
 import { db } from "@/firebase/client";
 import {
+  COMPANY_ANALYSIS_AC_FIELDS,
+  COMPANY_ANALYSIS_BUSINESS_MODEL_FIELDS,
+  COMPANY_ANALYSIS_IMPROVEMENT_FIELDS,
+  COMPANY_ANALYSIS_MILESTONE_FIELDS,
+  COMPANY_ANALYSIS_SUMMARY_FIELDS,
   EMPTY_COMPANY_ANALYSIS_REPORT_FORM,
-  splitNumberedReportSections,
-  splitReportParagraphs,
   toCompanyAnalysisReportForm,
   type CompanyAnalysisReportForm,
 } from "@/types/companyAnalysisReport";
@@ -435,26 +438,6 @@ export function AdminApplicationDetailModal({
 
     return { size, center, radius, axes, points };
   }, [assessmentSummary]);
-
-  const improvementSections = useMemo(
-    () => splitNumberedReportSections(reportForm.improvements),
-    [reportForm.improvements]
-  );
-
-  const diagnosticSummaryText = useMemo(() => {
-    const sections = [
-      reportForm.summaryCapability.trim(),
-      reportForm.summaryMarket.trim(),
-    ].filter(Boolean);
-    return sections.length > 0 ? sections.join("\n\n") : "-";
-  }, [reportForm.summaryCapability, reportForm.summaryMarket]);
-
-  const improvementsText = useMemo(() => {
-    if (improvementSections.length > 0) {
-      return improvementSections.join("\n\n");
-    }
-    return reportForm.improvements.trim() || "-";
-  }, [improvementSections, reportForm.improvements]);
 
   return (
     <>
@@ -1230,47 +1213,71 @@ export function AdminApplicationDetailModal({
                     </div>
 
                     <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                      <div className="text-sm font-semibold text-slate-700">
-                        기업상황요약
-                      </div>
-                      <div className="mt-4 space-y-5">
-                        <div className="space-y-4">
-                          <div className="text-xs font-semibold tracking-[0.08em] text-slate-400">
-                            기업진단
-                          </div>
-                          <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-4 whitespace-pre-wrap text-[13px] leading-6 text-slate-700">
-                            {diagnosticSummaryText}
-                          </div>
-                        </div>
-
-                        <div className="border-t border-slate-100" />
-
-                        <div className="space-y-4">
-                          <div className="text-xs font-semibold tracking-[0.08em] text-slate-400">
-                            개선 필요사항
-                          </div>
-                          <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-4 whitespace-pre-wrap text-[13px] leading-6 text-slate-700">
-                            {improvementsText}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                      <div className="text-sm font-semibold text-slate-700">AC 프로그램 제안</div>
+                      <div className="text-sm font-semibold text-slate-700">비즈니스 모델</div>
                       <div className="mt-3 space-y-3">
-                        {[
-                          ["1순위", reportForm.acPriority1],
-                          ["2순위", reportForm.acPriority2],
-                          ["3순위", reportForm.acPriority3],
-                        ].map(([label, value]) => (
+                        {COMPANY_ANALYSIS_BUSINESS_MODEL_FIELDS.map(({ key, label }) => (
                           <div
-                            key={label}
+                            key={key}
                             className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-4"
                           >
                             <div className="text-xs font-semibold text-slate-500">{label}</div>
                             <div className="mt-2 whitespace-pre-wrap text-[13px] leading-6 text-slate-700">
-                              {value || "-"}
+                              {reportForm[key] || "-"}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                      <div className="text-sm font-semibold text-slate-700">
+                        기업상황 요약
+                      </div>
+                      <div className="mt-3 space-y-3">
+                        {COMPANY_ANALYSIS_SUMMARY_FIELDS.map(({ key, label }) => (
+                          <div
+                            key={key}
+                            className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-4"
+                          >
+                            <div className="text-xs font-semibold text-slate-500">{label}</div>
+                            <div className="mt-2 whitespace-pre-wrap text-[13px] leading-6 text-slate-700">
+                              {reportForm[key] || "-"}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                      <div className="text-sm font-semibold text-slate-700">개선 필요사항</div>
+                      <div className="mt-3 space-y-3">
+                        {COMPANY_ANALYSIS_IMPROVEMENT_FIELDS.map(({ key, label }) => (
+                          <div
+                            key={key}
+                            className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-4"
+                          >
+                            <div className="text-xs font-semibold text-slate-500">{label}</div>
+                            <div className="mt-2 whitespace-pre-wrap text-[13px] leading-6 text-slate-700">
+                              {reportForm[key] || "-"}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                      <div className="text-sm font-semibold text-slate-700">
+                        액셀러레이팅 프로그램 활용 제안
+                      </div>
+                      <div className="mt-3 space-y-3">
+                        {COMPANY_ANALYSIS_AC_FIELDS.map(({ key, label }) => (
+                          <div
+                            key={key}
+                            className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-4"
+                          >
+                            <div className="text-xs font-semibold text-slate-500">{label}</div>
+                            <div className="mt-2 whitespace-pre-wrap text-[13px] leading-6 text-slate-700">
+                              {reportForm[key] || "-"}
                             </div>
                           </div>
                         ))}
@@ -1282,11 +1289,7 @@ export function AdminApplicationDetailModal({
                         엑셀러레이팅 마일스톤 제안
                       </div>
                       <div className="mt-3 space-y-4">
-                        {[
-                          ["5~6월", reportForm.milestone56],
-                          ["7~8월", reportForm.milestone78],
-                          ["9~10월", reportForm.milestone910],
-                        ].map(([label, value]) => (
+                        {COMPANY_ANALYSIS_MILESTONE_FIELDS.map(({ key, label }) => (
                           <div
                             key={label}
                             className="grid gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-4 lg:grid-cols-[88px_minmax(0,1fr)]"
@@ -1295,7 +1298,7 @@ export function AdminApplicationDetailModal({
                               {label}
                             </div>
                             <div className="whitespace-pre-wrap text-[13px] leading-6 text-slate-700">
-                              {value || "-"}
+                              {reportForm[key] || "-"}
                             </div>
                           </div>
                         ))}
