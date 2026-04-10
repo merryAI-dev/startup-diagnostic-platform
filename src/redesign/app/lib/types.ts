@@ -10,8 +10,6 @@ export type OfficeHourType = "regular" | "irregular" | "custom";
 
 export type SessionFormat = "online" | "offline";
 
-export type OfficeHourSlotStatus = "open" | "booked" | "closed";
-
 export type UserRole = "user" | "admin" | "consultant" | "staff";
 export type ApprovalRole = "admin" | "company" | "consultant";
 
@@ -148,25 +146,8 @@ export interface RegularOfficeHour {
     consultantId?: string;
     consultantName?: string;
     agendaIds?: string[];
-    status: OfficeHourSlotStatus;
+    status: "open" | "booked" | "closed";
   }[];
-}
-
-export interface OfficeHourSlot {
-  id: string;
-  type: "regular";
-  programId?: string;
-  consultantId?: string;
-  consultantName: string;
-  title: string;
-  description?: string;
-  date: string; // YYYY-MM-DD
-  startTime: string; // HH:mm
-  endTime: string; // HH:mm
-  agendaIds?: string[];
-  status: OfficeHourSlotStatus;
-  createdAt?: Date | string;
-  updatedAt?: Date | string;
 }
 
 export interface Application {
@@ -174,13 +155,13 @@ export interface Application {
   type: OfficeHourType;
   status: ApplicationStatus;
   officeHourId?: string;
-  officeHourSlotId?: string;
   companyId?: string | null;
   officeHourTitle: string;
   agendaId?: string;
   companyName?: string;
   consultant: string;
   consultantId?: string; // 컨설턴트 ID 추가
+  pendingConsultantIds?: string[];
   sessionFormat: SessionFormat;
   agenda: string;
   requestContent: string;

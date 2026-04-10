@@ -49,7 +49,7 @@ export function StatusChip({ status, className, size = "md" }: StatusChipProps) 
   return (
     <span
       className={cn(
-        "inline-flex items-center rounded-full border transition-colors",
+        "inline-flex items-center whitespace-nowrap rounded-full border transition-colors",
         sizeClass,
         config.className,
         className
