@@ -54,6 +54,14 @@ function toNumber(value: string) {
   return Number(digits);
 }
 
+function toSignedNumber(value: string) {
+  const normalized = value.replace(/,/g, "").trim();
+  if (!normalized || normalized === "-") return null;
+  const parsed = Number(normalized);
+  if (Number.isNaN(parsed)) return null;
+  return parsed;
+}
+
 function toDecimalNumber(value: string) {
   const normalized = value.replace(/,/g, "").trim();
   if (!normalized) return null;
@@ -112,7 +120,7 @@ function buildCompanyInfoRecord(form: CompanyInfoForm): CompanyInfoRecord {
         y2025: toDecimalNumber(form.revenue2025),
         y2026: toDecimalNumber(form.revenue2026),
       },
-      capitalTotal: toNumber(form.capitalTotal),
+      capitalTotal: toSignedNumber(form.capitalTotal),
     },
     certifications: {
       designation: form.certification,

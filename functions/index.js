@@ -107,14 +107,16 @@ function sanitizeConsentSnapshot(value) {
     return null;
   }
 
+  const terms = sanitizeConsentRecord(value.terms);
   const privacy = sanitizeConsentRecord(value.privacy);
   const marketing = sanitizeConsentRecord(value.marketing);
 
-  if (!privacy && !marketing) {
+  if (!terms && !privacy && !marketing) {
     return null;
   }
 
   return {
+    ...(terms ? { terms } : {}),
     ...(privacy ? { privacy } : {}),
     ...(marketing ? { marketing } : {}),
   };

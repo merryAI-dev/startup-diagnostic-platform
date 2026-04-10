@@ -339,6 +339,7 @@ export function CompanyDashboard({
     missingRequiredLabels,
     invalidRequiredLabels,
     formatNumberInput,
+    formatSignedNumberInput,
     formatRevenueInput,
     formatBusinessNumber,
     formatPhoneNumber,
@@ -2362,7 +2363,7 @@ export function CompanyDashboard({
                             onChange={(e) =>
                               setForm((prev) => ({
                                 ...prev,
-                                capitalTotal: formatNumberInput(e.target.value),
+                                capitalTotal: formatSignedNumberInput(e.target.value),
                               }))
                             }
                             onBlur={() => markTouched("capitalTotal")}
