@@ -42,10 +42,12 @@ function normalizeConsentRecord(record?: ConsentSnapshot[keyof ConsentSnapshot])
 function normalizeConsentSnapshot(consents?: ConsentSnapshot) {
   if (!consents) return undefined
 
+  const terms = normalizeConsentRecord(consents.terms)
   const privacy = normalizeConsentRecord(consents.privacy)
   const marketing = normalizeConsentRecord(consents.marketing)
 
   return {
+    ...(terms ? { terms } : {}),
     ...(privacy ? { privacy } : {}),
     ...(marketing ? { marketing } : {}),
   }
