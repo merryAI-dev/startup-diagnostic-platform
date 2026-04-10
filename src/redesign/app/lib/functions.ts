@@ -1,10 +1,14 @@
 import { httpsCallable } from "firebase/functions";
 import { functions, isFirebaseConfigured } from "@/redesign/app/lib/firebase";
-import type { ApplicationStatus, SessionFormat } from "@/redesign/app/lib/types";
+import type {
+  ApplicationStatus,
+  ConsultantAvailability,
+  ProgramWeekday,
+  SessionFormat,
+} from "@/redesign/app/lib/types";
 
 export type SubmitRegularApplicationPayload = {
   officeHourId: string;
-  officeHourSlotId?: string | null;
   officeHourTitle: string;
   programId?: string | null;
   agendaId: string;
@@ -18,7 +22,7 @@ export type SubmitRegularApplicationPayload = {
 
 type SubmitRegularApplicationResult = {
   applicationId: string;
-  slotId: string;
+  pendingConsultantIds: string[];
 };
 
 export type TransitionApplicationAction = "claim" | "confirm" | "reject" | "reopen";
@@ -35,14 +39,27 @@ type TransitionApplicationResult = {
   consultant?: string;
   consultantId?: string;
   rejectionReason?: string;
-  slotIdsUpdated?: string[];
 };
 
 type CancelApplicationResult = {
   applicationId: string;
   outcome: "deleted" | "rejected";
   status?: ApplicationStatus;
-  slotIdsUpdated?: string[];
+};
+
+export type UpdateCompanyApplicationPayload = {
+  applicationId: string;
+  requestContent: string;
+  attachmentNames: string[];
+  attachmentUrls: string[];
+  scheduledDate?: string | null;
+  scheduledTime?: string | null;
+};
+
+type UpdateCompanyApplicationResult = {
+  applicationId: string;
+  status: ApplicationStatus;
+  scheduleChanged: boolean;
 };
 
 type RunApplicationMaintenanceResult = {
@@ -66,6 +83,45 @@ type UpdateCompanyProgramsPayload = {
 type UpdateCompanyProgramsResult = {
   companyId: string;
   programIds: string[];
+};
+
+export type SyncConsultantSchedulingPayload = {
+  consultantId?: string;
+  availability?: ConsultantAvailability[];
+  agendaIds?: string[];
+  status?: "active" | "inactive";
+};
+
+type SyncConsultantSchedulingResult = {
+  consultantId: string;
+  status: "active" | "inactive";
+  agendaIds: string[];
+  slotCount: number;
+  closedSlotCount: number;
+};
+
+export type SyncProgramDefinitionPayload = {
+  programId: string;
+  name?: string;
+  description?: string;
+  color?: string;
+  targetHours?: number;
+  completedHours?: number;
+  maxApplications?: number;
+  usedApplications?: number;
+  internalTicketLimit?: number;
+  externalTicketLimit?: number;
+  companyLimit?: number;
+  periodStart?: string;
+  periodEnd?: string;
+  weekdays?: ProgramWeekday[];
+};
+
+type SyncProgramDefinitionResult = {
+  programId: string;
+  slotCount: number;
+  closedSlotCount: number;
+  applicationCount: number;
 };
 
 export type GenerateCompanyAnalysisReportPayload = {
@@ -157,6 +213,22 @@ export async function cancelApplicationViaFunction(applicationId: string) {
   return result.data;
 }
 
+export async function updateCompanyApplicationViaFunction(
+  payload: UpdateCompanyApplicationPayload
+) {
+  if (!isFirebaseConfigured || !functions) {
+    throw new Error("Firebase Functions is not configured");
+  }
+
+  const callable = httpsCallable<
+    UpdateCompanyApplicationPayload,
+    UpdateCompanyApplicationResult
+  >(functions, "updateCompanyApplication");
+
+  const result = await callable(payload);
+  return result.data;
+}
+
 export async function runApplicationMaintenanceViaFunction() {
   if (!isFirebaseConfigured || !functions) {
     throw new Error("Firebase Functions is not configured");
@@ -196,6 +268,38 @@ export async function updateCompanyProgramsViaFunction(
     UpdateCompanyProgramsPayload,
     UpdateCompanyProgramsResult
   >(functions, "updateCompanyPrograms");
+
+  const result = await callable(payload);
+  return result.data;
+}
+
+export async function syncConsultantSchedulingViaFunction(
+  payload: SyncConsultantSchedulingPayload
+) {
+  if (!isFirebaseConfigured || !functions) {
+    throw new Error("Firebase Functions is not configured");
+  }
+
+  const callable = httpsCallable<
+    SyncConsultantSchedulingPayload,
+    SyncConsultantSchedulingResult
+  >(functions, "syncConsultantScheduling");
+
+  const result = await callable(payload);
+  return result.data;
+}
+
+export async function syncProgramDefinitionViaFunction(
+  payload: SyncProgramDefinitionPayload
+) {
+  if (!isFirebaseConfigured || !functions) {
+    throw new Error("Firebase Functions is not configured");
+  }
+
+  const callable = httpsCallable<
+    SyncProgramDefinitionPayload,
+    SyncProgramDefinitionResult
+  >(functions, "syncProgramDefinition");
 
   const result = await callable(payload);
   return result.data;

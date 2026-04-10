@@ -1,4 +1,4 @@
-import { expect, test, type Browser, type Page } from "@playwright/test";
+import { expect, test, type Browser, type Locator, type Page } from "@playwright/test";
 import { execFileSync } from "node:child_process";
 import { loadE2EEnv } from "./support/env";
 
@@ -13,6 +13,12 @@ const firebaseConfig = {
   apiKey: env.firebaseApiKey,
   projectId: env.firebaseProjectId,
 };
+
+const qaCredentials = {
+  password: "12341234",
+  consultants: ["qa.consultant11@gmail.com", "qa.consultant2@gmail.com"],
+  companies: ["company@gmail.com", "company2@gmail.com"],
+} as const;
 
 type FirestoreDocument = {
   id: string;
@@ -167,6 +173,32 @@ async function getAdminIdToken() {
   return adminIdTokenPromise;
 }
 
+async function signInWithFirebaseEmail(email: string, password: string) {
+  assertFirebaseTestEnv();
+  const response = await fetch(
+    `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${firebaseConfig.apiKey}`,
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        email,
+        password,
+        returnSecureToken: true,
+      }),
+    },
+  );
+  const payload = await response.json();
+  if (!response.ok || typeof payload?.localId !== "string") {
+    throw new Error(`Firebase sign-in failed for ${email}: ${response.status} ${JSON.stringify(payload)}`);
+  }
+  return {
+    uid: payload.localId as string,
+    idToken: typeof payload.idToken === "string" ? payload.idToken : "",
+  };
+}
+
 async function runFirestoreQuery(
   collection: string,
   field: string,
@@ -242,6 +274,41 @@ async function getFirestoreDocument(documentPath: string): Promise<FirestoreDocu
     throw new Error(`Firestore get failed: ${response.status} ${JSON.stringify(payload)}`);
   }
   return parseFirestoreDocument(payload);
+}
+
+async function getExistingQaConsultant(index: 0 | 1) {
+  const email = qaCredentials.consultants[index];
+  const consultantDoc = await waitForConsultantDoc(email);
+  return {
+    consultant: {
+      name: String(consultantDoc.data.name ?? email),
+      email,
+      password: qaCredentials.password,
+    },
+    consultantId: consultantDoc.id,
+  };
+}
+
+async function getExistingQaCompany(index: 0 | 1) {
+  const email = qaCredentials.companies[index];
+  const { uid } = await signInWithFirebaseEmail(email, qaCredentials.password);
+  const profileDoc = await getFirestoreDocument(`profiles/${uid}`);
+  if (!profileDoc) {
+    throw new Error(`QA company profile not found: ${email}`);
+  }
+  const companyId = String(profileDoc.data.companyId ?? uid);
+  const companyDoc = await getFirestoreDocument(`companies/${companyId}`);
+  if (!companyDoc) {
+    throw new Error(`QA company doc not found: ${email} (${companyId})`);
+  }
+  return {
+    company: {
+      name: String(companyDoc.data.name ?? email),
+      email,
+      password: qaCredentials.password,
+    },
+    companyId,
+  };
 }
 
 async function waitForConsultantDoc(consultantEmail: string): Promise<FirestoreDocument> {
@@ -361,39 +428,51 @@ async function getRegularOfficeHourIdForCompany(companyName: string, agendaName:
     throw new Error(`회사 ${companyName}에 연결된 program이 없습니다.`);
   }
 
-  const agendas = await runFirestoreQuery("agendas", "name", agendaName);
-  const agenda = agendas[0];
-  if (!agenda) {
-    throw new Error(`아젠다 문서를 찾지 못했습니다: ${agendaName}`);
-  }
+  await resolveAgendaRef(agendaName);
+
+  let matchedGroupId = "";
+  let matchedDateKey = "";
 
   for (const programId of programIds) {
-    const todayKey = formatDateKey(new Date());
-    const slotDocs = (await runFirestoreQuery("officeHourSlots", "programId", programId)).filter((doc) => {
-      if (doc.data.type !== "regular") return false;
-      if (doc.data.status !== "open") return false;
-      if (!Array.isArray(doc.data.agendaIds)) return false;
-      if (typeof doc.data.date !== "string") return false;
-      if (String(doc.data.date) < todayKey) return false;
-      const agendaIds = doc.data.agendaIds.map((value) => String(value));
-      return agendaIds.includes(agenda.id);
-    });
-    if (slotDocs.length > 0) {
-      const [firstSlot] = slotDocs.sort((a, b) => {
-        const dateA = String(a.data.date ?? "");
-        const dateB = String(b.data.date ?? "");
-        const dateComp = dateA.localeCompare(dateB);
-        if (dateComp !== 0) return dateComp;
-        return String(a.data.startTime ?? "").localeCompare(String(b.data.startTime ?? ""));
-      });
-      const dateKey = String(firstSlot?.data.date ?? "");
-      if (dateKey) {
-        return `${programId}:${dateKey.slice(0, 7)}`;
+    const programDoc = await getFirestoreDocument(`programs/${programId}`);
+    if (!programDoc) continue;
+
+    const periodStart =
+      typeof programDoc.data.periodStart === "string" ? normalizeDateKey(programDoc.data.periodStart) : "";
+    const periodEnd =
+      typeof programDoc.data.periodEnd === "string" ? normalizeDateKey(programDoc.data.periodEnd) : "";
+    if (!periodStart || !periodEnd) continue;
+
+    const startDate = parseDateKey(periodStart);
+    const endDate = parseDateKey(periodEnd);
+    if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime()) || startDate > endDate) {
+      continue;
+    }
+
+    const weekdays = new Set(getWeekdayNumbers(programDoc.data.weekdays));
+    if (weekdays.size === 0) continue;
+
+    const today = parseDateKey(formatDateKey(new Date()));
+    const cursor = startDate < today ? new Date(today) : new Date(startDate);
+    while (cursor <= endDate) {
+      if (weekdays.has(cursor.getDay())) {
+        const dateKey = formatDateKey(cursor);
+        const groupId = `${programId}:unassigned:${dateKey.slice(0, 7)}`;
+        if (!matchedDateKey || dateKey < matchedDateKey) {
+          matchedDateKey = dateKey;
+          matchedGroupId = groupId;
+        }
+        break;
       }
+      cursor.setDate(cursor.getDate() + 1);
     }
   }
 
-  throw new Error(`회사 ${companyName} / 아젠다 ${agendaName}에 대한 open regular slot을 찾지 못했습니다.`);
+  if (matchedGroupId) {
+    return matchedGroupId;
+  }
+
+  throw new Error(`회사 ${companyName} / 아젠다 ${agendaName}에 대한 신청 가능한 정기 오피스아워를 찾지 못했습니다.`);
 }
 
 async function expectSingleApplicationDoc(companyName: string) {
@@ -448,86 +527,14 @@ function getWeekdayNumbers(weekdays: unknown) {
   return numbers;
 }
 
-function buildRegularSlotId(programId: string, consultantId: string, dateKey: string, startTime: string) {
-  return ["regular", programId, consultantId, dateKey, startTime].join("_").replace(/:/g, "-");
-}
-
-async function syncRegularSlotsForConsultant(consultantEmail: string) {
-  const consultant = await waitForConsultantDoc(consultantEmail);
-  const consultantId = consultant.id;
-  const consultantName = String(consultant.data.name ?? "컨설턴트");
-  const agendaIds = Array.isArray(consultant.data.agendaIds) ? consultant.data.agendaIds : [];
-  const availability = Array.isArray(consultant.data.availability) ? consultant.data.availability : [];
-  const programs = await listFirestoreDocuments("programs");
-  const existingConsultantSlots = (await runFirestoreQuery("officeHourSlots", "consultantId", consultantId))
-    .filter((doc) => doc.data.type === "regular");
-
-  for (const program of programs) {
-    const periodStart = typeof program.data.periodStart === "string" ? normalizeDateKey(program.data.periodStart) : "";
-    const periodEnd = typeof program.data.periodEnd === "string" ? normalizeDateKey(program.data.periodEnd) : "";
-    if (!periodStart || !periodEnd) continue;
-    const startDate = parseDateKey(periodStart);
-    const endDate = parseDateKey(periodEnd);
-    if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime()) || startDate > endDate) {
-      continue;
-    }
-    const weekdays = new Set(getWeekdayNumbers(program.data.weekdays));
-    const cursor = new Date(startDate);
-    const desiredSlotIds = new Set<string>();
-    while (cursor <= endDate) {
-      if (weekdays.has(cursor.getDay())) {
-        const dateKey = formatDateKey(cursor);
-        const dayAvailability = availability.find(
-          (item: any) => Number(item?.dayOfWeek) === cursor.getDay(),
-        );
-        const slots = Array.isArray(dayAvailability?.slots) ? dayAvailability.slots : [];
-        for (const slot of slots) {
-          if (!slot?.available) continue;
-          const startTime = String(slot.start ?? "");
-          const endTime = String(slot.end ?? "");
-          if (!startTime || !endTime) continue;
-          const slotId = buildRegularSlotId(program.id, consultantId, dateKey, startTime);
-          desiredSlotIds.add(slotId);
-          await updateFirestoreDocument(
-            `officeHourSlots/${slotId}`,
-            {
-              type: "regular",
-              programId: program.id,
-              consultantId,
-              consultantName,
-              agendaIds,
-              title: `${String(program.data.name ?? "사업")} 정기 오피스아워`,
-              description: String(program.data.description ?? `${String(program.data.name ?? "사업")} 사업`),
-              date: dateKey,
-              startTime,
-              endTime,
-              status: "open",
-            },
-          );
-        }
-      }
-      cursor.setDate(cursor.getDate() + 1);
-    }
-
-    const staleSlots = existingConsultantSlots.filter(
-      (doc) => doc.data.programId === program.id && !desiredSlotIds.has(doc.id),
-    );
-    for (const staleSlot of staleSlots) {
-      await deleteFirestoreDocument(`officeHourSlots/${staleSlot.id}`);
-    }
-  }
-}
-
 async function setConsultantAvailability(consultantEmail: string) {
   const consultant = await waitForConsultantDoc(consultantEmail);
   await updateFirestoreDocument(`consultants/${consultant.id}`, {
     availability: buildFullAvailability(),
   });
-  await syncRegularSlotsForConsultant(consultantEmail);
 }
 
 async function expectConsultantAgendaSlotsReady(consultantEmail: string, agenda: E2EAgendaRef | string) {
-  const consultant = await waitForConsultantDoc(consultantEmail);
   const agendaRef = await resolveAgendaRef(agenda);
   await expect.poll(async () => {
     const refreshedConsultants = await runFirestoreQuery("consultants", "email", consultantEmail);
@@ -536,12 +543,10 @@ async function expectConsultantAgendaSlotsReady(consultantEmail: string, agenda:
       ? refreshedConsultant.data.agendaIds.map((value) => String(value))
       : [];
     if (!agendaIds.includes(agendaRef.agendaId)) return 0;
-    const slotDocs = (await runFirestoreQuery("officeHourSlots", "consultantId", consultant.id)).filter(
-      (doc) =>
-        doc.data.type === "regular" &&
-        doc.data.status === "open",
-    );
-    return slotDocs.length;
+    const availability = Array.isArray(refreshedConsultant?.data.availability)
+      ? refreshedConsultant.data.availability
+      : [];
+    return availability.length;
   }, { timeout: 30_000 }).toBeGreaterThan(0);
 }
 
@@ -567,8 +572,12 @@ async function login(page: Page, email: string, password: string) {
 async function waitForAuthLoadingToClear(page: Page) {
   await expect
     .poll(async () => {
-      const loadingText = page.getByText("로딩 중...");
-      return await loadingText.count();
+      const loadingTexts = [
+        page.getByText("로딩 중..."),
+        page.getByText("Loading..."),
+      ];
+      const counts = await Promise.all(loadingTexts.map((locator) => locator.count()));
+      return counts.reduce((sum, count) => sum + count, 0);
     }, { timeout: 30_000 })
     .toBe(0);
 }
@@ -582,6 +591,7 @@ async function loginAndWaitForCompany(page: Page, email: string, password: strin
 
 async function waitForRegularCalendarReady(page: Page) {
   const loadingText = page.getByText("정기 오피스아워 일정을 불러오는 중입니다.");
+  const contentLoading = page.getByText("Loading...");
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
       await expect
@@ -590,7 +600,11 @@ async function waitForRegularCalendarReady(page: Page) {
           if (sessionCount > 0) return 0;
           const emptyStateCount = await page.getByText("표시할 정기 오피스아워가 없습니다").count();
           if (emptyStateCount > 0) return 0;
-          return await loadingText.count();
+          const [calendarLoadingCount, contentLoadingCount] = await Promise.all([
+            loadingText.count(),
+            contentLoading.count(),
+          ]);
+          return calendarLoadingCount + contentLoadingCount;
         }, { timeout: 30_000 })
         .toBe(0);
       return;
@@ -602,23 +616,76 @@ async function waitForRegularCalendarReady(page: Page) {
   }
 }
 
-async function waitForRegularDetailReady(page: Page) {
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    try {
-      await expect
-        .poll(async () => {
-          if (await page.getByTestId("regular-start-application").count()) return "ready";
-          if (await page.getByText("오늘 이전 일정만 남아 있어 신청할 수 없습니다.").count()) return "ready";
-          return "loading";
-        }, { timeout: 30_000 })
-        .toBe("ready");
-      return;
-    } catch (error) {
-      if (attempt === 1) throw error;
-      await page.reload();
-      await waitForAuthLoadingToClear(page);
+async function clickCalendarSessionCell(page: Page, sessionCard: Locator) {
+  await sessionCard.evaluate((node) => {
+    let current: HTMLElement | null = node.parentElement;
+    while (current) {
+      const rect = current.getBoundingClientRect();
+      if (rect.width >= 40 && rect.height >= 40) {
+        current.click();
+        return;
+      }
+      current = current.parentElement;
+    }
+    throw new Error("정기 오피스아워 클릭 가능한 날짜 셀을 찾지 못했습니다.");
+  });
+  await page.waitForTimeout(200);
+  if (await page.getByTestId("regular-officehour-trigger").count()) {
+    return;
+  }
+
+  const box = await sessionCard.boundingBox();
+  if (!box) {
+    throw new Error("정기 오피스아워 캘린더 셀 위치를 찾지 못했습니다.");
+  }
+  await page.mouse.click(box.x + Math.min(box.width / 2, 24), box.y + Math.min(box.height / 2, 24));
+}
+
+async function findRegularOfficeHourCards(page: Page, officeHourId: string) {
+  let officeHourCards = page.getByTestId(`regular-calendar-session-${officeHourId}`);
+  let count = await officeHourCards.count();
+  if (count === 0) {
+    const [programId] = officeHourId.split(":");
+    const programDoc = programId ? await getFirestoreDocument(`programs/${programId}`) : null;
+    const programName = String(programDoc?.data.name ?? "").trim();
+    if (programName) {
+      officeHourCards = page
+        .locator('[data-testid^="regular-calendar-session-"]')
+        .filter({ hasText: programName });
+      count = await officeHourCards.count();
     }
   }
+
+  return { officeHourCards, count };
+}
+
+async function openRegularApplicationSheetForOfficeHour(
+  page: Page,
+  officeHourId: string,
+  sessionIndex = 0,
+) {
+  await page.goto("/company/regular");
+  await waitForAuthLoadingToClear(page);
+  await waitForRegularCalendarReady(page);
+
+  const { officeHourCards, count } = await findRegularOfficeHourCards(page, officeHourId);
+  if (count === 0) {
+    throw new Error(`정기 오피스아워 카드를 찾지 못했습니다: ${officeHourId}`);
+  }
+  if (sessionIndex >= count) {
+    throw new Error(`정기 오피스아워 카드 인덱스가 범위를 벗어났습니다: ${sessionIndex}/${count}`);
+  }
+
+  const officeHourCard = officeHourCards.nth(sessionIndex);
+  await expect(officeHourCard).toBeVisible({ timeout: 30_000 });
+  const officeHourTitle = ((await officeHourCard.textContent()) ?? "").trim() || "정기 오피스아워";
+
+  await clickCalendarSessionCell(page, officeHourCard);
+  await expect(page.getByTestId("regular-officehour-trigger")).toBeVisible({ timeout: 30_000 });
+  await page.getByTestId("regular-officehour-trigger").click();
+  await page.getByRole("option", { name: new RegExp(`^${escapeRegExp(officeHourTitle)}$`) }).click();
+
+  return { officeHourTitle };
 }
 
 async function loginAndWaitForAdmin(page: Page, email: string, password: string) {
@@ -635,48 +702,65 @@ async function signupConsultant(page: Page, email: string, password: string, nam
   await page.getByTestId("auth-submit").click();
 
   await expect(page).toHaveURL(/\/signup-info/);
+  console.log("e2e: consultant signup:infoPage", email);
 
   await page.locator("#consultant-name").fill(name);
+  console.log("e2e: consultant signup:filled:name", email);
   await page.locator("#consultant-organization").fill("E2E Consulting");
   await page.locator("#consultant-email").fill(email);
   await page.locator("#consultant-phone").fill("01012345678");
-  await page.locator("#consultant-meeting-link").fill("https://meet.google.com/e2e-smoke");
   await page.locator("#consultant-expertise").fill("BM, GTM, Product");
   await page.locator("#consultant-bio").fill("Preview smoke test consultant profile.");
+  console.log("e2e: consultant signup:filled:profile", email);
   await page.getByRole("button", { name: "승인 대기 요청" }).click();
+  console.log("e2e: consultant signup:submitted", email);
 
   await expect(page).toHaveURL(/\/pending/);
+  console.log("e2e: consultant signup:pending", email);
 }
 
 async function fillCompanySignupForm(page: Page, email: string, companyName: string) {
+  console.log("e2e: company signup:fill:start", email);
   await page.getByTestId("company-type-prestartup").click();
   await page.getByTestId("company-signup-name").fill(companyName);
+  console.log("e2e: company signup:fill:basic", email);
 
   await page.getByTestId("company-program-trigger").click();
   const firstProgramOption = page.locator('[data-testid^="company-program-option-"]').first();
   await expect(firstProgramOption).toBeVisible();
   await firstProgramOption.click();
+  console.log("e2e: company signup:fill:program", email);
 
-  await page.getByLabel("대표 솔루션 한 줄 소개").fill("글로벌 진출을 준비하는 B2B SaaS 솔루션입니다");
+  await page.getByLabel("대표 솔루션 한 줄 소개").fill("글로벌 진출을 준비하는 B2B SaaS 솔루션을 운영합니다");
+  console.log("e2e: company signup:fill:solution", email);
   await page.getByLabel("UN SDGs 우선순위 1위").selectOption({ index: 1 });
   await page.getByLabel("UN SDGs 우선순위 2위").selectOption({ index: 2 });
+  console.log("e2e: company signup:fill:sdg", email);
   await page.getByLabel("대표자 성명").fill("홍길동");
   await page.getByLabel("대표자 나이").fill("35");
   await page.getByLabel("대표자 이메일").fill(email);
   await page.getByLabel("대표자 전화번호").fill("01012345678");
-  await page.getByTestId("company-ceo-gender-male").click();
+  await page
+    .locator("label")
+    .filter({ hasText: "대표자 성별" })
+    .getByRole("button", { name: "남" })
+    .click();
   await page.getByLabel("대표자 국적").fill("대한민국");
   await page.getByLabel("이전 창업 횟수").fill("1");
   await page.getByTestId("company-corep-no").click();
+  console.log("e2e: company signup:fill:representative", email);
   await page.getByLabel("2026년 내 희망 투자액").fill("2050000000");
   await page.getByLabel("투자전 희망기업가치 (Pre-Value)").fill("20000000000");
-  await page.getByLabel("MYSC에 가장 기대하는 점").fill("실행 연결");
+  await page.getByLabel("MYSC에 가장 기대하는 점").fill("실행 연결과 후속 지원까지 밀도 있게 기대합니다");
+  console.log("e2e: company signup:fill:funding", email);
+  console.log("e2e: company signup:fill:done", email);
 }
 
 async function submitCompanySignup(page: Page, options?: { doubleConfirm?: boolean }) {
   const submitButton = page.getByTestId("company-signup-submit");
   await expect(submitButton).toBeEnabled({ timeout: 30_000 });
   await submitButton.click();
+  console.log("e2e: company signup:consentOpen");
   await expect(page.getByTestId("company-consent-privacy")).toBeVisible();
   await page.getByTestId("company-consent-privacy").check();
   if (options?.doubleConfirm) {
@@ -692,6 +776,7 @@ async function submitCompanySignup(page: Page, options?: { doubleConfirm?: boole
     const confirmButton = page.getByTestId("company-consent-confirm");
     await confirmButton.click();
   }
+  console.log("e2e: company signup:consentSubmitted");
 }
 
 async function signupCompany(page: Page, email: string, password: string, companyName: string) {
@@ -702,14 +787,17 @@ async function signupCompany(page: Page, email: string, password: string, compan
   await page.getByTestId("auth-submit").click();
 
   await expect(page).toHaveURL(/\/signup-info/);
+  console.log("e2e: company signup:infoPage", email);
 
   await fillCompanySignupForm(page, email, companyName);
   await submitCompanySignup(page);
 
   await expect(page).toHaveURL(/\/pending/);
+  console.log("e2e: company signup:pending", email);
 }
 
 async function approvePendingUser(page: Page, email: string) {
+  console.log("e2e: approvePendingUser:start", email);
   await page.goto("/admin/admin-users");
   await page.getByPlaceholder("이메일 검색").fill(email);
 
@@ -717,6 +805,7 @@ async function approvePendingUser(page: Page, email: string) {
   await expect(approvalRow).toBeVisible();
   await approvalRow.getByRole("button", { name: "승인" }).click();
   await expect(approvalRow).toBeHidden({ timeout: 30_000 });
+  console.log("e2e: approvePendingUser:done", email);
 }
 
 async function mapFirstAgendaToConsultant(
@@ -724,6 +813,7 @@ async function mapFirstAgendaToConsultant(
   consultantName: string,
   preferredAgendaName?: string,
 ) {
+  console.log("e2e: mapFirstAgendaToConsultant:start", consultantName, preferredAgendaName ?? "<first>");
   await page.goto("/admin/admin-consultants");
   await page.getByPlaceholder("컨설턴트 이름 검색").fill(consultantName);
 
@@ -748,6 +838,7 @@ async function mapFirstAgendaToConsultant(
   await dialog.getByRole("button", { name: "저장" }).click();
   await expect(dialog).toBeHidden({ timeout: 15_000 });
 
+  console.log("e2e: mapFirstAgendaToConsultant:done", consultantName, agendaName);
   return agendaName;
 }
 
@@ -775,30 +866,7 @@ function ticketSummaryCard(page: Page, label: "내부 티켓" | "외부 티켓")
 }
 
 async function openRegularApplicationAgendaStepForOfficeHour(page: Page, officeHourId: string) {
-  await page.goto(`/company/regular-detail?id=${encodeURIComponent(officeHourId)}`);
-  let startApplicationButton = page.getByRole("button", { name: "신청 시작하기" }).first();
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    await waitForAuthLoadingToClear(page);
-    try {
-      await expect
-        .poll(
-          async () => ({
-            headingCount: await page.locator("main h1").count(),
-            buttonCount: await startApplicationButton.count(),
-          }),
-          { timeout: 30_000 },
-        )
-        .toEqual({ headingCount: 1, buttonCount: 1 });
-      await expect(startApplicationButton).toBeVisible({ timeout: 10_000 });
-      break;
-    } catch (error) {
-      if (attempt === 1) throw error;
-      await page.reload();
-      startApplicationButton = page.getByRole("button", { name: "신청 시작하기" }).first();
-    }
-  }
-
-  await startApplicationButton.click();
+  await openRegularApplicationSheetForOfficeHour(page, officeHourId);
   await expect(page.getByTestId("regular-agenda-trigger")).toBeVisible({ timeout: 30_000 });
 }
 
@@ -972,13 +1040,17 @@ async function provisionApprovedConsultantAccount(browser: Browser, seed = uniqu
 
   {
     const { context, page } = await newPage(browser);
+    console.log("e2e: consultant signup:start", consultant.email);
     await signupConsultant(page, consultant.email, consultant.password, consultant.name);
+    console.log("e2e: consultant signup:done", consultant.email);
     await context.close();
   }
 
   const adminSession = await newPage(browser);
+  console.log("e2e: consultant approval:start", consultant.email);
   await loginAndWaitForAdmin(adminSession.page, adminCredentials.email!, adminCredentials.password!);
   await approvePendingUser(adminSession.page, consultant.email);
+  console.log("e2e: consultant approval:done", consultant.email);
   await adminSession.context.close();
 
   return { consultant };
@@ -1011,9 +1083,14 @@ async function configureConsultantAgendaAndSchedule(
   consultant: { name: string; email: string; password: string },
   agenda: E2EAgendaRef | string,
 ) {
+  const agendaRef = await resolveAgendaRef(agenda);
+  console.log("e2e: configureConsultant:start", consultant.email, agendaRef.agendaName);
   await assignAgendaToConsultantRecord(consultant.email, agenda);
+  console.log("e2e: configureConsultant:agendaAssigned", consultant.email, agendaRef.agendaName);
   await setConsultantAvailability(consultant.email);
+  console.log("e2e: configureConsultant:availabilitySet", consultant.email);
   await expectConsultantAgendaSlotsReady(consultant.email, agenda);
+  console.log("e2e: configureConsultant:ready", consultant.email, agendaRef.agendaName);
 }
 
 async function provisionApprovedConsultantWithAgenda(
@@ -1060,14 +1137,18 @@ async function provisionApprovedCompany(browser: Browser, seed = uniqueSeed()) {
 
   {
     const { context, page } = await newPage(browser);
+    console.log("e2e: company signup:start", company.email);
     await signupCompany(page, company.email, company.password, company.name);
+    console.log("e2e: company signup:done", company.email);
     await context.close();
   }
 
   const adminSession = await newPage(browser);
+  console.log("e2e: company approval:start", company.email);
   await loginAndWaitForAdmin(adminSession.page, adminCredentials.email!, adminCredentials.password!);
   await adminSession.page.goto("/admin/admin-users");
   await approvePendingUser(adminSession.page, company.email);
+  console.log("e2e: company approval:done", company.email);
   await adminSession.context.close();
 
   return {
@@ -1233,96 +1314,81 @@ async function openRegularApplicationWizardForOfficeHour(
   agendaName: string,
   preferredSelection?: { dateIndex: number; time: string; expectDisabled?: boolean },
 ) {
-  await page.goto("/company/regular");
+  await page.goto(`/company/regular-detail?id=${encodeURIComponent(officeHourId)}`);
   await waitForAuthLoadingToClear(page);
-  await waitForRegularCalendarReady(page);
-  const officeHourCard = page.getByTestId(`regular-calendar-session-${officeHourId}`).first();
-  await expect(officeHourCard).toBeVisible({ timeout: 30_000 });
-  await officeHourCard.click();
-  await waitForRegularDetailReady(page);
-  const startApplicationButton = page.getByTestId("regular-start-application");
-  await expect(startApplicationButton).toBeVisible({ timeout: 30_000 });
   const officeHourTitle =
     (await page.locator("h1").first().textContent())?.trim() || "정기 오피스아워";
+  await expect(page.getByTestId("regular-start-application")).toBeVisible({ timeout: 30_000 });
+  await page.getByTestId("regular-start-application").click();
+  await expect(page.getByTestId("regular-agenda-trigger")).toBeVisible({ timeout: 30_000 });
 
-  await startApplicationButton.click();
-  await expect(page.getByTestId("regular-agenda-trigger")).toBeVisible();
-  await page.getByTestId("regular-agenda-trigger").click();
-  await page
-    .getByText(new RegExp(`^${escapeRegExp(agendaName)}\\s+·`))
-    .click();
-  await page.getByTestId("regular-wizard-next").click();
+  const sessionIndexes = preferredSelection
+    ? [preferredSelection.dateIndex]
+    : Array.from({ length: 31 }, (_, index) => index);
 
-  const enabledDates = page.locator('[role="gridcell"]:not([disabled]):not([aria-disabled="true"])');
-  const enabledDateCount = await enabledDates.count();
-  let selectedDateIndex = -1;
-  let selectedTime = "";
-  let foundSchedulableDate = false;
+  for (const sessionIndex of sessionIndexes) {
+    if (sessionIndex > 0 || preferredSelection) {
+      await page.goto(`/company/regular-detail?id=${encodeURIComponent(officeHourId)}`);
+      await waitForAuthLoadingToClear(page);
+      await expect(page.getByTestId("regular-start-application")).toBeVisible({ timeout: 30_000 });
+      await page.getByTestId("regular-start-application").click();
+      await expect(page.getByTestId("regular-agenda-trigger")).toBeVisible({ timeout: 30_000 });
+    }
 
-  let selection = preferredSelection;
-  if (selection) {
-    const dateCell = enabledDates.nth(preferredSelection.dateIndex);
-    await expect(dateCell).toBeVisible();
-    await dateCell.click();
-    const preferredTime = page.getByTestId(
-      `regular-time-slot-${preferredSelection.time.replace(":", "-")}`,
-    );
-    await expect(preferredTime).toBeVisible();
-    if (preferredSelection.expectDisabled) {
-      await expect(preferredTime).toBeDisabled();
-    } else {
-      if (await preferredTime.isDisabled()) {
-        selection = undefined;
-      } else {
-        await expect(preferredTime).toBeEnabled();
+    await page.getByTestId("regular-agenda-trigger").click();
+    await page
+      .getByText(new RegExp(`^${escapeRegExp(agendaName)}\\s+·`))
+      .click();
+
+    let selectedTime = "";
+    let foundSchedulableTime = false;
+
+    if (preferredSelection) {
+      const preferredTime = page.getByTestId(
+        `regular-time-slot-${preferredSelection.time.replace(":", "-")}`,
+      );
+      await expect(preferredTime).toBeVisible({ timeout: 30_000 });
+      if (preferredSelection.expectDisabled) {
+        await expect(preferredTime).toBeDisabled();
+        return { officeHourTitle, selectedDateIndex: sessionIndex, selectedTime: preferredSelection.time };
+      }
+      if (await preferredTime.isEnabled()) {
         await preferredTime.click();
+        selectedTime = preferredSelection.time;
+        foundSchedulableTime = true;
+      }
+    } else {
+      const firstEnabledTime = page.locator('[data-testid^="regular-time-slot-"]:not([disabled])').first();
+      if (await firstEnabledTime.count()) {
+        selectedTime = ((await firstEnabledTime.textContent()) ?? "").trim().split(/\s+/u)[0] ?? "";
+        await firstEnabledTime.click();
+        foundSchedulableTime = true;
       }
     }
-    if (selection) {
-      selectedDateIndex = preferredSelection.dateIndex;
-      selectedTime = preferredSelection.time;
-      foundSchedulableDate = !preferredSelection.expectDisabled;
+
+    if (!foundSchedulableTime) {
+      continue;
     }
+
+    await page
+      .getByTestId("regular-request-currentSituation")
+      .fill("현재 제품 출시 전환과 초기 매출 확보를 동시에 준비 중입니다.");
+    await page
+      .getByTestId("regular-request-keyChallenges")
+      .fill("시장 진입 우선순위와 초기 세일즈 메시지가 명확하지 않아 실행이 지연됩니다.");
+    await page
+      .getByTestId("regular-request-requestedSupport")
+      .fill("우선 타겟 고객군과 초기 영업 접근 전략을 함께 정리하고 싶습니다.");
+    await page.getByTestId("regular-wizard-next").click();
+
+    return { officeHourTitle, selectedDateIndex: sessionIndex, selectedTime };
   }
 
-  for (let index = 0; index < enabledDateCount; index += 1) {
-    if (selection) break;
-    const dateCell = enabledDates.nth(index);
-    await expect(dateCell).toBeVisible();
-    await dateCell.click();
-
-    const firstEnabledTime = page.locator('[data-testid^="regular-time-slot-"]:not([disabled])').first();
-    if (await firstEnabledTime.count()) {
-      selectedDateIndex = index;
-      selectedTime = ((await firstEnabledTime.textContent()) ?? "").trim().split(/\s+/u)[0] ?? "";
-      await firstEnabledTime.click();
-      foundSchedulableDate = true;
-      break;
-    }
+  if (preferredSelection) {
+    throw new Error("선택한 날짜/시간으로는 현재 신청 가능한 정기 오피스아워를 찾지 못했습니다.");
   }
 
-  if (selection?.expectDisabled) {
-    return { officeHourTitle, selectedDateIndex, selectedTime };
-  }
-
-  if (!foundSchedulableDate) {
-    throw new Error("선택한 regular office hour에서 신청 가능한 날짜/시간을 찾지 못했습니다.");
-  }
-
-  await page.getByTestId("regular-wizard-next").click();
-  await page.getByTestId("regular-wizard-next").click();
-  await page
-    .getByTestId("regular-request-currentSituation")
-    .fill("현재 제품 출시 전환과 초기 매출 확보를 동시에 준비 중입니다.");
-  await page
-    .getByTestId("regular-request-keyChallenges")
-    .fill("시장 진입 우선순위와 초기 세일즈 메시지가 명확하지 않아 실행이 지연됩니다.");
-  await page
-    .getByTestId("regular-request-requestedSupport")
-    .fill("우선 타겟 고객군과 초기 영업 접근 전략을 함께 정리하고 싶습니다.");
-  await page.getByTestId("regular-wizard-next").click();
-
-  return { officeHourTitle, selectedDateIndex, selectedTime };
+  throw new Error("선택한 정기 오피스아워에서 신청 가능한 시간대를 찾지 못했습니다.");
 }
 
 test.describe("preview smoke", () => {
@@ -1376,10 +1442,8 @@ test.describe("preview smoke", () => {
       applicationId = applicationDoc.id;
       expect(applicationDoc.data.status).toBe("pending");
       expect(applicationDoc.data.agenda).toBe(agendaName);
-      const slotId = String(applicationDoc.data.officeHourSlotId ?? "");
-      expect(slotId).not.toBe("");
-      const slotDoc = await getFirestoreDocument(`officeHourSlots/${slotId}`);
-      expect(slotDoc?.data.status).toBe("booked");
+      expect(Array.isArray(applicationDoc.data.pendingConsultantIds)).toBe(true);
+      expect((applicationDoc.data.pendingConsultantIds as unknown[]).length).toBe(1);
       await context.close();
     }
 
@@ -1449,12 +1513,9 @@ test.describe("preview smoke", () => {
       await expect(ticketSummaryCard(page, "내부 티켓").getByText("예약 0")).toBeVisible({
         timeout: 30_000,
       });
-      const slotId = String(applicationDoc.data.officeHourSlotId ?? "");
       await expect.poll(async () => (await getApplicationsByCompanyName(company.name)).length, {
         timeout: 30_000,
       }).toBe(0);
-      const slotDoc = await getFirestoreDocument(`officeHourSlots/${slotId}`);
-      expect(slotDoc?.data.status).toBe("open");
       await context.close();
     }
   });
@@ -1503,10 +1564,8 @@ test.describe("preview smoke", () => {
       await page.getByText(officeHourTitle).first().click();
       await expect(page.getByText(rejectionReason, { exact: true })).toBeVisible({ timeout: 30_000 });
       const rejectedDoc = await expectSingleApplicationDoc(company.name);
+      expect(rejectedDoc.data.status).toBe("rejected");
       expect(rejectedDoc.data.rejectionReason).toBe(rejectionReason);
-      const slotId = String(rejectedDoc.data.officeHourSlotId ?? "");
-      const slotDoc = await getFirestoreDocument(`officeHourSlots/${slotId}`);
-      expect(slotDoc?.data.status).toBe("open");
       await context.close();
     }
   });
@@ -1539,7 +1598,6 @@ test.describe("preview smoke", () => {
       });
 
       let officeHourTitle = "";
-      let slotId = "";
       const officeHourId = await getRegularOfficeHourIdForCompany(company.name, agenda.agendaName);
       {
         const { context, page } = await newPage(browser);
@@ -1566,8 +1624,8 @@ test.describe("preview smoke", () => {
         });
         const applicationDoc = await expectSingleApplicationDoc(company.name);
         expect(applicationDoc.data.status).toBe("pending");
-        slotId = String(applicationDoc.data.officeHourSlotId ?? "");
-        expect(slotId).not.toBe("");
+        expect(Array.isArray(applicationDoc.data.pendingConsultantIds)).toBe(true);
+        expect((applicationDoc.data.pendingConsultantIds as unknown[]).length).toBe(1);
         await context.close();
       }
 
@@ -1599,8 +1657,6 @@ test.describe("preview smoke", () => {
         await expect.poll(async () => (await getApplicationsByCompanyName(company.name)).length, {
           timeout: 30_000,
         }).toBe(0);
-        const slotDoc = await getFirestoreDocument(`officeHourSlots/${slotId}`);
-        expect(slotDoc?.data.status).toBe("open");
         await context.close();
       }
 
@@ -1793,9 +1849,8 @@ test.describe("preview smoke", () => {
       });
       const applicationDoc = await expectSingleApplicationDoc(company.name);
       expect(applicationDoc.data.status).toBe("pending");
-      const slotId = String(applicationDoc.data.officeHourSlotId ?? "");
-      const slotDoc = await getFirestoreDocument(`officeHourSlots/${slotId}`);
-      expect(slotDoc?.data.status).toBe("booked");
+      expect(Array.isArray(applicationDoc.data.pendingConsultantIds)).toBe(true);
+      expect((applicationDoc.data.pendingConsultantIds as unknown[]).length).toBe(1);
       await context.close();
     }
 
@@ -1879,7 +1934,7 @@ test.describe("preview smoke", () => {
     }
   });
 
-  test("same time can be booked twice when two consultants are available for the same agenda", async ({
+  test("multi-consultant pending targets both consultants and blocks the same time for others", async ({
     browser,
   }) => {
     test.setTimeout(6 * 60 * 1000);
@@ -1887,10 +1942,10 @@ test.describe("preview smoke", () => {
     const seed = uniqueSeed();
     const agenda = await createE2EAgenda(seed);
     try {
-      const { consultant: primaryConsultant } = await provisionApprovedConsultantAccount(browser, `${seed}-a`);
-      const { consultant: secondaryConsultant } = await provisionApprovedConsultantAccount(browser, `${seed}-b`);
-      const { company: companyA } = await provisionApprovedCompany(browser, `${seed}-a`);
-      const { company: companyB } = await provisionApprovedCompany(browser, `${seed}-b`);
+      const { consultant: primaryConsultant } = await getExistingQaConsultant(0);
+      const { consultant: secondaryConsultant } = await getExistingQaConsultant(1);
+      const { company: companyA } = await getExistingQaCompany(0);
+      const { company: companyB } = await getExistingQaCompany(1);
       await configureConsultantAgendaAndSchedule(browser, primaryConsultant, agenda);
       await configureConsultantAgendaAndSchedule(browser, secondaryConsultant, agenda);
 
@@ -1914,72 +1969,42 @@ test.describe("preview smoke", () => {
         await openRegularApplicationWizardForOfficeHour(page, officeHourIdB, agenda.agendaName, {
           dateIndex: selectedDateIndex,
           time: selectedTime,
+          expectDisabled: true,
         });
-        const functionResponsePromise = page.waitForResponse(
-          (response) =>
-            response.url().includes("submitRegularApplication") &&
-            response.request().method() === "POST",
-          { timeout: 30_000 },
-        );
-        await page.getByTestId("regular-wizard-submit").click();
-        const functionResponse = await functionResponsePromise;
-        const responseText = await functionResponse.text();
-        console.log("submitRegularApplication second consultant slot:", functionResponse.status(), responseText.slice(0, 600));
-        if (!functionResponse.ok()) {
-          throw new Error(`다중 컨설턴트 동일 시간 예약 실패: ${functionResponse.status()} ${responseText.slice(0, 300)}`);
-        }
-        await expect(page).toHaveURL(/\/company\/dashboard/, { timeout: 30_000 });
+        await page.goto("/company/dashboard");
+        await expect(ticketSummaryCard(page, "내부 티켓").getByText("예약 0")).toBeVisible({
+          timeout: 30_000,
+        });
         await context.close();
       }
 
+      const primaryConsultantDoc = await waitForConsultantDoc(primaryConsultant.email);
+      const secondaryConsultantDoc = await waitForConsultantDoc(secondaryConsultant.email);
       const applicationA = await expectSingleApplicationDoc(companyA.name);
-      const applicationB = await expectSingleApplicationDoc(companyB.name);
       expect(applicationA.data.status).toBe("pending");
-      expect(applicationB.data.status).toBe("pending");
-      const slotIdA = String(applicationA.data.officeHourSlotId ?? "");
-      const slotIdB = String(applicationB.data.officeHourSlotId ?? "");
-      expect(slotIdA).not.toBe("");
-      expect(slotIdB).not.toBe("");
-      expect(slotIdA).not.toBe(slotIdB);
-
-      const slotDocA = await getFirestoreDocument(`officeHourSlots/${slotIdA}`);
-      const slotDocB = await getFirestoreDocument(`officeHourSlots/${slotIdB}`);
-      expect(slotDocA?.data.status).toBe("booked");
-      expect(slotDocB?.data.status).toBe("booked");
-      expect(slotDocA?.data.startTime).toBe(selectedTime);
-      expect(slotDocB?.data.startTime).toBe(selectedTime);
-      expect(slotDocA?.data.consultantName).not.toBe(slotDocB?.data.consultantName);
-
-      const companyByConsultant = new Map<string, string>([
-        [String(slotDocA?.data.consultantName ?? ""), companyA.name],
-        [String(slotDocB?.data.consultantName ?? ""), companyB.name],
-      ]);
+      expect(applicationA.data.pendingConsultantIds).toEqual(
+        [primaryConsultantDoc.id, secondaryConsultantDoc.id].sort(),
+      );
 
       {
         const { context, page } = await newPage(browser);
         await loginAndWaitForAdmin(page, primaryConsultant.email, primaryConsultant.password);
-        const expectedCompany = companyByConsultant.get(primaryConsultant.name);
-        const otherCompany = expectedCompany === companyA.name ? companyB.name : companyA.name;
-        if (!expectedCompany) {
-          throw new Error(`컨설턴트 ${primaryConsultant.name} 배정 회사를 찾지 못했습니다.`);
-        }
-        await expectSingleApplicationRow(page, expectedCompany);
-        await expectNoApplicationRow(page, otherCompany);
+        await expectSingleApplicationRow(page, companyA.name);
+        await expectNoApplicationRow(page, companyB.name);
         await context.close();
       }
 
       {
         const { context, page } = await newPage(browser);
         await loginAndWaitForAdmin(page, secondaryConsultant.email, secondaryConsultant.password);
-        const expectedCompany = companyByConsultant.get(secondaryConsultant.name);
-        const otherCompany = expectedCompany === companyA.name ? companyB.name : companyA.name;
-        if (!expectedCompany) {
-          throw new Error(`컨설턴트 ${secondaryConsultant.name} 배정 회사를 찾지 못했습니다.`);
-        }
-        await expectSingleApplicationRow(page, expectedCompany);
-        await expectNoApplicationRow(page, otherCompany);
+        await expectSingleApplicationRow(page, companyA.name);
+        await expectNoApplicationRow(page, companyB.name);
         await context.close();
       }
+
+      await expect.poll(async () => (await getApplicationsByCompanyName(companyB.name)).length, {
+        timeout: 30_000,
+      }).toBe(0);
     } finally {
       await cleanupE2EAgendas();
     }

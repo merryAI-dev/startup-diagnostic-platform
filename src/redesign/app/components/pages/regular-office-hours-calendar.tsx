@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
-import { ChevronLeft, ChevronRight, Calendar, List } from "lucide-react";
-import { RegularOfficeHour } from "@/redesign/app/lib/types";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
+import { Program, RegularOfficeHour } from "@/redesign/app/lib/types";
 import { Button } from "@/redesign/app/components/ui/button";
 import { Badge } from "@/redesign/app/components/ui/badge";
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameMonth, isSameDay, addMonths, subMonths, startOfWeek, endOfWeek, isToday, addDays, isBefore, startOfDay } from "date-fns";
@@ -9,18 +9,35 @@ import { parseLocalDateKey } from "@/redesign/app/lib/date-keys";
 
 interface RegularOfficeHoursCalendarProps {
   officeHours: RegularOfficeHour[];
-  onSelectOfficeHour: (id: string) => void;
+  programs: Program[];
+  ticketStats: {
+    totalInternal: number;
+    totalExternal: number;
+    reservedInternal: number;
+    reservedExternal: number;
+    completedInternal: number;
+    completedExternal: number;
+    remainingInternal: number;
+    remainingExternal: number;
+  };
+  summary: {
+    upcomingCount: number;
+    currentMonthCount: number;
+    nextScheduleLabel: string | null;
+  };
+  onSelectOfficeHour: (id?: string, dateKey?: string) => void;
 }
-
-type ViewMode = "calendar" | "list";
 
 export function RegularOfficeHoursCalendar({
   officeHours,
+  programs,
+  ticketStats,
+  summary,
   onSelectOfficeHour,
 }: RegularOfficeHoursCalendarProps) {
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
-  const [viewMode, setViewMode] = useState<ViewMode>("calendar");
+  const monthInitializedRef = useRef(false);
 
   // 캘린더 날짜 생성
   const monthStart = startOfMonth(currentMonth);
@@ -38,28 +55,37 @@ export function RegularOfficeHoursCalendar({
       ),
     ];
 
-  const todayStart = startOfDay(new Date());
-  // 오늘 이전 날짜는 캘린더 진입 단계에서 제외
-  const filteredOfficeHours = officeHours
-    .map((officeHour) => ({
-      ...officeHour,
-      availableDates: (officeHour.availableDates ?? []).filter(
-        (date) => {
-          const parsed = parseLocalDateKey(date);
-          return parsed ? !isBefore(parsed, todayStart) : false;
-        }
-      ),
-    }))
-    .filter((officeHour) => officeHour.availableDates.length > 0);
-
-  // 날짜별로 오피스아워를 펼쳐서 배열로 만들기
-  const expandedSessions = filteredOfficeHours.flatMap(oh =>
-    oh.availableDates.map(date => ({
-      ...oh,
-      date: date,
-    }))
+  const todayStart = useMemo(() => startOfDay(new Date()), []);
+  const normalizedOfficeHours = useMemo(
+    () =>
+      officeHours
+        .map((officeHour) => ({
+          ...officeHour,
+          availableDates: (officeHour.availableDates ?? []).filter((date) =>
+            Boolean(parseLocalDateKey(date))
+          ),
+        }))
+        .filter((officeHour) => officeHour.availableDates.length > 0),
+    [officeHours]
   );
-  const availableDateKeys = useMemo(
+
+  const expandedSessions = useMemo(
+    () =>
+      normalizedOfficeHours
+        .flatMap((officeHour) =>
+          officeHour.availableDates.map((date) => ({
+            ...officeHour,
+            date,
+          }))
+        )
+        .sort((a, b) => {
+          const dateCompare = a.date.localeCompare(b.date);
+          if (dateCompare !== 0) return dateCompare;
+          return a.title.localeCompare(b.title);
+        }),
+    [normalizedOfficeHours]
+  );
+  const displayDateKeys = useMemo(
     () => new Set(
       expandedSessions
         .map((session) => parseLocalDateKey(session.date))
@@ -68,9 +94,20 @@ export function RegularOfficeHoursCalendar({
     ),
     [expandedSessions]
   );
+  const requestableSessions = useMemo(
+    () =>
+      expandedSessions.filter((session) => {
+        const parsed = parseLocalDateKey(session.date);
+        return parsed ? !isBefore(parsed, todayStart) : false;
+      }),
+    [expandedSessions, todayStart]
+  );
+  const firstRequestableSession = requestableSessions[0];
   const firstExpandedSession = expandedSessions[0];
-  const firstAvailableDate = firstExpandedSession
-    ? parseLocalDateKey(firstExpandedSession.date)
+  const firstAvailableDate = firstRequestableSession
+    ? parseLocalDateKey(firstRequestableSession.date)
+    : firstExpandedSession
+      ? parseLocalDateKey(firstExpandedSession.date)
     : null;
 
   useEffect(() => {
@@ -79,20 +116,16 @@ export function RegularOfficeHoursCalendar({
       return;
     }
     const selectedKey = format(selectedDate, "yyyy-MM-dd");
-    if (!availableDateKeys.has(selectedKey)) {
+    if (!displayDateKeys.has(selectedKey)) {
       setSelectedDate(firstAvailableDate);
     }
-  }, [availableDateKeys, firstAvailableDate, selectedDate]);
+  }, [displayDateKeys, firstAvailableDate, selectedDate]);
 
   useEffect(() => {
-    if (!firstAvailableDate) return;
-    const currentMonthHasSession = expandedSessions.some((session) =>
-      Boolean(parseLocalDateKey(session.date) && isSameMonth(parseLocalDateKey(session.date)!, currentMonth))
-    );
-    if (!currentMonthHasSession) {
-      setCurrentMonth(firstAvailableDate);
-    }
-  }, [currentMonth, expandedSessions, firstAvailableDate]);
+    if (!firstAvailableDate || monthInitializedRef.current) return;
+    setCurrentMonth(firstAvailableDate);
+    monthInitializedRef.current = true;
+  }, [firstAvailableDate]);
 
   // 특정 날짜의 오피스아워
   const getOfficeHoursForDate = (date: Date) => {
@@ -102,65 +135,177 @@ export function RegularOfficeHoursCalendar({
       return isSameDay(sessionDate, date);
     });
   };
+  const isPastSessionDate = (dateKey: string) => {
+    const parsed = parseLocalDateKey(dateKey);
+    return parsed ? isBefore(parsed, todayStart) : false;
+  };
 
   const weekDays = ["일", "월", "화", "수", "목", "금", "토"];
 
-  // 요일별 그룹핑
-  const sessionsByDay = expandedSessions.reduce((acc, session) => {
-    const parsedDate = parseLocalDateKey(session.date);
-    if (!parsedDate) return acc;
-    const dayOfWeek = format(parsedDate, "E", { locale: ko });
-    if (!acc[dayOfWeek]) acc[dayOfWeek] = [];
-    acc[dayOfWeek].push(session);
-    return acc;
-  }, {} as Record<string, typeof expandedSessions>);
   const currentMonthSessionCount = expandedSessions.filter((session) =>
     Boolean(parseLocalDateKey(session.date) && isSameMonth(parseLocalDateKey(session.date)!, currentMonth))
   ).length;
+  const visibleProgramNames = programs.map((program) => program.name);
+  const internalTicketsDepleted = ticketStats.remainingInternal === 0;
+  const externalTicketsDepleted = ticketStats.remainingExternal === 0;
 
   return (
     <div className="min-h-full flex flex-col bg-gray-50">
       {/* Header */}
-      <div className="border-b border-slate-200/80 bg-white/80 px-8 py-4 backdrop-blur-sm">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h1 className="text-2xl font-semibold text-slate-900">정기 오피스아워</h1>
-            <p className="mt-1 text-sm text-slate-500">
-              매주 정해진 시간에 진행되는 오피스아워를 신청하세요
-            </p>
+      <div className="border-b border-slate-200/80 bg-linear-to-r from-white via-slate-50/80 to-sky-50/60 px-6 py-2 backdrop-blur-sm">
+        <div className="space-y-2">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h1 className="text-[22px] font-semibold tracking-[-0.02em] text-slate-900">정기 오피스아워</h1>
+              <p className="mt-0.5 text-[13px] text-slate-500">
+                날짜를 선택한 뒤 신청할 사업과 시간을 바로 선택하세요.
+              </p>
+            </div>
           </div>
-          <div className="flex gap-2">
-            <Button
-              variant={viewMode === "calendar" ? "default" : "outline"}
-              size="sm"
-              onClick={() => setViewMode("calendar")}
-            >
-              <Calendar className="w-4 h-4 mr-2" />
-              캘린더
-            </Button>
-            <Button
-              variant={viewMode === "list" ? "default" : "outline"}
-              size="sm"
-              onClick={() => setViewMode("list")}
-            >
-              <List className="w-4 h-4 mr-2" />
-              리스트
-            </Button>
+
+          <div className="grid gap-3 lg:grid-cols-[minmax(320px,1fr)_minmax(240px,0.9fr)_minmax(220px,0.95fr)]">
+            <div className="relative w-full overflow-hidden rounded-xl border border-slate-200 bg-white px-3 pt-3 pb-2 shadow-xs">
+              <div className="absolute top-0 right-0 h-16 w-16 rounded-full bg-sky-100/60 blur-2xl" />
+              <div className="relative flex items-start justify-between gap-4">
+                <div className="min-w-0 flex-1">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-600">
+                    참여 사업
+                  </p>
+                  <div className="mt-1 flex items-center gap-2">
+                    <p className="text-[13px] font-semibold text-slate-900">{programs.length}개</p>
+                    <span className="whitespace-nowrap rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-500">
+                      신청 가능 사업
+                    </span>
+                  </div>
+                </div>
+              </div>
+              {programs.length > 0 ? (
+                <div className="relative mt-2 rounded-lg border border-slate-200/80 bg-slate-50/80 px-2.5 py-1.5">
+                  <div className="max-h-20 space-y-1 overflow-y-auto pr-1">
+                    {visibleProgramNames.map((name, index) => (
+                      <div
+                        key={name}
+                        className="grid grid-cols-[22px_1fr] items-start gap-2 rounded-md border border-slate-200/80 bg-white/90 px-1.5 py-1"
+                      >
+                        <span className="inline-flex h-5 w-5 items-center justify-center rounded-md bg-slate-100 text-[10px] font-semibold text-slate-600">
+                          {index + 1}
+                        </span>
+                        <p className="min-w-0 text-[11px] leading-4 text-slate-700">
+                          {name}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <p className="mt-2.5 text-xs text-slate-500">참여 중인 사업이 없습니다.</p>
+              )}
+            </div>
+
+            <div className="w-full rounded-xl border border-slate-200 bg-white px-3 pt-3 pb-2 shadow-xs">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-600">
+                  티켓 현황
+                </p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div
+                  className={`rounded-lg border px-2 py-2 ${
+                    internalTicketsDepleted ? "border-slate-200 bg-slate-100" : "border-sky-100 bg-sky-50/60"
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                      내부
+                    </p>
+                    {internalTicketsDepleted ? (
+                      <span className="whitespace-nowrap rounded-full bg-slate-200 px-1.5 py-0.5 text-[9px] font-semibold text-slate-500">
+                        소진
+                      </span>
+                    ) : null}
+                  </div>
+                  <div className="mt-1 flex items-end gap-1">
+                    <p className="text-sm font-semibold leading-none text-slate-900">
+                      {ticketStats.remainingInternal}
+                    </p>
+                    <span className="text-[10px] font-medium text-slate-400">
+                      / {ticketStats.totalInternal}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-[9px] text-slate-500">
+                    예약 {ticketStats.reservedInternal} · 완료 {ticketStats.completedInternal}
+                  </p>
+                </div>
+
+                <div
+                  className={`rounded-lg border px-2 py-2 ${
+                    externalTicketsDepleted ? "border-slate-200 bg-slate-100" : "border-emerald-100 bg-emerald-50/60"
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                      외부
+                    </p>
+                    {externalTicketsDepleted ? (
+                      <span className="whitespace-nowrap rounded-full bg-slate-200 px-1.5 py-0.5 text-[9px] font-semibold text-slate-500">
+                        소진
+                      </span>
+                    ) : null}
+                  </div>
+                  <div className="mt-1 flex items-end gap-1">
+                    <p className="text-sm font-semibold leading-none text-slate-900">
+                      {ticketStats.remainingExternal}
+                    </p>
+                    <span className="text-[10px] font-medium text-slate-400">
+                      / {ticketStats.totalExternal}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-[9px] text-slate-500">
+                    예약 {ticketStats.reservedExternal} · 완료 {ticketStats.completedExternal}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex h-full w-full flex-col rounded-xl border border-slate-200 bg-white px-3 pt-3 pb-2 shadow-xs">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-600">
+                예정 일정
+              </p>
+              <div className="mt-1.5 flex items-end gap-1.5">
+                <p className="text-base font-semibold leading-none text-slate-900">
+                  {summary.upcomingCount}
+                </p>
+                <span className="text-xs font-medium text-slate-400">
+                  건
+                </span>
+              </div>
+              <p className="mt-1 text-[10px] text-slate-500">
+                이번 달 {summary.currentMonthCount}건
+              </p>
+              <div className="mt-2 flex flex-1 flex-col rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500">
+                  가장 가까운 일정
+                </p>
+                <p className="mt-1 flex-1 text-xs font-medium leading-5 text-slate-700">
+                  {summary.nextScheduleLabel ?? "예정 일정 없음"}
+                </p>
+              </div>
+            </div>
           </div>
         </div>
 
       </div>
 
-      {viewMode === "calendar" ? (
-        <div className="flex-1 flex min-h-0">
+      <div className="flex flex-1 min-h-0 overflow-hidden">
           {/* Main Calendar */}
-          <div className="flex-1 px-4 pt-4 pb-6 overflow-y-auto">
-            <div className="bg-white rounded-lg border">
+          <div className="flex-1 px-3 pt-2 pb-2">
+            <div className="rounded-lg border bg-white">
               {/* Calendar Header */}
-              <div className="border-b px-5 py-3">
+              <div className="border-b px-4 py-2.5">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-4">
-                    <h2 className="text-base font-semibold text-gray-900">
+                    <h2 className="text-[15px] font-semibold text-gray-900">
                       {format(currentMonth, "yyyy년 M월", { locale: ko })}
                     </h2>
                     <div className="flex gap-1">
@@ -187,7 +332,7 @@ export function RegularOfficeHoursCalendar({
                       </Button>
                     </div>
                   </div>
-                  <div className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-800">
+                  <div className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-[11px] font-medium text-emerald-800">
                     <span className="h-2 w-2 rounded-full bg-emerald-500" />
                     이번 달 예약 가능 일정
                     <span className="rounded-full bg-white px-2 py-0.5 text-emerald-900">
@@ -198,13 +343,13 @@ export function RegularOfficeHoursCalendar({
               </div>
 
               {/* Calendar Grid */}
-              <div className="p-3">
+              <div className="p-2">
                 <div className="grid grid-cols-7 gap-px bg-gray-200 rounded-lg overflow-hidden">
                   {/* Week days header */}
                   {weekDays.map((day) => (
                     <div
                       key={day}
-                      className="bg-gray-50 text-center py-2 text-xs font-semibold text-gray-700"
+                      className="bg-gray-50 text-center py-1.5 text-[11px] font-semibold text-gray-700"
                     >
                       {day}
                     </div>
@@ -214,6 +359,7 @@ export function RegularOfficeHoursCalendar({
                   {calendarDays.map((day, idx) => {
                     const sessions = getOfficeHoursForDate(day);
                     const hasSessions = sessions.length > 0;
+                    const hasRequestableSessions = sessions.some((session) => !isPastSessionDate(session.date));
                     const isCurrentMonth = isSameMonth(day, currentMonth);
                     const isSelected = selectedDate && isSameDay(day, selectedDate);
                     const isTodayDate = isToday(day);
@@ -222,18 +368,20 @@ export function RegularOfficeHoursCalendar({
                       <div
                         key={idx}
                         onClick={() => {
-                          if (!hasSessions) return;
+                          if (!hasSessions || !hasRequestableSessions) return;
                           setSelectedDate(day);
+                          onSelectOfficeHour(undefined, format(day, "yyyy-MM-dd"));
                         }}
                         className={`
-                          bg-white h-[104px] p-1.5 transition-all
+                          bg-white h-[90px] p-1.5 transition-all
                           ${!isCurrentMonth ? "bg-gray-50 text-gray-400" : "text-gray-900"}
                           ${hasSessions ? "cursor-pointer hover:bg-gray-50" : "cursor-default bg-slate-50/50"}
                           ${isSelected ? "ring-2 ring-primary ring-inset" : ""}
                           ${isTodayDate && !isSelected && hasSessions ? "bg-blue-50" : ""}
+                          ${hasSessions && !hasRequestableSessions ? "bg-slate-100 text-slate-500" : ""}
                         `}
                       >
-                        <div className="flex items-center justify-between mb-2">
+                        <div className="mb-1.5 flex items-center justify-between">
                           <span
                             className={`text-xs font-medium ${
                               isTodayDate
@@ -250,22 +398,26 @@ export function RegularOfficeHoursCalendar({
                           {sessions.length > 0 && (
                             <Badge
                               variant="outline"
-                              className="h-5 rounded-full border-emerald-200 bg-emerald-50 px-1.5 text-[10px] font-semibold text-emerald-800"
+                              className={`h-5 rounded-full px-1.5 text-[10px] font-semibold ${
+                                hasRequestableSessions
+                                  ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                                  : "border-slate-200 bg-slate-100 text-slate-600"
+                              }`}
                             >
                               {sessions.length}건
                             </Badge>
                           )}
                         </div>
-                        <div className="h-[70px] grid grid-rows-3 gap-1">
+                        <div className="grid h-[60px] grid-rows-3 gap-1">
                           {sessions.slice(0, 2).map((session, sessionIdx) => (
                             <div
                               key={session.id + sessionIdx}
                               data-testid={`regular-calendar-session-${session.id}`}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                onSelectOfficeHour(session.id);
-                              }}
-                              className="h-full text-[10px] leading-4 px-1 rounded bg-primary/10 hover:bg-primary/20 transition-colors border-l-2 border-primary truncate"
+                              className={`pointer-events-none h-full text-[10px] leading-4 px-1 rounded border-l-2 truncate ${
+                                isPastSessionDate(session.date)
+                                  ? "border-slate-300 bg-slate-100 text-slate-500"
+                                  : "border-primary bg-primary/10"
+                              }`}
                             >
                               {session.title}
                             </div>
@@ -283,95 +435,8 @@ export function RegularOfficeHoursCalendar({
                 </div>
               </div>
             </div>
-          </div>
-
-          {/* Right Sidebar - Selected Date Details */}
-          {selectedDate && (
-            <div className="w-96 bg-white border-l p-5 overflow-y-auto">
-              <div className="mb-4">
-                <h2 className="text-base font-semibold text-gray-900 mb-1">
-                  {format(selectedDate, "M월 d일 (E)", { locale: ko })}
-                </h2>
-                <p className="text-xs text-muted-foreground">
-                  {getOfficeHoursForDate(selectedDate).length > 0
-                    ? `${getOfficeHoursForDate(selectedDate).length}개의 세션`
-                    : "예정된 세션이 없습니다"}
-                </p>
-              </div>
-
-              <div className="space-y-2">
-                {getOfficeHoursForDate(selectedDate).map((session) => (
-                  <div
-                    key={session.id + session.date}
-                    data-testid={`regular-calendar-session-${session.id}`}
-                    onClick={() => onSelectOfficeHour(session.id)}
-                    className="group relative overflow-hidden rounded-md border border-slate-200 bg-slate-50/60 px-3 py-2.5 hover:border-primary/40 hover:bg-white hover:shadow-sm cursor-pointer transition-all"
-                  >
-                    <div className="absolute left-0 top-0 h-full w-1 bg-primary/20 group-hover:bg-primary/50 transition-colors" />
-                    <div className="pl-1 space-y-1">
-                      <h3 className="text-[13px] font-semibold tracking-tight text-gray-900 line-clamp-1">
-                        {session.title}
-                      </h3>
-                      <p className="text-[11px] leading-4 text-muted-foreground line-clamp-1">
-                        {session.description}
-                      </p>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
         </div>
-      ) : (
-        /* List View */
-        <div className="flex-1 p-6 overflow-y-auto">
-          <div className="max-w-5xl mx-auto">
-            {/* Group by Day of Week */}
-            {Object.entries(sessionsByDay).length === 0 ? (
-              <div className="rounded-lg border bg-white p-6 text-sm text-muted-foreground">
-                표시할 정기 오피스아워가 없습니다.
-              </div>
-            ) : (
-              Object.entries(sessionsByDay).map(([day, sessions]) => (
-                <div key={day} className="mb-8">
-                  <h2 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
-                    <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center text-primary font-semibold">
-                      {day}
-                    </div>
-                    {day}요일
-                    <Badge variant="secondary" className="ml-2">
-                      {sessions.length}
-                    </Badge>
-                  </h2>
-                  <div className="grid grid-cols-2 gap-4">
-                    {sessions.map((session) => (
-                      <div
-                        key={session.id + session.date}
-                        onClick={() => onSelectOfficeHour(session.id)}
-                        className="bg-white border rounded-lg p-5 hover:shadow-lg cursor-pointer transition-all group"
-                      >
-                        <div className="flex items-start justify-between mb-4">
-                          <div>
-                            <h3 className="font-semibold text-gray-900">{session.title}</h3>
-                            <p className="text-sm text-muted-foreground line-clamp-2">
-                              {session.description}
-                            </p>
-                          </div>
-                          <div className="text-right">
-                            <div className="text-xs text-muted-foreground mt-0.5">
-                              {format(parseLocalDateKey(session.date)!, "M월 d일", { locale: ko })}
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-      )}
+      </div>
     </div>
   );
 }

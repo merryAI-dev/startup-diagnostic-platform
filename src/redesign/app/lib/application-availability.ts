@@ -1,4 +1,4 @@
-import type { Application, Consultant, OfficeHourSlot } from "@/redesign/app/lib/types"
+import type { Application, Consultant } from "@/redesign/app/lib/types"
 import { parseLocalDateKey } from "@/redesign/app/lib/date-keys"
 
 export function normalizeTimeKey(value?: string): string {
@@ -38,49 +38,33 @@ export function isConsultantAvailableAt(
   )
 }
 
-export function getReservedConsultantId(
-  application: Application,
-  officeHourSlots: OfficeHourSlot[],
-): string | undefined {
-  if (application.consultantId) return application.consultantId
-  if (!application.officeHourSlotId) return undefined
-  return officeHourSlots.find((slot) => slot.id === application.officeHourSlotId)?.consultantId
+export function getPendingConsultantIds(application: Application): string[] {
+  const explicitPendingIds = Array.isArray(application.pendingConsultantIds)
+    ? application.pendingConsultantIds
+        .map((value) => value?.trim())
+        .filter((value): value is string => Boolean(value))
+    : []
+  return Array.from(new Set(explicitPendingIds))
 }
 
-function getFallbackReservedConsultantId(params: {
-  application: Application
-  consultants: Consultant[]
-  agendaId: string
-  dateKey: string
-  time: string
-}): string | undefined {
-  const { application, consultants, agendaId, dateKey, time } = params
-  if (!application.agendaId || application.agendaId !== agendaId) return undefined
-  if (!application.scheduledDate || application.scheduledDate !== dateKey) return undefined
-  if (!application.scheduledTime) return undefined
-  if (normalizeTimeKey(application.scheduledTime) !== normalizeTimeKey(time)) return undefined
-
-  const possibleConsultants = consultants.filter(
-    (consultant) =>
-      consultant.status === "active" &&
-      (consultant.agendaIds ?? []).includes(agendaId) &&
-      isConsultantAvailableAt(consultant, dateKey, time),
-  )
-
-  if (possibleConsultants.length !== 1) return undefined
-  return possibleConsultants[0]?.id
+export function isApplicationTargetingConsultant(
+  application: Application,
+  consultantId?: string | null,
+): boolean {
+  if (!consultantId) return false
+  if (application.consultantId === consultantId) return true
+  return getPendingConsultantIds(application).includes(consultantId)
 }
 
 export function getAssignableConsultantsAt(params: {
   consultants: Consultant[]
   applications: Application[]
-  officeHourSlots: OfficeHourSlot[]
   agendaId: string
   dateKey: string
   time: string
   slotConsultantId?: string
 }): Consultant[] {
-  const { consultants, applications, officeHourSlots, agendaId, dateKey, time, slotConsultantId } = params
+  const { consultants, applications, agendaId, dateKey, time, slotConsultantId } = params
   const normalizedTime = normalizeTimeKey(time)
   const linkedConsultants = consultants.filter(
     (consultant) =>
@@ -108,27 +92,11 @@ export function getAssignableConsultantsAt(params: {
       if (application.scheduledDate !== dateKey) return false
       if (normalizeTimeKey(application.scheduledTime) !== normalizedTime) return false
 
-      const isUnassignedPending =
-        normalizedStatus === "pending" &&
-        application.agendaId === agendaId &&
-        !application.consultantId &&
-        (!application.consultant || application.consultant === "담당자 배정 중")
-
-      if (isUnassignedPending) {
-        return true
+      const pendingConsultantIds = getPendingConsultantIds(application)
+      if (normalizedStatus === "pending" && pendingConsultantIds.length > 0) {
+        return pendingConsultantIds.includes(consultant.id)
       }
-
-      const reservedConsultantId =
-        getReservedConsultantId(application, officeHourSlots) ??
-        getFallbackReservedConsultantId({
-          application,
-          consultants: linkedConsultants,
-          agendaId,
-          dateKey,
-          time: normalizedTime,
-        })
-
-      return reservedConsultantId === consultant.id
+      return application.consultantId === consultant.id
     })
   })
 }

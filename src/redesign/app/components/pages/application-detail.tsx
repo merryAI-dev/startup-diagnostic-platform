@@ -4,6 +4,7 @@ import { Card, CardContent } from "@/redesign/app/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/redesign/app/components/ui/tabs";
 import { Textarea } from "@/redesign/app/components/ui/textarea";
 import { Label } from "@/redesign/app/components/ui/label";
+import { Input } from "@/redesign/app/components/ui/input";
 import { StatusChip } from "@/redesign/app/components/status-chip";
 import { Application, Message } from "@/redesign/app/lib/types";
 import { format } from "date-fns";
@@ -40,6 +41,8 @@ interface ApplicationDetailProps {
     requestContent: string;
     retainedAttachments: Array<{ name: string; url?: string }>;
     newFiles: FileItem[];
+    scheduledDate?: string;
+    scheduledTime?: string;
   }) => Promise<boolean>;
   currentUserRole?: string;
   currentConsultantId?: string | null;
@@ -165,6 +168,10 @@ export function ApplicationDetail({
     }
     return items;
   }, [application.attachments, application.attachmentUrls]);
+  const attachmentItemsKey = useMemo(
+    () => attachmentItems.map((item) => `${item.id}:${item.name}:${item.url ?? ""}`).join("|"),
+    [attachmentItems]
+  );
   const canEditCompanyApplication =
     isCompanyUser
     && !isSessionEnded
@@ -177,13 +184,23 @@ export function ApplicationDetail({
   const [editingRetainedAttachments, setEditingRetainedAttachments] = useState(attachmentItems);
   const [editingNewFiles, setEditingNewFiles] = useState<FileItem[]>([]);
   const [savingCompanyEdit, setSavingCompanyEdit] = useState(false);
+  const [editingScheduledDate, setEditingScheduledDate] = useState(application.scheduledDate ?? "");
+  const [editingScheduledTime, setEditingScheduledTime] = useState(application.scheduledTime ?? "");
 
   useEffect(() => {
     setEditingRequestContent(application.requestContent ?? "");
     setEditingRetainedAttachments(attachmentItems);
     setEditingNewFiles([]);
+    setEditingScheduledDate(application.scheduledDate ?? "");
+    setEditingScheduledTime(application.scheduledTime ?? "");
     setIsEditingCompanyApplication(false);
-  }, [application.id, application.requestContent, attachmentItems]);
+  }, [
+    application.id,
+    application.requestContent,
+    application.scheduledDate,
+    application.scheduledTime,
+    attachmentItemsKey,
+  ]);
 
   const handleSaveCompanyApplication = async () => {
     if (!onUpdateCompanyApplication || !canEditCompanyApplication) return;
@@ -200,6 +217,12 @@ export function ApplicationDetail({
         url: item.url,
       })),
       newFiles: editingNewFiles,
+      ...(application.type === "regular"
+        ? {
+            scheduledDate: editingScheduledDate,
+            scheduledTime: editingScheduledTime,
+          }
+        : {}),
     });
     setSavingCompanyEdit(false);
 
@@ -293,8 +316,33 @@ export function ApplicationDetail({
         <div className="rounded-lg border bg-white p-5 space-y-5">
           <div>
             <p className="text-xs text-muted-foreground mb-1">일정 정보</p>
-            <div className="text-sm space-y-1.5">
-              {application.scheduledDate ? (
+            {isEditingCompanyApplication && application.type === "regular" ? (
+              <div className="space-y-3">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <Label className="mb-2 block text-xs text-muted-foreground">날짜</Label>
+                    <Input
+                      type="date"
+                      value={editingScheduledDate}
+                      onChange={(event) => setEditingScheduledDate(event.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <Label className="mb-2 block text-xs text-muted-foreground">시간</Label>
+                    <Input
+                      type="time"
+                      value={editingScheduledTime}
+                      onChange={(event) => setEditingScheduledTime(event.target.value)}
+                    />
+                  </div>
+                </div>
+                <p className="text-xs text-amber-700">
+                  일정이 바뀌면 다시 수락 대기 상태로 조정됩니다.
+                </p>
+              </div>
+            ) : (
+              <div className="text-sm space-y-1.5">
+                {application.scheduledDate ? (
                 <>
                   <p>
                     {format(parseLocalDateKey(application.scheduledDate)!, "yyyy년 M월 d일 (E)", {
@@ -315,7 +363,8 @@ export function ApplicationDetail({
               <p className="text-muted-foreground">
                 {application.sessionFormat === "online" ? "온라인" : "오프라인"}
               </p>
-            </div>
+              </div>
+            )}
           </div>
 
           <div>
@@ -427,6 +476,8 @@ export function ApplicationDetail({
                   setEditingRequestContent(application.requestContent ?? "");
                   setEditingRetainedAttachments(attachmentItems);
                   setEditingNewFiles([]);
+                  setEditingScheduledDate(application.scheduledDate ?? "");
+                  setEditingScheduledTime(application.scheduledTime ?? "");
                 }}
                 disabled={savingCompanyEdit}
               >

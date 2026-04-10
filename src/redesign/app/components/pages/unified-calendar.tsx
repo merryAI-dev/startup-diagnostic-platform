@@ -38,6 +38,7 @@ import { cn } from "@/redesign/app/components/ui/utils";
 import { toast } from "sonner";
 import type { DayContentProps } from "react-day-picker";
 import { endOfLocalDateKey, parseLocalDateTimeKey } from "@/redesign/app/lib/date-keys";
+import { getPendingConsultantIds, isApplicationTargetingConsultant } from "@/redesign/app/lib/application-availability";
 
 interface UnifiedCalendarProps {
   currentUser: User;
@@ -158,7 +159,7 @@ export function UnifiedCalendar({
     type: "meeting" as const,
   });
 
-  const { isOnline, isFirebaseReady, isMockMode } = useConnectionStatus();
+  const { isOnline, isFirebaseReady } = useConnectionStatus();
   const calendarService = useCalendarService(currentUser.id, {
     subscribeToEvents: false,
   });
@@ -188,7 +189,7 @@ export function UnifiedCalendar({
         toast.error("일정 등록에 실패했습니다");
       }
     } else {
-      toast.success("일정이 등록되었습니다 (Mock 모드)");
+      toast.error("Firebase 설정이 필요합니다");
     }
 
     setShowCreateDialog(false);
@@ -245,7 +246,7 @@ export function UnifiedCalendar({
   const isConsultant = currentUser.role === "consultant";
   const isMyEvent = (event: Application) => {
     if (!isConsultant) return false;
-    if (currentConsultantId && event.consultantId === currentConsultantId) {
+    if (currentConsultantId && isApplicationTargetingConsultant(event, currentConsultantId)) {
       return true;
     }
     const currentNameKey = normalizeConsultantDisplayName(currentConsultantName);
@@ -279,7 +280,7 @@ export function UnifiedCalendar({
   };
   const isAssignedToCurrentConsultant = (app: Application) => {
     if (!isConsultant) return false;
-    if (currentConsultantId && app.consultantId === currentConsultantId) {
+    if (currentConsultantId && isApplicationTargetingConsultant(app, currentConsultantId)) {
       return true;
     }
     const currentNameKey = normalizeConsultantDisplayName(currentConsultantName);
@@ -347,15 +348,29 @@ export function UnifiedCalendar({
   const pendingRequests = useMemo(() => {
     if (!isConsultant) return [];
     return applications
-      .filter((app) =>
-        (app.status === "pending" || app.status === "review")
-        && !app.consultantId
-        && (!app.consultant || app.consultant === "담당자 배정 중")
-        && !hasSessionEnded(app)
-        && matchesConsultantAgenda(app)
-        && isCurrentConsultantAvailableAt(app)
-        && !hasCurrentConsultantConflict(app)
-      )
+      .filter((app) => {
+        const isPendingLike = app.status === "pending" || app.status === "review";
+        if (!isPendingLike || hasSessionEnded(app)) return false;
+        if (isAssignedToCurrentConsultant(app)) {
+          return true;
+        }
+
+        const pendingConsultantIds = getPendingConsultantIds(app);
+        const isUnassigned =
+          !app.consultantId
+          && pendingConsultantIds.length === 0
+          && (!app.consultant || app.consultant === "담당자 배정 중");
+
+        if (!isUnassigned) {
+          return false;
+        }
+
+        return (
+          matchesConsultantAgenda(app)
+          && isCurrentConsultantAvailableAt(app)
+          && !hasCurrentConsultantConflict(app)
+        );
+      })
       .sort((a, b) => {
         const dateA = new Date(a.createdAt).getTime();
         const dateB = new Date(b.createdAt).getTime();

@@ -12,8 +12,6 @@ import {
 import {
   Application,
   User,
-  Program,
-  Agenda,
   FileItem,
 } from "@/redesign/app/lib/types";
 import { Button } from "@/redesign/app/components/ui/button";
@@ -38,6 +36,7 @@ import {
   DialogTitle,
 } from "@/redesign/app/components/ui/dialog";
 import { Textarea } from "@/redesign/app/components/ui/textarea";
+import { Input } from "@/redesign/app/components/ui/input";
 import {
   format,
   startOfMonth,
@@ -62,9 +61,6 @@ interface DashboardCalendarProps {
   applications: Application[];
   applicationsWithoutAssignableConsultantIds?: string[];
   user: User;
-  programs: Program[];
-  agendas: Agenda[];
-  ticketOverrides?: Record<string, { internal?: number; external?: number }>;
   onNavigate: (page: string, id?: string) => void;
   onCancelApplication: (id: string) => Promise<void> | void;
   onUpdateCompanyApplication?: (
@@ -161,9 +157,6 @@ export function DashboardCalendar({
   applications,
   applicationsWithoutAssignableConsultantIds = [],
   user,
-  programs,
-  agendas,
-  ticketOverrides,
   onNavigate,
   onCancelApplication,
   onUpdateCompanyApplication,
@@ -175,7 +168,7 @@ export function DashboardCalendar({
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState<Date | null>(new Date());
   const [cancelTarget, setCancelTarget] = useState<Application | null>(null);
-  const [selectedApplication, setSelectedApplication] = useState<Application | null>(null);
+  const [selectedApplicationId, setSelectedApplicationId] = useState<string | null>(null);
   const [applicationListTab, setApplicationListTab] = useState<"pending" | "rejected">("pending");
   const [isEditingApplication, setIsEditingApplication] = useState(false);
   const [editingRequestSections, setEditingRequestSections] = useState<RequestSections>(
@@ -186,16 +179,6 @@ export function DashboardCalendar({
   >([]);
   const [editingNewFiles, setEditingNewFiles] = useState<FileItem[]>([]);
   const [savingApplicationEdit, setSavingApplicationEdit] = useState(false);
-
-  const userPrograms = programs;
-  const agendaScopeById = useMemo(
-    () => new Map(agendas.map((agenda) => [agenda.id, agenda.scope])),
-    [agendas]
-  );
-  const agendaScopeByName = useMemo(
-    () => new Map(agendas.map((agenda) => [agenda.name, agenda.scope])),
-    [agendas]
-  );
 
   const canViewAll =
     user.permissions?.canViewAllApplications
@@ -247,66 +230,6 @@ export function DashboardCalendar({
         && hasSessionEnded(app)
       )
   );
-
-  const getApplicationScope = (app: Application) => {
-    if (app.type === "irregular" && typeof app.isInternal === "boolean") {
-      return app.isInternal ? "internal" : "external";
-    }
-    if (app.agendaId && agendaScopeById.has(app.agendaId)) {
-      return agendaScopeById.get(app.agendaId) ?? null;
-    }
-    if (app.agenda && agendaScopeByName.has(app.agenda)) {
-      return agendaScopeByName.get(app.agenda) ?? null;
-    }
-    return null;
-  };
-
-  const ticketStats = useMemo(() => {
-    const overrides = ticketOverrides ?? {};
-    const totalInternal = userPrograms.reduce((sum, program) => {
-      const override = overrides[program.id]?.internal;
-      const value =
-        typeof override === "number" ? override : (program.internalTicketLimit ?? 0);
-      return sum + value;
-    }, 0);
-    const totalExternal = userPrograms.reduce((sum, program) => {
-      const override = overrides[program.id]?.external;
-      const value =
-        typeof override === "number" ? override : (program.externalTicketLimit ?? 0);
-      return sum + value;
-    }, 0);
-    let reservedInternal = 0;
-    let reservedExternal = 0;
-    let completedInternal = 0;
-    let completedExternal = 0;
-
-    userApplications.forEach((app) => {
-      const scope = getApplicationScope(app);
-      if (!scope) return;
-      const isReserved =
-        app.status === "pending" || app.status === "review" || app.status === "confirmed";
-      const isCompleted = app.status === "completed";
-      if (!isReserved && !isCompleted) return;
-      if (scope === "internal") {
-        if (isCompleted) completedInternal += 1;
-        else reservedInternal += 1;
-      } else {
-        if (isCompleted) completedExternal += 1;
-        else reservedExternal += 1;
-      }
-    });
-
-    return {
-      totalInternal,
-      totalExternal,
-      reservedInternal,
-      reservedExternal,
-      completedInternal,
-      completedExternal,
-      remainingInternal: Math.max(0, totalInternal - reservedInternal - completedInternal),
-      remainingExternal: Math.max(0, totalExternal - reservedExternal - completedExternal),
-    };
-  }, [userApplications, userPrograms, agendaScopeById, agendaScopeByName]);
 
   // 캘린더 날짜 생성
   const monthStart = startOfMonth(currentMonth);
@@ -370,7 +293,7 @@ export function DashboardCalendar({
     applicationListTab === "pending" ? pendingApplications : rejectedApplications;
 
   const openApplicationModal = (application: Application) => {
-    setSelectedApplication(application);
+    setSelectedApplicationId(application.id);
   };
 
   const formatScheduleLabel = (application: Application) => {
@@ -387,6 +310,14 @@ export function DashboardCalendar({
 
   const getApplicationTypeLabel = (application: Application) =>
     application.type === "irregular" ? "비정기 오피스아워" : "정기 오피스아워";
+
+  const selectedApplication = useMemo(
+    () =>
+      selectedApplicationId
+        ? applications.find((application) => application.id === selectedApplicationId) ?? null
+        : null,
+    [applications, selectedApplicationId]
+  );
 
   const canDeleteApplication =
     selectedApplication
@@ -424,6 +355,13 @@ export function DashboardCalendar({
     }
     return items;
   }, [selectedApplication]);
+  const selectedApplicationAttachmentsKey = useMemo(
+    () =>
+      selectedApplicationAttachments
+        .map((item) => `${item.id}:${item.name}:${item.url ?? ""}`)
+        .join("|"),
+    [selectedApplicationAttachments]
+  );
 
   const selectedApplicationRequestSections = useMemo(
     () => parseRequestSections(selectedApplication?.requestContent),
@@ -431,14 +369,11 @@ export function DashboardCalendar({
   );
 
   const listTabButtonClass = (tab: "pending" | "rejected") =>
-    `inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-semibold transition ${
+    `group relative flex flex-1 items-center justify-center gap-2 border-b-2 px-2 py-3 text-sm font-semibold whitespace-nowrap transition ${
       applicationListTab === tab
-        ? "bg-slate-900 text-white"
-        : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+        ? "border-slate-900 text-slate-900"
+        : "border-transparent text-slate-500 hover:border-slate-200 hover:text-slate-700"
     }`;
-
-  const internalTicketsDepleted = ticketStats.remainingInternal === 0;
-  const externalTicketsDepleted = ticketStats.remainingExternal === 0;
   const editingRequestSectionValidations = useMemo(
     () =>
       REQUEST_SECTION_META.map(({ key, label }) => {
@@ -457,20 +392,6 @@ export function DashboardCalendar({
   );
 
   useEffect(() => {
-    if (!selectedApplication) return;
-    const nextSelectedApplication = applications.find(
-      (application) => application.id === selectedApplication.id
-    );
-    if (!nextSelectedApplication) {
-      setSelectedApplication(null);
-      return;
-    }
-    if (nextSelectedApplication !== selectedApplication) {
-      setSelectedApplication(nextSelectedApplication);
-    }
-  }, [applications, selectedApplication]);
-
-  useEffect(() => {
     if (!selectedApplication) {
       setIsEditingApplication(false);
       setEditingRequestSections(createEmptyRequestSections());
@@ -484,7 +405,11 @@ export function DashboardCalendar({
     setEditingRetainedAttachments(selectedApplicationAttachments);
     setEditingNewFiles([]);
     setIsEditingApplication(false);
-  }, [selectedApplication, selectedApplicationAttachments]);
+  }, [
+    selectedApplication?.id,
+    selectedApplication?.requestContent,
+    selectedApplicationAttachmentsKey,
+  ]);
 
   const handleSaveApplicationEdit = async () => {
     if (!selectedApplication || !onUpdateCompanyApplication || !canEditApplication) return;
@@ -526,124 +451,25 @@ export function DashboardCalendar({
       </div>
 
       <div className="flex min-h-0 flex-1 overflow-hidden">
-        {/* Left Sidebar - Ticket Summary */}
-        <div className="w-80 bg-white border-r p-6 overflow-y-auto">
-          <h2 className="text-sm font-semibold text-gray-900 mb-4">티켓 현황</h2>
-          <div className="space-y-3">
-            <div className="grid grid-cols-2 gap-3">
-              <div
-                className={`rounded-lg border p-3 transition-colors ${
-                  internalTicketsDepleted
-                    ? "border-slate-200 bg-slate-100 text-slate-400"
-                    : "border-slate-200 bg-white"
-                }`}
-              >
-                <div className="mb-1 flex items-center justify-between gap-2">
-                  <div
-                    className={`text-xs font-semibold ${
-                      internalTicketsDepleted ? "text-slate-500" : "text-gray-900"
-                    }`}
-                  >
-                    내부 티켓
-                  </div>
-                  {internalTicketsDepleted ? (
-                    <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-semibold text-slate-500">
-                      소진
-                    </span>
-                  ) : null}
-                </div>
-                <div
-                  className={`text-xl font-bold leading-none ${
-                    internalTicketsDepleted ? "text-slate-400" : "text-gray-900"
-                  }`}
-                >
-                  {ticketStats.remainingInternal}
-                  <span className="text-xs font-normal text-muted-foreground">
-                    {" "}
-                    / {ticketStats.totalInternal}
-                  </span>
-                </div>
-                <p
-                  className={`mt-1 text-[11px] ${
-                    internalTicketsDepleted ? "text-slate-400" : "text-muted-foreground"
-                  }`}
-                >
-                  예약 {ticketStats.reservedInternal} · 완료 {ticketStats.completedInternal}
-                </p>
-              </div>
-              <div
-                className={`rounded-lg border p-3 transition-colors ${
-                  externalTicketsDepleted
-                    ? "border-slate-200 bg-slate-100 text-slate-400"
-                    : "border-slate-200 bg-white"
-                }`}
-              >
-                <div className="mb-1 flex items-center justify-between gap-2">
-                  <div
-                    className={`text-xs font-semibold ${
-                      externalTicketsDepleted ? "text-slate-500" : "text-gray-900"
-                    }`}
-                  >
-                    외부 티켓
-                  </div>
-                  {externalTicketsDepleted ? (
-                    <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-semibold text-slate-500">
-                      소진
-                    </span>
-                  ) : null}
-                </div>
-                <div
-                  className={`text-xl font-bold leading-none ${
-                    externalTicketsDepleted ? "text-slate-400" : "text-gray-900"
-                  }`}
-                >
-                  {ticketStats.remainingExternal}
-                  <span className="text-xs font-normal text-muted-foreground">
-                    {" "}
-                    / {ticketStats.totalExternal}
-                  </span>
-                </div>
-                <p
-                  className={`mt-1 text-[11px] ${
-                    externalTicketsDepleted ? "text-slate-400" : "text-muted-foreground"
-                  }`}
-                >
-                  예약 {ticketStats.reservedExternal} · 완료 {ticketStats.completedExternal}
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <div className="mt-8">
-            <h2 className="text-sm font-semibold text-gray-900 mb-4">참여 사업</h2>
-            {userPrograms.length > 0 ? (
-              <div className="max-h-48 overflow-y-auto pr-1">
-                <ul className="space-y-2">
-                  {userPrograms.map((program) => (
-                    <li key={program.id} className="text-sm border rounded-lg px-3 py-2 bg-gray-50">
-                      {program.name}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ) : (
-              <p className="text-xs text-muted-foreground">
-                참여 중인 사업이 없습니다.
-              </p>
-            )}
-          </div>
-
-          <div className="mt-8">
-            <div className="mb-4 flex items-center justify-between gap-2">
+        <div className="flex w-80 min-h-0 flex-col bg-white border-r p-6">
+          <div className="flex min-h-0 flex-1 flex-col">
+            <div className="mb-4">
               <h2 className="text-sm font-semibold text-gray-900">신청 현황</h2>
-              <div className="flex items-center gap-2">
+              <div className="mt-3 border-b border-slate-200">
+                <div className="flex items-center gap-4">
                 <button
                   type="button"
                   className={listTabButtonClass("pending")}
                   onClick={() => setApplicationListTab("pending")}
                 >
-                  대기중
-                  <span className="rounded-full bg-white/20 px-1.5 py-0.5 text-[11px]">
+                  <span>대기중</span>
+                  <span
+                    className={`rounded-full px-1.5 py-0.5 text-[11px] leading-none transition ${
+                      applicationListTab === "pending"
+                        ? "bg-slate-900 text-white"
+                        : "bg-slate-100 text-slate-500 group-hover:bg-slate-200"
+                    }`}
+                  >
                     {pendingApplications.length}
                   </span>
                 </button>
@@ -652,16 +478,23 @@ export function DashboardCalendar({
                   className={listTabButtonClass("rejected")}
                   onClick={() => setApplicationListTab("rejected")}
                 >
-                  거절됨
-                  <span className="rounded-full bg-white/20 px-1.5 py-0.5 text-[11px]">
+                  <span>거절됨</span>
+                  <span
+                    className={`rounded-full px-1.5 py-0.5 text-[11px] leading-none transition ${
+                      applicationListTab === "rejected"
+                        ? "bg-slate-900 text-white"
+                        : "bg-slate-100 text-slate-500 group-hover:bg-slate-200"
+                    }`}
+                  >
                     {rejectedApplications.length}
                   </span>
                 </button>
+                </div>
               </div>
             </div>
 
             {currentListApplications.length > 0 ? (
-              <div className="max-h-80 space-y-2 overflow-y-auto pr-1">
+              <div className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
                 {currentListApplications.map((app) => {
                   const metaLine = buildMetaLine(app);
                   return (
@@ -718,7 +551,7 @@ export function DashboardCalendar({
                 })}
               </div>
             ) : (
-              <div className="rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-center text-xs text-slate-500">
+              <div className="flex min-h-0 flex-1 items-center justify-center rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-center text-xs text-slate-500">
                 {applicationListTab === "pending"
                   ? "대기중인 신청이 없습니다."
                   : "거절된 신청이 없습니다."}
@@ -876,7 +709,7 @@ export function DashboardCalendar({
                     <div className="absolute left-[4.28rem] top-10 bottom-[-1.25rem] w-px bg-slate-200" />
                   ) : null}
                   <div className="absolute left-0 top-0 flex w-16 flex-col items-end gap-1 text-right">
-                    <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700">
+                    <span className="whitespace-nowrap rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700">
                       {event.scheduledTime ?? "시간 미정"}
                     </span>
                     {event.duration ? (
@@ -897,7 +730,7 @@ export function DashboardCalendar({
                           {event.officeHourTitle}
                         </p>
                         <div className="mt-1 flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
-                          <span className="rounded-full bg-slate-100 px-2 py-1">
+                          <span className="whitespace-nowrap rounded-full bg-slate-100 px-2 py-1">
                             {event.sessionFormat === "online" ? "온라인" : "오프라인"}
                           </span>
                           {event.agenda ? <span>{event.agenda}</span> : null}
@@ -917,7 +750,7 @@ export function DashboardCalendar({
       <Dialog
         open={Boolean(selectedApplication)}
         onOpenChange={(open) => {
-          if (!open) setSelectedApplication(null);
+          if (!open) setSelectedApplicationId(null);
         }}
       >
         <DialogContent className="flex max-h-[85vh] max-w-2xl flex-col overflow-hidden p-0">
@@ -930,7 +763,7 @@ export function DashboardCalendar({
                       {selectedApplication.officeHourTitle}
                     </DialogTitle>
                     <DialogDescription className="mt-2 flex flex-wrap items-center gap-2">
-                      <span className="rounded-full bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-600">
+                      <span className="whitespace-nowrap rounded-full bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-600">
                         {getApplicationTypeLabel(selectedApplication)}
                       </span>
                       <StatusChip status={selectedApplication.status} size="sm" />
@@ -996,6 +829,11 @@ export function DashboardCalendar({
                     <p className="mt-2 text-sm font-semibold text-slate-900">
                       {formatScheduleLabel(selectedApplication)}
                     </p>
+                    {isEditingApplication ? (
+                      <p className="mt-2 text-[11px] text-slate-500">
+                        대기중 리스트에서는 신청 내용과 첨부 파일만 수정할 수 있습니다.
+                      </p>
+                    ) : null}
                   </div>
                   <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3">
                     <div className="flex items-center gap-2 text-xs font-semibold text-slate-500">
@@ -1184,7 +1022,7 @@ export function DashboardCalendar({
                     {savingApplicationEdit ? "저장 중..." : "저장"}
                   </Button>
                 ) : null}
-                <Button onClick={() => setSelectedApplication(null)}>닫기</Button>
+                <Button onClick={() => setSelectedApplicationId(null)}>닫기</Button>
               </DialogFooter>
             </>
           ) : null}
@@ -1212,7 +1050,7 @@ export function DashboardCalendar({
                 if (!cancelTarget) return;
                 await Promise.resolve(onCancelApplication(cancelTarget.id));
                 if (selectedApplication?.id === cancelTarget.id) {
-                  setSelectedApplication(null);
+                  setSelectedApplicationId(null);
                 }
                 setCancelTarget(null);
               }}
