@@ -820,6 +820,15 @@ function CompanySignupInfo({
     return digits.replace(/\B(?=(\d{3})+(?!\d))/g, ",")
   }
 
+  function formatSignedNumberInput(value: string) {
+    const trimmed = value.trim()
+    const isNegative = trimmed.startsWith("-")
+    const digits = value.replace(/[^\d]/g, "")
+    if (!digits) return isNegative ? "-" : ""
+    const formatted = digits.replace(/\B(?=(\d{3})+(?!\d))/g, ",")
+    return isNegative ? `-${formatted}` : formatted
+  }
+
   function formatRevenueInput(value: string) {
     return formatNumberInput(value)
   }
@@ -2206,7 +2215,7 @@ function CompanySignupInfo({
                           onChange={(e) =>
                             setForm((prev) => ({
                               ...prev,
-                              capitalTotal: formatNumberInput(e.target.value),
+                              capitalTotal: formatSignedNumberInput(e.target.value),
                             }))
                           }
                           onBlur={() => markTouched("capitalTotal")}
