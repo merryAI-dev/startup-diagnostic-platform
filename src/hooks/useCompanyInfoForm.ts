@@ -120,6 +120,15 @@ function formatNumberInput(value: string) {
   return digits.replace(/\B(?=(\d{3})+(?!\d))/g, ",")
 }
 
+function formatSignedNumberInput(value: string) {
+  const trimmed = value.trim()
+  const isNegative = trimmed.startsWith("-")
+  const digits = value.replace(/[^\d]/g, "")
+  if (!digits) return isNegative ? "-" : ""
+  const formatted = digits.replace(/\B(?=(\d{3})+(?!\d))/g, ",")
+  return isNegative ? `-${formatted}` : formatted
+}
+
 function formatRevenueInput(value: string) {
   return formatNumberInput(value)
 }
@@ -177,6 +186,14 @@ function toNumber(value: string) {
   const digits = value.replace(/[^\d]/g, "")
   if (!digits) return null
   return Number(digits)
+}
+
+function toSignedNumber(value: string) {
+  const normalized = value.replace(/,/g, "").trim()
+  if (!normalized || normalized === "-") return null
+  const parsed = Number(normalized)
+  if (Number.isNaN(parsed)) return null
+  return parsed
 }
 
 function toDecimalNumber(value: string) {
@@ -627,7 +644,7 @@ export function useCompanyInfoForm(companyId: string) {
           y2025: isCorporate ? toDecimalNumber(form.revenue2025) : null,
           y2026: isCorporate ? toDecimalNumber(form.revenue2026) : null,
         },
-        capitalTotal: isCorporate ? toNumber(form.capitalTotal) : null,
+        capitalTotal: isCorporate ? toSignedNumber(form.capitalTotal) : null,
       },
       certifications: {
         designation: isCorporate ? form.certification : "",
@@ -766,6 +783,7 @@ export function useCompanyInfoForm(companyId: string) {
     savedCompanyProgramIds,
     savedInvestmentRows,
     formatNumberInput,
+    formatSignedNumberInput,
     formatRevenueInput,
     formatBusinessNumber,
     markTouched: (field: keyof CompanyInfoForm) =>

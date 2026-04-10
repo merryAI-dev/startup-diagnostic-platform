@@ -42,10 +42,12 @@ function normalizeConsentRecord(record?: ConsentSnapshot[keyof ConsentSnapshot])
 function normalizeConsentSnapshot(consents?: ConsentSnapshot) {
   if (!consents) return undefined
 
+  const terms = normalizeConsentRecord(consents.terms)
   const privacy = normalizeConsentRecord(consents.privacy)
   const marketing = normalizeConsentRecord(consents.marketing)
 
   return {
+    ...(terms ? { terms } : {}),
     ...(privacy ? { privacy } : {}),
     ...(marketing ? { marketing } : {}),
   }
@@ -55,6 +57,14 @@ function toNumber(value: string) {
   const digits = value.replace(/[^\d]/g, "")
   if (!digits) return null
   return Number(digits)
+}
+
+function toSignedNumber(value: string) {
+  const normalized = value.replace(/,/g, "").trim()
+  if (!normalized || normalized === "-") return null
+  const parsed = Number(normalized)
+  if (Number.isNaN(parsed)) return null
+  return parsed
 }
 
 function toDecimalNumber(value: string) {
@@ -132,7 +142,7 @@ export function buildCompanyInfoRecord(
         y2025: toDecimalNumber(form.revenue2025),
         y2026: toDecimalNumber(form.revenue2026),
       },
-      capitalTotal: toNumber(form.capitalTotal),
+      capitalTotal: toSignedNumber(form.capitalTotal),
     },
     certifications: {
       designation: form.certification,
