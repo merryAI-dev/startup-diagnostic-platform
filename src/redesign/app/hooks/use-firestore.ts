@@ -1,8 +1,8 @@
 /**
  * useFirestore – React Hook for Firestore CRUD + Real-time
  * ─────────────────────────────────────────────────────────
- * Firebase가 설정된 경우 Firestore를 사용하고,
- * 미설정(Mock 모드)인 경우 로컬 상태 + localStorage로 폴백합니다.
+ * Firebase가 설정된 경우 Firestore를 사용합니다.
+ * 미설정 상태는 비정상 구성으로 취급하며 빈 결과/실패를 반환합니다.
  *
  * 500명 동시 접속 지원:
  *  • 실시간 리스너 자동 구독/해제
@@ -34,7 +34,6 @@ export function useConnectionStatus() {
     isOnline: status === "online",
     isOffline: status === "offline",
     isFirebaseReady: isFirebaseConfigured,
-    isMockMode: !isFirebaseConfigured,
   };
 }
 

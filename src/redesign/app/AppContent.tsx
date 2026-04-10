@@ -12,6 +12,13 @@ import { ProtectedRoute } from "@/redesign/app/components/auth/protected-route"
 import { Topbar } from "@/redesign/app/components/layout/topbar"
 import { SidebarNav } from "@/redesign/app/components/layout/sidebar-nav"
 import { ContentLoadingOverlay } from "@/redesign/app/components/ui/content-loading-overlay"
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/redesign/app/components/ui/sheet"
 import { DashboardCalendar } from "@/redesign/app/components/pages/dashboard-calendar"
 import { RegularOfficeHoursCalendar } from "@/redesign/app/components/pages/regular-office-hours-calendar"
 import { RegularOfficeHourDetail } from "@/redesign/app/components/pages/regular-office-hour-detail"
@@ -68,21 +75,9 @@ import {
   User,
   UserRole,
   Agenda,
-  OfficeHourSlot,
   RegularOfficeHour,
-  OfficeHourSlotStatus,
   PendingProfileApproval,
 } from "@/redesign/app/lib/types"
-import {
-  regularOfficeHours as initialRegularOfficeHours,
-  initialApplications,
-  initialMessages,
-  agendas as initialAgendas,
-  initialConsultants,
-  initialMessageTemplates,
-  initialUsers,
-  programs as initialPrograms,
-} from "@/redesign/app/lib/data"
 import {
   COLLECTIONS,
   isFirebaseConfigured,
@@ -94,13 +89,18 @@ import {
 import {
   approvePendingUserViaFunction,
   cancelApplicationViaFunction,
+  syncConsultantSchedulingViaFunction,
+  syncProgramDefinitionViaFunction,
   submitRegularApplicationViaFunction,
   transitionApplicationStatusViaFunction,
+  updateCompanyApplicationViaFunction,
 } from "@/redesign/app/lib/functions"
 import {
   getAssignableConsultantsAt,
+  getPendingConsultantIds,
   hasScheduledConsultantForPendingApplication,
   hasApplicantConflictAt,
+  isApplicationTargetingConsultant,
 } from "@/redesign/app/lib/application-availability"
 import {
   endOfLocalDateKey,
@@ -110,14 +110,6 @@ import {
 } from "@/redesign/app/lib/date-keys"
 import { firestoreService } from "@/redesign/app/lib/firestore-service"
 import { db as redesignDb, storage as firebaseStorage } from "@/redesign/app/lib/firebase"
-import {
-  mockNotifications,
-  mockChatRooms,
-  mockChatMessages,
-  mockAIRecommendations,
-  mockGoals,
-  mockTeamMembers,
-} from "@/redesign/app/lib/advanced-mock-data"
 import {
   getCompanyIdsByProgram,
   replaceProgramCompanies,
@@ -405,17 +397,17 @@ function getWeekdayNumbers(weekdays?: Program["weekdays"]): number[] {
 function isProgramDateAllowed(program: Program | undefined, dateKey: string): boolean {
   if (!program || !isDateKey(dateKey)) return false
   const targetDate = parseDateKey(dateKey)
-  return new Set(getWeekdayNumbers(program.weekdays)).has(targetDate.getDay())
-}
+  const normalizedStart = normalizeDateKey(program.periodStart)
+  const normalizedEnd = normalizeDateKey(program.periodEnd)
+  if (!normalizedStart || !normalizedEnd) return false
 
-function sortOfficeHourSlots(slots: OfficeHourSlot[]): OfficeHourSlot[] {
-  return [...slots].sort((a, b) => {
-    const dateComp = a.date.localeCompare(b.date)
-    if (dateComp !== 0) return dateComp
-    const startComp = a.startTime.localeCompare(b.startTime)
-    if (startComp !== 0) return startComp
-    return a.consultantName.localeCompare(b.consultantName)
-  })
+  const startDate = parseDateKey(normalizedStart)
+  const endDate = parseDateKey(normalizedEnd)
+  if (targetDate.getTime() < startDate.getTime() || targetDate.getTime() > endDate.getTime()) {
+    return false
+  }
+
+  return new Set(getWeekdayNumbers(program.weekdays)).has(targetDate.getDay())
 }
 
 function buildRegularSlotId(
@@ -429,192 +421,9 @@ function buildRegularSlotId(
     .replace(/:/g, "-")
 }
 
-function buildManagedRegularSlots(
-  programs: Program[],
-  consultants: Consultant[],
-  agendas: Agenda[],
-  existingSlots: OfficeHourSlot[],
-) {
-  const activeAgendaIds = agendas
-    .filter((agenda) => agenda.active !== false)
-    .map((agenda) => agenda.id)
-  const linkedConsultants = consultants.filter((consultant) => {
-    if (consultant.status !== "active") return false
-    const consultantAgendaIds = consultant.agendaIds ?? []
-    return consultantAgendaIds.some((agendaId) => activeAgendaIds.includes(agendaId))
-  })
-  const existingSlotsById = new Map(existingSlots.map((slot) => [slot.id, slot]))
-  const desiredSlots: OfficeHourSlot[] = []
-
-  programs.forEach((program) => {
-    const normalizedStart = normalizeDateKey(program.periodStart)
-    const normalizedEnd = normalizeDateKey(program.periodEnd)
-    if (!normalizedStart || !normalizedEnd) {
-      return
-    }
-
-    const startDate = parseDateKey(normalizedStart)
-    const endDate = parseDateKey(normalizedEnd)
-    if (startDate.getTime() > endDate.getTime()) {
-      return
-    }
-
-    const weekdays = new Set(getWeekdayNumbers(program.weekdays))
-    const targetDates: string[] = []
-    const cursor = new Date(startDate)
-    while (cursor.getTime() <= endDate.getTime()) {
-      if (weekdays.has(cursor.getDay())) {
-        targetDates.push(formatDateKey(cursor))
-      }
-      cursor.setDate(cursor.getDate() + 1)
-    }
-
-    const baseTitle = `${program.name} 정기 오피스아워`
-    const baseDescription = program.description?.trim() || `${program.name} 사업`
-
-    linkedConsultants.forEach((consultant) => {
-      targetDates.forEach((dateKey) => {
-        const dayOfWeek = parseDateKey(dateKey).getDay()
-        const dayAvailability = consultant.availability.find(
-          (availability) => availability.dayOfWeek === dayOfWeek,
-        )
-        if (!dayAvailability) return
-        dayAvailability.slots
-          .filter((slot) => slot.available)
-          .forEach((slot) => {
-            const slotId = buildRegularSlotId(program.id, consultant.id, dateKey, slot.start)
-            const existing = existingSlotsById.get(slotId)
-
-            desiredSlots.push({
-              id: slotId,
-              type: "regular",
-              programId: program.id,
-              consultantId: consultant.id,
-              consultantName: consultant.name,
-              title: baseTitle,
-              description: baseDescription,
-              date: dateKey,
-              startTime: slot.start,
-              endTime: slot.end,
-              agendaIds: consultant.agendaIds ?? [],
-              status: existing?.status === "booked" ? "booked" : "open",
-            })
-          })
-      })
-    })
-  })
-
-  const managedProgramIds = new Set(programs.map((program) => program.id))
-  const desiredSlotIds = new Set(desiredSlots.map((slot) => slot.id))
-  const mergedMap = new Map(existingSlots.map((slot) => [slot.id, slot]))
-  desiredSlots.forEach((slot) => {
-    mergedMap.set(slot.id, slot)
-  })
-
-  const closedSlots: OfficeHourSlot[] = []
-  existingSlots.forEach((slot) => {
-    if (slot.type !== "regular" || !slot.programId || !managedProgramIds.has(slot.programId)) {
-      return
-    }
-    if (desiredSlotIds.has(slot.id) || slot.status === "booked") {
-      return
-    }
-    const closedSlot =
-      slot.status === "closed"
-        ? slot
-        : {
-            ...slot,
-            status: "closed" as const,
-          }
-    mergedMap.set(slot.id, closedSlot)
-    closedSlots.push(closedSlot)
-  })
-
-  return {
-    desiredSlots: sortOfficeHourSlots(desiredSlots),
-    closedSlots: sortOfficeHourSlots(closedSlots),
-    mergedSlots: sortOfficeHourSlots(Array.from(mergedMap.values())),
-  }
-}
-
-function groupSlotsToRegularOfficeHours(
-  slots: OfficeHourSlot[],
-  programs: Program[],
-): RegularOfficeHour[] {
-  const grouped = new Map<string, RegularOfficeHour>()
-  const programsById = new Map(programs.map((program) => [program.id, program]))
-
-  slots.forEach((slot) => {
-    if (!isDateKey(slot.date)) return
-    if (slot.programId && !isProgramDateAllowed(programsById.get(slot.programId), slot.date)) {
-      return
-    }
-    const isOpenSlot = slot.status === "open"
-    const month = slot.date.slice(0, 7)
-    const groupKey = [slot.programId ?? "no-program", month].join(":")
-    const slotTitle = typeof slot.title === "string" ? slot.title.trim() : ""
-    const officeHourTitle =
-      slotTitle.length > 0 ? slotTitle : `${month.replace("-", "년 ")}월 정기 오피스아워`
-    const existing = grouped.get(groupKey)
-    if (!existing) {
-      grouped.set(groupKey, {
-        id: groupKey,
-        title: officeHourTitle,
-        consultant: "담당자 배정 중",
-        programId: slot.programId,
-        month,
-        availableDates: isOpenSlot ? [slot.date] : [],
-        description: slot.description?.trim() || "정기 오피스아워",
-        slots: [
-          {
-            id: slot.id,
-            date: slot.date,
-            startTime: slot.startTime,
-            endTime: slot.endTime,
-            consultantId: slot.consultantId,
-            consultantName: slot.consultantName,
-            agendaIds: slot.agendaIds,
-            status: slot.status,
-          },
-        ],
-      })
-      return
-    }
-
-    const nextDates = new Set(existing.availableDates)
-    if (isOpenSlot) {
-      nextDates.add(slot.date)
-    }
-    const nextSlots = [...(existing.slots ?? [])]
-    nextSlots.push({
-      id: slot.id,
-      date: slot.date,
-      startTime: slot.startTime,
-      endTime: slot.endTime,
-      consultantId: slot.consultantId,
-      consultantName: slot.consultantName,
-      agendaIds: slot.agendaIds,
-      status: slot.status,
-    })
-
-    grouped.set(groupKey, {
-      ...existing,
-      availableDates: Array.from(nextDates).sort(),
-      slots: nextSlots.sort((a, b) => {
-        const dateComp = a.date.localeCompare(b.date)
-        if (dateComp !== 0) return dateComp
-        return a.startTime.localeCompare(b.startTime)
-      }),
-    })
-  })
-
-  return Array.from(grouped.values()).sort((a, b) => {
-    const monthComp = a.month.localeCompare(b.month)
-    if (monthComp !== 0) return monthComp
-    const titleComp = a.title.localeCompare(b.title)
-    if (titleComp !== 0) return titleComp
-    return a.consultant.localeCompare(b.consultant)
-  })
+function buildRegularOfficeHourId(programId: string, dateKey: string): string {
+  if (!programId || !isDateKey(dateKey)) return ""
+  return `${programId}:unassigned:${dateKey.slice(0, 7)}`
 }
 
 function groupProgramsToRegularOfficeHours(programs: Program[]): RegularOfficeHour[] {
@@ -684,15 +493,6 @@ function groupProgramsToRegularOfficeHours(programs: Program[]): RegularOfficeHo
   })
 }
 
-function normalizeSlotDoc(slot: OfficeHourSlot): OfficeHourSlot {
-  return {
-    ...slot,
-    status: slot.status ?? "open",
-    createdAt: slot.createdAt ? normalizeDateValue(slot.createdAt) : undefined,
-    updatedAt: slot.updatedAt ? normalizeDateValue(slot.updatedAt) : undefined,
-  }
-}
-
 function normalizeApplicationStatus(status?: ApplicationStatus): ApplicationStatus {
   if (status === "review") return "pending"
   return status ?? "pending"
@@ -749,6 +549,16 @@ function omitId<T extends { id: string }>(item: T): Omit<T, "id"> {
   ) as Omit<T, "id">
 }
 
+function buildPlaceholderUser(role: UserRole): User {
+  return {
+    id: "",
+    email: "",
+    companyName: "",
+    role,
+    programs: [],
+  }
+}
+
 export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
   const { user: firebaseUser, profile, loading, refreshProfile } = useAppAuth()
   const navigate = useNavigate()
@@ -764,8 +574,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       : rootSegment === "admin"
         ? "admin"
         : "user")
-  const loadingUser =
-    initialUsers.find((candidate) => candidate.role === loadingRole) ?? initialUsers[0]!
+  const loadingUser = buildPlaceholderUser(loadingRole)
   const loadingPage =
     routeSegment ||
     (loadingRole === "consultant"
@@ -845,8 +654,6 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       "admin-users",
       "pending-reports",
     ])
-  const needsOfficeHourSlots =
-    needsRegularOfficeHours || isPage(["application", "pending-reports"])
   const needsCompanyLookup = resolvedRole === "admin" && needsApplications
   const needsCompanyDirectory =
     resolvedRole === "admin" && isPage(["admin-programs", "admin-program-list"])
@@ -872,7 +679,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     return map
   }, [companyDocs])
   const [profileList, setProfileList] = useState<RawProfileApprovalDoc[]>([])
-  const [users, setUsers] = useState<UserWithPermissions[]>(initialUsers)
+  const [users, setUsers] = useState<UserWithPermissions[]>([])
   const liveCompanyIds = useMemo(() => {
     return new Set(
       profileList
@@ -896,14 +703,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
         ownerUid: doc.ownerUid ?? null,
       }))
     }
-    return users
-      .filter((u) => u.role === "user")
-      .map((u) => ({
-        id: u.id,
-        name: u.companyName?.trim() || "회사명 미입력",
-        programs: u.programs ?? [],
-        ownerUid: null,
-      }))
+    return []
   }, [
     companyDocs,
     companyNameById,
@@ -962,7 +762,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       enabled: isFirebaseConfigured && resolvedRole === "user" && !!companyRecordId,
     },
   )
-  const fallbackUser = initialUsers.find((u) => u.role === resolvedRole) ?? initialUsers[0]!
+  const fallbackUser = buildPlaceholderUser(resolvedRole)
   const user: User = useMemo(() => {
     const companyNameFromInfo =
       resolvedRole === "user" ? companyInfoDoc?.basic?.companyInfo?.trim() || null : null
@@ -1058,35 +858,17 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
         ? "admin-dashboard"
         : "dashboard"
   const [currentPage, setCurrentPage] = useState<AppPage>(initialPage)
-  const [applications, setApplications] = useState<Application[]>(() =>
-    isFirebaseConfigured
-      ? []
-      : initialApplications.map((application) => normalizeApplicationDoc(application)),
-  )
+  const [applications, setApplications] = useState<Application[]>([])
   const cancelledMigrationRan = useRef(false)
   const programAgendaCleanupRan = useRef(false)
-  const [regularOfficeHourList, setRegularOfficeHourList] = useState<RegularOfficeHour[]>(() =>
-    isFirebaseConfigured ? [] : initialRegularOfficeHours,
-  )
-  const [officeHourSlotList, setOfficeHourSlotList] = useState<OfficeHourSlot[]>([])
-  const [messages, setMessages] = useState<Message[]>(initialMessages)
+  const [regularOfficeHourList, setRegularOfficeHourList] = useState<RegularOfficeHour[]>([])
+  const [messages, setMessages] = useState<Message[]>([])
   const [selectedOfficeHourId, setSelectedOfficeHourId] = useState<string | null>(null)
   const [selectedApplicationId, setSelectedApplicationId] = useState<string | null>(null)
-  const [consultants, setConsultants] = useState<Consultant[]>(() =>
-    isFirebaseConfigured
-      ? []
-      : initialConsultants.map((consultant) => ({
-          ...consultant,
-          agendaIds: consultant.agendaIds ?? [],
-        })),
-  )
-  const [agendaList, setAgendaList] = useState<Agenda[]>(() =>
-    isFirebaseConfigured ? [] : initialAgendas,
-  )
-  const [templates, setTemplates] = useState<MessageTemplate[]>(initialMessageTemplates)
-  const [programList, setProgramList] = useState<Program[]>(() =>
-    isFirebaseConfigured ? [] : initialPrograms,
-  )
+  const [consultants, setConsultants] = useState<Consultant[]>([])
+  const [agendaList, setAgendaList] = useState<Agenda[]>([])
+  const [templates, setTemplates] = useState<MessageTemplate[]>([])
+  const [programList, setProgramList] = useState<Program[]>([])
 
   const [reports, setReports] = useState<OfficeHourReport[]>([])
   const [reportFormOpen, setReportFormOpen] = useState(false)
@@ -1094,18 +876,21 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
   const [reportBeingEdited, setReportBeingEdited] = useState<OfficeHourReport | null>(null)
   const [reportFormIsManual, setReportFormIsManual] = useState(false)
   const [reportPopupDismissed, setReportPopupDismissed] = useState<Record<string, number>>({})
+  const [consultantScheduleSaving, setConsultantScheduleSaving] = useState(false)
+  const [selectedRegularDateKey, setSelectedRegularDateKey] = useState<string | null>(null)
+  const [isRegularApplicationSheetOpen, setIsRegularApplicationSheetOpen] = useState(false)
   const reportPopupOpenedRef = useRef(false)
   const reportPopupSessionKey = "office-hour-report-popup-shown"
   const submissionLocksRef = useRef<Set<string>>(new Set())
 
   // 새로운 기능을 위한 상태
-  const [notifications, setNotifications] = useState<Notification[]>(mockNotifications)
-  const [chatRooms, setChatRooms] = useState<ChatRoom[]>(mockChatRooms)
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>(mockChatMessages)
+  const [notifications, setNotifications] = useState<Notification[]>([])
+  const [chatRooms, setChatRooms] = useState<ChatRoom[]>([])
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
   const [aiRecommendations, setAIRecommendations] =
-    useState<AIRecommendation[]>(mockAIRecommendations)
-  const [goals, setGoals] = useState<Goal[]>(mockGoals)
-  const [teamMembers, setTeamMembers] = useState<TeamMember[]>(mockTeamMembers)
+    useState<AIRecommendation[]>([])
+  const [goals, setGoals] = useState<Goal[]>([])
+  const [teamMembers, setTeamMembers] = useState<TeamMember[]>([])
 
   const { data: consultantDocs, loading: consultantDocsLoading } = useFirestoreCollection<Consultant>(COLLECTIONS.CONSULTANTS, {
     orderByField: "name",
@@ -1122,14 +907,6 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     orderDirection: "asc",
     enabled: isFirebaseConfigured && !isCompanyInfoRoute && needsPrograms,
   })
-  const { data: officeHourSlotDocs, loading: officeHourSlotDocsLoading } = useFirestoreCollection<OfficeHourSlot>(
-    COLLECTIONS.OFFICE_HOUR_SLOTS,
-    {
-      orderByField: "date",
-      orderDirection: "asc",
-      enabled: isFirebaseConfigured && !isCompanyInfoRoute && needsOfficeHourSlots,
-    },
-  )
   const { data: officeHourApplicationDocs, loading: officeHourApplicationDocsLoading } = useFirestoreCollection<Application>(
     COLLECTIONS.OFFICE_HOUR_APPLICATIONS,
     {
@@ -1171,9 +948,6 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
   const consultantCrud = useFirestoreCRUD<Omit<Consultant, "id">>(COLLECTIONS.CONSULTANTS)
   const agendaCrud = useFirestoreCRUD<Omit<Agenda, "id">>(COLLECTIONS.AGENDAS)
   const programCrud = useFirestoreCRUD<Omit<Program, "id">>(COLLECTIONS.PROGRAMS)
-  const officeHourSlotCrud = useFirestoreCRUD<Omit<OfficeHourSlot, "id">>(
-    COLLECTIONS.OFFICE_HOUR_SLOTS,
-  )
   const officeHourApplicationCrud = useFirestoreCRUD<Omit<Application, "id">>(
     COLLECTIONS.OFFICE_HOUR_APPLICATIONS,
   )
@@ -1233,19 +1007,6 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       .sort((a, b) => getTimeValue(b.createdAt) - getTimeValue(a.createdAt))
   }, [applications, isFirebaseConfigured, officeHourApplicationDocs, resolveCompanyName])
 
-  const slotTitleById = useMemo(
-    () => new Map(officeHourSlotList.map((slot) => [slot.id, slot.title])),
-    [officeHourSlotList],
-  )
-  const slotProgramIdById = useMemo(
-    () =>
-      new Map(
-        officeHourSlotList.flatMap((slot) =>
-          slot.programId ? [[slot.id, slot.programId] as const] : [],
-        ),
-      ),
-    [officeHourSlotList],
-  )
   const officeHourById = useMemo(
     () => new Map(regularOfficeHourList.map((officeHour) => [officeHour.id, officeHour])),
     [regularOfficeHourList],
@@ -1267,8 +1028,8 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       if (application.officeHourId && application.officeHourId.includes(":")) {
         return application.officeHourId.split(":")[0]
       }
-      if (application.officeHourSlotId && slotProgramIdById.has(application.officeHourSlotId)) {
-        return slotProgramIdById.get(application.officeHourSlotId)
+      if (application.officeHourId && officeHourById.has(application.officeHourId)) {
+        return officeHourById.get(application.officeHourId)?.programId
       }
       return undefined
     })()
@@ -1277,9 +1038,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     const resolvedAgenda = agendaName ?? application.agenda ?? "미지정"
 
     let resolvedOfficeHourTitle = application.officeHourTitle
-    if (application.officeHourSlotId && slotTitleById.has(application.officeHourSlotId)) {
-      resolvedOfficeHourTitle = slotTitleById.get(application.officeHourSlotId)!
-    } else if (application.officeHourId && officeHourById.has(application.officeHourId)) {
+    if (application.officeHourId && officeHourById.has(application.officeHourId)) {
       resolvedOfficeHourTitle = officeHourById.get(application.officeHourId)!.title
     }
 
@@ -1306,7 +1065,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       agenda: resolvedAgenda,
       officeHourTitle: resolvedOfficeHourTitle,
     }
-  }, [agendaNameById, officeHourById, programNameById, slotProgramIdById, slotTitleById])
+  }, [agendaNameById, officeHourById, programNameById])
 
   const resolvedApplications = useMemo(() => {
     return liveApplications.map(resolveApplicationRecord)
@@ -1341,16 +1100,15 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       return []
     }
     return resolvedApplications.filter((application) => {
-      if (application.consultantId) {
-        return consultantIdCandidates.has(application.consultantId)
+      const pendingConsultantIds = getPendingConsultantIds(application)
+      const isTargetedToCurrentConsultant = Array.from(consultantIdCandidates).some((consultantId) =>
+        isApplicationTargetingConsultant(application, consultantId),
+      )
+      if (isTargetedToCurrentConsultant) {
+        return true
       }
-      if (application.officeHourSlotId) {
-        const reservedSlot = officeHourSlotList.find((slot) => slot.id === application.officeHourSlotId)
-        if (reservedSlot?.consultantId) {
-          if (consultantIdCandidates.has(reservedSlot.consultantId)) {
-            return true
-          }
-        }
+      if (pendingConsultantIds.length > 0) {
+        return false
       }
       if (application.agendaId && consultantAgendaIds.has(application.agendaId)) {
         return true
@@ -1368,7 +1126,6 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     consultantIdCandidates,
     consultantAgendaIds,
     consultantAgendaNames,
-    officeHourSlotList,
   ])
 
   const agendaScopeById = useMemo(
@@ -1391,16 +1148,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
 
   const scopedRegularOfficeHourList = useMemo(() => {
     if (resolvedRole === "consultant") {
-      return resolvedRegularOfficeHourList.filter((officeHour) => {
-        return (
-          (officeHour.consultantId && consultantIdCandidates.has(officeHour.consultantId)) ||
-          Boolean(
-            officeHour.slots?.some(
-              (slot) => slot.consultantId && consultantIdCandidates.has(slot.consultantId),
-            ),
-          )
-        )
-      })
+      return resolvedRegularOfficeHourList
     }
     if (resolvedRole === "user") {
       return resolvedRegularOfficeHourList.filter((officeHour) => {
@@ -1411,19 +1159,9 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     return resolvedRegularOfficeHourList
   }, [
     companyProgramIds,
-    consultantIdCandidates,
     resolvedRegularOfficeHourList,
     resolvedRole,
   ])
-  const regularOfficeHoursLoading =
-    isFirebaseConfigured &&
-    resolvedRole === "user" &&
-    needsRegularOfficeHours &&
-    resolvedRegularOfficeHourList.length === 0 &&
-    (
-      programDocsLoading ||
-      officeHourSlotDocsLoading
-    )
   const applicationsLoading =
     isFirebaseConfigured &&
     needsApplications &&
@@ -1436,7 +1174,6 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     currentPage === "regular-wizard" &&
     (
       officeHourApplicationDocsLoading ||
-      officeHourSlotDocsLoading ||
       consultantDocsLoading ||
       agendaDocsLoading
     )
@@ -1475,6 +1212,18 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     }
     return programList
   }, [companyProgramIds, consultantProgramIds, programList, resolvedRole])
+  const userRegularOfficeHourList = useMemo(() => {
+    if (resolvedRole !== "user") return []
+    return groupProgramsToRegularOfficeHours(scopedProgramList)
+  }, [resolvedRole, scopedProgramList])
+  const visibleRegularOfficeHourList =
+    resolvedRole === "user" ? userRegularOfficeHourList : scopedRegularOfficeHourList
+  const regularOfficeHoursLoading =
+    isFirebaseConfigured &&
+    resolvedRole === "user" &&
+    needsRegularOfficeHours &&
+    visibleRegularOfficeHourList.length === 0 &&
+    programDocsLoading
 
   const ticketStats = useMemo(() => {
     if (resolvedRole !== "user") {
@@ -1552,6 +1301,54 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     scopedApplications,
     scopedProgramList,
   ])
+
+  const regularOfficeHourSummary = useMemo(() => {
+    if (resolvedRole !== "user") {
+      return {
+        upcomingCount: 0,
+        currentMonthCount: 0,
+        nextScheduleLabel: null as string | null,
+      }
+    }
+
+    const today = startOfDay(new Date())
+    const upcomingRegularApplications = scopedApplications
+      .filter((application) => {
+        if (application.type !== "regular") return false
+        if (normalizeApplicationStatus(application.status) !== "confirmed") return false
+        if (!application.scheduledDate) return false
+        const scheduledDate = parseSafeLocalDateKey(application.scheduledDate)
+        return Boolean(scheduledDate && !isBefore(scheduledDate, today))
+      })
+      .sort((a, b) => {
+        const aDate = parseLocalDateTimeKey(a.scheduledDate!, a.scheduledTime ?? "00:00")?.getTime() ?? 0
+        const bDate = parseLocalDateTimeKey(b.scheduledDate!, b.scheduledTime ?? "00:00")?.getTime() ?? 0
+        return aDate - bDate
+      })
+
+    const nextApplication = upcomingRegularApplications[0]
+    const nextScheduleDate = nextApplication?.scheduledDate
+      ? parseSafeLocalDateKey(nextApplication.scheduledDate)
+      : null
+
+    return {
+      upcomingCount: upcomingRegularApplications.length,
+      currentMonthCount: upcomingRegularApplications.filter((application) => {
+        const scheduledDate = application.scheduledDate
+          ? parseSafeLocalDateKey(application.scheduledDate)
+          : null
+        return Boolean(
+          scheduledDate &&
+          scheduledDate.getFullYear() === today.getFullYear() &&
+          scheduledDate.getMonth() === today.getMonth(),
+        )
+      }).length,
+      nextScheduleLabel:
+        nextApplication && nextScheduleDate
+          ? `${nextApplication.scheduledDate} ${nextApplication.scheduledTime ?? ""}`.trim()
+          : null,
+    }
+  }, [resolvedRole, scopedApplications])
 
   const scopedUser = useMemo<User>(() => {
     if (resolvedRole !== "consultant") return user
@@ -1701,20 +1498,8 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
 
   useEffect(() => {
     if (!isFirebaseConfigured) return
-    const normalizedSlots = officeHourSlotDocs.map(normalizeSlotDoc)
-    setOfficeHourSlotList(normalizedSlots)
-
-    const slotGroups = groupSlotsToRegularOfficeHours(normalizedSlots, programList)
-    const programGroups = groupProgramsToRegularOfficeHours(programList)
-    const programIdsWithSlots = new Set(
-      slotGroups.map((group) => group.programId).filter(Boolean) as string[],
-    )
-    const merged = [
-      ...slotGroups,
-      ...programGroups.filter((group) => !programIdsWithSlots.has(group.programId ?? "")),
-    ]
-    setRegularOfficeHourList(merged)
-  }, [officeHourSlotDocs, programList])
+    setRegularOfficeHourList(groupProgramsToRegularOfficeHours(programList))
+  }, [isFirebaseConfigured, programList])
 
   useEffect(() => {
     if (!isFirebaseConfigured || !needsApplications) return
@@ -1798,26 +1583,10 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
 
   const getSessionEndTime = (app: Application) => {
     const durationHours = app.duration ?? 1
-    const slot = app.officeHourSlotId
-      ? officeHourSlotList.find((item) => item.id === app.officeHourSlotId)
-      : undefined
 
     if (app.scheduledDate && app.scheduledTime) {
       const start = parseLocalDateTimeKey(app.scheduledDate, app.scheduledTime)
       if (start) {
-        return new Date(start.getTime() + durationHours * 60 * 60 * 1000)
-      }
-    }
-
-    if (slot) {
-      const start = parseLocalDateTimeKey(slot.date, slot.startTime)
-      if (start) {
-        if (slot.endTime) {
-          const end = parseLocalDateTimeKey(slot.date, slot.endTime)
-          if (end) {
-            return end
-          }
-        }
         return new Date(start.getTime() + durationHours * 60 * 60 * 1000)
       }
     }
@@ -1866,8 +1635,6 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     })
     setApplications(nextApplications)
 
-    const slotIdsToOpen = collectReleasableSlotIds(eligible, nextApplications)
-    await releaseSlots(slotIdsToOpen)
     return true
   }
 
@@ -1889,7 +1656,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
   const reportFormDeadlineInfo = useMemo(() => {
     if (!reportFormApplication || reportFormIsManual) return null
     return getReportDeadlineInfo(reportFormApplication)
-  }, [reportFormApplication, reportFormIsManual, officeHourSlotList])
+  }, [reportFormApplication, reportFormIsManual])
 
   // 자동 상태 전환:
   // 1) 진행 시간이 지난 pending는 rejected로 자동 전환
@@ -1969,8 +1736,6 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     canAutoTransitionApplications,
     isFirebaseConfigured,
     officeHourApplicationCrud,
-    officeHourSlotList,
-    officeHourSlotCrud,
   ])
 
   const dismissReportPopup = (applicationId: string, dismissForMs: number) => {
@@ -2019,7 +1784,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       reportPopupOpenedRef.current = true
       sessionStorage.setItem(reportPopupSessionKey, "true")
     }
-  }, [user, scopedApplications, reports, reportFormOpen, officeHourSlotList, reportPopupDismissed])
+  }, [user, scopedApplications, reports, reportFormOpen, reportPopupDismissed])
 
   useEffect(() => {
     reportPopupOpenedRef.current = false
@@ -2110,12 +1875,35 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
             priority: (deadlineInfo?.isOverdue ? "high" : "medium") as Notification["priority"],
           }
         })
-
-      return [...updated, ...newNotifications].sort(
+      const nextNotifications = [...updated, ...newNotifications].sort(
         (a, b) => b.createdAt.getTime() - a.createdAt.getTime(),
       )
+
+      if (
+        prev.length === nextNotifications.length &&
+        prev.every((item, index) => {
+          const nextItem = nextNotifications[index]
+          if (!nextItem) return false
+          return (
+            item.id === nextItem.id &&
+            item.type === nextItem.type &&
+            item.title === nextItem.title &&
+            item.content === nextItem.content &&
+            item.link === nextItem.link &&
+            item.isRead === nextItem.isRead &&
+            item.userId === nextItem.userId &&
+            item.relatedId === nextItem.relatedId &&
+            item.priority === nextItem.priority &&
+            item.createdAt.getTime() === nextItem.createdAt.getTime()
+          )
+        })
+      ) {
+        return prev
+      }
+
+      return nextNotifications
     })
-  }, [user, scopedApplications, reports, officeHourSlotList])
+  }, [user, scopedApplications, reports])
 
   const openReportFormForApplication = (applicationId: string) => {
     if (applicationId === "irregular-manual") {
@@ -2157,6 +1945,9 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     if (page === "regular-detail") {
       setSelectedOfficeHourId(id ?? null)
     }
+    if (page !== "regular-detail" && page !== "regular-wizard") {
+      setSelectedRegularDateKey(null)
+    }
     if (page === "application") {
       setSelectedApplicationId(id ?? null)
     }
@@ -2169,99 +1960,30 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
   }
   const handleNavigateLoose = (page: string, id?: string) => handleNavigate(page as AppPage, id)
 
-  const handleSelectOfficeHour = (id: string) => {
-    handleNavigate("regular-detail", id)
+  const handleSelectOfficeHour = (id?: string, dateKey?: string) => {
+    const resolvedOfficeHourId = id
+      ?? visibleRegularOfficeHourList.find((item) => (dateKey ? item.availableDates?.includes(dateKey) : false))?.id
+      ?? null
+    setSelectedOfficeHourId(resolvedOfficeHourId)
+    setSelectedRegularDateKey(dateKey ?? null)
+    if (currentPage === "regular" && resolvedOfficeHourId) {
+      setIsRegularApplicationSheetOpen(true)
+      return
+    }
+    if (resolvedOfficeHourId) {
+      handleNavigate("regular-detail", resolvedOfficeHourId)
+    }
   }
 
   const handleStartRegularApplication = () => {
     handleNavigate("regular-wizard")
   }
 
-  const hasOtherActiveApplicationsForSlot = (
-    slotId: string,
-    applicationId: string,
-    appList: Application[],
-  ) => {
-    return appList.some(
-      (app) =>
-        app.id !== applicationId &&
-        app.officeHourSlotId === slotId &&
-        app.status !== "cancelled" &&
-        app.status !== "rejected",
-    )
-  }
-
-  const getRelatedSlotIdsForApplication = (application: Application) => {
-    const slotId = application.officeHourSlotId
-    if (!slotId) return []
-    const baseSlot = officeHourSlotList.find((slot) => slot.id === slotId)
-    if (!baseSlot) return [slotId]
-    if (baseSlot.consultantId) return [slotId]
-    if (!baseSlot.programId || !baseSlot.date || !baseSlot.startTime) {
-      return [slotId]
+  useEffect(() => {
+    if (currentPage !== "regular") {
+      setIsRegularApplicationSheetOpen(false)
     }
-
-    const matchedSlotIds = officeHourSlotList
-      .filter(
-        (slot) =>
-          slot.type === "regular" &&
-          slot.programId === baseSlot.programId &&
-          slot.date === baseSlot.date &&
-          slot.startTime === baseSlot.startTime,
-      )
-      .map((slot) => slot.id)
-
-    return matchedSlotIds.length > 0 ? matchedSlotIds : [slotId]
-  }
-
-  const collectReleasableSlotIds = (changedApplications: Application[], appList: Application[]) => {
-    const releasable = new Set<string>()
-
-    changedApplications.forEach((application) => {
-      getRelatedSlotIdsForApplication(application).forEach((slotId) => {
-        if (!hasOtherActiveApplicationsForSlot(slotId, application.id, appList)) {
-          releasable.add(slotId)
-        }
-      })
-    })
-
-    return releasable
-  }
-
-  const releaseSlots = async (slotIds: Set<string>) => {
-    if (slotIds.size === 0) return
-    if (isFirebaseConfigured) {
-      const operations = Array.from(slotIds).map((slotId) => ({
-        type: "update" as const,
-        collection: COLLECTIONS.OFFICE_HOUR_SLOTS,
-        docId: slotId,
-        data: { status: "open" },
-      }))
-      const updated = await officeHourSlotCrud.batchUpdate(operations)
-      if (!updated) {
-        toast.error("슬롯 상태 업데이트에 실패했습니다")
-      }
-      return
-    }
-    slotIds.forEach((slotId) => applyLocalSlotStatus(slotId, "open"))
-  }
-
-  const applyLocalSlotStatus = (slotId: string, status: OfficeHourSlotStatus) => {
-    setOfficeHourSlotList((prev) =>
-      prev.map((slot) => (slot.id === slotId ? { ...slot, status } : slot)),
-    )
-    setRegularOfficeHourList((prev) =>
-      prev.map((officeHour) => {
-        if (!officeHour.slots?.some((slot) => slot.id === slotId)) {
-          return officeHour
-        }
-        return {
-          ...officeHour,
-          slots: officeHour.slots.map((slot) => (slot.id === slotId ? { ...slot, status } : slot)),
-        }
-      }),
-    )
-  }
+  }, [currentPage])
 
   const acquireSubmissionLock = (key: string) => {
     if (submissionLocksRef.current.has(key)) return false
@@ -2345,7 +2067,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
   }
 
   const handleSubmitRegularApplication = async (data: ApplicationFormData) => {
-    const officeHour = resolvedRegularOfficeHourList.find((oh) => oh.id === data.officeHourId)
+    const officeHour = visibleRegularOfficeHourList.find((oh) => oh.id === data.officeHourId)
     if (!officeHour) return
     if (isBefore(startOfDay(data.date), startOfDay(new Date()))) {
       toast.error("오늘 이전 날짜는 신청할 수 없습니다")
@@ -2368,21 +2090,6 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     }
 
     try {
-      const selectedSlot = data.slotId
-        ? officeHourSlotList.find((slot) => slot.id === data.slotId)
-        : officeHour.slots?.find(
-            (slot) =>
-              slot.date === scheduledDate &&
-              slot.startTime === data.time &&
-              slot.status === "open" &&
-              (!slot.agendaIds || slot.agendaIds.includes(data.agendaId)),
-          )
-
-      if (selectedSlot && selectedSlot.status !== "open") {
-        toast.error("선택한 시간이 이미 마감되었습니다")
-        return
-      }
-
       const agenda = agendaList.find((a) => a.id === data.agendaId)
       if (!agenda) {
         toast.error("선택한 아젠다 정보를 찾지 못했습니다")
@@ -2427,11 +2134,9 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       const assignableConsultants = getAssignableConsultantsAt({
         consultants: linkedConsultants,
         applications,
-        officeHourSlots: officeHourSlotList,
         agendaId: data.agendaId,
         dateKey: scheduledDate,
         time: data.time,
-        slotConsultantId: selectedSlot?.consultantId,
       })
 
       if (assignableConsultants.length === 0) {
@@ -2464,13 +2169,13 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
         type: "regular",
         status: "pending",
         officeHourId: data.officeHourId,
-        officeHourSlotId: selectedSlot?.id ?? data.slotId,
         companyId: companyRecordId,
         programId: officeHour.programId,
         officeHourTitle: officeHour.title,
         agendaId: data.agendaId,
         companyName: user.companyName,
         consultant: "담당자 배정 중",
+        pendingConsultantIds: assignableConsultants.map((consultant) => consultant.id),
         sessionFormat: data.sessionFormat,
         agenda: agenda.name,
         requestContent: data.requestContent,
@@ -2493,7 +2198,6 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
         try {
           await submitRegularApplicationViaFunction({
             officeHourId: data.officeHourId,
-            officeHourSlotId: selectedSlot?.id ?? data.slotId ?? null,
             officeHourTitle: officeHour.title,
             programId: officeHour.programId ?? null,
             agendaId: data.agendaId,
@@ -2515,9 +2219,6 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
         }
       } else {
         setApplications((prev) => [...prev, newApplication])
-        if (newApplication.officeHourSlotId) {
-          applyLocalSlotStatus(newApplication.officeHourSlotId, "booked")
-        }
       }
 
       toast.success("신청이 제출되었습니다", {
@@ -2707,9 +2408,6 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     }
     setApplications(nextApplications)
 
-    const releasableSlotIds = collectReleasableSlotIds([targetApplication], nextApplications)
-    await releaseSlots(releasableSlotIds)
-
     toast.success("신청이 삭제되었습니다")
     handleNavigate("dashboard")
   }
@@ -2809,26 +2507,6 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       setApplications(nextApplications)
     }
 
-    const slotId = targetApplication.officeHourSlotId
-    if (!slotId) return
-
-    const shouldReleaseSlot =
-      status === "cancelled" ||
-      status === "rejected"
-    if (shouldReleaseSlot) {
-      const releasableSlotIds = collectReleasableSlotIds([targetApplication], nextApplications)
-      await releaseSlots(releasableSlotIds)
-      return
-    }
-
-    if (isFirebaseConfigured) {
-      const slotUpdated = await officeHourSlotCrud.update(slotId, { status: "booked" })
-      if (!slotUpdated) {
-        toast.error("슬롯 상태 업데이트에 실패했습니다")
-      }
-    } else {
-      applyLocalSlotStatus(slotId, "booked")
-    }
   }
 
   const handleRequestApplication = async (id: string) => {
@@ -2879,13 +2557,8 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       toast.error("배정된 아젠다와 일치하지 않습니다")
       return
     }
-    const reservedSlot = targetApplication.officeHourSlotId
-      ? officeHourSlotList.find((slot) => slot.id === targetApplication.officeHourSlotId)
-      : undefined
-    if (
-      reservedSlot?.consultantId &&
-      reservedSlot.consultantId !== currentConsultant.id
-    ) {
+    const pendingConsultantIds = getPendingConsultantIds(targetApplication)
+    if (pendingConsultantIds.length > 0 && !pendingConsultantIds.includes(currentConsultant.id)) {
       toast.error("배정된 컨설턴트만 이 신청을 처리할 수 있습니다")
       return
     }
@@ -2926,6 +2599,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       status: "confirmed" as const,
       consultant: currentConsultant.name,
       consultantId: currentConsultant.id,
+      pendingConsultantIds: undefined,
       updatedAt,
     }
 
@@ -2934,8 +2608,9 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
         status: "confirmed",
         consultant: currentConsultant.name,
         consultantId: currentConsultant.id,
+        pendingConsultantIds: deleteField(),
         updatedAt,
-      })
+      } as Record<string, unknown>)
       if (!updated) {
         toast.error("수락 요청 처리에 실패했습니다")
         return
@@ -2989,14 +2664,8 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       !targetApplication.consultantId &&
       (!targetApplication.consultant || targetApplication.consultant === "담당자 배정 중")
     const isAssignedToCurrent = targetApplication.consultantId === currentConsultant.id
-    const reservedSlot = targetApplication.officeHourSlotId
-      ? officeHourSlotList.find((slot) => slot.id === targetApplication.officeHourSlotId)
-      : undefined
-
-    if (
-      reservedSlot?.consultantId &&
-      reservedSlot.consultantId !== currentConsultant.id
-    ) {
+    const pendingConsultantIds = getPendingConsultantIds(targetApplication)
+    if (pendingConsultantIds.length > 0 && !pendingConsultantIds.includes(currentConsultant.id)) {
       toast.error("배정된 컨설턴트만 이 신청을 처리할 수 있습니다")
       return
     }
@@ -3012,7 +2681,8 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       ...targetApplication,
       status: "rejected" as const,
       consultant: currentConsultant.name,
-      consultantId: currentConsultant.id,
+      consultantId: undefined,
+      pendingConsultantIds: undefined,
       rejectionReason,
       updatedAt,
     }
@@ -3023,18 +2693,16 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       const updated = await officeHourApplicationCrud.update(id, {
         status: "rejected",
         consultant: currentConsultant.name,
-        consultantId: currentConsultant.id,
+        consultantId: deleteField(),
+        pendingConsultantIds: deleteField(),
         rejectionReason,
         updatedAt,
-      })
+      } as Record<string, unknown>)
       if (!updated) {
         toast.error("거절 처리에 실패했습니다")
         return
       }
     }
-
-    const releasableSlotIds = collectReleasableSlotIds([targetApplication], nextApplications)
-    await releaseSlots(releasableSlotIds)
 
       toast.success("거절 처리되었습니다.")
     } finally {
@@ -3076,13 +2744,10 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       }
 
     const isPending = normalizeApplicationStatus(targetApplication.status) === "pending"
-    const isRequester = targetApplication.consultantId === currentConsultant.id
-    const reservedSlot = targetApplication.officeHourSlotId
-      ? officeHourSlotList.find((slot) => slot.id === targetApplication.officeHourSlotId)
-      : undefined
-    const isReservedToCurrent =
-      !reservedSlot?.consultantId || reservedSlot.consultantId === currentConsultant.id
-    if (!isPending || !isRequester || !isReservedToCurrent) {
+    const pendingConsultantIds = getPendingConsultantIds(targetApplication)
+    const isPendingTargetedToCurrent =
+      pendingConsultantIds.length === 0 || pendingConsultantIds.includes(currentConsultant.id)
+    if (!isPending || !isPendingTargetedToCurrent) {
       toast.error("확정할 수 있는 상태가 아닙니다")
       return
     }
@@ -3121,6 +2786,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     const assignmentPatch = {
       consultant: currentConsultant.name,
       consultantId: currentConsultant.id,
+      pendingConsultantIds: undefined,
     }
     const nextApplication = {
       ...targetApplication,
@@ -3141,19 +2807,6 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       }
     } else {
       setApplications((prev) => prev.map((app) => (app.id === id ? nextApplication : app)))
-    }
-
-    if (targetApplication.officeHourSlotId) {
-      if (isFirebaseConfigured) {
-        const slotUpdated = await officeHourSlotCrud.update(targetApplication.officeHourSlotId, {
-          status: "booked",
-        })
-        if (!slotUpdated) {
-          toast.error("슬롯 상태 업데이트에 실패했습니다")
-        }
-      } else {
-        applyLocalSlotStatus(targetApplication.officeHourSlotId, "booked")
-      }
     }
 
       toast.success("일정이 확정되었습니다.")
@@ -3260,6 +2913,8 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       requestContent: string
       retainedAttachments: Array<{ name: string; url?: string }>
       newFiles: FileItem[]
+      scheduledDate?: string
+      scheduledTime?: string
     },
   ) => {
     const targetApplication = applications.find((app) => app.id === id)
@@ -3290,6 +2945,15 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       toast.error("진행 시간이 지난 신청 또는 완료된 신청은 수정할 수 없습니다")
       return false
     }
+
+    const nextScheduledDate = payload.scheduledDate?.trim() || targetApplication.scheduledDate || ""
+    const nextScheduledTime = normalizeTimeKey(payload.scheduledTime ?? targetApplication.scheduledTime ?? "")
+    const scheduleChanged =
+      targetApplication.type === "regular" &&
+      (
+        nextScheduledDate !== (targetApplication.scheduledDate ?? "") ||
+        nextScheduledTime !== normalizeTimeKey(targetApplication.scheduledTime ?? "")
+      )
 
     let uploadedUrls: string[] = []
     if (isFirebaseConfigured && payload.newFiles.length > 0) {
@@ -3327,34 +2991,119 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       (url) => !retainedUrls.includes(url),
     )
 
-    const updatedAt = new Date()
-    const nextApplications = applications.map((app) =>
-      app.id === id
-        ? {
+    if (isFirebaseConfigured) {
+      try {
+        await updateCompanyApplicationViaFunction({
+          applicationId: id,
+          requestContent: nextRequestContent,
+          attachmentNames: nextAttachmentNames,
+          attachmentUrls: nextAttachmentUrls,
+          ...(scheduleChanged ? { scheduledDate: nextScheduledDate, scheduledTime: nextScheduledTime } : {}),
+        })
+      } catch (error) {
+        if (uploadedUrls.length > 0) {
+          await removeApplicationAttachmentsFromStorage(uploadedUrls)
+        }
+        toast.error(getFunctionErrorMessage(error, "신청 정보 저장에 실패했습니다"))
+        return false
+      }
+    } else {
+      if (scheduleChanged) {
+        if (targetApplication.type !== "regular") {
+          toast.error("정기 오피스아워 신청만 일정과 시간을 수정할 수 있습니다")
+          if (uploadedUrls.length > 0) {
+            await removeApplicationAttachmentsFromStorage(uploadedUrls)
+          }
+          return false
+        }
+        if (!isDateKey(nextScheduledDate) || !nextScheduledTime) {
+          toast.error("변경할 날짜와 시간을 확인해주세요")
+          if (uploadedUrls.length > 0) {
+            await removeApplicationAttachmentsFromStorage(uploadedUrls)
+          }
+          return false
+        }
+        if (isBefore(startOfDay(parseDateKey(nextScheduledDate)), startOfDay(new Date()))) {
+          toast.error("오늘 이전 날짜로는 변경할 수 없습니다")
+          if (uploadedUrls.length > 0) {
+            await removeApplicationAttachmentsFromStorage(uploadedUrls)
+          }
+          return false
+        }
+        const targetProgram = programList.find((program) => program.id === targetApplication.programId)
+        if (!isProgramDateAllowed(targetProgram, nextScheduledDate)) {
+          toast.error("사업 운영일이 아니어서 변경할 수 없습니다")
+          if (uploadedUrls.length > 0) {
+            await removeApplicationAttachmentsFromStorage(uploadedUrls)
+          }
+          return false
+        }
+        const applicantConflict = applications.some((app) => {
+          if (app.id === id) return false
+          if (!["pending", "confirmed"].includes(normalizeApplicationStatus(app.status))) return false
+          return app.scheduledDate === nextScheduledDate && normalizeTimeKey(app.scheduledTime) === nextScheduledTime
+        })
+        if (applicantConflict) {
+          toast.error("이미 같은 시간에 신청한 일정이 있어 중복 신청할 수 없습니다.")
+          if (uploadedUrls.length > 0) {
+            await removeApplicationAttachmentsFromStorage(uploadedUrls)
+          }
+          return false
+        }
+        const assignableConsultants = getAssignableConsultantsAt({
+          consultants,
+          applications: applications.filter((app) => app.id !== id),
+          agendaId: targetApplication.agendaId ?? "",
+          dateKey: nextScheduledDate,
+          time: nextScheduledTime,
+        })
+        if (assignableConsultants.length === 0) {
+          toast.error("선택한 시간에 현재 배정 가능한 컨설턴트가 없어 변경할 수 없습니다.")
+          if (uploadedUrls.length > 0) {
+            await removeApplicationAttachmentsFromStorage(uploadedUrls)
+          }
+          return false
+        }
+      }
+
+      const updatedAt = new Date()
+      const nextApplications: Application[] = applications.map((app) => {
+        if (app.id !== id) return app
+        if (!scheduleChanged) {
+          return {
             ...app,
             requestContent: nextRequestContent,
             attachments: nextAttachmentNames,
             attachmentUrls: nextAttachmentUrls,
             updatedAt,
           }
-        : app,
-    )
-    const remotePayload: Record<string, any> = {
-      requestContent: nextRequestContent,
-      attachments: nextAttachmentNames,
-      attachmentUrls: nextAttachmentUrls,
-      updatedAt,
-    }
-
-    if (isFirebaseConfigured) {
-      const updated = await officeHourApplicationCrud.update(id, remotePayload)
-      if (!updated) {
-        if (uploadedUrls.length > 0) {
-          await removeApplicationAttachmentsFromStorage(uploadedUrls)
         }
-        return false
-      }
-    } else {
+
+        const nextPendingConsultantIds = getAssignableConsultantsAt({
+          consultants,
+          applications: applications.filter((item) => item.id !== id),
+          agendaId: targetApplication.agendaId ?? "",
+          dateKey: nextScheduledDate,
+          time: nextScheduledTime,
+        }).map((consultant) => consultant.id)
+
+        return {
+          ...app,
+          requestContent: nextRequestContent,
+          attachments: nextAttachmentNames,
+          attachmentUrls: nextAttachmentUrls,
+          scheduledDate: nextScheduledDate,
+          scheduledTime: nextScheduledTime,
+          officeHourId:
+            app.programId ? buildRegularOfficeHourId(app.programId, nextScheduledDate) || app.officeHourId : app.officeHourId,
+          status: "pending" as const,
+          consultant: "담당자 배정 중",
+          consultantId: undefined,
+          pendingConsultantIds: nextPendingConsultantIds,
+          rejectionReason: undefined,
+          updatedAt,
+        }
+      })
       setApplications(nextApplications)
     }
 
@@ -3365,7 +3114,11 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       }
     }
 
-    toast.success("신청 내용이 수정되었습니다")
+    toast.success(
+      scheduleChanged
+        ? "일정이 변경되어 다시 수락 대기 상태로 조정되었습니다"
+        : "신청 내용이 수정되었습니다",
+    )
     return true
   }
 
@@ -3402,49 +3155,11 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     return true
   }
 
-  const syncManagedRegularSlots = async (nextConsultants: Consultant[]) => {
-    const { desiredSlots, closedSlots, mergedSlots } = buildManagedRegularSlots(
-      programList,
-      nextConsultants,
-      agendaList,
-      officeHourSlotList,
-    )
-
-    if (isFirebaseConfigured) {
-      const operations = [
-        ...desiredSlots.map((slot) => ({
-          type: "set" as const,
-          collection: COLLECTIONS.OFFICE_HOUR_SLOTS,
-          docId: slot.id,
-          data: omitId(slot),
-        })),
-        ...closedSlots.map((slot) => ({
-          type: "update" as const,
-          collection: COLLECTIONS.OFFICE_HOUR_SLOTS,
-          docId: slot.id,
-          data: { status: "closed" as const },
-        })),
-      ]
-
-      if (operations.length > 0) {
-        const synced = await officeHourSlotCrud.batchUpdate(operations)
-        if (!synced) {
-          toast.error("정기 오피스아워 슬롯 동기화에 실패했습니다")
-          return false
-        }
-      }
-    }
-
-    setOfficeHourSlotList(mergedSlots)
-    const slotGroups = groupSlotsToRegularOfficeHours(mergedSlots, programList)
-    const programGroups = groupProgramsToRegularOfficeHours(programList)
-    const programIdsWithSlots = new Set(
-      slotGroups.map((group) => group.programId).filter(Boolean) as string[],
-    )
-    setRegularOfficeHourList([
-      ...slotGroups,
-      ...programGroups.filter((group) => !programIdsWithSlots.has(group.programId ?? "")),
-    ])
+  const syncManagedRegularSlots = async (
+    _nextConsultants: Consultant[],
+    nextPrograms: Program[] = programList,
+  ) => {
+    setRegularOfficeHourList(groupProgramsToRegularOfficeHours(nextPrograms))
     return true
   }
 
@@ -3627,55 +3342,19 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     }
 
     if (isFirebaseConfigured) {
-      const updated = await consultantCrud.update(consultantId, { availability })
-      if (!updated) {
-        const authUid = firebaseUser?.uid ?? ""
-        const authEmail = firebaseUser?.email?.trim() ?? ""
-        if (!authUid || !authEmail) {
-          toast.error("로그인 정보를 확인한 뒤 다시 시도해주세요")
-          return
-        }
-        const authEmailKey = toNormalizedEmail(authEmail)
-        const fallbackEmailKey = toNormalizedEmail(fallbackEmail)
-        const preservedSecondaryEmail =
-          fallbackEmail && fallbackEmailKey !== authEmailKey
-            ? fallbackEmail
-            : currentConsultant?.secondaryEmail
-        const createPayload: Omit<Consultant, "id"> = {
-          ...omitId(nextConsultant),
-          email: authEmail,
-          ...(preservedSecondaryEmail ? { secondaryEmail: preservedSecondaryEmail } : {}),
-        }
-        const created = await consultantCrud.set(authUid, createPayload, true)
-        if (!created) {
-          toast.error("스케줄 저장에 실패했습니다")
-          return
-        }
-        const syncedConsultant = {
-          ...nextConsultant,
-          id: authUid,
-          email: authEmail,
-          ...(preservedSecondaryEmail ? { secondaryEmail: preservedSecondaryEmail } : {}),
-        }
-        saveConsultantToState(syncedConsultant)
-        const nextConsultants = consultants.some((consultant) => consultant.id === syncedConsultant.id)
-          ? consultants.map((consultant) =>
-              consultant.id === syncedConsultant.id ? syncedConsultant : consultant,
-            )
-          : [...consultants, syncedConsultant]
-        const slotsSynced = await syncManagedRegularSlots(nextConsultants)
-        if (!slotsSynced) return
-        toast.success("내 스케줄이 저장되었습니다")
+      setConsultantScheduleSaving(true)
+      try {
+        await syncConsultantSchedulingViaFunction({
+          availability,
+        })
+      } catch (error) {
+        toast.error(getFunctionErrorMessage(error, "스케줄 저장에 실패했습니다"))
         return
+      } finally {
+        setConsultantScheduleSaving(false)
       }
+
       saveConsultantToState(nextConsultant)
-      const nextConsultants = consultants.some((consultant) => consultant.id === nextConsultant.id)
-        ? consultants.map((consultant) =>
-            consultant.id === nextConsultant.id ? nextConsultant : consultant,
-          )
-        : [...consultants, nextConsultant]
-      const slotsSynced = await syncManagedRegularSlots(nextConsultants)
-      if (!slotsSynced) return
       toast.success("내 스케줄이 저장되었습니다")
       return
     }
@@ -3703,29 +3382,54 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       data.agendaIds === undefined &&
       data.availability === undefined &&
       Object.keys(data).length === 1
-    setConsultants((prev) => prev.map((c) => (c.id === id ? { ...c, ...data } : c)))
+    const schedulingData: Partial<Pick<Consultant, "status" | "agendaIds" | "availability">> = {}
+    if (data.status !== undefined) {
+      schedulingData.status = data.status
+    }
+    if (data.agendaIds !== undefined) {
+      schedulingData.agendaIds = data.agendaIds
+    }
+    if (data.availability !== undefined) {
+      schedulingData.availability = data.availability
+    }
+    const nonSchedulingData: Partial<Consultant> = { ...data }
+    delete nonSchedulingData.status
+    delete nonSchedulingData.agendaIds
+    delete nonSchedulingData.availability
+    const hasSchedulingUpdate = Object.keys(schedulingData).length > 0
 
     if (isFirebaseConfigured) {
-      const ok = await consultantCrud.update(id, data as Partial<Omit<Consultant, "id">>)
-      if (!ok) {
-        toast.error("컨설턴트 정보를 저장하지 못했습니다")
-        return
+      if (hasSchedulingUpdate) {
+        try {
+          await syncConsultantSchedulingViaFunction({
+            consultantId: id,
+            ...(schedulingData.status !== undefined ? { status: schedulingData.status } : {}),
+            ...(schedulingData.agendaIds !== undefined ? { agendaIds: schedulingData.agendaIds } : {}),
+            ...(schedulingData.availability !== undefined
+              ? { availability: schedulingData.availability }
+              : {}),
+          })
+        } catch (error) {
+          toast.error(getFunctionErrorMessage(error, "컨설턴트 운영 정보 저장에 실패했습니다"))
+          return
+        }
       }
+
+      if (Object.keys(nonSchedulingData).length > 0) {
+        const ok = await consultantCrud.update(id, nonSchedulingData as Partial<Omit<Consultant, "id">>)
+        if (!ok) {
+          toast.error("컨설턴트 정보를 저장하지 못했습니다")
+          return
+        }
+      }
+    } else {
+      setConsultants((prev) => prev.map((c) => (c.id === id ? { ...c, ...data } : c)))
     }
 
     if (nextConsultantStatus === "active" || nextConsultantStatus === "inactive") {
       const nextActive = nextConsultantStatus === "active"
       const matchedProfile = profileList.find((profileItem) => profileItem.id === id)
       if (matchedProfile) {
-        if (isFirebaseConfigured) {
-          const profileSaved = await profileCrud.update(matchedProfile.id, {
-            active: nextActive,
-          })
-          if (!profileSaved) {
-            toast.error("사용자 활성 상태 동기화에 실패했습니다")
-            return
-          }
-        }
         setProfileList((prev) =>
           prev.map((item) =>
             item.id === matchedProfile.id ? { ...item, active: nextActive } : item,
@@ -3743,17 +3447,18 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       }
     }
 
-    if (
-      nextConsultantStatus === "active" ||
-      nextConsultantStatus === "inactive" ||
-      data.agendaIds !== undefined ||
-      data.availability !== undefined
-    ) {
+    if (!isFirebaseConfigured && hasSchedulingUpdate) {
       const nextConsultants = consultants.map((consultant) =>
         consultant.id === id ? { ...consultant, ...data } : consultant,
       )
       const slotsSynced = await syncManagedRegularSlots(nextConsultants)
       if (!slotsSynced) return
+    }
+
+    if (isFirebaseConfigured) {
+      setConsultants((prev) =>
+        prev.map((consultant) => (consultant.id === id ? { ...consultant, ...data } : consultant)),
+      )
     }
 
     toast.success(
@@ -3874,6 +3579,47 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     const nextName = typeof data.name === "string" ? data.name.trim() : ""
     const prevName = prevProgram?.name ?? ""
     const shouldSyncTitles = nextName.length > 0 && prevName.length > 0 && nextName !== prevName
+    const nextProgramList = programList.map((program) =>
+      program.id === id ? { ...program, ...data } : program,
+    )
+    const shouldSyncManagedSlots =
+      data.name !== undefined ||
+      data.description !== undefined ||
+      data.periodStart !== undefined ||
+      data.periodEnd !== undefined ||
+      data.weekdays !== undefined
+
+    if (isFirebaseConfigured) {
+      try {
+        await syncProgramDefinitionViaFunction({
+          programId: id,
+          ...(data.name !== undefined ? { name: data.name } : {}),
+          ...(data.description !== undefined ? { description: data.description } : {}),
+          ...(data.color !== undefined ? { color: data.color } : {}),
+          ...(data.targetHours !== undefined ? { targetHours: data.targetHours } : {}),
+          ...(data.completedHours !== undefined ? { completedHours: data.completedHours } : {}),
+          ...(data.maxApplications !== undefined ? { maxApplications: data.maxApplications } : {}),
+          ...(data.usedApplications !== undefined ? { usedApplications: data.usedApplications } : {}),
+          ...(data.internalTicketLimit !== undefined
+            ? { internalTicketLimit: data.internalTicketLimit }
+            : {}),
+          ...(data.externalTicketLimit !== undefined
+            ? { externalTicketLimit: data.externalTicketLimit }
+            : {}),
+          ...(data.companyLimit !== undefined ? { companyLimit: data.companyLimit } : {}),
+          ...(data.periodStart !== undefined ? { periodStart: data.periodStart } : {}),
+          ...(data.periodEnd !== undefined ? { periodEnd: data.periodEnd } : {}),
+          ...(data.weekdays !== undefined ? { weekdays: data.weekdays } : {}),
+        })
+      } catch (error) {
+        toast.error(getFunctionErrorMessage(error, "사업 정보 저장에 실패했습니다"))
+        return
+      }
+
+      setProgramList(nextProgramList)
+      toast.success("사업 정보가 업데이트되었습니다")
+      return
+    }
 
     const buildRegularOfficeHourTitle = (name: string) => `${name} 정기 오피스아워`
     const nextDefaultTitle = shouldSyncTitles ? buildRegularOfficeHourTitle(nextName) : ""
@@ -3889,21 +3635,6 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     }
 
     if (shouldSyncTitles) {
-      const nextSlots = officeHourSlotList.map((slot) => {
-        if (slot.programId !== id) return slot
-        const nextTitle = updateOfficeHourTitle(slot.title)
-        const nextDescription = slot.description?.startsWith(`${prevName} ·`)
-          ? slot.description.replace(prevName, nextName)
-          : slot.description
-        if (nextTitle === slot.title && nextDescription === slot.description) return slot
-        return {
-          ...slot,
-          title: nextTitle,
-          description: nextDescription,
-        }
-      })
-      setOfficeHourSlotList(nextSlots)
-
       const nextApplications = applications.map((app) => {
         if (app.programId !== id || app.type !== "regular") return app
         const nextTitle = updateOfficeHourTitle(app.officeHourTitle)
@@ -3914,70 +3645,18 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
         }
       })
       setApplications(nextApplications)
-
-      if (isFirebaseConfigured) {
-        const slotById = new Map(officeHourSlotList.map((slot) => [slot.id, slot]))
-        const slotUpdates = nextSlots
-          .filter((slot) => slot.programId === id)
-          .filter((slot) => {
-            const prev = slotById.get(slot.id)
-            return prev?.title !== slot.title || prev?.description !== slot.description
-          })
-          .map((slot) => {
-            const data: Record<string, any> = { title: slot.title }
-            if (slot.description !== undefined) {
-              data.description = slot.description
-            }
-            return {
-              type: "update" as const,
-              collection: COLLECTIONS.OFFICE_HOUR_SLOTS,
-              docId: slot.id,
-              data,
-            }
-          })
-
-        const appById = new Map(applications.map((app) => [app.id, app]))
-        const applicationUpdates = nextApplications
-          .filter((app) => app.programId === id && app.type === "regular")
-          .filter((app) => {
-            const prev = appById.get(app.id)
-            return prev?.officeHourTitle !== app.officeHourTitle
-          })
-          .map((app) => ({
-            type: "update" as const,
-            collection: COLLECTIONS.OFFICE_HOUR_APPLICATIONS,
-            docId: app.id,
-            data: {
-              officeHourTitle: app.officeHourTitle,
-            },
-          }))
-
-        if (slotUpdates.length > 0) {
-          const okSlots = await officeHourSlotCrud.batchUpdate(slotUpdates)
-          if (!okSlots) {
-            toast.error("오피스아워 슬롯 이름 업데이트에 실패했습니다")
-          }
-        }
-
-        if (applicationUpdates.length > 0) {
-          const okApps = await officeHourApplicationCrud.batchUpdate(applicationUpdates)
-          if (!okApps) {
-            toast.error("신청 내역의 오피스아워 이름 업데이트에 실패했습니다")
-          }
-        }
-      }
     }
 
-    setProgramList((prev) =>
-      prev.map((program) => (program.id === id ? { ...program, ...data } : program)),
-    )
-    if (isFirebaseConfigured) {
-      const ok = await programCrud.update(id, data as Partial<Omit<Program, "id">>)
-      if (!ok) {
-        toast.error("사업 정보 저장에 실패했습니다")
+    setProgramList(nextProgramList)
+
+    if (shouldSyncManagedSlots) {
+      const slotsSynced = await syncManagedRegularSlots(consultants, nextProgramList)
+      if (!slotsSynced) {
+        toast.error("사업 정보는 저장되었지만 정기 슬롯 동기화에 실패했습니다")
         return
       }
     }
+
     toast.success("사업 정보가 업데이트되었습니다")
   }
 
@@ -4021,140 +3700,6 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
 
     toast.success("참여 기업 구성이 업데이트되었습니다")
     return true
-  }
-
-  const handleGenerateProgramSlots = async (programId: string) => {
-    const targetProgram = programList.find((program) => program.id === programId)
-    if (!targetProgram) {
-      toast.error("사업 정보를 찾을 수 없습니다")
-      return
-    }
-    if (!targetProgram.periodStart || !targetProgram.periodEnd) {
-      toast.error("사업 기간을 먼저 설정해주세요")
-      return
-    }
-
-    const activeAgendaIds = agendaList
-      .filter((agenda) => agenda.active !== false)
-      .map((agenda) => agenda.id)
-    if (activeAgendaIds.length === 0) {
-      toast.error("활성 아젠다가 없습니다")
-      return
-    }
-
-    const linkedConsultants = consultants.filter((consultant) => {
-      if (consultant.status !== "active") return false
-      const consultantAgendaIds = consultant.agendaIds ?? []
-      return consultantAgendaIds.some((agendaId) => activeAgendaIds.includes(agendaId))
-    })
-    if (linkedConsultants.length === 0) {
-      toast.error("활성 상태의 연결 컨설턴트가 없습니다")
-      return
-    }
-
-    const startDate = parseDateKey(targetProgram.periodStart)
-    const endDate = parseDateKey(targetProgram.periodEnd)
-    if (startDate.getTime() > endDate.getTime()) {
-      toast.error("사업 기간이 올바르지 않습니다")
-      return
-    }
-
-    const weekdays = new Set(getWeekdayNumbers(targetProgram.weekdays))
-    const targetDates: string[] = []
-    const cursor = new Date(startDate)
-    while (cursor.getTime() <= endDate.getTime()) {
-      if (weekdays.has(cursor.getDay())) {
-        targetDates.push(formatDateKey(cursor))
-      }
-      cursor.setDate(cursor.getDate() + 1)
-    }
-
-    const existingSlotsById = new Map(officeHourSlotList.map((slot) => [slot.id, slot]))
-    const generatedSlots: OfficeHourSlot[] = []
-
-    const baseTitle = `${targetProgram.name} 정기 오피스아워`
-    const baseDescription = targetProgram.description?.trim() || `${targetProgram.name} 사업`
-    const timeKeysByDate = new Map<string, Set<string>>()
-
-    linkedConsultants.forEach((consultant) => {
-      targetDates.forEach((dateKey) => {
-        const dayOfWeek = parseDateKey(dateKey).getDay()
-        const dayAvailability = consultant.availability.find(
-          (availability) => availability.dayOfWeek === dayOfWeek,
-        )
-        if (!dayAvailability) return
-        dayAvailability.slots
-          .filter((slot) => slot.available)
-          .forEach((slot) => {
-            const key = `${slot.start}-${slot.end}`
-            const existing = timeKeysByDate.get(dateKey)
-            if (existing) {
-              existing.add(key)
-            } else {
-              timeKeysByDate.set(dateKey, new Set([key]))
-            }
-          })
-      })
-    })
-
-    timeKeysByDate.forEach((timeKeys, dateKey) => {
-      timeKeys.forEach((timeKey) => {
-        const [startTime, endTime] = timeKey.split("-")
-        if (!startTime || !endTime) return
-        const slotId = `${programId}_${dateKey}_${startTime}`.replace(/:/g, "-")
-        const existing = existingSlotsById.get(slotId)
-
-        generatedSlots.push({
-          id: slotId,
-          type: "regular",
-          programId,
-          consultantName: "담당자 배정 중",
-          title: baseTitle,
-          description: baseDescription,
-          date: dateKey,
-          startTime,
-          endTime,
-          status: existing?.status ?? "open",
-        })
-      })
-    })
-
-    if (generatedSlots.length === 0) {
-      toast.error("생성할 슬롯이 없습니다. 컨설턴트 가용시간을 확인해주세요")
-      return
-    }
-
-    if (isFirebaseConfigured) {
-      const operations = generatedSlots.map((slot) => ({
-        type: "set" as const,
-        collection: COLLECTIONS.OFFICE_HOUR_SLOTS,
-        docId: slot.id,
-        data: omitId(slot),
-      }))
-      const ok = await officeHourSlotCrud.batchUpdate(operations)
-      if (!ok) {
-        toast.error("슬롯 생성에 실패했습니다")
-        return
-      }
-      toast.success(`${generatedSlots.length}개 슬롯을 생성/갱신했습니다`)
-      return
-    }
-
-    const mergedSlotMap = new Map(officeHourSlotList.map((slot) => [slot.id, slot]))
-    generatedSlots.forEach((slot) => {
-      mergedSlotMap.set(slot.id, slot)
-    })
-    const mergedSlots = Array.from(mergedSlotMap.values()).sort((a, b) => {
-      const dateComp = a.date.localeCompare(b.date)
-      if (dateComp !== 0) return dateComp
-      const startComp = a.startTime.localeCompare(b.startTime)
-      if (startComp !== 0) return startComp
-      return a.consultantName.localeCompare(b.consultantName)
-    })
-
-    setOfficeHourSlotList(mergedSlots)
-    setRegularOfficeHourList(groupSlotsToRegularOfficeHours(mergedSlots, programList))
-    toast.success(`${generatedSlots.length}개 슬롯을 생성했습니다`)
   }
 
   const handleAddUser = (data: Omit<UserWithPermissions, "id" | "createdAt">) => {
@@ -4237,7 +3782,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     })
   }
 
-  const selectedOfficeHour = scopedRegularOfficeHourList.find(
+  const selectedOfficeHour = visibleRegularOfficeHourList.find(
     (oh) => oh.id === selectedOfficeHourId,
   )
 
@@ -4258,16 +3803,15 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     if (resolvedRole !== "consultant") {
       return resolvedDoc
     }
-    if (resolvedDoc.consultantId && consultantIdCandidates.has(resolvedDoc.consultantId)) {
+    const pendingConsultantIds = getPendingConsultantIds(resolvedDoc)
+    const isTargetedToCurrentConsultant = Array.from(consultantIdCandidates).some((consultantId) =>
+      isApplicationTargetingConsultant(resolvedDoc, consultantId),
+    )
+    if (isTargetedToCurrentConsultant) {
       return resolvedDoc
     }
-    if (resolvedDoc.officeHourSlotId) {
-      const reservedSlot = officeHourSlotList.find((slot) => slot.id === resolvedDoc.officeHourSlotId)
-      if (reservedSlot?.consultantId) {
-        if (consultantIdCandidates.has(reservedSlot.consultantId)) {
-          return resolvedDoc
-        }
-      }
+    if (pendingConsultantIds.length > 0) {
+      return undefined
     }
     if (resolvedDoc.agendaId && consultantAgendaIds.has(resolvedDoc.agendaId)) {
       return resolvedDoc
@@ -4286,7 +3830,6 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     firebaseUser?.uid,
     user.id,
     consultantIdCandidates,
-    officeHourSlotList,
     consultantAgendaIds,
     consultantAgendaNames,
   ])
@@ -4348,9 +3891,6 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
                 pendingWithoutAssignableConsultantIds,
               )}
               user={user}
-              programs={scopedProgramList}
-              agendas={agendaList}
-              ticketOverrides={companyMetaDoc?.programTicketOverrides}
               onCancelApplication={handleCancelApplication}
               onUpdateCompanyApplication={handleUpdateApplicationByCompany}
               onNavigate={handleNavigateLoose}
@@ -4366,10 +3906,57 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
                 </div>
               </div>
             ) : (
-              <RegularOfficeHoursCalendar
-                officeHours={scopedRegularOfficeHourList}
-                onSelectOfficeHour={handleSelectOfficeHour}
-              />
+              <>
+                <RegularOfficeHoursCalendar
+                  officeHours={visibleRegularOfficeHourList}
+                  programs={scopedProgramList}
+                  ticketStats={ticketStats}
+                  summary={regularOfficeHourSummary}
+                  onSelectOfficeHour={handleSelectOfficeHour}
+                />
+                <Sheet
+                  open={isRegularApplicationSheetOpen && Boolean(selectedOfficeHour)}
+                  onOpenChange={setIsRegularApplicationSheetOpen}
+                >
+                <SheetContent
+                  side="right"
+                  className="w-full gap-0 border-l border-slate-200 bg-white/98 p-0 sm:max-w-2xl"
+                >
+                    {selectedOfficeHour && (
+                      <>
+                        <SheetHeader className="sr-only">
+                          <SheetTitle>정기 오피스아워 신청</SheetTitle>
+                          <SheetDescription>
+                            선택한 날짜와 사업 기준으로 정기 오피스아워를 바로 신청합니다.
+                          </SheetDescription>
+                        </SheetHeader>
+                        <RegularApplicationWizard
+                          officeHour={selectedOfficeHour}
+                          officeHours={visibleRegularOfficeHourList}
+                          applications={resolvedApplications}
+                          consultants={consultants}
+                          agendas={agendaList}
+                          layout="sheet"
+                          isRealtimeDataLoading={regularWizardRealtimeLoading}
+                          allowedWeekdays={
+                            programList.find((program) => program.id === selectedOfficeHour.programId)?.weekdays
+                          }
+                          remainingInternalTickets={ticketStats.remainingInternal}
+                          remainingExternalTickets={ticketStats.remainingExternal}
+                          currentApplicant={{
+                            createdByUid: firebaseUser?.uid ?? user.id,
+                            companyId: companyRecordId,
+                            applicantEmail: user.email,
+                          }}
+                          preselectedDateKey={selectedRegularDateKey ?? undefined}
+                          onBack={() => setIsRegularApplicationSheetOpen(false)}
+                          onSubmit={handleSubmitRegularApplication}
+                        />
+                      </>
+                    )}
+                  </SheetContent>
+                </Sheet>
+              </>
             )
           )}
 
@@ -4386,8 +3973,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
           {currentPage === "regular-wizard" && selectedOfficeHour && (
             <RegularApplicationWizard
               officeHour={selectedOfficeHour}
-              officeHours={scopedRegularOfficeHourList}
-              officeHourSlots={officeHourSlotList}
+              officeHours={visibleRegularOfficeHourList}
               applications={resolvedApplications}
               consultants={consultants}
               agendas={agendaList}
@@ -4402,6 +3988,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
                 companyId: companyRecordId,
                 applicantEmail: user.email,
               }}
+              preselectedDateKey={selectedRegularDateKey ?? undefined}
               onBack={() => handleNavigate("regular-detail", selectedOfficeHour.id)}
               onSubmit={handleSubmitRegularApplication}
             />
@@ -4729,7 +4316,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
                 agendas={agendaList}
                 defaultEmail={firebaseUser?.email}
                 saving={consultantCrud.saving}
-                scheduleSaving={consultantCrud.saving}
+                scheduleSaving={consultantScheduleSaving}
                 onSaveSchedule={handleSaveConsultantSchedule}
                 onSubmit={handleSaveConsultantProfile}
               />
@@ -4774,7 +4361,6 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
                 currentConsultantName={currentConsultant?.name ?? null}
                 currentConsultantAgendaIds={currentConsultant?.agendaIds ?? []}
                 currentConsultantAvailability={currentConsultant?.availability ?? []}
-                officeHourSlots={officeHourSlotList}
               />
             </ProtectedRoute>
           )}

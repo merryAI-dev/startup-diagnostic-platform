@@ -9,7 +9,6 @@ import {
 import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
 import { auth, db, isFirebaseConfigured } from "@/redesign/app/lib/firebase";
 import { ConsultantAvailability, User } from "@/redesign/app/lib/types";
-import { initialUsers } from "@/redesign/app/lib/data";
 import type { CompanyInfoForm, CompanyInfoRecord } from "@/types/company";
 
 interface AuthContextType {
@@ -208,32 +207,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Firebase Auth State 변경 감지
   useEffect(() => {
     if (!isFirebaseConfigured || !auth) {
-      // Firebase 미설정시 로컬스토리지에서 로드
-      const savedUser = localStorage.getItem("mysc-user");
-      if (savedUser) {
-        try {
-          const parsedUser = JSON.parse(savedUser);
-          // Date 객체가 포함되어 있을 수 있으므로 문자열로 변환
-          const sanitizedUser = {
-            ...parsedUser,
-            createdAt: typeof parsedUser.createdAt === 'string' 
-              ? parsedUser.createdAt 
-              : (parsedUser.createdAt instanceof Date 
-                  ? parsedUser.createdAt.toISOString() 
-                  : new Date().toISOString()),
-            lastLoginAt: typeof parsedUser.lastLoginAt === 'string'
-              ? parsedUser.lastLoginAt
-              : (parsedUser.lastLoginAt instanceof Date
-                  ? parsedUser.lastLoginAt.toISOString()
-                  : new Date().toISOString()),
-          };
-          setUser(sanitizedUser);
-        } catch (error) {
-          console.error("Error parsing saved user:", error);
-          // 파싱 에러 시 localStorage 클리어
-          localStorage.removeItem("mysc-user");
-        }
-      }
+      setUser(null);
+      setFirebaseUser(null);
       setLoading(false);
       return;
     }
@@ -244,12 +219,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (firebaseUser) {
         const appUser = await loadUserFromFirestore(firebaseUser);
         setUser(appUser);
-        if (appUser) {
-          localStorage.setItem("mysc-user", JSON.stringify(appUser));
-        }
       } else {
         setUser(null);
-        localStorage.removeItem("mysc-user");
       }
       
       setLoading(false);
@@ -258,52 +229,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => unsubscribe();
   }, []);
 
-  // 로그인 (Firebase 또는 Mock)
+  // 로그인 (Firebase 전용)
   const signIn = async (email: string, password?: string) => {
-    if (isFirebaseConfigured && auth) {
-      // Firebase 로그인
-      if (!password) {
-        throw new Error("Password is required for Firebase authentication");
+    if (!isFirebaseConfigured || !auth) {
+      throw new Error("Firebase가 설정되지 않았습니다");
+    }
+    if (!password) {
+      throw new Error("Password is required for Firebase authentication");
+    }
+
+    try {
+      const userCredential = await signInWithEmailAndPassword(auth, email, password);
+      const appUser = await loadUserFromFirestore(userCredential.user);
+
+      if (!appUser) {
+        throw new Error("User data not found in Firestore");
       }
-      
-      try {
-        const userCredential = await signInWithEmailAndPassword(auth, email, password);
-        const appUser = await loadUserFromFirestore(userCredential.user);
-        
-        if (!appUser) {
-          throw new Error("User data not found in Firestore");
-        }
-        
-        // Firestore에 마지막 로그인 시간 업데이트
-        if (db) {
-          await setDoc(doc(db, "users", userCredential.user.uid), {
-            lastLoginAt: new Date().toISOString(),
-          }, { merge: true });
-        }
-        
-      } catch (error: any) {
-        console.error("Firebase login error:", error);
-        throw new Error(error.message || "로그인에 실패했습니다");
+
+      if (db) {
+        await setDoc(doc(db, "users", userCredential.user.uid), {
+          lastLoginAt: new Date().toISOString(),
+        }, { merge: true });
       }
-    } else {
-      // Mock 로그인 (비밀번호 없이 이메일만)
-      const mockUser = initialUsers.find(u => u.email === email);
-      if (mockUser) {
-        // Date 객체를 문자열로 변환
-        const userToSave = {
-          ...mockUser,
-          createdAt: typeof mockUser.createdAt === 'string' 
-            ? mockUser.createdAt 
-            : mockUser.createdAt.toISOString(),
-          lastLoginAt: typeof mockUser.lastLoginAt === 'string'
-            ? mockUser.lastLoginAt
-            : mockUser.lastLoginAt.toISOString(),
-        };
-        setUser(userToSave);
-        localStorage.setItem("mysc-user", JSON.stringify(userToSave));
-      } else {
-        throw new Error("등록되지 않은 이메일입니다");
-      }
+    } catch (error: any) {
+      console.error("Firebase login error:", error);
+      throw new Error(error.message || "로그인에 실패했습니다");
     }
   };
 
@@ -413,7 +363,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       };
       
       setUser(appUser);
-      localStorage.setItem("mysc-user", JSON.stringify(appUser));
       
     } catch (error: any) {
       console.error("Firebase signup error:", error);
@@ -428,7 +377,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     setUser(null);
     setFirebaseUser(null);
-    localStorage.removeItem("mysc-user");
   };
 
   // 사용자 역할 업데이트 (관리자 전용)
@@ -451,7 +399,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           permissions: getRolePermissions(role),
         };
         setUser(updatedUser);
-        localStorage.setItem("mysc-user", JSON.stringify(updatedUser));
       }
     } catch (error) {
       console.error("Error updating user role:", error);

@@ -8,12 +8,13 @@ import { Badge } from "@/redesign/app/components/ui/badge";
 import { DateRangePicker } from "@/redesign/app/components/ui/date-range-picker";
 import { PaginationControls } from "@/redesign/app/components/ui/pagination-controls";
 import { StatusChip } from "@/redesign/app/components/status-chip";
-import { Agenda, Application, ApplicationStatus, ConsultantAvailability, OfficeHourSlot, Program } from "@/redesign/app/lib/types";
+import { Agenda, Application, ApplicationStatus, ConsultantAvailability, Program } from "@/redesign/app/lib/types";
 import { format } from "date-fns";
 import { ko } from "date-fns/locale";
 import { AdminApplicationDetailModal } from "@/redesign/app/components/pages/admin-application-detail-modal";
 import type { DateRange } from "react-day-picker";
 import { parseLocalDateKey } from "@/redesign/app/lib/date-keys";
+import { getPendingConsultantIds, isApplicationTargetingConsultant } from "@/redesign/app/lib/application-availability";
 
 interface AdminApplicationsProps {
   applications: Application[];
@@ -29,7 +30,6 @@ interface AdminApplicationsProps {
   currentConsultantName?: string | null;
   currentConsultantAgendaIds?: string[];
   currentConsultantAvailability?: ConsultantAvailability[];
-  officeHourSlots?: OfficeHourSlot[];
 }
 
 export function AdminApplications({
@@ -46,7 +46,6 @@ export function AdminApplications({
   currentConsultantName,
   currentConsultantAgendaIds = [],
   currentConsultantAvailability = [],
-  officeHourSlots = [],
 }: AdminApplicationsProps) {
   const PAGE_SIZE = 10;
   const pageTitleClassName = "text-2xl font-semibold text-slate-900";
@@ -141,15 +140,8 @@ export function AdminApplications({
 
   const isAssignedToCurrentConsultant = (app: Application) => {
     if (!isConsultantUser) return false;
-    if (currentConsultantId && app.consultantId === currentConsultantId) {
+    if (currentConsultantId && isApplicationTargetingConsultant(app, currentConsultantId)) {
       return true;
-    }
-
-    if (app.officeHourSlotId) {
-      const reservedSlot = officeHourSlots.find((slot) => slot.id === app.officeHourSlotId);
-      if (reservedSlot?.consultantId && currentConsultantId && reservedSlot.consultantId === currentConsultantId) {
-        return true;
-      }
     }
 
     const currentNameKey = normalizeConsultantDisplayName(currentConsultantName);
@@ -244,8 +236,10 @@ export function AdminApplications({
       }
 
       const isPendingLike = app.status === "pending" || app.status === "review";
+      const pendingConsultantIds = getPendingConsultantIds(app);
       const isUnassigned =
         !app.consultantId &&
+        pendingConsultantIds.length === 0 &&
         (!app.consultant || app.consultant === "담당자 배정 중");
 
       if (!isPendingLike || !isUnassigned) {

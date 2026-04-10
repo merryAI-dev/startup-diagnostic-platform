@@ -177,22 +177,6 @@ export function useCalendarService(
     [createEvent]
   );
 
-  // ─── Mock 데이터 (Firebase 미설정 시) ───
-  const getMockAvailableSlots = useCallback((date: string): AvailableSlot[] => {
-    const unavailableTimes = ["11:00", "14:00", "16:00"];
-    const slots: AvailableSlot[] = [];
-    for (let hour = 9; hour < 18; hour++) {
-      const startTime = `${String(hour).padStart(2, "0")}:00`;
-      slots.push({
-        start: startTime,
-        end: `${String(hour + 1).padStart(2, "0")}:00`,
-        available: !unavailableTimes.includes(startTime),
-        reason: unavailableTimes.includes(startTime) ? "기존 일정 있음" : undefined,
-      });
-    }
-    return slots;
-  }, []);
-
   return {
     // State
     events,
@@ -205,10 +189,7 @@ export function useCalendarService(
     deleteEvent,
 
     // Calendar-specific
-    getAvailableSlots: isFirebaseConfigured ? getAvailableSlots : getMockAvailableSlots,
+    getAvailableSlots: isFirebaseConfigured ? getAvailableSlots : (() => []),
     registerOfficeHourEvent,
-
-    // Mock fallback
-    getMockAvailableSlots,
   };
 }

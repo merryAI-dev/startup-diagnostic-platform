@@ -131,7 +131,6 @@ export const COLLECTIONS = {
   CONSULTANTS: "consultants",
   PROGRAMS: "programs",
   AGENDAS: "agendas",
-  OFFICE_HOUR_SLOTS: "officeHourSlots",
   OFFICE_HOUR_APPLICATIONS: "officeHourApplications",
   REPORTS: "reports",
   MESSAGES: "messages",
