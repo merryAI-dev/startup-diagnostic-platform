@@ -36,7 +36,7 @@ const adminNavItems: NavItem[] = [
   { id: "admin-consultants", label: "컨설턴트 관리", icon: UserCog },
   { id: "admin-users", label: "사용자 관리", icon: Users },
   { id: "startup-diagnostic", label: "스타트업 진단시트", icon: FileText },
-  { id: "pending-reports", label: "미작성 보고서", icon: AlertCircle },
+  { id: "pending-reports", label: "오피스아워 보고서", icon: AlertCircle },
 ]
 
 const userNavItems: NavItem[] = [

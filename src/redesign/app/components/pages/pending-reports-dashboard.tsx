@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import ExcelJS from "exceljs";
 import { getBlob, ref as storageRef } from "firebase/storage";
-import { Application, Consultant, Program, OfficeHourReport, User } from "@/redesign/app/lib/types";
+import { Application, CompanyDirectoryItem, Consultant, Program, OfficeHourReport, User } from "@/redesign/app/lib/types";
+import { normalizeCompanyName } from "@/redesign/app/lib/company-name";
 import { Button } from "@/redesign/app/components/ui/button";
 import { Badge } from "@/redesign/app/components/ui/badge";
 import {
@@ -17,7 +18,16 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Textarea } from "@/redesign/app/components/ui/textarea";
 import { DateRangePicker } from "@/redesign/app/components/ui/date-range-picker";
 import { PaginationControls } from "@/redesign/app/components/ui/pagination-controls";
-import { AlertCircle, Clock, Download, Eye, FileText, Loader2, Mail } from "lucide-react";
+import { Popover, PopoverContent, PopoverTrigger } from "@/redesign/app/components/ui/popover";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/redesign/app/components/ui/command";
+import { AlertCircle, Check, ChevronsUpDown, Clock, Download, Eye, FileText, Loader2, Mail, X } from "lucide-react";
 import { addDays, format, differenceInDays } from "date-fns";
 import { ko } from "date-fns/locale";
 import type { DateRange } from "react-day-picker";
@@ -171,6 +181,7 @@ interface PendingReportsDashboardProps {
   reports: OfficeHourReport[];
   programs: Program[];
   consultants: Consultant[];
+  companies?: CompanyDirectoryItem[];
   currentUser: User;
   currentConsultantId?: string | null;
   currentConsultantName?: string | null;
@@ -220,12 +231,11 @@ export function PendingReportsDashboard({
   reports,
   programs,
   consultants,
+  companies = [],
   currentUser,
   currentConsultantId,
   currentConsultantName,
   onCreateReport,
-  onEditReport,
-  onDeleteReport,
 }: PendingReportsDashboardProps) {
   const PAGE_SIZE = 10;
   const isConsultantUser = currentUser.role === "consultant";
@@ -246,6 +256,72 @@ export function PendingReportsDashboard({
   } | null>(null);
   const [emailDraft, setEmailDraft] = useState<EmailDraft | null>(null);
   const [downloadingReportId, setDownloadingReportId] = useState<string | null>(null);
+  const [companyFilterOpen, setCompanyFilterOpen] = useState(false);
+  const [companyFilterQuery, setCompanyFilterQuery] = useState("");
+  const [selectedCompanyIds, setSelectedCompanyIds] = useState<string[]>([]);
+
+  const companyNameById = useMemo(
+    () => new Map(companies.map((company) => [company.id, company.name])),
+    [companies],
+  );
+
+  const resolveRowCompanyId = (row: Pick<ReportRow, "application" | "report">) =>
+    row.report?.companyId || row.application.companyId || null;
+
+  const resolveRowCompanyName = (row: Pick<ReportRow, "application" | "report">) => {
+    const companyId = resolveRowCompanyId(row);
+    if (companyId && companyNameById.has(companyId)) {
+      return companyNameById.get(companyId) ?? "기업명 미입력";
+    }
+    return (
+      row.report?.companyName?.trim()
+      || row.application.companyName?.trim()
+      || row.application.applicantName?.trim()
+      || "기업명 미입력"
+    );
+  };
+
+  const companyFilterOptions = useMemo(() => {
+    const normalizedQuery = normalizeCompanyName(companyFilterQuery);
+    return companies
+      .filter((company) => {
+        if (!normalizedQuery) return true;
+        const normalizedName = company.normalizedName || normalizeCompanyName(company.name);
+        const normalizedAliases = (company.aliases ?? []).map((alias) => normalizeCompanyName(alias));
+        return (
+          normalizedName.includes(normalizedQuery)
+          || normalizedQuery.includes(normalizedName)
+          || normalizedAliases.some((alias) => alias.includes(normalizedQuery) || normalizedQuery.includes(alias))
+        );
+      })
+      .sort((left, right) => {
+        const leftSelected = selectedCompanyIds.includes(left.id);
+        const rightSelected = selectedCompanyIds.includes(right.id);
+        if (leftSelected !== rightSelected) return leftSelected ? -1 : 1;
+        return left.name.localeCompare(right.name, "ko-KR");
+      })
+      .slice(0, normalizedQuery ? 50 : 80);
+  }, [companies, companyFilterQuery, selectedCompanyIds]);
+
+  const selectedCompanyFilters = useMemo(
+    () =>
+      selectedCompanyIds.map((companyId) => ({
+        id: companyId,
+        name: companyNameById.get(companyId) ?? "기업명 미입력",
+      })),
+    [companyNameById, selectedCompanyIds],
+  );
+
+  const visibleCompanyFilterBadges = selectedCompanyFilters.slice(0, 2);
+  const hiddenCompanyFilterCount = selectedCompanyFilters.length - visibleCompanyFilterBadges.length;
+
+  const toggleCompanyFilter = (companyId: string) => {
+    setSelectedCompanyIds((prev) =>
+      prev.includes(companyId)
+        ? prev.filter((id) => id !== companyId)
+        : [...prev, companyId],
+    );
+  };
 
   const normalizeConsultantName = (value?: string | null) =>
     (value ?? "").replace(/\s*컨설턴트\s*$/u, "").trim().toLowerCase();
@@ -268,7 +344,7 @@ export function PendingReportsDashboard({
       "yyyy년 M월 d일",
       "일정 확인 필요",
     );
-    const companyName = row.application.companyName?.trim() || row.application.applicantName?.trim() || "기업";
+    const companyName = resolveRowCompanyName(row);
     const subject = `[MYSC] 오피스아워 일지 작성 요청 - ${row.application.officeHourTitle}`;
     const body = [
       `${row.consultantName}님 안녕하세요.`,
@@ -337,7 +413,7 @@ export function PendingReportsDashboard({
       const rows: Array<[string, string]> = [
         ["사업", programName],
         ["컨설턴트", report.consultantName || application.consultant || "-"],
-        ["기업", application.companyName || application.applicantName || "-"],
+        ["기업", report.companyName || application.companyName || application.applicantName || "-"],
         ["오피스아워", application.officeHourTitle || "-"],
         ["진행일", scheduledDate],
         ["작성일", writtenDate],
@@ -446,7 +522,7 @@ export function PendingReportsDashboard({
       const blob = new Blob([buffer], {
         type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       });
-      const safeCompanyName = (application.companyName || application.applicantName || "office-hour")
+      const safeCompanyName = (report.companyName || application.companyName || application.applicantName || "office-hour")
         .replace(/[\\/:*?"<>|]/g, "-")
         .trim();
       const safeDate = scheduledDate === "-" ? "undated" : scheduledDate;
@@ -593,6 +669,8 @@ export function PendingReportsDashboard({
             id: report.applicationId,
             type: "irregular",
             status: "completed",
+            companyId: report.companyId ?? null,
+            companyName: report.companyName ?? undefined,
             officeHourTitle: report.topic?.trim() || "비정기 오피스아워 (수동)",
             consultant: report.consultantName || "컨설턴트",
             consultantId: report.consultantId,
@@ -666,18 +744,14 @@ export function PendingReportsDashboard({
     return rows;
   }, [pendingReports, submittedReports, consultants]);
   const filteredReportRows = useMemo(() => {
-    if (!reportDateRange?.from && !reportDateRange?.to) {
-      return reportRows;
-    }
-
-    const rangeStart = reportDateRange.from
+    const rangeStart = reportDateRange?.from
       ? new Date(
           reportDateRange.from.getFullYear(),
           reportDateRange.from.getMonth(),
           reportDateRange.from.getDate()
         )
       : null;
-    const rangeEnd = reportDateRange.to
+    const rangeEnd = reportDateRange?.to
       ? new Date(
           reportDateRange.to.getFullYear(),
           reportDateRange.to.getMonth(),
@@ -686,8 +760,13 @@ export function PendingReportsDashboard({
       : rangeStart;
 
     return reportRows.filter((row) => {
+      if (isAdminUser && selectedCompanyIds.length > 0) {
+        const companyId = resolveRowCompanyId(row);
+        if (!companyId || !selectedCompanyIds.includes(companyId)) return false;
+      }
+
       const scheduledDate = parseLocalDate(row.application.scheduledDate);
-      if (!scheduledDate) return false;
+      if (!scheduledDate) return !rangeStart && !rangeEnd;
       const normalized = new Date(
         scheduledDate.getFullYear(),
         scheduledDate.getMonth(),
@@ -698,7 +777,7 @@ export function PendingReportsDashboard({
       if (rangeEnd && normalized > rangeEnd) return false;
       return true;
     });
-  }, [reportDateRange, reportRows]);
+  }, [isAdminUser, reportDateRange, reportRows, selectedCompanyIds]);
   const paginatedReportRows = useMemo(() => {
     const startIndex = (reportPage - 1) * PAGE_SIZE;
     return filteredReportRows.slice(startIndex, startIndex + PAGE_SIZE);
@@ -710,7 +789,7 @@ export function PendingReportsDashboard({
 
   useEffect(() => {
     setReportPage(1);
-  }, [filteredReportRows.length, reportDateRange?.from, reportDateRange?.to]);
+  }, [filteredReportRows.length, reportDateRange?.from, reportDateRange?.to, selectedCompanyIds]);
 
   useEffect(() => {
     const totalPages = Math.max(1, Math.ceil(filteredReportRows.length / PAGE_SIZE));
@@ -719,7 +798,7 @@ export function PendingReportsDashboard({
     }
   }, [filteredReportRows.length, reportPage]);
 
-  const pageTitle = isConsultantUser ? "오피스아워 일지" : "미작성 보고서";
+  const pageTitle = isConsultantUser ? "오피스아워 일지" : "오피스아워 보고서";
   const pageDescription = isConsultantUser
     ? "배정된 세션의 오피스아워 일지 작성 현황을 확인합니다"
     : "세션 완료 후 3일 이내 보고서 작성 현황을 관리합니다";
@@ -779,9 +858,117 @@ export function PendingReportsDashboard({
         {/* 오피스아워 보고서 현황 */}
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border bg-white">
           <div className="shrink-0 border-b p-6 space-y-4">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
               <h3 className="font-semibold text-gray-900">오피스아워 보고서 현황</h3>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2 md:justify-end">
+                {isAdminUser && (
+                  <Popover
+                    open={companyFilterOpen}
+                    onOpenChange={(open) => {
+                      setCompanyFilterOpen(open);
+                      if (!open) setCompanyFilterQuery("");
+                    }}
+                  >
+                    <PopoverTrigger asChild>
+                      <div
+                        role="combobox"
+                        aria-expanded={companyFilterOpen}
+                        tabIndex={0}
+                        className="flex min-h-9 w-full cursor-pointer items-center gap-1.5 rounded-md border bg-white px-2 py-1 text-sm outline-none transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 sm:w-[320px]"
+                      >
+                        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
+                          {selectedCompanyFilters.length > 0 ? (
+                            <>
+                              {visibleCompanyFilterBadges.map((company) => (
+                                <Badge
+                                  key={company.id}
+                                  variant="secondary"
+                                  className="max-w-[120px] truncate bg-emerald-100 text-emerald-700"
+                                >
+                                  {company.name}
+                                </Badge>
+                              ))}
+                              {hiddenCompanyFilterCount > 0 && (
+                                <Badge variant="secondary" className="bg-slate-100 text-slate-600">
+                                  +{hiddenCompanyFilterCount}
+                                </Badge>
+                              )}
+                            </>
+                          ) : (
+                            <span className="px-1 text-slate-500">기업 필터</span>
+                          )}
+                        </div>
+                        {selectedCompanyIds.length > 0 && (
+                          <button
+                            type="button"
+                            className="rounded-sm p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                            onClick={(event) => {
+                              event.preventDefault();
+                              event.stopPropagation();
+                              setSelectedCompanyIds([]);
+                            }}
+                            aria-label="기업 필터 전체 해제"
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </button>
+                        )}
+                        <ChevronsUpDown className="h-4 w-4 shrink-0 text-slate-400" />
+                      </div>
+                    </PopoverTrigger>
+                    <PopoverContent align="start" className="w-[min(420px,calc(100vw-48px))] p-0">
+                      <Command shouldFilter={false}>
+                        <CommandInput
+                          value={companyFilterQuery}
+                          onValueChange={setCompanyFilterQuery}
+                          placeholder="기업명 검색"
+                        />
+                        <CommandList className="max-h-72">
+                          <CommandEmpty>검색 결과가 없습니다.</CommandEmpty>
+                          <CommandGroup>
+                            {companyFilterOptions.map((company) => {
+                              const selected = selectedCompanyIds.includes(company.id);
+                              return (
+                                <CommandItem
+                                  key={company.id}
+                                  value={company.id}
+                                  onSelect={() => toggleCompanyFilter(company.id)}
+                                  className="cursor-pointer"
+                                >
+                                  <Check
+                                    className={
+                                      selected
+                                        ? "h-4 w-4 text-emerald-600 opacity-100"
+                                        : "h-4 w-4 opacity-0"
+                                    }
+                                  />
+                                  <span className="min-w-0 flex-1 truncate">{company.name}</span>
+                                </CommandItem>
+                              );
+                            })}
+                          </CommandGroup>
+                        </CommandList>
+                      </Command>
+                      <div className="flex items-center justify-between border-t px-3 py-2">
+                        <span className="text-xs text-slate-500">
+                          {selectedCompanyIds.length > 0
+                            ? `${selectedCompanyIds.length}개 기업 선택됨`
+                            : "전체 기업"}
+                        </span>
+                        {selectedCompanyIds.length > 0 && (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 px-2"
+                            onClick={() => setSelectedCompanyIds([])}
+                          >
+                            전체 보기
+                          </Button>
+                        )}
+                      </div>
+                    </PopoverContent>
+                  </Popover>
+                )}
                 <DateRangePicker
                   value={reportDateRange}
                   onChange={setReportDateRange}
@@ -813,6 +1000,7 @@ export function PendingReportsDashboard({
                     <TableRow className="hover:bg-white">
                       <TableHead className="bg-white">상태</TableHead>
                       <TableHead className="bg-white">사업</TableHead>
+                      <TableHead className="bg-white">기업</TableHead>
                       <TableHead className="bg-white">컨설턴트</TableHead>
                       <TableHead className="bg-white">오피스아워</TableHead>
                       <TableHead className="bg-white">기한</TableHead>
@@ -835,6 +1023,9 @@ export function PendingReportsDashboard({
                             <span className="w-2 h-2 rounded-full" style={{ backgroundColor: row.programColor }} />
                             <span className="text-sm">{row.programName}</span>
                           </div>
+                        </TableCell>
+                        <TableCell className="text-sm">
+                          <div className="max-w-[180px] truncate">{resolveRowCompanyName(row)}</div>
                         </TableCell>
                         <TableCell className="text-sm text-muted-foreground">
                           {row.consultantName}
@@ -986,7 +1177,15 @@ export function PendingReportsDashboard({
           {selectedReportItem && (
             <div className="flex min-h-0 flex-1 flex-col">
               <DialogHeader className="shrink-0 border-b px-6 py-5">
-                <DialogTitle>오피스아워 일지 상세</DialogTitle>
+                <div className="flex items-center justify-between gap-3">
+                  <DialogTitle>오피스아워 일지 상세</DialogTitle>
+                  <Badge variant="secondary" className="bg-slate-100 text-slate-600">
+                    읽기 전용
+                  </Badge>
+                </div>
+                <DialogDescription>
+                  보고서 내용만 확인할 수 있습니다.
+                </DialogDescription>
               </DialogHeader>
 
               <div className="min-h-0 flex-1 space-y-6 overflow-y-auto px-6 py-6">
@@ -1004,6 +1203,10 @@ export function PendingReportsDashboard({
                   <div>
                     <div className="text-xs text-muted-foreground">오피스아워</div>
                     <div className="font-medium">{selectedReportItem.application.officeHourTitle}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-muted-foreground">기업</div>
+                    <div className="font-medium">{resolveRowCompanyName(selectedReportItem)}</div>
                   </div>
                   <div>
                     <div className="text-xs text-muted-foreground">진행일</div>
@@ -1072,29 +1275,11 @@ export function PendingReportsDashboard({
                 )}
               </div>
 
-              <div className="shrink-0 border-t px-6 py-4">
-                <div className="flex justify-end gap-2">
-                  <Button
-                    variant="destructive"
-                    onClick={() => {
-                      const confirmed = window.confirm(
-                        "보고서를 삭제하시겠습니까? 첨부 사진도 Storage에서 함께 삭제됩니다."
-                      );
-                      if (!confirmed) return;
-                      onDeleteReport(selectedReportItem.report);
-                      setSelectedReportItem(null);
-                    }}
-                  >
-                    삭제
-                  </Button>
-                  <Button
-                    onClick={() => {
-                      onEditReport(selectedReportItem.report);
-                      setSelectedReportItem(null);
-                    }}
-                  >
-                    수정
-                  </Button>
+              <div className="shrink-0 border-t bg-slate-50 px-6 py-4">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <span className="text-xs text-slate-500">
+                    읽기 전용으로 표시 중입니다.
+                  </span>
                   <Button variant="outline" onClick={() => setSelectedReportItem(null)}>
                     닫기
                   </Button>

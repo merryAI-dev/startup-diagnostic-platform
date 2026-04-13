@@ -45,12 +45,13 @@ const adminNavItems: NavItem[] = [
   { id: "admin-agendas", label: "아젠다 관리", icon: FileText },
   { id: "admin-consultants", label: "컨설턴트 관리", icon: UserCog },
   { id: "admin-users", label: "사용자 관리", icon: Users },
-  { id: "pending-reports", label: "미작성 보고서", icon: AlertCircle }, // 추가
+  { id: "pending-reports", label: "오피스아워 보고서", icon: AlertCircle }, // 추가
 ];
 
 const consultantNavItems: NavItem[] = [
   { id: "consultant-calendar", label: "내 일정 캘린더", icon: CalendarRange },
   { id: "consultant-profile", label: "내 정보 입력", icon: UserCog },
+  { id: "consultant-companies", label: "기업 등록", icon: UsersRound },
   { id: "pending-reports", label: "오피스아워 일지", icon: FileText },
   { id: "admin-applications", label: "신청 관리", icon: ClipboardList },
 ];

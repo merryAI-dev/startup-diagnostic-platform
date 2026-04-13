@@ -3,8 +3,8 @@ import { PlaceholderPage } from "@/redesign/pages/PlaceholderPage"
 export function PendingReportsPage() {
   return (
     <PlaceholderPage
-      title="미작성 보고서"
-      description="작성 기한이 지난 보고서를 확인합니다."
+      title="오피스아워 보고서"
+      description="오피스아워 보고서 작성 현황을 확인합니다."
     />
   )
 }
