@@ -417,6 +417,7 @@ export function AdminConsultants({
                                 size="icon"
                                 className="h-9 w-9 shrink-0"
                                 disabled={isSavingMeetingLink}
+                                loading={isSavingMeetingLink}
                                 onClick={() => {
                                   if (isEditingMeetingLink) {
                                     void finishMeetingLinkEdit(consultant)

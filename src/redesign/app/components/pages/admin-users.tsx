@@ -251,9 +251,10 @@ export function AdminUsers({
                             size="sm"
                             className="shrink-0"
                             disabled={isApproving}
+                            loading={isApproving}
                             onClick={() => handleApprovePendingUser(pending)}
                           >
-                            {isApproving ? "승인 중..." : "승인"}
+                            승인
                           </Button>
                         </div>
                       </div>

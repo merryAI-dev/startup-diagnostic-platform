@@ -583,26 +583,10 @@ export function AdminDashboard({
     async function loadCompanies() {
       setLoadingCompanies(true)
       try {
-        const [profileSnapshot, companySnapshot] = await Promise.all([
-          getDocs(collection(db, "profiles")),
-          getDocs(collection(db, "companies")),
-        ])
-        const liveCompanyIds = new Set(
-          profileSnapshot.docs
-            .map((docSnap) => docSnap.data() as ProfileSummary)
-            .filter(
-              (data) =>
-                data.role === "company" &&
-                (data.active === true || !!data.approvedAt) &&
-                typeof data.companyId === "string" &&
-                data.companyId.trim().length > 0,
-            )
-            .map((data) => data.companyId!.trim()),
-        )
+        const companySnapshot = await getDocs(collection(db, "companies"))
         if (!mounted) return
-        const liveCompanyDocs = companySnapshot.docs.filter((docSnap) => liveCompanyIds.has(docSnap.id))
         const companyInfoEntries = await Promise.all(
-          liveCompanyDocs.map(async (docSnap) => {
+          companySnapshot.docs.map(async (docSnap) => {
             const companyInfoSnap = await getDoc(doc(db, "companies", docSnap.id, "companyInfo", "info"))
             const companyInfoData = companyInfoSnap.exists()
               ? (companyInfoSnap.data() as Partial<CompanyInfoRecord>)
@@ -618,7 +602,7 @@ export function AdminDashboard({
         )
         if (!mounted) return
         const voucherStatusByCompanyId = new Map(companyInfoEntries)
-        const list = liveCompanyDocs
+        const list = companySnapshot.docs
           .map((docSnap) => {
             const data = docSnap.data() as {
               name?: string | null

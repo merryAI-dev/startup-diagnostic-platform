@@ -19,6 +19,7 @@ import { Textarea } from "@/redesign/app/components/ui/textarea";
 import { DateRangePicker } from "@/redesign/app/components/ui/date-range-picker";
 import { PaginationControls } from "@/redesign/app/components/ui/pagination-controls";
 import { Popover, PopoverContent, PopoverTrigger } from "@/redesign/app/components/ui/popover";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/redesign/app/components/ui/select";
 import {
   Command,
   CommandEmpty,
@@ -246,6 +247,7 @@ export function PendingReportsDashboard({
     ? "mx-auto w-full max-w-[1440px]"
     : "mx-auto w-full max-w-7xl";
   const [reportDateRange, setReportDateRange] = useState<DateRange | undefined>();
+  const [reportStatusFilter, setReportStatusFilter] = useState<"all" | "작성" | "미작성">("all");
   const [reportPage, setReportPage] = useState(1);
   const [selectedReportItem, setSelectedReportItem] = useState<{
     report: OfficeHourReport;
@@ -765,6 +767,10 @@ export function PendingReportsDashboard({
         if (!companyId || !selectedCompanyIds.includes(companyId)) return false;
       }
 
+      if (reportStatusFilter !== "all" && row.statusLabel !== reportStatusFilter) {
+        return false;
+      }
+
       const scheduledDate = parseLocalDate(row.application.scheduledDate);
       if (!scheduledDate) return !rangeStart && !rangeEnd;
       const normalized = new Date(
@@ -777,7 +783,7 @@ export function PendingReportsDashboard({
       if (rangeEnd && normalized > rangeEnd) return false;
       return true;
     });
-  }, [isAdminUser, reportDateRange, reportRows, selectedCompanyIds]);
+  }, [isAdminUser, reportDateRange, reportRows, reportStatusFilter, selectedCompanyIds]);
   const paginatedReportRows = useMemo(() => {
     const startIndex = (reportPage - 1) * PAGE_SIZE;
     return filteredReportRows.slice(startIndex, startIndex + PAGE_SIZE);
@@ -789,7 +795,7 @@ export function PendingReportsDashboard({
 
   useEffect(() => {
     setReportPage(1);
-  }, [filteredReportRows.length, reportDateRange?.from, reportDateRange?.to, selectedCompanyIds]);
+  }, [filteredReportRows.length, reportDateRange?.from, reportDateRange?.to, reportStatusFilter, selectedCompanyIds]);
 
   useEffect(() => {
     const totalPages = Math.max(1, Math.ceil(filteredReportRows.length / PAGE_SIZE));
@@ -969,6 +975,19 @@ export function PendingReportsDashboard({
                     </PopoverContent>
                   </Popover>
                 )}
+                <Select
+                  value={reportStatusFilter}
+                  onValueChange={(value) => setReportStatusFilter(value as "all" | "작성" | "미작성")}
+                >
+                  <SelectTrigger className="w-full bg-white sm:w-[140px]">
+                    <SelectValue placeholder="작성 여부" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">전체</SelectItem>
+                    <SelectItem value="작성">작성</SelectItem>
+                    <SelectItem value="미작성">미작성</SelectItem>
+                  </SelectContent>
+                </Select>
                 <DateRangePicker
                   value={reportDateRange}
                   onChange={setReportDateRange}
@@ -998,12 +1017,11 @@ export function PendingReportsDashboard({
                 <Table>
                   <TableHeader className="[&_tr]:sticky [&_tr]:top-0 [&_tr]:z-10 [&_tr]:bg-white">
                     <TableRow className="hover:bg-white">
-                      <TableHead className="bg-white">상태</TableHead>
-                      <TableHead className="bg-white">사업</TableHead>
-                      <TableHead className="bg-white">기업</TableHead>
-                      <TableHead className="bg-white">컨설턴트</TableHead>
-                      <TableHead className="bg-white">오피스아워</TableHead>
                       <TableHead className="bg-white">기한</TableHead>
+                      <TableHead className="bg-white">유형</TableHead>
+                      <TableHead className="bg-white">기업명</TableHead>
+                      <TableHead className="bg-white">사업명</TableHead>
+                      <TableHead className="bg-white">컨설턴트</TableHead>
                       <TableHead className="bg-white">진행일</TableHead>
                       <TableHead className="bg-white">작성일</TableHead>
                       <TableHead className="w-[72px] bg-white text-center">다운로드</TableHead>
@@ -1013,26 +1031,6 @@ export function PendingReportsDashboard({
                   <TableBody>
                     {paginatedReportRows.map((row) => (
                       <TableRow key={`${row.type}-${row.application.id}`}>
-                        <TableCell>
-                          <span className="text-sm text-muted-foreground">
-                            {row.statusLabel}
-                          </span>
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex items-center gap-2">
-                            <span className="w-2 h-2 rounded-full" style={{ backgroundColor: row.programColor }} />
-                            <span className="text-sm">{row.programName}</span>
-                          </div>
-                        </TableCell>
-                        <TableCell className="text-sm">
-                          <div className="max-w-[180px] truncate">{resolveRowCompanyName(row)}</div>
-                        </TableCell>
-                        <TableCell className="text-sm text-muted-foreground">
-                          {row.consultantName}
-                        </TableCell>
-                        <TableCell className="text-sm">
-                          <div className="max-w-[220px] truncate">{row.application.officeHourTitle}</div>
-                        </TableCell>
                         <TableCell>
                           <Badge
                             variant="secondary"
@@ -1047,7 +1045,31 @@ export function PendingReportsDashboard({
                             {row.dueLabel}
                           </Badge>
                         </TableCell>
+                        <TableCell>
+                          <Badge
+                            variant="secondary"
+                            className={
+                              row.application.type === "regular"
+                                ? "bg-blue-50 text-blue-700"
+                                : "bg-emerald-50 text-emerald-700"
+                            }
+                          >
+                            {row.application.type === "regular" ? "정기" : "비정기"}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-sm">
+                          <div className="max-w-[180px] truncate">{resolveRowCompanyName(row)}</div>
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex items-center gap-2">
+                            <span className="w-2 h-2 rounded-full" style={{ backgroundColor: row.programColor }} />
+                            <span className="text-sm">{row.programName}</span>
+                          </div>
+                        </TableCell>
                         <TableCell className="text-sm text-muted-foreground">
+                          {row.consultantName}
+                        </TableCell>
+                        <TableCell className="text-sm">
                           {row.application.scheduledDate
                             ? formatLocalDateText(row.application.scheduledDate, "yyyy.MM.dd")
                             : "-"}
@@ -1177,40 +1199,32 @@ export function PendingReportsDashboard({
           {selectedReportItem && (
             <div className="flex min-h-0 flex-1 flex-col">
               <DialogHeader className="shrink-0 border-b px-6 py-5">
-                <div className="flex items-center justify-between gap-3">
-                  <DialogTitle>오피스아워 일지 상세</DialogTitle>
-                  <Badge variant="secondary" className="bg-slate-100 text-slate-600">
-                    읽기 전용
-                  </Badge>
-                </div>
-                <DialogDescription>
-                  보고서 내용만 확인할 수 있습니다.
-                </DialogDescription>
+                <DialogTitle>오피스아워 일지 상세</DialogTitle>
               </DialogHeader>
 
-              <div className="min-h-0 flex-1 space-y-6 overflow-y-auto px-6 py-6">
-                <div className="grid grid-cols-2 gap-4 text-sm">
-                  <div>
-                    <div className="text-xs text-muted-foreground">사업</div>
-                    <div className="font-medium">{selectedReportItem.programName}</div>
+              <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
+                <div className="grid grid-cols-1 gap-x-8 gap-y-5 border-b pb-6 text-sm md:grid-cols-2">
+                  <div className="space-y-1.5">
+                    <div className="text-xs font-medium text-slate-500">사업</div>
+                    <div className="text-sm text-slate-900">{selectedReportItem.programName}</div>
                   </div>
-                  <div>
-                    <div className="text-xs text-muted-foreground">컨설턴트</div>
-                    <div className="font-medium">
+                  <div className="space-y-1.5">
+                    <div className="text-xs font-medium text-slate-500">컨설턴트</div>
+                    <div className="text-sm text-slate-900">
                       {selectedReportItem.report.consultantName || selectedReportItem.application.consultant}
                     </div>
                   </div>
-                  <div>
-                    <div className="text-xs text-muted-foreground">오피스아워</div>
-                    <div className="font-medium">{selectedReportItem.application.officeHourTitle}</div>
+                  <div className="space-y-1.5">
+                    <div className="text-xs font-medium text-slate-500">오피스아워</div>
+                    <div className="text-sm text-slate-900">{selectedReportItem.application.officeHourTitle}</div>
                   </div>
-                  <div>
-                    <div className="text-xs text-muted-foreground">기업</div>
-                    <div className="font-medium">{resolveRowCompanyName(selectedReportItem)}</div>
+                  <div className="space-y-1.5">
+                    <div className="text-xs font-medium text-slate-500">기업</div>
+                    <div className="text-sm text-slate-900">{resolveRowCompanyName(selectedReportItem)}</div>
                   </div>
-                  <div>
-                    <div className="text-xs text-muted-foreground">진행일</div>
-                    <div className="font-medium">
+                  <div className="space-y-1.5">
+                    <div className="text-xs font-medium text-slate-500">진행일</div>
+                    <div className="text-sm text-slate-900">
                       {selectedReportItem.application.scheduledDate
                         ? formatLocalDateText(
                           selectedReportItem.application.scheduledDate,
@@ -1219,49 +1233,55 @@ export function PendingReportsDashboard({
                         : "-"}
                     </div>
                   </div>
-                  <div>
-                    <div className="text-xs text-muted-foreground">작성일</div>
-                    <div className="font-medium">
+                  <div className="space-y-1.5">
+                    <div className="text-xs font-medium text-slate-500">작성일</div>
+                    <div className="text-sm text-slate-900">
                       {selectedReportItem.report.date
                         ? formatLocalDateText(selectedReportItem.report.date, "yyyy년 M월 d일")
                         : "-"}
                     </div>
                   </div>
                 </div>
-                <div>
-                  <div className="text-xs text-muted-foreground mb-1">주제</div>
-                  <div className="rounded-lg border px-3 py-2 text-sm break-all">
+
+                <div className="space-y-2 border-b py-6">
+                  <div className="text-xs font-medium text-slate-500">주제</div>
+                  <div className="text-sm leading-6 text-slate-900 break-all">
                     {selectedReportItem.report.topic || "-"}
                   </div>
                 </div>
-                <div>
-                  <div className="text-xs text-muted-foreground mb-1">참여자</div>
-                  <div className="rounded-lg border px-3 py-2 text-sm break-all">
+
+                <div className="space-y-2 border-b py-6">
+                  <div className="text-xs font-medium text-slate-500">참여자</div>
+                  <div className="text-sm leading-6 text-slate-900 break-all">
                     {(selectedReportItem.report.participants ?? []).join(", ") || "-"}
                   </div>
                 </div>
-                <div>
-                  <div className="text-xs text-muted-foreground mb-1">기업의 현황</div>
-                  <div className="rounded-lg border px-3 py-2 text-sm whitespace-pre-wrap break-all">
+
+                <div className="space-y-2 border-b py-6">
+                  <div className="text-xs font-medium text-slate-500">기업의 현황</div>
+                  <div className="whitespace-pre-wrap break-all text-sm leading-7 text-slate-900">
                     {selectedReportContent.companyStatus || "-"}
                   </div>
                 </div>
-                <div>
-                  <div className="text-xs text-muted-foreground mb-1">자문내용</div>
-                  <div className="rounded-lg border px-3 py-2 text-sm whitespace-pre-wrap break-all">
+
+                <div className="space-y-2 border-b py-6">
+                  <div className="text-xs font-medium text-slate-500">자문내용</div>
+                  <div className="whitespace-pre-wrap break-all text-sm leading-7 text-slate-900">
                     {selectedReportContent.advisoryContent || "-"}
                   </div>
                 </div>
-                <div>
-                  <div className="text-xs text-muted-foreground mb-1">팔로업</div>
-                  <div className="rounded-lg border px-3 py-2 text-sm whitespace-pre-wrap break-all">
+
+                <div className="space-y-2 py-6">
+                  <div className="text-xs font-medium text-slate-500">팔로업</div>
+                  <div className="whitespace-pre-wrap break-all text-sm leading-7 text-slate-900">
                     {selectedReportItem.report.followUp || "-"}
                   </div>
                 </div>
+
                 {selectedReportItem.report.photos?.length > 0 && (
-                  <div>
-                    <div className="text-xs text-muted-foreground mb-2">사진</div>
-                    <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                  <div className="space-y-3 border-t py-6">
+                    <div className="text-xs font-medium text-slate-500">사진</div>
+                    <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
                       {selectedReportItem.report.photos.map((url, idx) => (
                         <img
                           key={`${url}-${idx}`}
@@ -1275,11 +1295,8 @@ export function PendingReportsDashboard({
                 )}
               </div>
 
-              <div className="shrink-0 border-t bg-slate-50 px-6 py-4">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <span className="text-xs text-slate-500">
-                    읽기 전용으로 표시 중입니다.
-                  </span>
+              <div className="shrink-0 border-t border-slate-200 bg-white px-6 py-4">
+                <div className="flex justify-end">
                   <Button variant="outline" onClick={() => setSelectedReportItem(null)}>
                     닫기
                   </Button>

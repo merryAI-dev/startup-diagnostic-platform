@@ -474,9 +474,10 @@ export function ConsultantProfilePage({
                 type="submit"
                 form="consultant-profile-form"
                 disabled={saving || isInvalid}
+                loading={saving}
                 className={submitClassName}
               >
-                {saving ? "저장 중..." : (submitLabel ?? "정보 저장")}
+                {submitLabel ?? "정보 저장"}
               </Button>
             </div>
           )}
@@ -528,9 +529,10 @@ export function ConsultantProfilePage({
                 size="sm"
                 disabled={scheduleSaving || !isScheduleDirty}
                 onClick={() => onSaveSchedule(draftAvailability)}
+                loading={scheduleSaving}
                 data-testid="consultant-schedule-save"
               >
-                {scheduleSaving ? "저장 중..." : "스케줄 저장"}
+                스케줄 저장
               </Button>
             </div>
             <div className="grid gap-3">

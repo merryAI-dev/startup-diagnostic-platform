@@ -297,10 +297,10 @@ export function RegularOfficeHoursCalendar({
 
       </div>
 
-      <div className="flex flex-1 min-h-0 overflow-hidden">
+      <div className="flex min-h-0 flex-1 overflow-hidden">
           {/* Main Calendar */}
-          <div className="flex-1 px-3 pt-2 pb-2">
-            <div className="rounded-lg border bg-white">
+          <div className="min-h-0 flex-1 overflow-y-auto px-3 pt-2 pb-2">
+            <div className="min-h-max rounded-lg border bg-white">
               {/* Calendar Header */}
               <div className="border-b px-4 py-2.5">
                 <div className="flex items-center justify-between">

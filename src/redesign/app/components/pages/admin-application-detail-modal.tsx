@@ -1368,8 +1368,9 @@ export function AdminApplicationDetailModal({
               data-testid="application-action-confirm"
               onClick={handleConfirmAction}
               disabled={isActionPending || (actionType === "reject" && rejectReason.trim().length === 0)}
+              loading={isActionPending}
             >
-              {isActionPending ? "처리 중..." : "확인"}
+              확인
             </Button>
           </div>
         </DialogContent>

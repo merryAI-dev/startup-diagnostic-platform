@@ -34,7 +34,7 @@ interface ApplicationDetailProps {
   messages: Message[];
   onBack: () => void;
   onSendMessage: (content: string, files: FileItem[]) => void;
-  onCancelApplication: () => void;
+  onCancelApplication: () => Promise<void> | void;
   onRejectApplication?: (reason: string) => void;
   onUpdateRejectionReason?: (reason: string) => void;
   onUpdateCompanyApplication?: (payload: {
@@ -73,6 +73,7 @@ export function ApplicationDetail({
   const [messageContent, setMessageContent] = useState("");
   const [messageFiles, setMessageFiles] = useState<FileItem[]>([]);
   const [showCancelDialog, setShowCancelDialog] = useState(false);
+  const [cancelingApplication, setCancelingApplication] = useState(false);
   const [showRejectDialog, setShowRejectDialog] = useState(false);
   const [rejectReason, setRejectReason] = useState("");
   const [showEditRejectDialog, setShowEditRejectDialog] = useState(false);
@@ -229,6 +230,17 @@ export function ApplicationDetail({
     if (!ok) return;
     setIsEditingCompanyApplication(false);
     setEditingNewFiles([]);
+  };
+
+  const handleCancelApplicationConfirm = async () => {
+    if (cancelingApplication) return;
+    setCancelingApplication(true);
+    try {
+      await Promise.resolve(onCancelApplication());
+      setShowCancelDialog(false);
+    } finally {
+      setCancelingApplication(false);
+    }
   };
 
   return (
@@ -487,8 +499,9 @@ export function ApplicationDetail({
                 type="button"
                 onClick={handleSaveCompanyApplication}
                 disabled={savingCompanyEdit || editingRequestContent.trim().length === 0}
+                loading={savingCompanyEdit}
               >
-                {savingCompanyEdit ? "저장 중..." : "저장"}
+                저장
               </Button>
             </div>
           )}
@@ -737,7 +750,13 @@ export function ApplicationDetail({
       )}
 
       {/* Cancel confirmation dialog */}
-      <AlertDialog open={showCancelDialog} onOpenChange={setShowCancelDialog}>
+      <AlertDialog
+        open={showCancelDialog}
+        onOpenChange={(open) => {
+          if (cancelingApplication) return;
+          setShowCancelDialog(open);
+        }}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>신청을 삭제하시겠습니까?</AlertDialogTitle>
@@ -746,16 +765,16 @@ export function ApplicationDetail({
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>취소</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => {
-                onCancelApplication();
-                setShowCancelDialog(false);
-              }}
+            <AlertDialogCancel disabled={cancelingApplication}>취소</AlertDialogCancel>
+            <Button
+              type="button"
+              onClick={handleCancelApplicationConfirm}
+              disabled={cancelingApplication}
+              loading={cancelingApplication}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
               삭제
-            </AlertDialogAction>
+            </Button>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

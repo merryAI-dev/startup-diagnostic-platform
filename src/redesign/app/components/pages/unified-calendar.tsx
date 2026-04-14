@@ -840,9 +840,10 @@ export function UnifiedCalendar({
                       <Button
                         onClick={handleCreateEvent}
                         disabled={calendarService.isLoading}
+                        loading={calendarService.isLoading}
                         className="bg-[#5DADE2] hover:bg-[#5DADE2]/90"
                       >
-                        {calendarService.isLoading ? "등록 중..." : "일정 등록"}
+                        일정 등록
                       </Button>
                     </div>
                   </div>
@@ -904,12 +905,9 @@ export function UnifiedCalendar({
                     <Button
                       onClick={handleConfirmAction}
                       disabled={isActionPending || (actionType === "reject" && rejectReason.trim().length === 0)}
+                      loading={isActionPending}
                     >
-                      {isActionPending
-                        ? actionType === "accept"
-                          ? "수락 중..."
-                          : "거절 중..."
-                        : "확인"}
+                      확인
                     </Button>
                   </div>
                 </DialogContent>

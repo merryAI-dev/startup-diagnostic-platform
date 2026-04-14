@@ -693,23 +693,9 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
   }, [companyDocs])
   const [profileList, setProfileList] = useState<RawProfileApprovalDoc[]>([])
   const [users, setUsers] = useState<UserWithPermissions[]>([])
-  const liveCompanyIds = useMemo(() => {
-    return new Set(
-      profileList
-        .filter((doc) => {
-          const role = toApprovalRole(doc.role)
-          return role === "company" && (doc.active === true || !!doc.approvedAt) && !!doc.companyId
-        })
-        .map((doc) => doc.companyId!)
-        .filter((companyId) => companyId.trim().length > 0),
-    )
-  }, [profileList])
   const companyDirectory = useMemo(() => {
     if (isFirebaseConfigured) {
-      const filteredCompanyDocs = needsCompanyDirectory
-        ? companyDocs.filter((doc) => liveCompanyIds.has(doc.id))
-        : companyDocs
-      return filteredCompanyDocs.map(
+      return companyDocs.map(
         (doc): CompanyDirectoryItem => ({
           id: doc.id,
           name: doc.name?.trim() || companyNameById.get(doc.id) || "회사명 미입력",
@@ -733,9 +719,6 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     companyDocs,
     companyNameById,
     isFirebaseConfigured,
-    liveCompanyIds,
-    needsCompanyDirectory,
-    users,
   ])
   const resolveCompanyName = useCallback(
     (value?: string | null) => {
@@ -4125,7 +4108,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
                 >
                   <SheetContent
                     side="right"
-                    className="w-full gap-0 border-l border-slate-200 bg-white/98 p-0 sm:max-w-2xl"
+                    className="w-full min-h-0 gap-0 overflow-hidden border-l border-slate-200 bg-white/98 p-0 sm:max-w-2xl"
                   >
                     {selectedOfficeHour && (
                       <>

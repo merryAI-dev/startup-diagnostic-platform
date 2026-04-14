@@ -1,5 +1,6 @@
 import { Shield } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/redesign/app/components/ui/card";
+import { Spinner } from "@/redesign/app/components/ui/spinner";
 import { User as UserType } from "@/redesign/app/lib/types";
 import { Switch } from "@/redesign/app/components/ui/switch";
 
@@ -54,7 +55,7 @@ export function Settings({
             </div>
             <div className="flex items-center justify-between rounded-lg bg-muted px-4 py-3 text-xs text-slate-600">
               <span>현재 상태: {marketingConsentEnabled ? "수신 동의" : "수신 거부"}</span>
-              {marketingConsentSaving ? <span>저장 중...</span> : null}
+              {marketingConsentSaving ? <Spinner className="h-3.5 w-3.5" /> : null}
             </div>
           </CardContent>
         </Card>

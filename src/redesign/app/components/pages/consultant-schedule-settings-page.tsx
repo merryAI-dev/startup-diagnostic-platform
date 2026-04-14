@@ -172,9 +172,10 @@ export function ConsultantScheduleSettingsPage({
                 type="button"
                 onClick={handleSave}
                 disabled={saving || !isDirty}
+                loading={saving}
                 data-testid="consultant-schedule-save"
               >
-                {saving ? "저장 중..." : "스케줄 저장"}
+                스케줄 저장
               </Button>
             </div>
           </div>
