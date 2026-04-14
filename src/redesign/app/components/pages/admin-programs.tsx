@@ -1,7 +1,8 @@
 import { type FormEvent, useEffect, useMemo, useState } from "react"
-import { CalendarDays, CheckCircle2, Clock3, Plus, Search, Target, Users, X, XCircle } from "lucide-react"
+import { CalendarDays, CheckCircle2, Clock3, Eye, Plus, Search, Target, Users, X, XCircle } from "lucide-react"
 import { Agenda, Application, Program } from "@/redesign/app/lib/types"
 import { getCompletedHoursByProgram } from "@/redesign/app/lib/program-metrics"
+import { ProgramKpiDefinition, getProgramKpiPreviewDefinitions } from "@/redesign/app/lib/program-kpi-preview"
 import { getCompanyIdsByProgram } from "@/lib/company-program-membership"
 import { StatusChip } from "@/redesign/app/components/status-chip"
 import { Badge } from "@/redesign/app/components/ui/badge"
@@ -13,10 +14,10 @@ import {
   CardHeader,
   CardTitle,
 } from "@/redesign/app/components/ui/card"
+import { Checkbox } from "@/redesign/app/components/ui/checkbox"
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from "@/redesign/app/components/ui/dialog"
@@ -67,6 +68,10 @@ type ProgramStats = {
   cancelledSessions: number
   uniqueCompanies: number
   achievementRate: number
+}
+
+type ProgramKpiDraft = ProgramKpiDefinition & {
+  active: boolean
 }
 
 const PAGE_SIZE = 10
@@ -160,6 +165,7 @@ export function AdminPrograms({
   const [companyUpdateSaving, setCompanyUpdateSaving] = useState(false)
   const [selectedAvailableIds, setSelectedAvailableIds] = useState<string[]>([])
   const [selectedCompanyIds, setSelectedCompanyIds] = useState<string[]>([])
+  const [programKpiDrafts, setProgramKpiDrafts] = useState<Record<string, ProgramKpiDraft[]>>({})
   const [page, setPage] = useState(1)
 
   const applicationsByProgram = useMemo(() => {
@@ -300,6 +306,7 @@ export function AdminPrograms({
       (id) => companyById.get(id) || { id, name: "회사명 미입력" },
     )
   }, [companyById, editingCompanyIds, editingProgram])
+  const editingCompanyLimit = numberFromInput(detailForm.companyLimit)
   const availableCompanies = useMemo(() => {
     if (!editingProgram) return []
     const currentIds = new Set(editingCompanyIds)
@@ -309,6 +316,26 @@ export function AdminPrograms({
       return company.name.toLowerCase().includes(companySearchQuery)
     })
   }, [companySearchQuery, editingCompanyIds, editingProgram, sortedCompanies])
+
+  useEffect(() => {
+    if (programs.length === 0) return
+
+    setProgramKpiDrafts((prev) => {
+      let changed = false
+      const next = { ...prev }
+
+      programs.forEach((program, index) => {
+        if (next[program.id]) return
+        next[program.id] = getProgramKpiPreviewDefinitions(program, index).map((definition) => ({
+          ...definition,
+          active: true,
+        }))
+        changed = true
+      })
+
+      return changed ? next : prev
+    })
+  }, [programs])
 
   useEffect(() => {
     if (programs.length === 0) {
@@ -366,6 +393,39 @@ export function AdminPrograms({
       setPage(totalPages)
     }
   }, [filteredProgramStats.length, page])
+
+  const selectedProgramKpis = useMemo(
+    () => (selectedProgram ? programKpiDrafts[selectedProgram.id] ?? [] : []),
+    [programKpiDrafts, selectedProgram],
+  )
+
+  function updateProgramKpiDraft(programId: string, metricId: string, patch: Partial<ProgramKpiDraft>) {
+    setProgramKpiDrafts((prev) => ({
+      ...prev,
+      [programId]: (prev[programId] ?? []).map((metric) =>
+        metric.id === metricId ? { ...metric, ...patch } : metric,
+      ),
+    }))
+  }
+
+  function addProgramKpiDraft(programId: string) {
+    setProgramKpiDrafts((prev) => {
+      const current = prev[programId] ?? []
+      const nextMetric: ProgramKpiDraft = {
+        id: `${programId}__draft_${Date.now()}`,
+        label: "",
+        format: "number",
+        unit: "건",
+        description: "",
+        active: true,
+      }
+
+      return {
+        ...prev,
+        [programId]: [...current, nextMetric],
+      }
+    })
+  }
 
   function handleSubmitProgram(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -549,7 +609,11 @@ export function AdminPrograms({
                             <div className="text-xs text-muted-foreground">
                               {item.completedHours}h / {item.program.targetHours}h
                             </div>
-                            <Progress value={item.achievementRate} className="h-1.5" />
+                            <Progress
+                              value={item.achievementRate}
+                              className="h-1.5 bg-slate-100"
+                              indicatorClassName="bg-slate-500"
+                            />
                             <div className="text-xs font-medium">{item.achievementRate}%</div>
                           </div>
                         </TableCell>
@@ -559,8 +623,10 @@ export function AdminPrograms({
                             type="button"
                             variant="outline"
                             size="sm"
+                            className="border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100 hover:text-slate-900"
                             onClick={() => openEditDialog(item.program.id)}
                           >
+                            <Eye className="mr-2 h-4 w-4" />
                             상세보기
                           </Button>
                         </TableCell>
@@ -829,6 +895,113 @@ export function AdminPrograms({
                           </div>
                         </div>
                       </div>
+
+                      <div className="rounded-lg border border-slate-200 bg-slate-50/70 p-4">
+                        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <div className="text-sm font-medium text-slate-900">정량 KPI 설정</div>
+                              <Badge variant="outline" className="border-blue-200 bg-blue-50 text-blue-700">
+                                Preview
+                              </Badge>
+                            </div>
+                            <p className="mt-1 text-xs text-muted-foreground">
+                              사업별 KPI 정의를 두고 기업 실적 입력 화면에 노출하는 형태를 미리 확인합니다.
+                            </p>
+                          </div>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => addProgramKpiDraft(selectedProgram.id)}
+                          >
+                            <Plus className="mr-2 h-4 w-4" />
+                            항목 추가
+                          </Button>
+                        </div>
+
+                        <div className="mt-4 space-y-3">
+                          {selectedProgramKpis.length === 0 ? (
+                            <div className="rounded-md border border-dashed bg-white px-3 py-4 text-sm text-muted-foreground">
+                              아직 설정된 KPI가 없습니다.
+                            </div>
+                          ) : (
+                            selectedProgramKpis.map((metric) => (
+                              <div
+                                key={metric.id}
+                                className={`rounded-lg border bg-white p-3 ${
+                                  metric.active ? "border-slate-200" : "border-slate-200 opacity-60"
+                                }`}
+                              >
+                                <div className="grid gap-3 md:grid-cols-[minmax(0,1.4fr)_120px_minmax(0,1.2fr)_92px]">
+                                  <div className="space-y-1.5">
+                                    <Label htmlFor={`${selectedProgram.id}-${metric.id}-label`}>KPI 이름</Label>
+                                    <Input
+                                      id={`${selectedProgram.id}-${metric.id}-label`}
+                                      value={metric.label}
+                                      onChange={(event) =>
+                                        updateProgramKpiDraft(selectedProgram.id, metric.id, {
+                                          label: event.target.value,
+                                        })
+                                      }
+                                      placeholder="예: 투자 유치 총액"
+                                    />
+                                  </div>
+                                  <div className="space-y-1.5">
+                                    <Label htmlFor={`${selectedProgram.id}-${metric.id}-unit`}>단위</Label>
+                                    <Input
+                                      id={`${selectedProgram.id}-${metric.id}-unit`}
+                                      value={metric.unit}
+                                      onChange={(event) =>
+                                        updateProgramKpiDraft(selectedProgram.id, metric.id, {
+                                          unit: event.target.value,
+                                        })
+                                      }
+                                      placeholder="건"
+                                    />
+                                  </div>
+                                  <div className="space-y-1.5">
+                                    <Label htmlFor={`${selectedProgram.id}-${metric.id}-description`}>설명</Label>
+                                    <Input
+                                      id={`${selectedProgram.id}-${metric.id}-description`}
+                                      value={metric.description}
+                                      onChange={(event) =>
+                                        updateProgramKpiDraft(selectedProgram.id, metric.id, {
+                                          description: event.target.value,
+                                        })
+                                      }
+                                      placeholder="입력 기준 안내"
+                                    />
+                                  </div>
+                                  <div className="space-y-2">
+                                    <Label htmlFor={`${selectedProgram.id}-${metric.id}-active`}>사용 여부</Label>
+                                    <div className="flex h-10 items-center gap-2 rounded-md border border-slate-200 px-3">
+                                      <Checkbox
+                                        id={`${selectedProgram.id}-${metric.id}-active`}
+                                        checked={metric.active}
+                                        onCheckedChange={(checked) =>
+                                          updateProgramKpiDraft(selectedProgram.id, metric.id, {
+                                            active: checked === true,
+                                          })
+                                        }
+                                      />
+                                      <span className="text-sm text-slate-700">
+                                        {metric.active ? "활성" : "비활성"}
+                                      </span>
+                                    </div>
+                                  </div>
+                                </div>
+                                <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+                                  <Badge variant="secondary" className="text-[11px]">
+                                    {metric.format === "currency" ? "금액" : "숫자"}
+                                  </Badge>
+                                  <span>저장 연동 전 mock 상태입니다.</span>
+                                </div>
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      </div>
                     </CardContent>
                   </Card>
 
@@ -905,131 +1078,147 @@ export function AdminPrograms({
       </div>
 
       <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
-        <DialogContent className="max-h-[92vh] overflow-y-auto p-8 sm:max-w-5xl">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Plus className="w-4 h-4" />
-              사업 생성
-            </DialogTitle>
-            <DialogDescription>
-              입력 여백을 넉넉하게 구성했습니다. 기본 정보를 입력하면 사업이 생성됩니다.
-            </DialogDescription>
+        <DialogContent className="flex max-h-[92vh] flex-col overflow-hidden p-0 sm:max-w-5xl">
+          <DialogHeader className="shrink-0 border-b px-8 py-6 pr-14">
+            <DialogTitle>사업 생성</DialogTitle>
           </DialogHeader>
 
-          <form className="mt-2 space-y-6" onSubmit={handleSubmitProgram}>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="space-y-2">
-                <Label>사업명</Label>
-                <Input
-                  value={form.name}
-                  onChange={(event) => setForm((prev) => ({ ...prev, name: event.target.value }))}
-                  placeholder="예: 2026 상반기 농식품 프로그램"
-                  required
-                />
-              </div>
+          <form className="flex min-h-0 flex-1 flex-col" onSubmit={handleSubmitProgram}>
+            <div className="min-h-0 flex-1 overflow-y-auto px-8 py-6">
+              <div className="space-y-6">
+                <section className="rounded-2xl border border-slate-200 bg-white shadow-xs">
+                  <div className="border-b border-slate-200 px-6 py-4">
+                    <div className="text-sm font-semibold text-slate-900">기본 정보</div>
+                    <p className="mt-1 text-xs text-slate-500">
+                      사업명, 설명, 운영 기간을 입력합니다.
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-1 gap-6 px-6 py-5 md:grid-cols-2">
+                    <div className="space-y-2">
+                      <Label>사업명</Label>
+                      <Input
+                        value={form.name}
+                        onChange={(event) =>
+                          setForm((prev) => ({ ...prev, name: event.target.value }))
+                        }
+                        placeholder="예: 2026 상반기 농식품 프로그램"
+                        required
+                      />
+                    </div>
 
-              <div className="space-y-2 md:col-span-1">
-                <Label>사업 설명</Label>
-                <Textarea
-                  rows={3}
-                  value={form.description}
-                  onChange={(event) =>
-                    setForm((prev) => ({ ...prev, description: event.target.value }))
-                  }
-                  placeholder="사업 목적 및 운영 메모"
-                />
-              </div>
+                    <div className="space-y-2">
+                      <Label>사업 설명</Label>
+                      <Textarea
+                        rows={4}
+                        value={form.description}
+                        onChange={(event) =>
+                          setForm((prev) => ({ ...prev, description: event.target.value }))
+                        }
+                        placeholder="사업 목적 및 운영 메모"
+                      />
+                    </div>
 
-              <div className="space-y-2">
-                <Label>기간 시작</Label>
-                <Input
-                  type="date"
-                  value={form.periodStart}
-                  onChange={(event) =>
-                    setForm((prev) => ({ ...prev, periodStart: event.target.value }))
-                  }
-                />
-              </div>
+                    <div className="space-y-2">
+                      <Label>기간 시작</Label>
+                      <Input
+                        type="date"
+                        value={form.periodStart}
+                        onChange={(event) =>
+                          setForm((prev) => ({ ...prev, periodStart: event.target.value }))
+                        }
+                      />
+                    </div>
 
-              <div className="space-y-2">
-                <Label>기간 종료</Label>
-                <Input
-                  type="date"
-                  value={form.periodEnd}
-                  onChange={(event) =>
-                    setForm((prev) => ({ ...prev, periodEnd: event.target.value }))
-                  }
-                />
-                <p className="text-xs text-muted-foreground">요일은 화/목 고정입니다.</p>
+                    <div className="space-y-2">
+                      <Label>기간 종료</Label>
+                      <Input
+                        type="date"
+                        value={form.periodEnd}
+                        onChange={(event) =>
+                          setForm((prev) => ({ ...prev, periodEnd: event.target.value }))
+                        }
+                      />
+                    </div>
+                  </div>
+                </section>
+
+                <section className="rounded-2xl border border-slate-200 bg-white shadow-xs">
+                  <div className="border-b border-slate-200 px-6 py-4">
+                    <div className="text-sm font-semibold text-slate-900">운영 설정</div>
+                    <p className="mt-1 text-xs text-slate-500">
+                      티켓 수, 참여기업 정원, 목표 시수를 설정합니다.
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-1 gap-6 px-6 py-5 md:grid-cols-2 xl:grid-cols-4">
+                    <div className="space-y-2">
+                      <Label>내부 티켓 수</Label>
+                      <Input
+                        inputMode="numeric"
+                        value={form.internalTicketLimit}
+                        onChange={(event) =>
+                          setForm((prev) => ({
+                            ...prev,
+                            internalTicketLimit: event.target.value.replace(/[^\d]/g, ""),
+                          }))
+                        }
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>외부 티켓 수</Label>
+                      <Input
+                        inputMode="numeric"
+                        value={form.externalTicketLimit}
+                        onChange={(event) =>
+                          setForm((prev) => ({
+                            ...prev,
+                            externalTicketLimit: event.target.value.replace(/[^\d]/g, ""),
+                          }))
+                        }
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>참여 기업 수</Label>
+                      <Input
+                        inputMode="numeric"
+                        value={form.companyLimit}
+                        onChange={(event) =>
+                          setForm((prev) => ({
+                            ...prev,
+                            companyLimit: event.target.value.replace(/[^\d]/g, ""),
+                          }))
+                        }
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>목표 시수(h)</Label>
+                      <Input
+                        inputMode="numeric"
+                        value={form.targetHours}
+                        onChange={(event) =>
+                          setForm((prev) => ({
+                            ...prev,
+                            targetHours: event.target.value.replace(/[^\d]/g, ""),
+                          }))
+                        }
+                      />
+                    </div>
+                  </div>
+                </section>
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-              <div className="space-y-2">
-                <Label>내부 티켓 수</Label>
-                <Input
-                  inputMode="numeric"
-                  value={form.internalTicketLimit}
-                  onChange={(event) =>
-                    setForm((prev) => ({
-                      ...prev,
-                      internalTicketLimit: event.target.value.replace(/[^\d]/g, ""),
-                    }))
-                  }
-                />
+            <div className="shrink-0 border-t px-8 py-4">
+              <div className="flex justify-end gap-2">
+                <Button type="button" variant="outline" onClick={() => setIsAddDialogOpen(false)}>
+                  취소
+                </Button>
+                <Button type="submit">
+                  생성하기
+                </Button>
               </div>
-
-              <div className="space-y-2">
-                <Label>외부 티켓 수</Label>
-                <Input
-                  inputMode="numeric"
-                  value={form.externalTicketLimit}
-                  onChange={(event) =>
-                    setForm((prev) => ({
-                      ...prev,
-                      externalTicketLimit: event.target.value.replace(/[^\d]/g, ""),
-                    }))
-                  }
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label>참여 기업 수</Label>
-                <Input
-                  inputMode="numeric"
-                  value={form.companyLimit}
-                  onChange={(event) =>
-                    setForm((prev) => ({
-                      ...prev,
-                      companyLimit: event.target.value.replace(/[^\d]/g, ""),
-                    }))
-                  }
-                />
-              </div>
-
-              <div className="space-y-2">
-                <Label>목표 시수(h)</Label>
-                <Input
-                  inputMode="numeric"
-                  value={form.targetHours}
-                  onChange={(event) =>
-                    setForm((prev) => ({
-                      ...prev,
-                      targetHours: event.target.value.replace(/[^\d]/g, ""),
-                    }))
-                  }
-                />
-              </div>
-            </div>
-
-            <div className="flex justify-end gap-2 pt-2">
-              <Button type="button" variant="outline" onClick={() => setIsAddDialogOpen(false)}>
-                취소
-              </Button>
-              <Button type="submit">
-                <Plus className="w-4 h-4 mr-2" />
-                사업 생성
-              </Button>
             </div>
           </form>
         </DialogContent>
@@ -1047,259 +1236,317 @@ export function AdminPrograms({
         <DialogContent className="flex max-h-[92vh] flex-col overflow-hidden p-0 sm:max-w-5xl">
           <DialogHeader className="shrink-0 border-b px-8 py-6 pr-14">
             <DialogTitle>사업 상세보기 / 수정</DialogTitle>
-            <DialogDescription>
-              입력 여백과 폭을 늘려 수정하기 편하게 조정했습니다.
-            </DialogDescription>
           </DialogHeader>
 
           {editingProgram ? (
             <>
               <div className="min-h-0 flex-1 overflow-y-auto px-8 py-6">
                 <div className="space-y-6">
-                  <div className="rounded-lg border p-4 bg-slate-50/60">
-                    <div className="text-sm font-medium">{editingProgram.name}</div>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      기간: {prettyDateRange(editingProgram.periodStart, editingProgram.periodEnd)}
-                    </p>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div className="space-y-2">
-                  <Label>사업명</Label>
-                  <Input
-                    value={detailForm.name}
-                    onChange={(event) =>
-                      setDetailForm((prev) => ({ ...prev, name: event.target.value }))
-                    }
-                    required
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label>사업 설명</Label>
-                  <Textarea
-                    rows={3}
-                    value={detailForm.description}
-                    onChange={(event) =>
-                      setDetailForm((prev) => ({ ...prev, description: event.target.value }))
-                    }
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label>기간 시작</Label>
-                  <Input
-                    type="date"
-                    value={detailForm.periodStart}
-                    onChange={(event) =>
-                      setDetailForm((prev) => ({ ...prev, periodStart: event.target.value }))
-                    }
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label>기간 종료</Label>
-                  <Input
-                    type="date"
-                    value={detailForm.periodEnd}
-                    onChange={(event) =>
-                      setDetailForm((prev) => ({ ...prev, periodEnd: event.target.value }))
-                    }
-                  />
-                </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-                <div className="space-y-2">
-                  <Label>내부 티켓 수</Label>
-                  <Input
-                    inputMode="numeric"
-                    value={detailForm.internalTicketLimit}
-                    onChange={(event) =>
-                      setDetailForm((prev) => ({
-                        ...prev,
-                        internalTicketLimit: event.target.value.replace(/[^\d]/g, ""),
-                      }))
-                    }
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label>외부 티켓 수</Label>
-                  <Input
-                    inputMode="numeric"
-                    value={detailForm.externalTicketLimit}
-                    onChange={(event) =>
-                      setDetailForm((prev) => ({
-                        ...prev,
-                        externalTicketLimit: event.target.value.replace(/[^\d]/g, ""),
-                      }))
-                    }
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label>참여 기업 수</Label>
-                  <Input
-                    inputMode="numeric"
-                    value={detailForm.companyLimit}
-                    onChange={(event) =>
-                      setDetailForm((prev) => ({
-                        ...prev,
-                        companyLimit: event.target.value.replace(/[^\d]/g, ""),
-                      }))
-                    }
-                  />
-                </div>
-
-                <div className="space-y-2">
-                  <Label>목표 시수(h)</Label>
-                  <Input
-                    inputMode="numeric"
-                    value={detailForm.targetHours}
-                    onChange={(event) =>
-                      setDetailForm((prev) => ({
-                        ...prev,
-                        targetHours: event.target.value.replace(/[^\d]/g, ""),
-                      }))
-                    }
-                  />
-                </div>
-                  </div>
-
-                  <div className="rounded-lg border p-4 space-y-3">
-                <div className="flex items-center justify-between">
-                  <div className="text-sm font-medium flex items-center gap-2">
-                    <Users className="w-4 h-4" />
-                    참여 기업 관리
-                  </div>
-                  <div className="text-xs text-muted-foreground">
-                    {editingProgram.companyLimit && editingProgram.companyLimit > 0
-                      ? `${selectedCompanies.length} / ${editingProgram.companyLimit}개`
-                      : `${selectedCompanies.length}개`}
-                  </div>
-                </div>
-
-                <div className="space-y-2">
-                  <Label>참여 기업 검색</Label>
-                  <Input
-                    value={companySearch}
-                    onChange={(event) => setCompanySearch(event.target.value)}
-                    placeholder="회사명을 입력하세요"
-                  />
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-[1fr_auto_1fr] gap-4">
-                  <div className="space-y-2">
-                    <div className="text-xs text-muted-foreground">선택 전 기업</div>
-                    <div className="h-52 overflow-y-auto rounded-lg border border-slate-200 bg-white">
-                      {availableCompanies.length === 0 ? (
-                        <div className="p-3 text-xs text-muted-foreground">
-                          추가 가능한 기업이 없습니다.
-                        </div>
-                      ) : (
-                        availableCompanies.map((company) => {
-                          const checked = selectedAvailableIds.includes(company.id)
-                          return (
-                            <label
-                              key={company.id}
-                              className="flex items-center gap-2 px-3 py-2 border-b border-slate-200/70 last:border-b-0 text-sm text-slate-600 cursor-pointer hover:bg-slate-50/60"
-                            >
-                              <input
-                                type="checkbox"
-                                className="h-4 w-4 rounded border-slate-200 text-slate-500 focus:ring-slate-300"
-                                checked={checked}
-                                onChange={(event) => {
-                                  setSelectedAvailableIds((prev) => {
-                                    if (event.target.checked) {
-                                      return [...prev, company.id]
-                                    }
-                                    return prev.filter((id) => id !== company.id)
-                                  })
-                                }}
-                              />
-                              <span>{company.name}</span>
-                            </label>
-                          )
-                        })
-                      )}
+                  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                    <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+                      <div className="text-[11px] font-medium text-slate-500">사업명</div>
+                      <div className="mt-1 truncate text-sm font-semibold text-slate-900">
+                        {editingProgram.name}
+                      </div>
+                    </div>
+                    <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
+                      <div className="text-[11px] font-medium text-slate-500">운영 기간</div>
+                      <div className="mt-1 text-sm font-semibold text-slate-900">
+                        {prettyDateRange(editingProgram.periodStart, editingProgram.periodEnd)}
+                      </div>
+                    </div>
+                    <div className="rounded-xl border border-emerald-200 bg-emerald-50/70 px-4 py-3">
+                      <div className="text-[11px] font-medium text-emerald-700">참여 기업</div>
+                      <div className="mt-1 text-sm font-semibold text-emerald-900">
+                        {selectedCompanies.length}개
+                        {editingCompanyLimit > 0 ? ` / ${editingCompanyLimit}개` : ""}
+                      </div>
+                    </div>
+                    <div className="rounded-xl border border-blue-200 bg-blue-50/70 px-4 py-3">
+                      <div className="text-[11px] font-medium text-blue-700">목표 시수</div>
+                      <div className="mt-1 text-sm font-semibold text-blue-900">
+                        {numberFromInput(detailForm.targetHours)}h
+                      </div>
                     </div>
                   </div>
 
-                  <div className="flex flex-col items-center justify-center gap-2">
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      className="bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
-                      disabled={
-                        companyUpdateSaving ||
-                        selectedAvailableIds.length === 0 ||
-                        ((editingProgram.companyLimit ?? 0) > 0 &&
-                          selectedCompanies.length >= (editingProgram.companyLimit ?? 0))
-                      }
-                      onClick={addSelectedCompanies}
-                    >
-                      →
-                    </Button>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      className="bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
-                      disabled={companyUpdateSaving || selectedCompanyIds.length === 0}
-                      onClick={removeSelectedCompanies}
-                    >
-                      ←
-                    </Button>
-                  </div>
+                  <section className="rounded-2xl border border-slate-200 bg-white shadow-xs">
+                    <div className="border-b border-slate-200 px-6 py-4">
+                      <div className="text-sm font-semibold text-slate-900">기본 정보</div>
+                      <p className="mt-1 text-xs text-slate-500">
+                        사업명과 설명, 운영 기간을 함께 관리합니다.
+                      </p>
+                    </div>
+                    <div className="grid grid-cols-1 gap-6 px-6 py-5 md:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label>사업명</Label>
+                        <Input
+                          value={detailForm.name}
+                          onChange={(event) =>
+                            setDetailForm((prev) => ({ ...prev, name: event.target.value }))
+                          }
+                          required
+                        />
+                      </div>
 
-                  <div className="space-y-2">
-                    <div className="text-xs text-muted-foreground">선택된 기업</div>
-                    <div className="h-52 overflow-y-auto rounded-lg border border-slate-200 bg-white">
-                      {selectedCompanies.length === 0 ? (
-                        <div className="p-3 text-xs text-muted-foreground">
-                          아직 참여 기업이 없습니다.
+                      <div className="space-y-2">
+                        <Label>사업 설명</Label>
+                        <Textarea
+                          rows={4}
+                          value={detailForm.description}
+                          onChange={(event) =>
+                            setDetailForm((prev) => ({ ...prev, description: event.target.value }))
+                          }
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label>기간 시작</Label>
+                        <Input
+                          type="date"
+                          value={detailForm.periodStart}
+                          onChange={(event) =>
+                            setDetailForm((prev) => ({ ...prev, periodStart: event.target.value }))
+                          }
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label>기간 종료</Label>
+                        <Input
+                          type="date"
+                          value={detailForm.periodEnd}
+                          onChange={(event) =>
+                            setDetailForm((prev) => ({ ...prev, periodEnd: event.target.value }))
+                          }
+                        />
+                      </div>
+                    </div>
+                  </section>
+
+                  <section className="rounded-2xl border border-slate-200 bg-white shadow-xs">
+                    <div className="border-b border-slate-200 px-6 py-4">
+                      <div className="text-sm font-semibold text-slate-900">운영 설정</div>
+                      <p className="mt-1 text-xs text-slate-500">
+                        티켓 수, 참여기업 정원, 목표 시수를 설정합니다.
+                      </p>
+                    </div>
+                    <div className="grid grid-cols-1 gap-6 px-6 py-5 md:grid-cols-2 xl:grid-cols-4">
+                      <div className="space-y-2">
+                        <Label>내부 티켓 수</Label>
+                        <Input
+                          inputMode="numeric"
+                          value={detailForm.internalTicketLimit}
+                          onChange={(event) =>
+                            setDetailForm((prev) => ({
+                              ...prev,
+                              internalTicketLimit: event.target.value.replace(/[^\d]/g, ""),
+                            }))
+                          }
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label>외부 티켓 수</Label>
+                        <Input
+                          inputMode="numeric"
+                          value={detailForm.externalTicketLimit}
+                          onChange={(event) =>
+                            setDetailForm((prev) => ({
+                              ...prev,
+                              externalTicketLimit: event.target.value.replace(/[^\d]/g, ""),
+                            }))
+                          }
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label>참여 기업 수</Label>
+                        <Input
+                          inputMode="numeric"
+                          value={detailForm.companyLimit}
+                          onChange={(event) =>
+                            setDetailForm((prev) => ({
+                              ...prev,
+                              companyLimit: event.target.value.replace(/[^\d]/g, ""),
+                            }))
+                          }
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label>목표 시수(h)</Label>
+                        <Input
+                          inputMode="numeric"
+                          value={detailForm.targetHours}
+                          onChange={(event) =>
+                            setDetailForm((prev) => ({
+                              ...prev,
+                              targetHours: event.target.value.replace(/[^\d]/g, ""),
+                            }))
+                          }
+                        />
+                      </div>
+                    </div>
+                  </section>
+
+                  <section className="rounded-2xl border border-slate-200 bg-white shadow-xs">
+                    <div className="border-b border-slate-200 px-6 py-4">
+                      <div>
+                        <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                          <Users className="h-4 w-4 text-slate-500" />
+                          참여 기업 관리
                         </div>
-                      ) : (
-                        selectedCompanies.map((company) => {
-                          const checked = selectedCompanyIds.includes(company.id)
-                          return (
-                            <label
-                              key={company.id}
-                              className="flex items-center gap-2 px-3 py-2 border-b border-slate-200/70 last:border-b-0 text-sm text-slate-600 cursor-pointer hover:bg-slate-50/60"
-                            >
-                              <input
-                                type="checkbox"
-                                className="h-4 w-4 rounded border-slate-200 text-slate-500 focus:ring-slate-300"
-                                checked={checked}
-                                onChange={(event) => {
-                                  setSelectedCompanyIds((prev) => {
-                                    if (event.target.checked) {
-                                      return [...prev, company.id]
-                                    }
-                                    return prev.filter((id) => id !== company.id)
-                                  })
-                                }}
-                              />
-                              <span className="flex-1">{company.name}</span>
-                              <button
-                                type="button"
-                                disabled={companyUpdateSaving}
-                                onClick={() => void removeCompanyFromProgram(company.id)}
-                                className="rounded hover:bg-slate-200/70"
-                                aria-label={`${company.name} 제거`}
-                              >
-                                <X className="w-3 h-3" />
-                              </button>
-                            </label>
-                          )
-                        })
-                      )}
-	                    </div>
-	                  </div>
-	                </div>
-	                </div>
+                        <p className="mt-1 text-xs text-slate-500">
+                          검색 후 선택한 기업을 현재 사업에 배정하거나 제외합니다.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="space-y-5 px-6 py-5">
+                      <div className="space-y-2">
+                        <Label>참여 기업 검색</Label>
+                        <Input
+                          value={companySearch}
+                          onChange={(event) => setCompanySearch(event.target.value)}
+                          placeholder="회사명을 입력하세요"
+                        />
+                      </div>
+
+                      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]">
+                        <div className="min-h-0 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50/60">
+                          <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
+                            <div>
+                              <div className="text-sm font-semibold text-slate-900">선택 가능 기업</div>
+                              <p className="mt-0.5 text-xs text-slate-500">
+                                아직 이 사업에 배정되지 않은 기업입니다.
+                              </p>
+                            </div>
+                            <Badge variant="outline" className="border-slate-200 bg-white text-slate-600">
+                              {availableCompanies.length}개
+                            </Badge>
+                          </div>
+                          <div className="h-[360px] overflow-y-auto bg-white">
+                            {availableCompanies.length === 0 ? (
+                              <div className="flex h-full items-center justify-center p-4 text-center text-sm text-slate-500">
+                                추가 가능한 기업이 없습니다.
+                              </div>
+                            ) : (
+                              availableCompanies.map((company) => {
+                                const checked = selectedAvailableIds.includes(company.id)
+                                return (
+                                  <label
+                                    key={company.id}
+                                    className="flex cursor-pointer items-center gap-3 border-b border-slate-200/70 px-4 py-3 hover:bg-slate-50/80"
+                                  >
+                                    <Checkbox
+                                      checked={checked}
+                                      onCheckedChange={(nextChecked) => {
+                                        setSelectedAvailableIds((prev) => {
+                                          if (nextChecked) {
+                                            return [...prev, company.id]
+                                          }
+                                          return prev.filter((id) => id !== company.id)
+                                        })
+                                      }}
+                                      className="rounded-full border-slate-300 data-[state=checked]:border-slate-700 data-[state=checked]:bg-slate-700 focus-visible:ring-slate-200"
+                                    />
+                                    <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-700">
+                                      {company.name}
+                                    </span>
+                                  </label>
+                                )
+                              })
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="flex flex-row items-center justify-center gap-2 xl:flex-col">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="h-10 min-w-12 rounded-full border-slate-200 bg-white px-4 text-slate-700 hover:bg-slate-50"
+                            disabled={
+                              companyUpdateSaving ||
+                              selectedAvailableIds.length === 0 ||
+                              (editingCompanyLimit > 0 &&
+                                selectedCompanies.length >= editingCompanyLimit)
+                            }
+                            onClick={addSelectedCompanies}
+                          >
+                            →
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="h-10 min-w-12 rounded-full border-slate-200 bg-white px-4 text-slate-700 hover:bg-slate-50"
+                            disabled={companyUpdateSaving || selectedCompanyIds.length === 0}
+                            onClick={removeSelectedCompanies}
+                          >
+                            ←
+                          </Button>
+                        </div>
+
+                        <div className="min-h-0 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50/60">
+                          <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
+                            <div>
+                              <div className="text-sm font-semibold text-slate-900">참여 중 기업</div>
+                              <p className="mt-0.5 text-xs text-slate-500">
+                                현재 사업에 연결된 기업입니다.
+                              </p>
+                            </div>
+                            <Badge variant="outline" className="border-slate-200 bg-white text-slate-600">
+                              {selectedCompanies.length}개
+                            </Badge>
+                          </div>
+                          <div className="h-[360px] overflow-y-auto bg-white">
+                            {selectedCompanies.length === 0 ? (
+                              <div className="flex h-full items-center justify-center p-4 text-center text-sm text-slate-500">
+                                아직 참여 기업이 없습니다.
+                              </div>
+                            ) : (
+                              selectedCompanies.map((company) => {
+                                const checked = selectedCompanyIds.includes(company.id)
+                                return (
+                                  <label
+                                    key={company.id}
+                                    className="flex cursor-pointer items-center gap-3 border-b border-slate-200/70 px-4 py-3 hover:bg-slate-50/80"
+                                  >
+                                    <Checkbox
+                                      checked={checked}
+                                      onCheckedChange={(nextChecked) => {
+                                        setSelectedCompanyIds((prev) => {
+                                          if (nextChecked) {
+                                            return [...prev, company.id]
+                                          }
+                                          return prev.filter((id) => id !== company.id)
+                                        })
+                                      }}
+                                      className="rounded-full border-slate-300 data-[state=checked]:border-slate-700 data-[state=checked]:bg-slate-700 focus-visible:ring-slate-200"
+                                    />
+                                    <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-700">
+                                      {company.name}
+                                    </span>
+                                    <button
+                                      type="button"
+                                      disabled={companyUpdateSaving}
+                                      onClick={() => void removeCompanyFromProgram(company.id)}
+                                      className="rounded-full p-1 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
+                                      aria-label={`${company.name} 제거`}
+                                    >
+                                      <X className="h-3.5 w-3.5" />
+                                    </button>
+                                  </label>
+                                )
+                              })
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </section>
 	              </div>
 	              </div>
 
