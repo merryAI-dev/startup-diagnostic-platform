@@ -129,11 +129,45 @@ service cloud.firestore {
     }
 
     match /companies/{companyId} {
+      function isConsultantManualCompanyCreate() {
+        return isConsultant()
+          && request.resource.data.source == "consultant_manual"
+          && request.resource.data.ownerUid == null
+          && request.resource.data.createdByUid == request.auth.uid
+          && request.resource.data.createdByRole == "consultant"
+          && request.resource.data.name is string
+          && request.resource.data.normalizedName is string
+          && request.resource.data.aliases is list
+          && request.resource.data.programs is list
+          && request.resource.data.active == true;
+      }
+
+      function isConsultantManualCompanyUpdate() {
+        return isConsultant()
+          && resource.data.source == "consultant_manual"
+          && resource.data.ownerUid == null
+          && resource.data.createdByUid == request.auth.uid
+          && request.resource.data.source == resource.data.source
+          && request.resource.data.ownerUid == resource.data.ownerUid
+          && request.resource.data.createdByUid == resource.data.createdByUid
+          && request.resource.data.createdByRole == resource.data.createdByRole
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            "name",
+            "normalizedName",
+            "aliases",
+            "active",
+            "deletedAt",
+            "deletedByUid",
+            "updatedAt"
+          ]);
+      }
+
       allow read: if isCompanyMember(companyId) || isInternalOperator();
       allow create: if isSignedIn()
         && (
           request.resource.data.ownerUid == request.auth.uid
           || isAdmin()
+          || isConsultantManualCompanyCreate()
         );
       allow update: if isSignedIn()
         && (
@@ -146,13 +180,22 @@ service cloud.firestore {
             )
           )
           || isAdmin()
+          || isConsultantManualCompanyUpdate()
         );
       allow delete: if false;
     }
 
     match /companies/{companyId}/companyInfo/{docId} {
+      function isConsultantManualCompanyOwnerAfter() {
+        let company = getAfter(/databases/$(database)/documents/companies/$(companyId)).data;
+        return isConsultant()
+          && company.source == "consultant_manual"
+          && company.ownerUid == null
+          && company.createdByUid == request.auth.uid;
+      }
+
       allow read: if isCompanyMember(companyId) || isInternalOperator();
-      allow create, update: if isCompanyMember(companyId) || isAdmin();
+      allow create, update: if isCompanyMember(companyId) || isAdmin() || isConsultantManualCompanyOwnerAfter();
       allow delete: if false;
     }
 

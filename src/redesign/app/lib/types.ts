@@ -35,6 +35,25 @@ export interface Program {
   weekdays?: ProgramWeekday[];
 }
 
+export type CompanySource = "signup" | "consultant_manual" | "admin_manual" | "legacy_unknown";
+
+export interface CompanyDirectoryItem {
+  id: string;
+  name: string;
+  normalizedName?: string | null;
+  aliases?: string[];
+  source?: CompanySource | string | null;
+  ownerUid?: string | null;
+  active?: boolean;
+  createdByUid?: string | null;
+  createdByRole?: "consultant" | "admin" | string | null;
+  createdAt?: Date | string;
+  updatedAt?: Date | string;
+  deletedAt?: Date | string | null;
+  deletedByUid?: string | null;
+  programs?: string[];
+}
+
 // 스타트업 실적 데이터
 export interface CompanyMetrics {
   id: string;
@@ -263,6 +282,8 @@ export interface MessageTemplate {
 export interface OfficeHourReport {
   id: string;
   applicationId: string;
+  companyId?: string | null;
+  companyName?: string | null;
   consultantId: string;
   consultantName: string;
   date: string;
