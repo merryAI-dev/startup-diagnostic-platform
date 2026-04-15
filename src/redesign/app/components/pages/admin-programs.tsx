@@ -1,8 +1,22 @@
 import { type FormEvent, useEffect, useMemo, useState } from "react"
-import { CalendarDays, CheckCircle2, Clock3, Eye, Plus, Search, Target, Users, X, XCircle } from "lucide-react"
+import {
+  CalendarDays,
+  CheckCircle2,
+  Clock3,
+  Eye,
+  Plus,
+  Search,
+  Target,
+  Users,
+  X,
+  XCircle,
+} from "lucide-react"
 import { Agenda, Application, Program } from "@/redesign/app/lib/types"
 import { getCompletedHoursByProgram } from "@/redesign/app/lib/program-metrics"
-import { ProgramKpiDefinition, getProgramKpiPreviewDefinitions } from "@/redesign/app/lib/program-kpi-preview"
+import {
+  ProgramKpiDefinition,
+  getProgramKpiPreviewDefinitions,
+} from "@/redesign/app/lib/program-kpi-preview"
 import { getCompanyIdsByProgram } from "@/lib/company-program-membership"
 import { StatusChip } from "@/redesign/app/components/status-chip"
 import { Badge } from "@/redesign/app/components/ui/badge"
@@ -273,9 +287,7 @@ export function AdminPrograms({
     const normalizedQuery = searchQuery.trim().toLowerCase()
     if (!normalizedQuery) return programStats
 
-    return programStats.filter((item) =>
-      item.program.name.toLowerCase().includes(normalizedQuery),
-    )
+    return programStats.filter((item) => item.program.name.toLowerCase().includes(normalizedQuery))
   }, [programStats, searchQuery])
 
   const paginatedProgramStats = useMemo(() => {
@@ -302,9 +314,7 @@ export function AdminPrograms({
   }, [companyIdsByProgram, editingProgram])
   const selectedCompanies = useMemo(() => {
     if (!editingProgram) return []
-    return editingCompanyIds.map(
-      (id) => companyById.get(id) || { id, name: "회사명 미입력" },
-    )
+    return editingCompanyIds.map((id) => companyById.get(id) || { id, name: "회사명 미입력" })
   }, [companyById, editingCompanyIds, editingProgram])
   const editingCompanyLimit = numberFromInput(detailForm.companyLimit)
   const availableCompanies = useMemo(() => {
@@ -371,9 +381,7 @@ export function AdminPrograms({
     if (!editingProgram) return
     setCompanyUpdateSaving(true)
     try {
-      const ok = await Promise.resolve(
-        onUpdateProgramCompanies(editingProgram.id, nextCompanyIds),
-      )
+      const ok = await Promise.resolve(onUpdateProgramCompanies(editingProgram.id, nextCompanyIds))
       if (ok === false) return
       setEditingCompanyIds(nextCompanyIds)
       setSelectedAvailableIds([])
@@ -395,11 +403,15 @@ export function AdminPrograms({
   }, [filteredProgramStats.length, page])
 
   const selectedProgramKpis = useMemo(
-    () => (selectedProgram ? programKpiDrafts[selectedProgram.id] ?? [] : []),
+    () => (selectedProgram ? (programKpiDrafts[selectedProgram.id] ?? []) : []),
     [programKpiDrafts, selectedProgram],
   )
 
-  function updateProgramKpiDraft(programId: string, metricId: string, patch: Partial<ProgramKpiDraft>) {
+  function updateProgramKpiDraft(
+    programId: string,
+    metricId: string,
+    patch: Partial<ProgramKpiDraft>,
+  ) {
     setProgramKpiDrafts((prev) => ({
       ...prev,
       [programId]: (prev[programId] ?? []).map((metric) =>
@@ -425,6 +437,71 @@ export function AdminPrograms({
         [programId]: [...current, nextMetric],
       }
     })
+  }
+
+  function removeProgramKpiDraft(programId: string, metricId: string) {
+    setProgramKpiDrafts((prev) => ({
+      ...prev,
+      [programId]: (prev[programId] ?? []).filter((metric) => metric.id !== metricId),
+    }))
+  }
+
+  function renderProgramKpiDrafts(programId: string, metrics: ProgramKpiDraft[]) {
+    return (
+      <div>
+        {metrics.length === 0 ? (
+          <div className="max-w-3xl rounded-md border border-dashed bg-slate-50 px-3 py-4 text-sm text-muted-foreground">
+            아직 설정된 KPI가 없습니다.
+          </div>
+        ) : (
+          <div className="max-h-80 overflow-y-auto">
+            <div className="max-w-3xl space-y-1.5 pr-3">
+              {metrics.map((metric, index) => (
+                <div
+                  key={metric.id}
+                  className="rounded-lg border border-slate-200 bg-white px-3 py-2"
+                >
+                  <div className="flex items-center gap-2">
+                    <Badge
+                      variant="outline"
+                      className="h-7 shrink-0 border-slate-200 bg-slate-50 px-2 text-[11px] text-slate-600"
+                    >
+                      KPI {index + 1}
+                    </Badge>
+                    <div className="min-w-0 flex-1">
+                      <Label htmlFor={`${programId}-${metric.id}-label`} className="sr-only">
+                        KPI 이름
+                      </Label>
+                      <Input
+                        id={`${programId}-${metric.id}-label`}
+                        value={metric.label}
+                        onChange={(event) =>
+                          updateProgramKpiDraft(programId, metric.id, {
+                            label: event.target.value,
+                          })
+                        }
+                        placeholder="예: 투자 유치 건수"
+                        className="h-8"
+                      />
+                    </div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 shrink-0 text-slate-400 hover:bg-slate-100 hover:text-rose-600"
+                      onClick={() => removeProgramKpiDraft(programId, metric.id)}
+                      aria-label={`KPI ${index + 1} 삭제`}
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    )
   }
 
   function handleSubmitProgram(event: FormEvent<HTMLFormElement>) {
@@ -491,14 +568,6 @@ export function AdminPrograms({
   function openEditDialog(programId: string) {
     setEditingProgramId(programId)
     setIsEditDialogOpen(true)
-  }
-
-  async function addCompanyToProgram(companyId: string) {
-    if (!editingProgram) return
-    const currentIds = editingCompanyIds
-    if (currentIds.includes(companyId)) return
-    const nextCompanyIds = [...currentIds, companyId]
-    await updateEditingProgramCompanies(nextCompanyIds)
   }
 
   async function removeCompanyFromProgram(companyId: string) {
@@ -650,7 +719,9 @@ export function AdminPrograms({
               <Card className="border border-slate-200">
                 <CardHeader className="pb-3">
                   <CardTitle className="text-base">전체 요약</CardTitle>
-                  <CardDescription>전체 사업 수와 시수 진행 상황을 빠르게 확인합니다.</CardDescription>
+                  <CardDescription>
+                    전체 사업 수와 시수 진행 상황을 빠르게 확인합니다.
+                  </CardDescription>
                 </CardHeader>
                 <CardContent className="pt-0">
                   <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -709,8 +780,7 @@ export function AdminPrograms({
                     <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
                       {programStats.map((item) => {
                         const isSelected = selectedProgramId === item.program.id
-                        const pendingCount =
-                          item.pendingSessions + item.confirmedSessions
+                        const pendingCount = item.pendingSessions + item.confirmedSessions
                         const statusChips = [
                           {
                             label: `완료 ${item.completedSessions}건`,
@@ -897,17 +967,17 @@ export function AdminPrograms({
                       </div>
 
                       <div className="rounded-lg border border-slate-200 bg-slate-50/70 p-4">
-                        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                           <div>
                             <div className="flex items-center gap-2">
-                              <div className="text-sm font-medium text-slate-900">정량 KPI 설정</div>
-                              <Badge variant="outline" className="border-blue-200 bg-blue-50 text-blue-700">
-                                Preview
+                              <div className="text-sm font-medium text-slate-900">정량 KPI</div>
+                              <Badge
+                                variant="outline"
+                                className="border-slate-200 bg-white text-slate-600"
+                              >
+                                {selectedProgramKpis.length}개
                               </Badge>
                             </div>
-                            <p className="mt-1 text-xs text-muted-foreground">
-                              사업별 KPI 정의를 두고 기업 실적 입력 화면에 노출하는 형태를 미리 확인합니다.
-                            </p>
                           </div>
                           <Button
                             type="button"
@@ -916,90 +986,12 @@ export function AdminPrograms({
                             onClick={() => addProgramKpiDraft(selectedProgram.id)}
                           >
                             <Plus className="mr-2 h-4 w-4" />
-                            항목 추가
+                            추가
                           </Button>
                         </div>
 
-                        <div className="mt-4 space-y-3">
-                          {selectedProgramKpis.length === 0 ? (
-                            <div className="rounded-md border border-dashed bg-white px-3 py-4 text-sm text-muted-foreground">
-                              아직 설정된 KPI가 없습니다.
-                            </div>
-                          ) : (
-                            selectedProgramKpis.map((metric) => (
-                              <div
-                                key={metric.id}
-                                className={`rounded-lg border bg-white p-3 ${
-                                  metric.active ? "border-slate-200" : "border-slate-200 opacity-60"
-                                }`}
-                              >
-                                <div className="grid gap-3 md:grid-cols-[minmax(0,1.4fr)_120px_minmax(0,1.2fr)_92px]">
-                                  <div className="space-y-1.5">
-                                    <Label htmlFor={`${selectedProgram.id}-${metric.id}-label`}>KPI 이름</Label>
-                                    <Input
-                                      id={`${selectedProgram.id}-${metric.id}-label`}
-                                      value={metric.label}
-                                      onChange={(event) =>
-                                        updateProgramKpiDraft(selectedProgram.id, metric.id, {
-                                          label: event.target.value,
-                                        })
-                                      }
-                                      placeholder="예: 투자 유치 총액"
-                                    />
-                                  </div>
-                                  <div className="space-y-1.5">
-                                    <Label htmlFor={`${selectedProgram.id}-${metric.id}-unit`}>단위</Label>
-                                    <Input
-                                      id={`${selectedProgram.id}-${metric.id}-unit`}
-                                      value={metric.unit}
-                                      onChange={(event) =>
-                                        updateProgramKpiDraft(selectedProgram.id, metric.id, {
-                                          unit: event.target.value,
-                                        })
-                                      }
-                                      placeholder="건"
-                                    />
-                                  </div>
-                                  <div className="space-y-1.5">
-                                    <Label htmlFor={`${selectedProgram.id}-${metric.id}-description`}>설명</Label>
-                                    <Input
-                                      id={`${selectedProgram.id}-${metric.id}-description`}
-                                      value={metric.description}
-                                      onChange={(event) =>
-                                        updateProgramKpiDraft(selectedProgram.id, metric.id, {
-                                          description: event.target.value,
-                                        })
-                                      }
-                                      placeholder="입력 기준 안내"
-                                    />
-                                  </div>
-                                  <div className="space-y-2">
-                                    <Label htmlFor={`${selectedProgram.id}-${metric.id}-active`}>사용 여부</Label>
-                                    <div className="flex h-10 items-center gap-2 rounded-md border border-slate-200 px-3">
-                                      <Checkbox
-                                        id={`${selectedProgram.id}-${metric.id}-active`}
-                                        checked={metric.active}
-                                        onCheckedChange={(checked) =>
-                                          updateProgramKpiDraft(selectedProgram.id, metric.id, {
-                                            active: checked === true,
-                                          })
-                                        }
-                                      />
-                                      <span className="text-sm text-slate-700">
-                                        {metric.active ? "활성" : "비활성"}
-                                      </span>
-                                    </div>
-                                  </div>
-                                </div>
-                                <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
-                                  <Badge variant="secondary" className="text-[11px]">
-                                    {metric.format === "currency" ? "금액" : "숫자"}
-                                  </Badge>
-                                  <span>저장 연동 전 mock 상태입니다.</span>
-                                </div>
-                              </div>
-                            ))
-                          )}
+                        <div className="mt-4">
+                          {renderProgramKpiDrafts(selectedProgram.id, selectedProgramKpis)}
                         </div>
                       </div>
                     </CardContent>
@@ -1055,7 +1047,9 @@ export function AdminPrograms({
                                 <StatusChip status={application.status} size="sm" />
                               </TableCell>
                               <TableCell>{application.companyName ?? "-"}</TableCell>
-                              <TableCell>{application.agenda || application.officeHourTitle}</TableCell>
+                              <TableCell>
+                                {application.agenda || application.officeHourTitle}
+                              </TableCell>
                               <TableCell>{application.consultant}</TableCell>
                               <TableCell>
                                 {formatScheduleLabel(
@@ -1215,9 +1209,7 @@ export function AdminPrograms({
                 <Button type="button" variant="outline" onClick={() => setIsAddDialogOpen(false)}>
                   취소
                 </Button>
-                <Button type="submit">
-                  생성하기
-                </Button>
+                <Button type="submit">생성하기</Button>
               </div>
             </div>
           </form>
@@ -1391,6 +1383,35 @@ export function AdminPrograms({
                   </section>
 
                   <section className="rounded-2xl border border-slate-200 bg-white shadow-xs">
+                    <div className="flex items-center justify-between gap-3 border-b border-slate-200 px-6 py-4">
+                      <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                        정량 KPI
+                        <Badge
+                          variant="outline"
+                          className="border-slate-200 bg-white text-slate-600"
+                        >
+                          {(programKpiDrafts[editingProgram.id] ?? []).length}개
+                        </Badge>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => addProgramKpiDraft(editingProgram.id)}
+                      >
+                        <Plus className="mr-2 h-4 w-4" />
+                        추가
+                      </Button>
+                    </div>
+                    <div className="px-6 py-5">
+                      {renderProgramKpiDrafts(
+                        editingProgram.id,
+                        programKpiDrafts[editingProgram.id] ?? [],
+                      )}
+                    </div>
+                  </section>
+
+                  <section className="rounded-2xl border border-slate-200 bg-white shadow-xs">
                     <div className="border-b border-slate-200 px-6 py-4">
                       <div>
                         <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
@@ -1417,12 +1438,17 @@ export function AdminPrograms({
                         <div className="min-h-0 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50/60">
                           <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
                             <div>
-                              <div className="text-sm font-semibold text-slate-900">선택 가능 기업</div>
+                              <div className="text-sm font-semibold text-slate-900">
+                                선택 가능 기업
+                              </div>
                               <p className="mt-0.5 text-xs text-slate-500">
                                 아직 이 사업에 배정되지 않은 기업입니다.
                               </p>
                             </div>
-                            <Badge variant="outline" className="border-slate-200 bg-white text-slate-600">
+                            <Badge
+                              variant="outline"
+                              className="border-slate-200 bg-white text-slate-600"
+                            >
                               {availableCompanies.length}개
                             </Badge>
                           </div>
@@ -1492,12 +1518,17 @@ export function AdminPrograms({
                         <div className="min-h-0 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50/60">
                           <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
                             <div>
-                              <div className="text-sm font-semibold text-slate-900">참여 중 기업</div>
+                              <div className="text-sm font-semibold text-slate-900">
+                                참여 중 기업
+                              </div>
                               <p className="mt-0.5 text-xs text-slate-500">
                                 현재 사업에 연결된 기업입니다.
                               </p>
                             </div>
-                            <Badge variant="outline" className="border-slate-200 bg-white text-slate-600">
+                            <Badge
+                              variant="outline"
+                              className="border-slate-200 bg-white text-slate-600"
+                            >
                               {selectedCompanies.length}개
                             </Badge>
                           </div>
@@ -1547,10 +1578,10 @@ export function AdminPrograms({
                       </div>
                     </div>
                   </section>
-	              </div>
-	              </div>
+                </div>
+              </div>
 
-	              <div className="shrink-0 border-t px-8 py-4">
+              <div className="shrink-0 border-t px-8 py-4">
                 <div className="flex justify-end items-center gap-2">
                   <Button
                     type="button"
