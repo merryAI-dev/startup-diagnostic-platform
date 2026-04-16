@@ -1471,6 +1471,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
         weekdays: doc.weekdays ?? ["TUE", "THU"],
         companyLimit: doc.companyLimit ?? 0,
         companyIds: doc.companyIds ?? [],
+        kpiDefinitions: doc.kpiDefinitions ?? [],
       })),
     )
   }, [programDocs])
@@ -3798,15 +3799,16 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
           ...(data.periodStart !== undefined ? { periodStart: data.periodStart } : {}),
           ...(data.periodEnd !== undefined ? { periodEnd: data.periodEnd } : {}),
           ...(data.weekdays !== undefined ? { weekdays: data.weekdays } : {}),
+          ...(data.kpiDefinitions !== undefined ? { kpiDefinitions: data.kpiDefinitions } : {}),
         })
       } catch (error) {
         toast.error(getFunctionErrorMessage(error, "사업 정보 저장에 실패했습니다"))
-        return
+        return false
       }
 
       setProgramList(nextProgramList)
       toast.success("사업 정보가 업데이트되었습니다")
-      return
+      return true
     }
 
     const buildRegularOfficeHourTitle = (name: string) => `${name} 정기 오피스아워`
@@ -3841,11 +3843,12 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       const slotsSynced = await syncManagedRegularSlots(consultants, nextProgramList)
       if (!slotsSynced) {
         toast.error("사업 정보는 저장되었지만 정기 슬롯 동기화에 실패했습니다")
-        return
+        return false
       }
     }
 
     toast.success("사업 정보가 업데이트되었습니다")
+    return true
   }
 
   const handleUpdateProgramCompanies = async (programId: string, companyIds: string[]) => {

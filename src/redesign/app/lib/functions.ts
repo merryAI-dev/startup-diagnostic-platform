@@ -3,6 +3,7 @@ import { functions, isFirebaseConfigured } from "@/redesign/app/lib/firebase";
 import type {
   ApplicationStatus,
   ConsultantAvailability,
+  ProgramKpiDefinition,
   ProgramWeekday,
   SessionFormat,
 } from "@/redesign/app/lib/types";
@@ -115,6 +116,7 @@ export type SyncProgramDefinitionPayload = {
   periodStart?: string;
   periodEnd?: string;
   weekdays?: ProgramWeekday[];
+  kpiDefinitions?: ProgramKpiDefinition[];
 };
 
 type SyncProgramDefinitionResult = {

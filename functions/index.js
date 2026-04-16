@@ -1,6 +1,7 @@
 "use strict";
 
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
+const { onDocumentCreated } = require("firebase-functions/v2/firestore");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
 const { defineSecret } = require("firebase-functions/params");
 const { initializeApp } = require("firebase-admin/app");
@@ -17,6 +18,7 @@ initializeApp();
 const db = getFirestore();
 const REGION = process.env.FUNCTION_REGION || "asia-northeast3";
 const GEMINI_API_KEY = defineSecret("GEMINI_API_KEY");
+const SLACK_SIGNUP_REQUEST_WEBHOOK_URL = defineSecret("SLACK_SIGNUP_REQUEST_WEBHOOK_URL");
 const ACTIVE_APPLICATION_STATUSES = new Set(["pending", "confirmed", "completed"]);
 const RESERVED_APPLICATION_STATUSES = new Set(["pending", "confirmed"]);
 const AUTO_REJECT_REASON = "진행 예정 시간이 지나 자동 거절되었습니다.";
@@ -79,6 +81,111 @@ function normalizeApplicationStatus(value) {
 function normalizeApprovalRole(value, fallback = "company") {
   const normalized = normalizeString(value);
   return APPROVAL_ROLE_VALUES.has(normalized) ? normalized : fallback;
+}
+
+function getApprovalRoleLabel(value) {
+  switch (normalizeApprovalRole(value, "")) {
+    case "admin":
+      return "관리자";
+    case "company":
+      return "기업";
+    case "consultant":
+      return "컨설턴트";
+    default:
+      return "미확인";
+  }
+}
+
+function formatFirestoreDateTime(value) {
+  const date =
+    value && typeof value.toDate === "function"
+      ? value.toDate()
+      : value instanceof Date
+        ? value
+        : null;
+
+  if (!date || Number.isNaN(date.getTime())) {
+    return "(missing)";
+  }
+
+  const formatter = new Intl.DateTimeFormat("ko-KR", {
+    timeZone: "Asia/Seoul",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  });
+
+  return `${formatter.format(date)} KST`;
+}
+
+function toSlackFieldValue(value) {
+  const normalized = normalizeString(value);
+  return normalized || "(missing)";
+}
+
+function buildSignupRequestSlackPayload(signupRequest) {
+  const requestedRole = normalizeApprovalRole(
+    signupRequest.requestedRole || signupRequest.role || "",
+    ""
+  );
+  const loginEmail = normalizeString(signupRequest.email);
+  const fields = [
+    {
+      type: "mrkdwn",
+      text: `*이메일*\n${toSlackFieldValue(loginEmail)}`,
+    },
+    {
+      type: "mrkdwn",
+      text: `*요청 역할*\n${getApprovalRoleLabel(requestedRole)} \`${toSlackFieldValue(requestedRole)}\``,
+    },
+    {
+      type: "mrkdwn",
+      text: `*가입 요청 시각*\n${formatFirestoreDateTime(signupRequest.createdAt)}`,
+    },
+  ];
+
+  return {
+    text: `새 가입 승인 요청: ${toSlackFieldValue(loginEmail)}`,
+    blocks: [
+      {
+        type: "header",
+        text: {
+          type: "plain_text",
+          text: "새 가입 승인 요청",
+        },
+      },
+      {
+        type: "section",
+        text: {
+          type: "mrkdwn",
+          text: `${toSlackFieldValue(loginEmail)}`,
+        },
+      },
+      {
+        type: "section",
+        fields,
+      },
+    ],
+  };
+}
+
+async function postSlackWebhook(webhookUrl, payload) {
+  const response = await fetch(webhookUrl, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json; charset=utf-8",
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const responseText = await response.text();
+    throw new Error(`Slack webhook failed (${response.status}): ${responseText || "empty response"}`);
+  }
 }
 
 function sanitizeConsentRecord(value) {
@@ -355,6 +462,49 @@ function syncCompanyProgramsInTransaction(transaction, params) {
   });
 }
 
+exports.notifySlackOnSignupRequestCreated = onDocumentCreated(
+  {
+    document: "signupRequests/{userId}",
+    region: REGION,
+    secrets: [SLACK_SIGNUP_REQUEST_WEBHOOK_URL],
+  },
+  async (event) => {
+    const snapshot = event.data;
+    if (!snapshot) {
+      console.error("notifySlackOnSignupRequestCreated missing snapshot", {
+        eventId: event.id,
+        userId: event.params?.userId || null,
+      });
+      return;
+    }
+
+    const signupRequest = snapshot.data() || {};
+    const userId = normalizeString(event.params?.userId) || snapshot.id;
+    const status = normalizeString(signupRequest.status) || "pending";
+
+    if (status !== "pending") {
+      console.warn("Skipping signup request Slack notification for non-pending request", {
+        eventId: event.id,
+        userId,
+        status,
+      });
+      return;
+    }
+
+    const webhookUrl = normalizeString(SLACK_SIGNUP_REQUEST_WEBHOOK_URL.value());
+    if (!webhookUrl) {
+      console.error("SLACK_SIGNUP_REQUEST_WEBHOOK_URL is not configured", {
+        eventId: event.id,
+        userId,
+      });
+      return;
+    }
+
+    const payload = buildSignupRequestSlackPayload(signupRequest);
+    await postSlackWebhook(webhookUrl, payload);
+  }
+);
+
 exports.updateCompanyPrograms = onCall(
   {
     region: REGION,
@@ -612,6 +762,32 @@ function sanitizeProgramWeekdays(value, fallback = ["TUE", "THU"]) {
       )
     : [];
   return normalized.length > 0 ? normalized : fallback;
+}
+
+function sanitizeProgramKpiDefinitions(value, fallback = []) {
+  if (!Array.isArray(value)) {
+    return fallback;
+  }
+
+  const seenIds = new Set();
+  const sanitized = value
+    .filter((item) => item && typeof item === "object")
+    .map((item) => ({
+      id: normalizeString(item.id),
+      label: normalizeString(item.label),
+      description: normalizeString(item.description),
+      active: item.active !== false,
+    }))
+    .filter((item) => item.id && item.label)
+    .filter((item) => {
+      if (seenIds.has(item.id)) {
+        return false;
+      }
+      seenIds.add(item.id);
+      return true;
+    });
+
+  return sanitized;
 }
 
 function buildRegularOfficeHourTitle(programName) {
@@ -991,6 +1167,13 @@ async function syncProgramDefinitionCore(params) {
       patch.weekdays === undefined
         ? sanitizeProgramWeekdays(currentProgram.weekdays)
         : sanitizeProgramWeekdays(patch.weekdays, sanitizeProgramWeekdays(currentProgram.weekdays)),
+    kpiDefinitions:
+      patch.kpiDefinitions === undefined
+        ? sanitizeProgramKpiDefinitions(currentProgram.kpiDefinitions)
+        : sanitizeProgramKpiDefinitions(
+            patch.kpiDefinitions,
+            sanitizeProgramKpiDefinitions(currentProgram.kpiDefinitions)
+          ),
   };
 
   const regularApplications = applicationSnap.docs
@@ -2357,6 +2540,9 @@ exports.syncProgramDefinition = onCall(
           ? { periodEnd: payload.periodEnd }
           : {}),
         ...(Object.prototype.hasOwnProperty.call(payload, "weekdays") ? { weekdays: payload.weekdays } : {}),
+        ...(Object.prototype.hasOwnProperty.call(payload, "kpiDefinitions")
+          ? { kpiDefinitions: payload.kpiDefinitions }
+          : {}),
       },
     });
   }

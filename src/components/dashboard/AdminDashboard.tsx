@@ -60,7 +60,11 @@ import {
 import { PaginationControls } from "@/redesign/app/components/ui/pagination-controls"
 import { cn } from "@/redesign/app/components/ui/utils"
 import { formatCurrency, formatNumber } from "@/redesign/app/lib/company-metrics-data"
-import { buildProgramKpiPreviews } from "@/redesign/app/lib/program-kpi-preview"
+import {
+  buildProgramMetricFieldKey,
+  normalizeProgramMetrics,
+  type PersistedProgramMetricMap,
+} from "@/redesign/app/lib/program-metrics-store"
 import {
   Select,
   SelectContent,
@@ -81,7 +85,7 @@ import {
 } from "@/types/companyAnalysisReport"
 import type { CompanyInfoRecord } from "@/types/company"
 import type { SelfAssessmentSections } from "@/types/selfAssessment"
-import type { MonthlyMetrics } from "@/redesign/app/lib/types"
+import type { MonthlyMetrics, ProgramKpiDefinition } from "@/redesign/app/lib/types"
 
 type AdminDashboardProps = {
   user: User
@@ -109,6 +113,7 @@ type ProgramSummary = {
   internalTicketLimit?: number
   externalTicketLimit?: number
   companyIds?: string[]
+  kpiDefinitions?: ProgramKpiDefinition[]
 }
 
 type MetricFormat = "number" | "currency"
@@ -126,6 +131,7 @@ type MetricsSnapshot = {
   data: MonthlyMetrics[]
   customFields: CustomMetricField[]
   visibleBaseMetricKeys: string[]
+  programMetrics?: PersistedProgramMetricMap
   updatedAt?: unknown
 }
 
@@ -183,10 +189,6 @@ const CUSTOM_METRIC_CHART_COLORS = [
 ]
 const DEFAULT_VISIBLE_BASE_METRIC_KEYS = BASE_METRIC_CHART_FIELDS.map((field) => field.key)
 const PROGRAM_METRIC_COLOR = "#4f46e5"
-
-function buildProgramMetricFieldKey(programId: string, metricId: string) {
-  return `program:${programId}:${metricId}`
-}
 
 function excelColumnName(columnNumber: number) {
   let column = columnNumber
@@ -465,6 +467,10 @@ function normalizeMetricsSnapshot(
     customFields,
     visibleBaseMetricKeys:
       visibleBaseMetricKeys.length > 0 ? visibleBaseMetricKeys : DEFAULT_VISIBLE_BASE_METRIC_KEYS,
+    programMetrics:
+      source.programMetrics && typeof source.programMetrics === "object"
+        ? (source.programMetrics as PersistedProgramMetricMap)
+        : undefined,
     updatedAt: source.updatedAt,
   }
 }
@@ -719,6 +725,7 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
             internalTicketLimit?: number
             externalTicketLimit?: number
             companyIds?: string[]
+            kpiDefinitions?: ProgramKpiDefinition[]
           }
           return {
             id: docSnap.id,
@@ -726,6 +733,7 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
             internalTicketLimit: data.internalTicketLimit ?? 0,
             externalTicketLimit: data.externalTicketLimit ?? 0,
             companyIds: data.companyIds ?? [],
+            kpiDefinitions: Array.isArray(data.kpiDefinitions) ? data.kpiDefinitions : [],
           }
         })
         setPrograms(list)
@@ -1092,25 +1100,31 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
     return programs.filter((program) => selectedCompanyProgramIds.includes(program.id))
   }, [programs, selectedCompanyProgramIds])
 
-  const companyProgramKpiPreviews = useMemo(
+  const companyProgramMetricViews = useMemo(
     () =>
-      buildProgramKpiPreviews(
+      normalizeProgramMetrics(
+        companyMetrics?.programMetrics,
         participatingPrograms.map((program) => ({
           id: program.id,
           name: program.name,
+          kpiDefinitions: program.kpiDefinitions ?? [],
         })),
         companyMetrics?.year ?? new Date().getFullYear(),
-        selectedCompanyName,
       ),
-    [companyMetrics?.year, participatingPrograms, selectedCompanyName],
+    [companyMetrics?.programMetrics, companyMetrics?.year, participatingPrograms],
   )
 
-  const selectedProgramKpiViews = useMemo(
+  const programMetricViewOptions = useMemo(
+    () => Object.values(companyProgramMetricViews),
+    [companyProgramMetricViews],
+  )
+
+  const selectedProgramMetricViews = useMemo(
     () =>
-      companyProgramKpiPreviews.filter((preview) =>
-        selectedProgramMetricViewIds.includes(preview.programId),
+      programMetricViewOptions.filter((record) =>
+        selectedProgramMetricViewIds.includes(record.programId),
       ),
-    [companyProgramKpiPreviews, selectedProgramMetricViewIds],
+    [programMetricViewOptions, selectedProgramMetricViewIds],
   )
 
   const visibleMetricFields = useMemo<VisibleMetricField[]>(
@@ -1124,20 +1138,20 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
         badgeLabel: "공통",
         commonKey: field.key,
       })),
-      ...selectedProgramKpiViews.flatMap((preview) =>
-        preview.definitions.map((definition) => ({
-          key: buildProgramMetricFieldKey(preview.programId, definition.id),
+      ...selectedProgramMetricViews.flatMap((record) =>
+        record.definitions.filter((definition) => definition.active !== false).map((definition) => ({
+          key: buildProgramMetricFieldKey(record.programId, definition.id),
           label: definition.label,
-          format: definition.format,
+          format: "number" as const,
           color: PROGRAM_METRIC_COLOR,
           source: "program" as const,
-          badgeLabel: preview.programName,
-          programId: preview.programId,
+          badgeLabel: record.programName,
+          programId: record.programId,
           metricId: definition.id,
         })),
       ),
     ],
-    [metricChartFields, selectedProgramKpiViews],
+    [metricChartFields, selectedProgramMetricViews],
   )
 
   const selectedMetricChartField = useMemo(
@@ -1168,16 +1182,17 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
     return baseRows.map((row) => {
       const values: Record<string, number | null> = { ...row.values }
 
-      selectedProgramKpiViews.forEach((preview) => {
-        const previewRow =
-          preview.rows.find(
-            (previewItem) => previewItem.year === row.year && previewItem.month === row.month,
-          ) ?? preview.rows.find((previewItem) => previewItem.month === row.month)
+      selectedProgramMetricViews.forEach((record) => {
+        const recordRow =
+          record.rows.find((item) => item.year === row.year && item.month === row.month) ??
+          record.rows.find((item) => item.month === row.month)
 
-        preview.definitions.forEach((definition) => {
-          values[buildProgramMetricFieldKey(preview.programId, definition.id)] =
-            previewRow?.values[definition.id] ?? null
-        })
+        record.definitions
+          .filter((definition) => definition.active !== false)
+          .forEach((definition) => {
+            values[buildProgramMetricFieldKey(record.programId, definition.id)] =
+              recordRow?.values[definition.id] ?? null
+          })
       })
 
       return {
@@ -1191,7 +1206,7 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
     hasMetricsDocument,
     metricChartFields,
     recentMetricsRows,
-    selectedProgramKpiViews,
+    selectedProgramMetricViews,
   ])
 
   const metricsChartData = useMemo(() => {
@@ -1232,22 +1247,22 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
 
   const programMetricFilterOptions = useMemo(() => {
     const normalizedQuery = programMetricFilterQuery.trim().toLowerCase()
-    if (!normalizedQuery) return companyProgramKpiPreviews
+    if (!normalizedQuery) return programMetricViewOptions
 
-    return companyProgramKpiPreviews.filter((preview) =>
-      preview.programName.toLowerCase().includes(normalizedQuery),
+    return programMetricViewOptions.filter((record) =>
+      record.programName.toLowerCase().includes(normalizedQuery),
     )
-  }, [companyProgramKpiPreviews, programMetricFilterQuery])
+  }, [programMetricFilterQuery, programMetricViewOptions])
 
-  const visibleProgramMetricBadges = selectedProgramKpiViews.slice(0, 2)
-  const hiddenProgramMetricCount = Math.max(0, selectedProgramKpiViews.length - 2)
+  const visibleProgramMetricBadges = selectedProgramMetricViews.slice(0, 2)
+  const hiddenProgramMetricCount = Math.max(0, selectedProgramMetricViews.length - 2)
 
   useEffect(() => {
-    const previewIds = companyProgramKpiPreviews.map((preview) => preview.programId)
+    const previewIds = programMetricViewOptions.map((record) => record.programId)
     setSelectedProgramMetricViewIds((prev) => {
       return prev.filter((programId) => previewIds.includes(programId))
     })
-  }, [companyProgramKpiPreviews])
+  }, [programMetricViewOptions])
 
   const toggleProgramMetricView = (programId: string) => {
     setSelectedProgramMetricViewIds((prev) =>
@@ -2826,7 +2841,7 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
                           </div>
                         </div>
                         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
-                          {companyProgramKpiPreviews.length > 0 ? (
+                          {programMetricViewOptions.length > 0 ? (
                             <Popover
                               open={programMetricFilterOpen}
                               onOpenChange={(open) => {
@@ -2839,20 +2854,18 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
                                   role="combobox"
                                   aria-expanded={programMetricFilterOpen}
                                   tabIndex={0}
-                                  className="flex h-9 w-full cursor-pointer items-center gap-1 rounded-lg border border-slate-300 bg-white px-2 py-1 text-sm outline-none transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 sm:w-[260px]"
+                                  className="flex h-9 w-full cursor-pointer items-center gap-1 rounded-lg border border-slate-300 bg-white px-2 py-1 text-sm outline-none transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 sm:w-[300px]"
                                 >
                                   <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
-                                    {selectedProgramKpiViews.length > 0 ? (
+                                    {selectedProgramMetricViews.length > 0 ? (
                                       <>
-                                        {visibleProgramMetricBadges.map((preview) => (
+                                        {visibleProgramMetricBadges.map((record) => (
                                           <Badge
-                                            key={preview.programId}
+                                            key={record.programId}
                                             variant="secondary"
                                             className="max-w-[88px] bg-blue-100 px-1.5 py-0 text-[11px] text-blue-700"
                                           >
-                                            <span className="block truncate">
-                                              {preview.programName}
-                                            </span>
+                                            <span className="block truncate">{record.programName}</span>
                                           </Badge>
                                         ))}
                                         {hiddenProgramMetricCount > 0 ? (
@@ -2889,7 +2902,7 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
                               </PopoverTrigger>
                               <PopoverContent
                                 align="end"
-                                className="w-[240px] max-w-[calc(100vw-48px)] p-0"
+                                className="w-[300px] max-w-[calc(100vw-48px)] p-0"
                               >
                                 <Command shouldFilter={false}>
                                   <CommandInput
@@ -2900,16 +2913,29 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
                                   <CommandList className="max-h-72">
                                     <CommandEmpty>검색 결과가 없습니다.</CommandEmpty>
                                     <CommandGroup>
-                                      {programMetricFilterOptions.map((preview) => {
+                                      {programMetricFilterOptions.map((record) => {
                                         const isSelected = selectedProgramMetricViewIds.includes(
-                                          preview.programId,
+                                          record.programId,
                                         )
+                                        const isDisabled =
+                                          record.definitions.filter(
+                                            (definition) => definition.active !== false,
+                                          ).length === 0
                                         return (
                                           <CommandItem
-                                            key={preview.programId}
-                                            value={preview.programId}
-                                            onSelect={() => toggleProgramMetricView(preview.programId)}
-                                            className="min-h-8 cursor-pointer px-2 py-1 text-sm"
+                                            key={record.programId}
+                                            value={record.programId}
+                                            disabled={isDisabled}
+                                            onSelect={() => {
+                                              if (isDisabled) return
+                                              toggleProgramMetricView(record.programId)
+                                            }}
+                                            className={cn(
+                                              "min-h-8 px-2 py-1 text-sm",
+                                              isDisabled
+                                                ? "cursor-not-allowed opacity-50"
+                                                : "cursor-pointer",
+                                            )}
                                           >
                                             <Check
                                               className={
@@ -2918,9 +2944,16 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
                                                   : "h-3.5 w-3.5 opacity-0"
                                               }
                                             />
-                                            <span className="min-w-0 flex-1 truncate">
-                                              {preview.programName}
-                                            </span>
+                                            <div className="flex min-w-0 flex-1 items-center gap-1.5">
+                                              <span className="min-w-0 flex-1 truncate">
+                                                {record.programName}
+                                              </span>
+                                            </div>
+                                            {isDisabled ? (
+                                              <span className="shrink-0 text-[10px] text-slate-400">
+                                                KPI 없음
+                                              </span>
+                                            ) : null}
                                           </CommandItem>
                                         )
                                       })}
@@ -2928,22 +2961,26 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
                                   </CommandList>
                                 </Command>
                                 <div className="flex items-center justify-between border-t px-3 py-2">
-                                  <span className="text-xs text-slate-500">
+                                  <div className="min-h-[16px] text-xs text-slate-500">
                                     {selectedProgramMetricViewIds.length > 0
                                       ? `${selectedProgramMetricViewIds.length}개 사업 선택됨`
-                                      : "공통만 표시"}
-                                  </span>
-                                  {selectedProgramMetricViewIds.length > 0 ? (
-                                    <Button
-                                      type="button"
-                                      variant="ghost"
-                                      size="sm"
-                                      className="h-7 px-2"
-                                      onClick={() => setSelectedProgramMetricViewIds([])}
-                                    >
-                                      전체 해제
-                                    </Button>
-                                  ) : null}
+                                      : "\u00A0"}
+                                  </div>
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="sm"
+                                    className={cn(
+                                      "h-7 px-2",
+                                      selectedProgramMetricViewIds.length > 0
+                                        ? ""
+                                        : "pointer-events-none opacity-0",
+                                    )}
+                                    onClick={() => setSelectedProgramMetricViewIds([])}
+                                    disabled={selectedProgramMetricViewIds.length === 0}
+                                  >
+                                    전체 해제
+                                  </Button>
                                 </div>
                               </PopoverContent>
                             </Popover>

@@ -63,7 +63,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/redesign/app/components/ui/select"
-import { buildProgramKpiPreviews } from "@/redesign/app/lib/program-kpi-preview"
 import {
   Table,
   TableBody,
@@ -77,7 +76,15 @@ import { formatCurrency, formatNumber } from "@/redesign/app/lib/company-metrics
 import { useFirestoreCollection, useFirestoreDocument } from "@/redesign/app/hooks/use-firestore"
 import { db, isFirebaseConfigured, storage as firebaseStorage } from "@/redesign/app/lib/firebase"
 import { firestoreService } from "@/redesign/app/lib/firestore-service"
-import { MonthlyMetrics, User } from "@/redesign/app/lib/types"
+import {
+  buildProgramMetricFieldKey,
+  createProgramMetricRecord,
+  normalizeProgramMetrics,
+  serializeProgramMetrics,
+  type PersistedProgramMetricMap,
+  type ProgramMetricRecord,
+} from "@/redesign/app/lib/program-metrics-store"
+import { MonthlyMetrics, ProgramKpiDefinition, User } from "@/redesign/app/lib/types"
 
 interface CompanyMetricsPageProps {
   currentUser: User
@@ -87,6 +94,7 @@ interface CompanyMetricsPageProps {
 type ProgramListItem = {
   id: string
   name?: string
+  kpiDefinitions?: ProgramKpiDefinition[]
 }
 
 type MetricFormat = "number" | "currency"
@@ -134,6 +142,7 @@ type MetricsPageState = {
 type PersistedMetricsDocument = MetricsPageState & {
   companyId: string
   companyName: string
+  programMetrics?: PersistedProgramMetricMap
   createdAt?: unknown
   updatedAt?: unknown
 }
@@ -175,10 +184,6 @@ const DEFAULT_VISIBLE_BASE_METRIC_KEYS = BASE_METRIC_FIELDS.map(
   (field) => field.key as BaseMetricKey,
 )
 const PROGRAM_METRIC_TONE = "bg-indigo-500"
-
-function buildProgramMetricFieldKey(programId: string, metricId: string) {
-  return `program:${programId}:${metricId}`
-}
 
 function createEmptyMonth(year: number, month: number): MonthlyMetrics {
   return {
@@ -574,15 +579,18 @@ export function CompanyMetricsPage({ currentUser, companyId }: CompanyMetricsPag
   const [selectedProgramIds, setSelectedProgramIds] = useState<string[]>([])
   const [programFilterOpen, setProgramFilterOpen] = useState(false)
   const [programFilterQuery, setProgramFilterQuery] = useState("")
-  const [programMetricDrafts, setProgramMetricDrafts] = useState<
-    Record<string, Array<{ month: number; year: number; values: Record<string, number> }>>
-  >({})
+  const [programMetricDrafts, setProgramMetricDrafts] = useState<Record<string, ProgramMetricRecord>>(
+    {},
+  )
   const fileInputRef = useRef<HTMLInputElement | null>(null)
 
   useEffect(() => {
     const emptyState = createEmptyMetricsState()
     setSavedMetricsState(emptyState)
     setDraftMetricsState(emptyState)
+    setProgramMetricDrafts({})
+    setSelectedProgramIds([])
+    setProgramFilterQuery("")
     setSelectedMetricKey(DEFAULT_SELECTED_METRIC_KEY)
     setIsDirty(false)
     setLastSavedAt(null)
@@ -595,46 +603,11 @@ export function CompanyMetricsPage({ currentUser, companyId }: CompanyMetricsPag
         return {
           id: programId,
           name: matchedProgram?.name?.trim() || programId,
+          kpiDefinitions: matchedProgram?.kpiDefinitions ?? [],
         }
       }),
     [currentUser.programs, programDocs],
   )
-
-  const programKpiPreviews = useMemo(
-    () =>
-      buildProgramKpiPreviews(
-        participatingPrograms,
-        draftMetricsState.year,
-        currentUser.companyName,
-      ),
-    [currentUser.companyName, draftMetricsState.year, participatingPrograms],
-  )
-
-  useEffect(() => {
-    const previewIds = programKpiPreviews.map((program) => program.programId)
-    setSelectedProgramIds((prev) => {
-      return prev.filter((programId) => previewIds.includes(programId))
-    })
-
-    setProgramMetricDrafts((prev) => {
-      let changed = false
-      const next = { ...prev }
-
-      programKpiPreviews.forEach((preview) => {
-        if (next[preview.programId]) {
-          return
-        }
-        next[preview.programId] = preview.rows.map((row) => ({
-          month: row.month,
-          year: row.year,
-          values: { ...row.values },
-        }))
-        changed = true
-      })
-
-      return changed ? next : prev
-    })
-  }, [programKpiPreviews])
 
   useEffect(() => {
     if (!isFirebaseConfigured || !companyId || persistedMetricsLoading || isDirty) {
@@ -642,10 +615,19 @@ export function CompanyMetricsPage({ currentUser, companyId }: CompanyMetricsPag
     }
 
     const nextState = normalizeMetricsState(persistedMetricsDoc ?? null)
+    const nextProgramMetrics = normalizeProgramMetrics(
+      persistedMetricsDoc?.programMetrics,
+      participatingPrograms,
+      nextState.year,
+    )
     setSavedMetricsState(nextState)
     setDraftMetricsState(nextState)
+    setProgramMetricDrafts(nextProgramMetrics)
+    setSelectedProgramIds((prev) =>
+      prev.filter((programId) => Object.prototype.hasOwnProperty.call(nextProgramMetrics, programId)),
+    )
     setLastSavedAt(normalizeDateLabel(persistedMetricsDoc?.updatedAt) ?? null)
-  }, [companyId, isDirty, persistedMetricsDoc, persistedMetricsLoading])
+  }, [companyId, isDirty, participatingPrograms, persistedMetricsDoc, persistedMetricsLoading])
 
   const savedMetricFields = useMemo<MetricField[]>(
     () => [
@@ -710,24 +692,29 @@ export function CompanyMetricsPage({ currentUser, companyId }: CompanyMetricsPag
     [savedMetricsState.data, selectedMonth],
   )
 
-  const selectedProgramPreviews = useMemo(
-    () => programKpiPreviews.filter((preview) => selectedProgramIds.includes(preview.programId)),
-    [programKpiPreviews, selectedProgramIds],
+  const programMetricOptions = useMemo(
+    () => Object.values(programMetricDrafts),
+    [programMetricDrafts],
+  )
+
+  const selectedProgramMetrics = useMemo(
+    () => programMetricOptions.filter((record) => selectedProgramIds.includes(record.programId)),
+    [programMetricOptions, selectedProgramIds],
   )
 
   const programFilterOptions = useMemo(() => {
     const normalizedQuery = programFilterQuery.trim().toLowerCase()
     if (!normalizedQuery) {
-      return programKpiPreviews
+      return programMetricOptions
     }
 
-    return programKpiPreviews.filter((preview) =>
-      preview.programName.toLowerCase().includes(normalizedQuery),
+    return programMetricOptions.filter((record) =>
+      record.programName.toLowerCase().includes(normalizedQuery),
     )
-  }, [programFilterQuery, programKpiPreviews])
+  }, [programFilterQuery, programMetricOptions])
 
-  const visibleProgramFilterBadges = selectedProgramPreviews.slice(0, 2)
-  const hiddenProgramFilterCount = Math.max(0, selectedProgramPreviews.length - 2)
+  const visibleProgramFilterBadges = selectedProgramMetrics.slice(0, 2)
+  const hiddenProgramFilterCount = Math.max(0, selectedProgramMetrics.length - 2)
 
   const visibleInputFields = useMemo<VisibleMetricField[]>(
     () => [
@@ -740,22 +727,22 @@ export function CompanyMetricsPage({ currentUser, companyId }: CompanyMetricsPag
         tone: field.tone,
         commonKey: field.key,
       })),
-      ...selectedProgramPreviews.flatMap((preview) =>
-        preview.definitions.map((definition) => ({
-          key: buildProgramMetricFieldKey(preview.programId, definition.id),
+      ...selectedProgramMetrics.flatMap((record) =>
+        record.definitions.filter((definition) => definition.active !== false).map((definition) => ({
+          key: buildProgramMetricFieldKey(record.programId, definition.id),
           label: definition.label,
-          format: definition.format,
+          format: "number" as const,
           source: "program" as const,
-          badgeLabel: preview.programName,
+          badgeLabel: record.programName,
           description: definition.description,
           tone: PROGRAM_METRIC_TONE,
-          programId: preview.programId,
-          programName: preview.programName,
+          programId: record.programId,
+          programName: record.programName,
           metricId: definition.id,
         })),
       ),
     ],
-    [draftMetricFields, selectedProgramPreviews],
+    [draftMetricFields, selectedProgramMetrics],
   )
 
   const visibleChartFields = useMemo<VisibleMetricField[]>(
@@ -769,22 +756,22 @@ export function CompanyMetricsPage({ currentUser, companyId }: CompanyMetricsPag
         tone: field.tone,
         commonKey: field.key,
       })),
-      ...selectedProgramPreviews.flatMap((preview) =>
-        preview.definitions.map((definition) => ({
-          key: buildProgramMetricFieldKey(preview.programId, definition.id),
+      ...selectedProgramMetrics.flatMap((record) =>
+        record.definitions.filter((definition) => definition.active !== false).map((definition) => ({
+          key: buildProgramMetricFieldKey(record.programId, definition.id),
           label: definition.label,
-          format: definition.format,
+          format: "number" as const,
           source: "program" as const,
-          badgeLabel: preview.programName,
+          badgeLabel: record.programName,
           description: definition.description,
           tone: PROGRAM_METRIC_TONE,
-          programId: preview.programId,
-          programName: preview.programName,
+          programId: record.programId,
+          programName: record.programName,
           metricId: definition.id,
         })),
       ),
     ],
-    [savedMetricFields, selectedProgramPreviews],
+    [savedMetricFields, selectedProgramMetrics],
   )
 
   useEffect(() => {
@@ -814,17 +801,16 @@ export function CompanyMetricsPage({ currentUser, companyId }: CompanyMetricsPag
     }
 
     const programRows =
-      (selectedChartField.programId ? programMetricDrafts[selectedChartField.programId] : null) ??
-      selectedProgramPreviews.find((preview) => preview.programId === selectedChartField.programId)
-        ?.rows ??
-      []
+      (selectedChartField.programId
+        ? programMetricDrafts[selectedChartField.programId]?.rows
+        : null) ?? []
     const rowsByMonth = new Map(programRows.map((row) => [row.month, row]))
 
     return MONTHS.map((month) => ({
       month: `${month}월`,
       value: rowsByMonth.get(month)?.values[selectedChartField.metricId ?? ""] ?? 0,
     }))
-  }, [programMetricDrafts, savedMetricsState.data, selectedChartField, selectedProgramPreviews])
+  }, [programMetricDrafts, savedMetricsState.data, selectedChartField])
 
   const summaryFields = useMemo(() => {
     const picks: MetricField[] = []
@@ -882,21 +868,35 @@ export function CompanyMetricsPage({ currentUser, companyId }: CompanyMetricsPag
     rawValue: string,
   ) => {
     const nextValue = Number.parseInt(rawValue, 10)
+    const matchedProgram = participatingPrograms.find((program) => program.id === programId)
 
     setProgramMetricDrafts((prev) => ({
       ...prev,
-      [programId]: (prev[programId] ?? []).map((row) =>
-        row.month === month
-          ? {
-              ...row,
-              values: {
-                ...row.values,
-                [metricId]: Number.isNaN(nextValue) ? 0 : nextValue,
-              },
-            }
-          : row,
-      ),
+      [programId]: prev[programId]
+        ? {
+            ...prev[programId],
+            rows: prev[programId].rows.map((row) =>
+              row.month === month
+                ? {
+                    ...row,
+                    values: {
+                      ...row.values,
+                      [metricId]: Number.isNaN(nextValue) ? 0 : nextValue,
+                    },
+                  }
+                : row,
+            ),
+          }
+        : createProgramMetricRecord(
+            programId,
+            matchedProgram?.name ?? programId,
+            draftMetricsState.year,
+            {
+              definitions: matchedProgram?.kpiDefinitions ?? [],
+            },
+          ),
     }))
+    setIsDirty(true)
   }
 
   const handleSave = async () => {
@@ -922,6 +922,7 @@ export function CompanyMetricsPage({ currentUser, companyId }: CompanyMetricsPag
         data: draftMetricsState.data,
         customFields: draftMetricsState.customFields,
         visibleBaseMetricKeys: draftMetricsState.visibleBaseMetricKeys,
+        programMetrics: serializeProgramMetrics(programMetricDrafts),
       },
       true,
     )
@@ -938,9 +939,15 @@ export function CompanyMetricsPage({ currentUser, companyId }: CompanyMetricsPag
       "annual",
     )
     const nextState = normalizeMetricsState(refreshedDocument ?? draftMetricsState)
+    const nextProgramMetrics = normalizeProgramMetrics(
+      refreshedDocument?.programMetrics ?? serializeProgramMetrics(programMetricDrafts),
+      participatingPrograms,
+      nextState.year,
+    )
 
     setSavedMetricsState(nextState)
     setDraftMetricsState(nextState)
+    setProgramMetricDrafts(nextProgramMetrics)
     setIsDirty(false)
     setLastSavedAt(
       normalizeDateLabel(refreshedDocument?.updatedAt) ??
@@ -1333,16 +1340,11 @@ export function CompanyMetricsPage({ currentUser, companyId }: CompanyMetricsPag
           </CardHeader>
 
           <CardContent className="flex flex-1 flex-col px-5 pt-4">
-            {programKpiPreviews.length > 0 && (
+            {programMetricOptions.length > 0 && (
               <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50/40 p-3">
                 <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
                   <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <p className="text-sm font-semibold text-foreground">사업별 KPI 표시</p>
-                      <Badge variant="outline" className="border-blue-200 bg-white text-blue-700">
-                        Mock
-                      </Badge>
-                    </div>
+                    <p className="text-sm font-semibold text-foreground">사업별 KPI 표시</p>
                     <p className="text-[11px] text-muted-foreground">
                       공통 지표는 항상 보이고, 선택한 사업 KPI만 이 표와 차트에 함께 붙습니다.
                     </p>
@@ -1360,10 +1362,10 @@ export function CompanyMetricsPage({ currentUser, companyId }: CompanyMetricsPag
                           role="combobox"
                           aria-expanded={programFilterOpen}
                           tabIndex={0}
-                          className="flex h-8 w-full cursor-pointer items-center gap-1 rounded-md border bg-white px-2 py-1 text-sm outline-none transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 sm:w-[240px]"
+                          className="flex h-8 w-full cursor-pointer items-center gap-1 rounded-md border bg-white px-2 py-1 text-sm outline-none transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 sm:w-[280px]"
                         >
                           <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
-                            {selectedProgramPreviews.length > 0 ? (
+                            {selectedProgramMetrics.length > 0 ? (
                               <>
                                 {visibleProgramFilterBadges.map((preview) => (
                                   <Badge
@@ -1406,7 +1408,7 @@ export function CompanyMetricsPage({ currentUser, companyId }: CompanyMetricsPag
                       </PopoverTrigger>
                       <PopoverContent
                         align="end"
-                        className="w-[240px] max-w-[calc(100vw-48px)] p-0"
+                        className="w-[280px] max-w-[calc(100vw-48px)] p-0"
                       >
                         <Command shouldFilter={false}>
                           <CommandInput
@@ -1419,12 +1421,24 @@ export function CompanyMetricsPage({ currentUser, companyId }: CompanyMetricsPag
                             <CommandGroup>
                               {programFilterOptions.map((preview) => {
                                 const selected = selectedProgramIds.includes(preview.programId)
+                                const isDisabled =
+                                  preview.definitions.filter((definition) => definition.active !== false)
+                                    .length === 0
                                 return (
                                   <CommandItem
                                     key={preview.programId}
                                     value={preview.programId}
-                                    onSelect={() => handleProgramToggle(preview.programId)}
-                                    className="min-h-8 cursor-pointer px-2 py-1 text-sm"
+                                    disabled={isDisabled}
+                                    onSelect={() => {
+                                      if (isDisabled) return
+                                      handleProgramToggle(preview.programId)
+                                    }}
+                                    className={cn(
+                                      "min-h-8 px-2 py-1 text-sm",
+                                      isDisabled
+                                        ? "cursor-not-allowed opacity-50"
+                                        : "cursor-pointer",
+                                    )}
                                   >
                                     <Check
                                       className={
@@ -1433,9 +1447,16 @@ export function CompanyMetricsPage({ currentUser, companyId }: CompanyMetricsPag
                                           : "h-3.5 w-3.5 opacity-0"
                                       }
                                     />
-                                    <span className="min-w-0 flex-1 truncate">
-                                      {preview.programName}
-                                    </span>
+                                    <div className="flex min-w-0 flex-1 items-center gap-1.5">
+                                      <span className="min-w-0 flex-1 truncate">
+                                        {preview.programName}
+                                      </span>
+                                    </div>
+                                    {isDisabled && (
+                                      <span className="shrink-0 text-[10px] text-slate-400">
+                                        KPI 없음
+                                      </span>
+                                    )}
                                   </CommandItem>
                                 )
                               })}
@@ -1443,22 +1464,26 @@ export function CompanyMetricsPage({ currentUser, companyId }: CompanyMetricsPag
                           </CommandList>
                         </Command>
                         <div className="flex items-center justify-between border-t px-3 py-2">
-                          <span className="text-xs text-slate-500">
+                          <div className="min-h-[16px] text-xs text-slate-500">
                             {selectedProgramIds.length > 0
                               ? `${selectedProgramIds.length}개 사업 선택됨`
-                              : "공통만 표시"}
-                          </span>
-                          {selectedProgramIds.length > 0 && (
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="sm"
-                              className="h-7 px-2"
-                              onClick={() => setSelectedProgramIds([])}
-                            >
-                              전체 해제
-                            </Button>
-                          )}
+                              : "\u00A0"}
+                          </div>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className={cn(
+                              "h-7 px-2",
+                              selectedProgramIds.length > 0
+                                ? ""
+                                : "pointer-events-none opacity-0",
+                            )}
+                            onClick={() => setSelectedProgramIds([])}
+                            disabled={selectedProgramIds.length === 0}
+                          >
+                            전체 해제
+                          </Button>
                         </div>
                       </PopoverContent>
                     </Popover>
@@ -1519,7 +1544,7 @@ export function CompanyMetricsPage({ currentUser, companyId }: CompanyMetricsPag
                               min="0"
                               inputMode="numeric"
                               value={String(
-                                programMetricDrafts[field.programId ?? ""]?.find(
+                                programMetricDrafts[field.programId ?? ""]?.rows.find(
                                   (row) => row.month === monthData.month,
                                 )?.values[field.metricId ?? ""] ?? 0,
                               )}

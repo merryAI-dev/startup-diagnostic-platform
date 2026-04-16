@@ -306,5 +306,14 @@ export function buildProgramKpiPreviews(
   year: number,
   companySeed = "preview",
 ) {
+  if (!isStartup11PreviewCompany(companySeed)) {
+    return programs.map((program) => ({
+      programId: program.id,
+      programName: program.name,
+      definitions: [],
+      rows: [],
+    }))
+  }
+
   return programs.map((program, index) => buildProgramKpiPreview(program, year, companySeed, index))
 }
