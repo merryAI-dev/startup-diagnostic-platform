@@ -8,6 +8,7 @@ Required deployed functions:
 - `cancelApplication`
 - `transitionApplicationStatus`
 - `approvePendingUser`
+- `notifySlackOnSignupRequestCreated`
 - `runApplicationMaintenance`
 - `scheduledApplicationMaintenance`
 
@@ -30,6 +31,8 @@ Example:
 ```bash
 firebase functions:secrets:set GEMINI_API_KEY --project startup-diagnosis-platform
 firebase functions:secrets:set GEMINI_API_KEY --project startup-acceleration-platform
+firebase functions:secrets:set SLACK_SIGNUP_REQUEST_WEBHOOK_URL --project startup-diagnosis-platform
+firebase functions:secrets:set SLACK_SIGNUP_REQUEST_WEBHOOK_URL --project startup-acceleration-platform
 ```
 
 ## Deploy commands

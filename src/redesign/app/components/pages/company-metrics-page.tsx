@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { collection, deleteDoc, doc, setDoc, serverTimestamp } from "firebase/firestore";
-import { deleteObject, getDownloadURL, ref, uploadBytes } from "firebase/storage";
+import { useEffect, useMemo, useRef, useState } from "react"
+import { collection, deleteDoc, doc, setDoc, serverTimestamp } from "firebase/firestore"
+import { deleteObject, getDownloadURL, ref, uploadBytes } from "firebase/storage"
 import {
   Area,
   AreaChart,
@@ -13,9 +13,11 @@ import {
   Tooltip,
   XAxis,
   YAxis,
-} from "recharts";
+} from "recharts"
 import {
   Award,
+  Check,
+  ChevronsUpDown,
   Download,
   DollarSign,
   FileText,
@@ -28,25 +30,39 @@ import {
   TrendingDown,
   TrendingUp,
   Users,
-} from "lucide-react";
-import { toast } from "sonner";
-import { Button } from "@/redesign/app/components/ui/button";
-import { Badge } from "@/redesign/app/components/ui/badge";
+  X,
+} from "lucide-react"
+import { toast } from "sonner"
+import { Button } from "@/redesign/app/components/ui/button"
+import { Badge } from "@/redesign/app/components/ui/badge"
 import {
   Card,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
-} from "@/redesign/app/components/ui/card";
-import { Input } from "@/redesign/app/components/ui/input";
+} from "@/redesign/app/components/ui/card"
+import { Input } from "@/redesign/app/components/ui/input"
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/redesign/app/components/ui/command"
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/redesign/app/components/ui/popover"
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/redesign/app/components/ui/select";
+} from "@/redesign/app/components/ui/select"
 import {
   Table,
   TableBody,
@@ -54,72 +70,101 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@/redesign/app/components/ui/table";
-import { cn } from "@/redesign/app/components/ui/utils";
-import { formatCurrency, formatNumber } from "@/redesign/app/lib/company-metrics-data";
-import { useFirestoreCollection, useFirestoreDocument } from "@/redesign/app/hooks/use-firestore";
-import { db, isFirebaseConfigured, storage as firebaseStorage } from "@/redesign/app/lib/firebase";
-import { firestoreService } from "@/redesign/app/lib/firestore-service";
-import { MonthlyMetrics, User } from "@/redesign/app/lib/types";
+} from "@/redesign/app/components/ui/table"
+import { cn } from "@/redesign/app/components/ui/utils"
+import { formatCurrency, formatNumber } from "@/redesign/app/lib/company-metrics-data"
+import { useFirestoreCollection, useFirestoreDocument } from "@/redesign/app/hooks/use-firestore"
+import { db, isFirebaseConfigured, storage as firebaseStorage } from "@/redesign/app/lib/firebase"
+import { firestoreService } from "@/redesign/app/lib/firestore-service"
+import {
+  buildProgramMetricFieldKey,
+  createProgramMetricRecord,
+  normalizeProgramMetrics,
+  serializeProgramMetrics,
+  type PersistedProgramMetricMap,
+  type ProgramMetricRecord,
+} from "@/redesign/app/lib/program-metrics-store"
+import { MonthlyMetrics, ProgramKpiDefinition, User } from "@/redesign/app/lib/types"
 
 interface CompanyMetricsPageProps {
-  currentUser: User;
-  companyId?: string | null;
+  currentUser: User
+  companyId?: string | null
 }
 
-type MetricFormat = "number" | "currency";
-type ChartVariant = "line" | "bar" | "area";
+type ProgramListItem = {
+  id: string
+  name?: string
+  kpiDefinitions?: ProgramKpiDefinition[]
+}
+
+type MetricFormat = "number" | "currency"
+type ChartVariant = "line" | "bar" | "area"
 type BaseMetricKey =
   | "revenue"
   | "employees"
   | "customers"
   | "patents"
   | "certifications"
-  | "monthlyActiveUsers";
+  | "monthlyActiveUsers"
 
 type CustomMetricField = {
-  key: string;
-  label: string;
-  format: MetricFormat;
-};
+  key: string
+  label: string
+  format: MetricFormat
+}
 
 type MetricField = CustomMetricField & {
-  source: "base" | "custom";
-  tone: string;
-};
+  source: "base" | "custom"
+  tone: string
+}
+
+type VisibleMetricField = {
+  key: string
+  label: string
+  format: MetricFormat
+  source: "common" | "program"
+  badgeLabel: string
+  description?: string
+  tone: string
+  commonKey?: string
+  programId?: string
+  programName?: string
+  metricId?: string
+}
 
 type MetricsPageState = {
-  year: number;
-  data: MonthlyMetrics[];
-  customFields: CustomMetricField[];
-  visibleBaseMetricKeys: BaseMetricKey[];
-};
+  year: number
+  data: MonthlyMetrics[]
+  customFields: CustomMetricField[]
+  visibleBaseMetricKeys: BaseMetricKey[]
+}
 
 type PersistedMetricsDocument = MetricsPageState & {
-  companyId: string;
-  companyName: string;
-  createdAt?: unknown;
-  updatedAt?: unknown;
-};
+  companyId: string
+  companyName: string
+  programMetrics?: PersistedProgramMetricMap
+  createdAt?: unknown
+  updatedAt?: unknown
+}
 
 type MetricsAttachmentDocument = {
-  id: string;
-  category?: string;
-  name: string;
-  size: number;
-  storagePath: string;
-  createdByUid?: string;
-  createdByName?: string;
-  createdAt?: unknown;
-};
+  id: string
+  category?: string
+  name: string
+  size: number
+  storagePath: string
+  createdByUid?: string
+  createdByName?: string
+  createdAt?: unknown
+}
 
-const MONTHS = Array.from({ length: 12 }, (_, index) => index + 1);
-const DEFAULT_SELECTED_METRIC_KEY: BaseMetricKey = "revenue";
+const MONTHS = Array.from({ length: 12 }, (_, index) => index + 1)
+const DEFAULT_SELECTED_METRIC_KEY: BaseMetricKey = "revenue"
 const CHART_VARIANT_OPTIONS: Array<{ key: ChartVariant; label: string }> = [
   { key: "line", label: "선형" },
   { key: "bar", label: "막대" },
   { key: "area", label: "영역" },
-];
+]
 
 const BASE_METRIC_FIELDS: MetricField[] = [
   { key: "revenue", label: "매출", format: "currency", source: "base", tone: "bg-emerald-500" },
@@ -127,9 +172,18 @@ const BASE_METRIC_FIELDS: MetricField[] = [
   { key: "customers", label: "고객 수", format: "number", source: "base", tone: "bg-violet-500" },
   { key: "patents", label: "특허", format: "number", source: "base", tone: "bg-amber-500" },
   { key: "certifications", label: "인증", format: "number", source: "base", tone: "bg-slate-500" },
-  { key: "monthlyActiveUsers", label: "MAU", format: "number", source: "base", tone: "bg-cyan-500" },
-];
-const DEFAULT_VISIBLE_BASE_METRIC_KEYS = BASE_METRIC_FIELDS.map((field) => field.key as BaseMetricKey);
+  {
+    key: "monthlyActiveUsers",
+    label: "MAU",
+    format: "number",
+    source: "base",
+    tone: "bg-cyan-500",
+  },
+]
+const DEFAULT_VISIBLE_BASE_METRIC_KEYS = BASE_METRIC_FIELDS.map(
+  (field) => field.key as BaseMetricKey,
+)
+const PROGRAM_METRIC_TONE = "bg-indigo-500"
 
 function createEmptyMonth(year: number, month: number): MonthlyMetrics {
   return {
@@ -142,16 +196,16 @@ function createEmptyMonth(year: number, month: number): MonthlyMetrics {
     customers: 0,
     monthlyActiveUsers: 0,
     otherMetrics: {},
-  };
+  }
 }
 
 function normalizeMonthlyData(data: MonthlyMetrics[], year: number): MonthlyMetrics[] {
-  const dataByMonth = new Map(data.map((item) => [item.month, item]));
+  const dataByMonth = new Map(data.map((item) => [item.month, item]))
 
   return MONTHS.map((month) => {
-    const existing = dataByMonth.get(month);
+    const existing = dataByMonth.get(month)
     if (!existing) {
-      return createEmptyMonth(year, month);
+      return createEmptyMonth(year, month)
     }
 
     return {
@@ -161,21 +215,21 @@ function normalizeMonthlyData(data: MonthlyMetrics[], year: number): MonthlyMetr
       year,
       monthlyActiveUsers: existing.monthlyActiveUsers ?? 0,
       otherMetrics: { ...(existing.otherMetrics ?? {}) },
-    };
-  });
+    }
+  })
 }
 
 function inferCustomFields(data: MonthlyMetrics[]): CustomMetricField[] {
-  const keys = new Set<string>();
+  const keys = new Set<string>()
   data.forEach((item) => {
-    Object.keys(item.otherMetrics ?? {}).forEach((key) => keys.add(key));
-  });
+    Object.keys(item.otherMetrics ?? {}).forEach((key) => keys.add(key))
+  })
 
   return Array.from(keys).map((key) => ({
     key,
     label: key,
     format: "number" as const,
-  }));
+  }))
 }
 
 function createEmptyMetricsState(year = new Date().getFullYear()): MetricsPageState {
@@ -184,15 +238,12 @@ function createEmptyMetricsState(year = new Date().getFullYear()): MetricsPageSt
     data: normalizeMonthlyData([], year),
     customFields: [],
     visibleBaseMetricKeys: [...DEFAULT_VISIBLE_BASE_METRIC_KEYS],
-  };
+  }
 }
 
-function normalizeCustomFields(
-  value: unknown,
-  fallback: CustomMetricField[],
-): CustomMetricField[] {
+function normalizeCustomFields(value: unknown, fallback: CustomMetricField[]): CustomMetricField[] {
   if (!Array.isArray(value)) {
-    return fallback;
+    return fallback
   }
 
   const customFields = value
@@ -206,119 +257,117 @@ function normalizeCustomFields(
       key: field.key,
       label: field.label.trim() || field.key,
       format: field.format,
-    }));
+    }))
 
-  return customFields.length > 0 ? customFields : fallback;
+  return customFields.length > 0 ? customFields : fallback
 }
 
 function normalizeVisibleBaseMetricKeys(value: unknown): BaseMetricKey[] {
   if (!Array.isArray(value)) {
-    return [...DEFAULT_VISIBLE_BASE_METRIC_KEYS];
+    return [...DEFAULT_VISIBLE_BASE_METRIC_KEYS]
   }
 
-  const allowedKeys = new Set<BaseMetricKey>(DEFAULT_VISIBLE_BASE_METRIC_KEYS);
+  const allowedKeys = new Set<BaseMetricKey>(DEFAULT_VISIBLE_BASE_METRIC_KEYS)
   const visibleKeys = value.filter(
     (key): key is BaseMetricKey => typeof key === "string" && allowedKeys.has(key as BaseMetricKey),
-  );
+  )
 
   return visibleKeys.length > 0
     ? DEFAULT_VISIBLE_BASE_METRIC_KEYS.filter((key) => visibleKeys.includes(key))
-    : [...DEFAULT_VISIBLE_BASE_METRIC_KEYS];
+    : [...DEFAULT_VISIBLE_BASE_METRIC_KEYS]
 }
 
 function normalizeMetricsState(
   source: Partial<MetricsPageState> | null | undefined,
   fallbackYear = new Date().getFullYear(),
 ): MetricsPageState {
-  const fallback = createEmptyMetricsState(fallbackYear);
+  const fallback = createEmptyMetricsState(fallbackYear)
 
   if (!source) {
-    return fallback;
+    return fallback
   }
 
-  const year = typeof source.year === "number" ? source.year : fallback.year;
+  const year = typeof source.year === "number" ? source.year : fallback.year
   const data = Array.isArray(source.data)
     ? normalizeMonthlyData(source.data as MonthlyMetrics[], year).map((monthData) => ({
         ...monthData,
         otherMetrics: { ...(monthData.otherMetrics ?? {}) },
       }))
-    : fallback.data;
-  const inferredCustomFields = inferCustomFields(data);
-  const customFields = normalizeCustomFields(source.customFields, inferredCustomFields);
-  const visibleBaseMetricKeys = normalizeVisibleBaseMetricKeys(source.visibleBaseMetricKeys);
+    : fallback.data
+  const inferredCustomFields = inferCustomFields(data)
+  const customFields = normalizeCustomFields(source.customFields, inferredCustomFields)
+  const visibleBaseMetricKeys = normalizeVisibleBaseMetricKeys(source.visibleBaseMetricKeys)
 
   return {
     year,
     data,
     customFields,
     visibleBaseMetricKeys,
-  };
+  }
 }
 
 function getLatestFilledMonth(data: MonthlyMetrics[]): number {
-  const filledMonth = [...data]
-    .reverse()
-    .find((item) => {
-      const baseValues = [
-        item.revenue,
-        item.employees,
-        item.customers,
-        item.patents,
-        item.certifications,
-        item.monthlyActiveUsers ?? 0,
-      ];
-      const customValues = Object.values(item.otherMetrics ?? {});
+  const filledMonth = [...data].reverse().find((item) => {
+    const baseValues = [
+      item.revenue,
+      item.employees,
+      item.customers,
+      item.patents,
+      item.certifications,
+      item.monthlyActiveUsers ?? 0,
+    ]
+    const customValues = Object.values(item.otherMetrics ?? {})
 
-      return [...baseValues, ...customValues].some((value) => value > 0);
-    });
+    return [...baseValues, ...customValues].some((value) => value > 0)
+  })
 
-  return filledMonth?.month ?? 1;
+  return filledMonth?.month ?? 1
 }
 
 function getComparisonMonth(year: number, data: MonthlyMetrics[]): number {
-  const today = new Date();
+  const today = new Date()
   if (today.getFullYear() === year) {
-    return today.getMonth() + 1;
+    return today.getMonth() + 1
   }
 
-  return getLatestFilledMonth(data);
+  return getLatestFilledMonth(data)
 }
 
 function getMetricValue(item: MonthlyMetrics, key: string): number {
   switch (key as BaseMetricKey) {
     case "revenue":
-      return item.revenue;
+      return item.revenue
     case "employees":
-      return item.employees;
+      return item.employees
     case "customers":
-      return item.customers;
+      return item.customers
     case "patents":
-      return item.patents;
+      return item.patents
     case "certifications":
-      return item.certifications;
+      return item.certifications
     case "monthlyActiveUsers":
-      return item.monthlyActiveUsers ?? 0;
+      return item.monthlyActiveUsers ?? 0
     default:
-      return item.otherMetrics?.[key] ?? 0;
+      return item.otherMetrics?.[key] ?? 0
   }
 }
 
 function setMetricValue(item: MonthlyMetrics, key: string, nextValue: number): MonthlyMetrics {
-  const value = Number.isFinite(nextValue) ? Math.max(0, nextValue) : 0;
+  const value = Number.isFinite(nextValue) ? Math.max(0, nextValue) : 0
 
   switch (key as BaseMetricKey) {
     case "revenue":
-      return { ...item, revenue: value };
+      return { ...item, revenue: value }
     case "employees":
-      return { ...item, employees: value };
+      return { ...item, employees: value }
     case "customers":
-      return { ...item, customers: value };
+      return { ...item, customers: value }
     case "patents":
-      return { ...item, patents: value };
+      return { ...item, patents: value }
     case "certifications":
-      return { ...item, certifications: value };
+      return { ...item, certifications: value }
     case "monthlyActiveUsers":
-      return { ...item, monthlyActiveUsers: value };
+      return { ...item, monthlyActiveUsers: value }
     default:
       return {
         ...item,
@@ -326,72 +375,72 @@ function setMetricValue(item: MonthlyMetrics, key: string, nextValue: number): M
           ...(item.otherMetrics ?? {}),
           [key]: value,
         },
-      };
+      }
   }
 }
 
 function formatMetricValue(value: number, format: MetricFormat): string {
-  return format === "currency" ? formatCurrency(value) : formatNumber(value);
+  return format === "currency" ? formatCurrency(value) : formatNumber(value)
 }
 
 function formatAxisValue(value: number, format: MetricFormat): string {
   if (format === "currency") {
     if (value >= 100000000) {
-      return `${(value / 100000000).toFixed(value % 100000000 === 0 ? 0 : 1)}억`;
+      return `${(value / 100000000).toFixed(value % 100000000 === 0 ? 0 : 1)}억`
     }
     if (value >= 10000) {
-      return `${Math.round(value / 10000)}만`;
+      return `${Math.round(value / 10000)}만`
     }
   }
 
   return new Intl.NumberFormat("ko-KR", {
     notation: value >= 1000 ? "compact" : "standard",
     maximumFractionDigits: 1,
-  }).format(value);
+  }).format(value)
 }
 
 function getMonthDelta(currentValue: number, previousValue?: number): string {
   if (previousValue === undefined) {
-    return "비교 데이터 없음";
+    return "비교 데이터 없음"
   }
 
-  const difference = currentValue - previousValue;
+  const difference = currentValue - previousValue
   if (difference === 0) {
-    return "전월과 동일";
+    return "전월과 동일"
   }
 
-  return `${difference > 0 ? "+" : ""}${formatNumber(difference)} 변화`;
+  return `${difference > 0 ? "+" : ""}${formatNumber(difference)} 변화`
 }
 
 function getMetricFieldByKey(fields: MetricField[], key: string, fallbackIndex = 0): MetricField {
-  return fields.find((field) => field.key === key) ?? BASE_METRIC_FIELDS[fallbackIndex]!;
+  return fields.find((field) => field.key === key) ?? BASE_METRIC_FIELDS[fallbackIndex]!
 }
 
 function normalizeDateLabel(value: unknown): string | null {
   if (!value) {
-    return null;
+    return null
   }
 
-  let parsedDate: Date | null = null;
+  let parsedDate: Date | null = null
 
   if (value instanceof Date) {
-    parsedDate = value;
+    parsedDate = value
   } else if (typeof value === "string" || typeof value === "number") {
-    const candidate = new Date(value);
-    parsedDate = Number.isNaN(candidate.getTime()) ? null : candidate;
+    const candidate = new Date(value)
+    parsedDate = Number.isNaN(candidate.getTime()) ? null : candidate
   } else if (typeof value === "object" && value !== null) {
-    const maybeTimestamp = value as { toDate?: () => Date };
+    const maybeTimestamp = value as { toDate?: () => Date }
     if (typeof maybeTimestamp.toDate === "function") {
       try {
-        parsedDate = maybeTimestamp.toDate();
+        parsedDate = maybeTimestamp.toDate()
       } catch {
-        parsedDate = null;
+        parsedDate = null
       }
     }
   }
 
   if (!parsedDate || Number.isNaN(parsedDate.getTime())) {
-    return null;
+    return null
   }
 
   return parsedDate.toLocaleString("ko-KR", {
@@ -400,68 +449,66 @@ function normalizeDateLabel(value: unknown): string | null {
     day: "2-digit",
     hour: "2-digit",
     minute: "2-digit",
-  });
+  })
 }
 
 function getDateValue(value: unknown): Date | null {
   if (!value) {
-    return null;
+    return null
   }
 
   if (value instanceof Date) {
-    return Number.isNaN(value.getTime()) ? null : value;
+    return Number.isNaN(value.getTime()) ? null : value
   }
 
   if (typeof value === "string" || typeof value === "number") {
-    const parsed = new Date(value);
-    return Number.isNaN(parsed.getTime()) ? null : parsed;
+    const parsed = new Date(value)
+    return Number.isNaN(parsed.getTime()) ? null : parsed
   }
 
   if (typeof value === "object" && value !== null) {
-    const maybeTimestamp = value as { toDate?: () => Date };
+    const maybeTimestamp = value as { toDate?: () => Date }
     if (typeof maybeTimestamp.toDate === "function") {
       try {
-        const parsed = maybeTimestamp.toDate();
-        return Number.isNaN(parsed.getTime()) ? null : parsed;
+        const parsed = maybeTimestamp.toDate()
+        return Number.isNaN(parsed.getTime()) ? null : parsed
       } catch {
-        return null;
+        return null
       }
     }
   }
 
-  return null;
+  return null
 }
 
 function formatFileSize(size: number): string {
   if (size >= 1024 * 1024) {
-    return `${(size / (1024 * 1024)).toFixed(1)}MB`;
+    return `${(size / (1024 * 1024)).toFixed(1)}MB`
   }
 
   if (size >= 1024) {
-    return `${Math.round(size / 1024)}KB`;
+    return `${Math.round(size / 1024)}KB`
   }
 
-  return `${size}B`;
+  return `${size}B`
 }
 
 function createMetricsCsv(metricsState: MetricsPageState, metricFields: MetricField[]): string {
   const escapeCell = (value: string | number) => {
-    const source = String(value ?? "");
+    const source = String(value ?? "")
     if (/[",\n]/.test(source)) {
-      return `"${source.replace(/"/g, "\"\"")}"`;
+      return `"${source.replace(/"/g, '""')}"`
     }
-    return source;
-  };
+    return source
+  }
 
-  const headers = ["월", ...metricFields.map((field) => field.label)];
+  const headers = ["월", ...metricFields.map((field) => field.label)]
   const rows = metricsState.data.map((monthData) => [
     `${monthData.month}월`,
     ...metricFields.map((field) => getMetricValue(monthData, field.key)),
-  ]);
+  ])
 
-  return [headers, ...rows]
-    .map((row) => row.map((cell) => escapeCell(cell)).join(","))
-    .join("\n");
+  return [headers, ...rows].map((row) => row.map((cell) => escapeCell(cell)).join(",")).join("\n")
 }
 
 function MetricTooltip({
@@ -471,85 +518,116 @@ function MetricTooltip({
   format,
   metricLabel,
 }: {
-  active?: boolean;
-  payload?: Array<{ value?: number }>;
-  label?: string;
-  format: MetricFormat;
-  metricLabel: string;
+  active?: boolean
+  payload?: Array<{ value?: number }>
+  label?: string
+  format: MetricFormat
+  metricLabel: string
 }) {
   if (!active || !payload?.length) {
-    return null;
+    return null
   }
 
-  const value = typeof payload[0]?.value === "number" ? payload[0].value : 0;
+  const value = typeof payload[0]?.value === "number" ? payload[0].value : 0
 
   return (
     <div className="rounded-lg border bg-white px-3 py-2 shadow-sm">
       <p className="text-sm font-medium text-foreground">{label}</p>
       <p className="mt-1 text-sm text-muted-foreground">
-        {metricLabel} <span className="font-semibold text-foreground">{formatMetricValue(value, format)}</span>
+        {metricLabel}{" "}
+        <span className="font-semibold text-foreground">{formatMetricValue(value, format)}</span>
       </p>
     </div>
-  );
+  )
 }
 
 export function CompanyMetricsPage({ currentUser, companyId }: CompanyMetricsPageProps) {
   const metricsCollectionPath = useMemo(
     () => (companyId ? `companies/${companyId}/metrics` : ""),
     [companyId],
-  );
+  )
   const filesCollectionPath = useMemo(
     () => (companyId ? `companies/${companyId}/files` : ""),
     [companyId],
-  );
+  )
+  const { data: programDocs } = useFirestoreCollection<ProgramListItem>("programs", {
+    enabled: isFirebaseConfigured && Boolean(currentUser.programs?.length),
+  })
   const { data: persistedMetricsDoc, loading: persistedMetricsLoading } =
     useFirestoreDocument<PersistedMetricsDocument>(metricsCollectionPath, "annual", {
       enabled: isFirebaseConfigured && !!companyId,
-    });
-  const { data: companyFileDocs } = useFirestoreCollection<MetricsAttachmentDocument>(filesCollectionPath, {
-    enabled: isFirebaseConfigured && !!companyId,
-  });
+    })
+  const { data: companyFileDocs } = useFirestoreCollection<MetricsAttachmentDocument>(
+    filesCollectionPath,
+    {
+      enabled: isFirebaseConfigured && !!companyId,
+    },
+  )
   const [savedMetricsState, setSavedMetricsState] = useState<MetricsPageState>(() =>
     createEmptyMetricsState(),
-  );
+  )
   const [draftMetricsState, setDraftMetricsState] = useState<MetricsPageState>(() =>
     createEmptyMetricsState(),
-  );
-  const [selectedMetricKey, setSelectedMetricKey] = useState<string>(DEFAULT_SELECTED_METRIC_KEY);
-  const [chartVariant, setChartVariant] = useState<ChartVariant>("line");
-  const [newFieldLabel, setNewFieldLabel] = useState("");
-  const [newFieldFormat, setNewFieldFormat] = useState<MetricFormat>("number");
-  const [isDirty, setIsDirty] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
-  const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
-  const [isUploadingAttachments, setIsUploadingAttachments] = useState(false);
-  const [deletingAttachmentIds, setDeletingAttachmentIds] = useState<Record<string, boolean>>({});
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  )
+  const [selectedMetricKey, setSelectedMetricKey] = useState<string>(DEFAULT_SELECTED_METRIC_KEY)
+  const [chartVariant, setChartVariant] = useState<ChartVariant>("line")
+  const [isDirty, setIsDirty] = useState(false)
+  const [isSaving, setIsSaving] = useState(false)
+  const [lastSavedAt, setLastSavedAt] = useState<string | null>(null)
+  const [isUploadingAttachments, setIsUploadingAttachments] = useState(false)
+  const [deletingAttachmentIds, setDeletingAttachmentIds] = useState<Record<string, boolean>>({})
+  const [selectedProgramIds, setSelectedProgramIds] = useState<string[]>([])
+  const [programFilterOpen, setProgramFilterOpen] = useState(false)
+  const [programFilterQuery, setProgramFilterQuery] = useState("")
+  const [programMetricDrafts, setProgramMetricDrafts] = useState<Record<string, ProgramMetricRecord>>(
+    {},
+  )
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
 
   useEffect(() => {
-    const emptyState = createEmptyMetricsState();
-    setSavedMetricsState(emptyState);
-    setDraftMetricsState(emptyState);
-    setSelectedMetricKey(DEFAULT_SELECTED_METRIC_KEY);
-    setIsDirty(false);
-    setLastSavedAt(null);
-  }, [companyId]);
+    const emptyState = createEmptyMetricsState()
+    setSavedMetricsState(emptyState)
+    setDraftMetricsState(emptyState)
+    setProgramMetricDrafts({})
+    setSelectedProgramIds([])
+    setProgramFilterQuery("")
+    setSelectedMetricKey(DEFAULT_SELECTED_METRIC_KEY)
+    setIsDirty(false)
+    setLastSavedAt(null)
+  }, [companyId])
+
+  const participatingPrograms = useMemo(
+    () =>
+      (currentUser.programs ?? []).map((programId) => {
+        const matchedProgram = programDocs.find((program) => program.id === programId)
+        return {
+          id: programId,
+          name: matchedProgram?.name?.trim() || programId,
+          kpiDefinitions: matchedProgram?.kpiDefinitions ?? [],
+        }
+      }),
+    [currentUser.programs, programDocs],
+  )
 
   useEffect(() => {
     if (!isFirebaseConfigured || !companyId || persistedMetricsLoading || isDirty) {
-      return;
+      return
     }
 
-    const nextState = normalizeMetricsState(persistedMetricsDoc ?? null);
-    setSavedMetricsState(nextState);
-    setDraftMetricsState(nextState);
-    setLastSavedAt(normalizeDateLabel(persistedMetricsDoc?.updatedAt) ?? null);
-  }, [
-    companyId,
-    isDirty,
-    persistedMetricsDoc,
-    persistedMetricsLoading,
-  ]);
+    const nextState = normalizeMetricsState(persistedMetricsDoc ?? null)
+    const nextProgramMetrics = normalizeProgramMetrics(
+      persistedMetricsDoc?.programMetrics,
+      participatingPrograms,
+      nextState.year,
+    )
+    setSavedMetricsState(nextState)
+    setDraftMetricsState(nextState)
+    setProgramMetricDrafts(nextProgramMetrics)
+    setSelectedProgramIds((prev) =>
+      prev.filter((programId) => Object.prototype.hasOwnProperty.call(nextProgramMetrics, programId)),
+    )
+    setLastSavedAt(normalizeDateLabel(persistedMetricsDoc?.updatedAt) ?? null)
+  }, [companyId, isDirty, participatingPrograms, persistedMetricsDoc, persistedMetricsLoading])
 
   const savedMetricFields = useMemo<MetricField[]>(
     () => [
@@ -563,7 +641,7 @@ export function CompanyMetricsPage({ currentUser, companyId }: CompanyMetricsPag
       })),
     ],
     [savedMetricsState.customFields, savedMetricsState.visibleBaseMetricKeys],
-  );
+  )
 
   const draftMetricFields = useMemo<MetricField[]>(
     () => [
@@ -577,15 +655,7 @@ export function CompanyMetricsPage({ currentUser, companyId }: CompanyMetricsPag
       })),
     ],
     [draftMetricsState.customFields, draftMetricsState.visibleBaseMetricKeys],
-  );
-
-  const hiddenBaseMetricFields = useMemo(
-    () =>
-      BASE_METRIC_FIELDS.filter(
-        (field) => !draftMetricsState.visibleBaseMetricKeys.includes(field.key as BaseMetricKey),
-      ),
-    [draftMetricsState.visibleBaseMetricKeys],
-  );
+  )
 
   const metricsAttachments = useMemo(
     () =>
@@ -598,192 +668,249 @@ export function CompanyMetricsPage({ currentUser, companyId }: CompanyMetricsPag
             typeof file.size === "number",
         )
         .sort((left, right) => {
-          const leftTime = getDateValue(left.createdAt)?.getTime() ?? 0;
-          const rightTime = getDateValue(right.createdAt)?.getTime() ?? 0;
-          return rightTime - leftTime;
+          const leftTime = getDateValue(left.createdAt)?.getTime() ?? 0
+          const rightTime = getDateValue(right.createdAt)?.getTime() ?? 0
+          return rightTime - leftTime
         }),
     [companyFileDocs],
-  );
-
-  useEffect(() => {
-    if (!savedMetricFields.some((field) => field.key === selectedMetricKey)) {
-      setSelectedMetricKey(savedMetricFields[0]?.key ?? DEFAULT_SELECTED_METRIC_KEY);
-    }
-  }, [savedMetricFields, selectedMetricKey]);
+  )
 
   const selectedMonth = useMemo(
     () => getComparisonMonth(savedMetricsState.year, savedMetricsState.data),
     [savedMetricsState.year, savedMetricsState.data],
-  );
+  )
 
   const currentMonthData = useMemo(
     () =>
       savedMetricsState.data.find((item) => item.month === selectedMonth) ??
       createEmptyMonth(savedMetricsState.year, selectedMonth),
     [savedMetricsState.data, savedMetricsState.year, selectedMonth],
-  );
+  )
 
   const previousMonthData = useMemo(
     () => savedMetricsState.data.find((item) => item.month === selectedMonth - 1),
     [savedMetricsState.data, selectedMonth],
-  );
+  )
 
-  const selectedMetric = useMemo(
-    () => savedMetricFields.find((field) => field.key === selectedMetricKey) ?? savedMetricFields[0] ?? BASE_METRIC_FIELDS[0]!,
-    [savedMetricFields, selectedMetricKey],
-  );
+  const programMetricOptions = useMemo(
+    () => Object.values(programMetricDrafts),
+    [programMetricDrafts],
+  )
 
-  const chartData = useMemo(
-    () =>
-      savedMetricsState.data.map((item) => ({
-        month: `${item.month}월`,
-        value: getMetricValue(item, selectedMetric.key),
+  const selectedProgramMetrics = useMemo(
+    () => programMetricOptions.filter((record) => selectedProgramIds.includes(record.programId)),
+    [programMetricOptions, selectedProgramIds],
+  )
+
+  const programFilterOptions = useMemo(() => {
+    const normalizedQuery = programFilterQuery.trim().toLowerCase()
+    if (!normalizedQuery) {
+      return programMetricOptions
+    }
+
+    return programMetricOptions.filter((record) =>
+      record.programName.toLowerCase().includes(normalizedQuery),
+    )
+  }, [programFilterQuery, programMetricOptions])
+
+  const visibleProgramFilterBadges = selectedProgramMetrics.slice(0, 2)
+  const hiddenProgramFilterCount = Math.max(0, selectedProgramMetrics.length - 2)
+
+  const visibleInputFields = useMemo<VisibleMetricField[]>(
+    () => [
+      ...draftMetricFields.map((field) => ({
+        key: field.key,
+        label: field.label,
+        format: field.format,
+        source: "common" as const,
+        badgeLabel: "공통",
+        tone: field.tone,
+        commonKey: field.key,
       })),
-    [savedMetricsState.data, selectedMetric.key],
-  );
+      ...selectedProgramMetrics.flatMap((record) =>
+        record.definitions.filter((definition) => definition.active !== false).map((definition) => ({
+          key: buildProgramMetricFieldKey(record.programId, definition.id),
+          label: definition.label,
+          format: "number" as const,
+          source: "program" as const,
+          badgeLabel: record.programName,
+          description: definition.description,
+          tone: PROGRAM_METRIC_TONE,
+          programId: record.programId,
+          programName: record.programName,
+          metricId: definition.id,
+        })),
+      ),
+    ],
+    [draftMetricFields, selectedProgramMetrics],
+  )
+
+  const visibleChartFields = useMemo<VisibleMetricField[]>(
+    () => [
+      ...savedMetricFields.map((field) => ({
+        key: field.key,
+        label: field.label,
+        format: field.format,
+        source: "common" as const,
+        badgeLabel: "공통",
+        tone: field.tone,
+        commonKey: field.key,
+      })),
+      ...selectedProgramMetrics.flatMap((record) =>
+        record.definitions.filter((definition) => definition.active !== false).map((definition) => ({
+          key: buildProgramMetricFieldKey(record.programId, definition.id),
+          label: definition.label,
+          format: "number" as const,
+          source: "program" as const,
+          badgeLabel: record.programName,
+          description: definition.description,
+          tone: PROGRAM_METRIC_TONE,
+          programId: record.programId,
+          programName: record.programName,
+          metricId: definition.id,
+        })),
+      ),
+    ],
+    [savedMetricFields, selectedProgramMetrics],
+  )
+
+  useEffect(() => {
+    if (!visibleChartFields.some((field) => field.key === selectedMetricKey)) {
+      setSelectedMetricKey(visibleChartFields[0]?.key ?? DEFAULT_SELECTED_METRIC_KEY)
+    }
+  }, [selectedMetricKey, visibleChartFields])
+
+  const selectedChartField = useMemo(
+    () => visibleChartFields.find((field) => field.key === selectedMetricKey) ?? null,
+    [selectedMetricKey, visibleChartFields],
+  )
+
+  const chartData = useMemo(() => {
+    if (!selectedChartField) {
+      return savedMetricsState.data.map((item) => ({
+        month: `${item.month}월`,
+        value: 0,
+      }))
+    }
+
+    if (selectedChartField.source === "common") {
+      return savedMetricsState.data.map((item) => ({
+        month: `${item.month}월`,
+        value: getMetricValue(item, selectedChartField.commonKey ?? DEFAULT_SELECTED_METRIC_KEY),
+      }))
+    }
+
+    const programRows =
+      (selectedChartField.programId
+        ? programMetricDrafts[selectedChartField.programId]?.rows
+        : null) ?? []
+    const rowsByMonth = new Map(programRows.map((row) => [row.month, row]))
+
+    return MONTHS.map((month) => ({
+      month: `${month}월`,
+      value: rowsByMonth.get(month)?.values[selectedChartField.metricId ?? ""] ?? 0,
+    }))
+  }, [programMetricDrafts, savedMetricsState.data, selectedChartField])
+
   const summaryFields = useMemo(() => {
-    const picks: MetricField[] = [];
-    const preferredKeys = ["revenue", "employees", "customers"];
+    const picks: MetricField[] = []
+    const preferredKeys = ["revenue", "employees", "customers"]
 
     preferredKeys.forEach((key) => {
-      const field = savedMetricFields.find((item) => item.key === key);
+      const field = savedMetricFields.find((item) => item.key === key)
       if (field) {
-        picks.push(field);
+        picks.push(field)
       }
-    });
+    })
 
-    if (!picks.some((field) => field.key === selectedMetric.key)) {
-      const selectedField = savedMetricFields.find((field) => field.key === selectedMetric.key);
-      if (selectedField) {
-        picks.push(selectedField);
+    if (selectedChartField?.source === "common") {
+      const selectedField = savedMetricFields.find(
+        (field) => field.key === selectedChartField.commonKey,
+      )
+      if (selectedField && !picks.some((field) => field.key === selectedField.key)) {
+        picks.push(selectedField)
       }
     }
 
     savedMetricFields.forEach((field) => {
       if (!picks.some((item) => item.key === field.key) && picks.length < 4) {
-        picks.push(field);
+        picks.push(field)
       }
-    });
+    })
 
-    return picks.slice(0, 4);
-  }, [savedMetricFields, selectedMetric.key]);
+    return picks.slice(0, 4)
+  }, [savedMetricFields, selectedChartField])
 
   const handleMetricChange = (month: number, key: string, rawValue: string) => {
-    const nextValue = Number.parseInt(rawValue, 10);
+    const nextValue = Number.parseInt(rawValue, 10)
 
     setDraftMetricsState((prev) => ({
       ...prev,
       data: prev.data.map((item) =>
-        item.month === month ? setMetricValue(item, key, Number.isNaN(nextValue) ? 0 : nextValue) : item,
+        item.month === month
+          ? setMetricValue(item, key, Number.isNaN(nextValue) ? 0 : nextValue)
+          : item,
       ),
-    }));
-    setIsDirty(true);
-  };
+    }))
+    setIsDirty(true)
+  }
 
-  const handleAddField = () => {
-    const label = newFieldLabel.trim();
-    if (!label) {
-      toast.error("컬럼 이름을 입력해 주세요.");
-      return;
-    }
+  const handleProgramToggle = (programId: string) => {
+    setSelectedProgramIds((prev) =>
+      prev.includes(programId) ? prev.filter((id) => id !== programId) : [...prev, programId],
+    )
+  }
 
-    const duplicated = [...draftMetricFields, ...hiddenBaseMetricFields].some((field) => field.label === label);
-    if (duplicated) {
-      toast.error("같은 이름의 컬럼이 이미 있습니다.");
-      return;
-    }
+  const handleProgramMetricChange = (
+    programId: string,
+    month: number,
+    metricId: string,
+    rawValue: string,
+  ) => {
+    const nextValue = Number.parseInt(rawValue, 10)
+    const matchedProgram = participatingPrograms.find((program) => program.id === programId)
 
-    const nextField: CustomMetricField = {
-      key: `custom-${Date.now()}`,
-      label,
-      format: newFieldFormat,
-    };
-
-    setDraftMetricsState((prev) => ({
+    setProgramMetricDrafts((prev) => ({
       ...prev,
-      customFields: [...prev.customFields, nextField],
-      data: prev.data.map((item) => ({
-        ...item,
-        otherMetrics: {
-          ...(item.otherMetrics ?? {}),
-          [nextField.key]: 0,
-        },
-      })),
-    }));
-    setSelectedMetricKey(nextField.key);
-    setNewFieldLabel("");
-    setNewFieldFormat("number");
-    setIsDirty(true);
-    toast.success("새 지표 컬럼을 추가했습니다.");
-  };
-
-  const handleDeleteField = (key: string) => {
-    const targetField = draftMetricFields.find((field) => field.key === key);
-    if (!targetField || draftMetricFields.length <= 1) {
-      if (draftMetricFields.length <= 1) {
-        toast.error("최소 한 개의 컬럼은 남아 있어야 합니다.");
-      }
-      return;
-    }
-
-    if (targetField.source === "base") {
-      setDraftMetricsState((prev) => ({
-        ...prev,
-        visibleBaseMetricKeys: prev.visibleBaseMetricKeys.filter((fieldKey) => fieldKey !== key),
-      }));
-    } else {
-      setDraftMetricsState((prev) => ({
-        ...prev,
-        customFields: prev.customFields.filter((field) => field.key !== key),
-        data: prev.data.map((item) => {
-          const nextOtherMetrics = { ...(item.otherMetrics ?? {}) };
-          delete nextOtherMetrics[key];
-
-          return {
-            ...item,
-            otherMetrics: nextOtherMetrics,
-          };
-        }),
-      }));
-    }
-
-    if (selectedMetricKey === key) {
-      setSelectedMetricKey(draftMetricFields.find((field) => field.key !== key)?.key ?? DEFAULT_SELECTED_METRIC_KEY);
-    }
-
-    setIsDirty(true);
-    toast.success(`${targetField.label} 컬럼을 삭제했습니다.`);
-  };
-
-  const handleRestoreBaseField = (key: BaseMetricKey) => {
-    const targetField = BASE_METRIC_FIELDS.find((field) => field.key === key);
-    if (!targetField) {
-      return;
-    }
-
-    setDraftMetricsState((prev) => ({
-      ...prev,
-      visibleBaseMetricKeys: DEFAULT_VISIBLE_BASE_METRIC_KEYS.filter(
-        (baseKey) => baseKey === key || prev.visibleBaseMetricKeys.includes(baseKey),
-      ),
-    }));
-    setSelectedMetricKey(key);
-    setIsDirty(true);
-    toast.success(`${targetField.label} 컬럼을 다시 추가했습니다.`);
-  };
+      [programId]: prev[programId]
+        ? {
+            ...prev[programId],
+            rows: prev[programId].rows.map((row) =>
+              row.month === month
+                ? {
+                    ...row,
+                    values: {
+                      ...row.values,
+                      [metricId]: Number.isNaN(nextValue) ? 0 : nextValue,
+                    },
+                  }
+                : row,
+            ),
+          }
+        : createProgramMetricRecord(
+            programId,
+            matchedProgram?.name ?? programId,
+            draftMetricsState.year,
+            {
+              definitions: matchedProgram?.kpiDefinitions ?? [],
+            },
+          ),
+    }))
+    setIsDirty(true)
+  }
 
   const handleSave = async () => {
     if (!isFirebaseConfigured) {
-      toast.error("Firebase 설정이 없어 실데이터 저장을 진행할 수 없습니다.");
-      return;
+      toast.error("Firebase 설정이 없어 실데이터 저장을 진행할 수 없습니다.")
+      return
     }
 
     if (!companyId) {
-      toast.error("회사 문서를 찾지 못해 저장할 수 없습니다.");
-      return;
+      toast.error("회사 문서를 찾지 못해 저장할 수 없습니다.")
+      return
     }
 
-    setIsSaving(true);
+    setIsSaving(true)
 
     const success = await firestoreService.setDocument<PersistedMetricsDocument>(
       metricsCollectionPath,
@@ -795,28 +922,33 @@ export function CompanyMetricsPage({ currentUser, companyId }: CompanyMetricsPag
         data: draftMetricsState.data,
         customFields: draftMetricsState.customFields,
         visibleBaseMetricKeys: draftMetricsState.visibleBaseMetricKeys,
+        programMetrics: serializeProgramMetrics(programMetricDrafts),
       },
       true,
-    );
+    )
 
-    setIsSaving(false);
+    setIsSaving(false)
 
     if (!success) {
-      toast.error("실적 데이터를 저장하지 못했습니다.");
-      return;
+      toast.error("실적 데이터를 저장하지 못했습니다.")
+      return
     }
 
     const refreshedDocument = await firestoreService.getDocument<PersistedMetricsDocument>(
       metricsCollectionPath,
       "annual",
-    );
-    const nextState = normalizeMetricsState(
-      refreshedDocument ?? draftMetricsState,
-    );
+    )
+    const nextState = normalizeMetricsState(refreshedDocument ?? draftMetricsState)
+    const nextProgramMetrics = normalizeProgramMetrics(
+      refreshedDocument?.programMetrics ?? serializeProgramMetrics(programMetricDrafts),
+      participatingPrograms,
+      nextState.year,
+    )
 
-    setSavedMetricsState(nextState);
-    setDraftMetricsState(nextState);
-    setIsDirty(false);
+    setSavedMetricsState(nextState)
+    setDraftMetricsState(nextState)
+    setProgramMetricDrafts(nextProgramMetrics)
+    setIsDirty(false)
     setLastSavedAt(
       normalizeDateLabel(refreshedDocument?.updatedAt) ??
         new Date().toLocaleString("ko-KR", {
@@ -826,59 +958,59 @@ export function CompanyMetricsPage({ currentUser, companyId }: CompanyMetricsPag
           hour: "2-digit",
           minute: "2-digit",
         }),
-    );
-    toast.success("실적 데이터를 회사 문서에 저장했습니다.");
-  };
+    )
+    toast.success("실적 데이터를 회사 문서에 저장했습니다.")
+  }
 
   const handleDownload = () => {
-    const csvContent = createMetricsCsv(draftMetricsState, draftMetricFields);
+    const csvContent = createMetricsCsv(draftMetricsState, draftMetricFields)
     const blob = new Blob([`\uFEFF${csvContent}`], {
       type: "text/csv;charset=utf-8;",
-    });
-    const url = window.URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `${currentUser.companyName}-${draftMetricsState.year}-monthly-metrics.csv`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    window.URL.revokeObjectURL(url);
-  };
+    })
+    const url = window.URL.createObjectURL(blob)
+    const link = document.createElement("a")
+    link.href = url
+    link.download = `${currentUser.companyName}-${draftMetricsState.year}-monthly-metrics.csv`
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    window.URL.revokeObjectURL(url)
+  }
 
   const handleAttachmentUpload = async (fileList: FileList | null) => {
     if (!fileList?.length) {
-      return;
+      return
     }
 
     if (!companyId || !db || !firebaseStorage || !isFirebaseConfigured) {
-      toast.error("첨부 자료를 업로드할 수 없습니다.");
-      return;
+      toast.error("첨부 자료를 업로드할 수 없습니다.")
+      return
     }
 
-    const dbInstance = db;
-    const storageInstance = firebaseStorage;
+    const dbInstance = db
+    const storageInstance = firebaseStorage
 
-    const files = Array.from(fileList);
-    const validFiles = files.filter((file) => file.size <= 5 * 1024 * 1024);
+    const files = Array.from(fileList)
+    const validFiles = files.filter((file) => file.size <= 5 * 1024 * 1024)
 
     if (validFiles.length !== files.length) {
-      toast.error("파일당 최대 5MB까지만 업로드할 수 있습니다.");
+      toast.error("파일당 최대 5MB까지만 업로드할 수 있습니다.")
     }
 
     if (validFiles.length === 0) {
-      return;
+      return
     }
 
-    setIsUploadingAttachments(true);
+    setIsUploadingAttachments(true)
 
     try {
       await Promise.all(
         validFiles.map(async (file) => {
-          const docRef = doc(collection(dbInstance, filesCollectionPath));
-          const storagePath = `company-files/${companyId}/${docRef.id}/${file.name}`;
+          const docRef = doc(collection(dbInstance, filesCollectionPath))
+          const storagePath = `company-files/${companyId}/${docRef.id}/${file.name}`
 
           try {
-            await uploadBytes(ref(storageInstance, storagePath), file);
+            await uploadBytes(ref(storageInstance, storagePath), file)
             await setDoc(docRef, {
               category: "metrics",
               companyId,
@@ -890,110 +1022,119 @@ export function CompanyMetricsPage({ currentUser, companyId }: CompanyMetricsPag
               contentType: file.type || "application/octet-stream",
               createdAt: serverTimestamp(),
               updatedAt: serverTimestamp(),
-            });
+            })
           } catch (error) {
             try {
-              await deleteObject(ref(storageInstance, storagePath));
+              await deleteObject(ref(storageInstance, storagePath))
             } catch {
               // best effort cleanup
             }
-            throw error;
+            throw error
           }
         }),
-      );
+      )
 
-      toast.success(`${validFiles.length}개 파일을 업로드했습니다.`);
+      toast.success(`${validFiles.length}개 파일을 업로드했습니다.`)
     } catch (error) {
-      console.warn("Failed to upload metrics attachments:", error);
-      toast.error("첨부 자료 업로드에 실패했습니다.");
+      console.warn("Failed to upload metrics attachments:", error)
+      toast.error("첨부 자료 업로드에 실패했습니다.")
     } finally {
-      setIsUploadingAttachments(false);
+      setIsUploadingAttachments(false)
       if (fileInputRef.current) {
-        fileInputRef.current.value = "";
+        fileInputRef.current.value = ""
       }
     }
-  };
+  }
 
   const handleAttachmentDelete = async (attachment: MetricsAttachmentDocument) => {
     if (!db || !firebaseStorage || !companyId) {
-      toast.error("첨부 자료를 삭제할 수 없습니다.");
-      return;
+      toast.error("첨부 자료를 삭제할 수 없습니다.")
+      return
     }
 
-    const dbInstance = db;
-    const storageInstance = firebaseStorage;
+    const dbInstance = db
+    const storageInstance = firebaseStorage
 
-    setDeletingAttachmentIds((prev) => ({ ...prev, [attachment.id]: true }));
+    setDeletingAttachmentIds((prev) => ({ ...prev, [attachment.id]: true }))
 
     try {
       try {
-        await deleteObject(ref(storageInstance, attachment.storagePath));
+        await deleteObject(ref(storageInstance, attachment.storagePath))
       } catch (error: any) {
         if (error?.code !== "storage/object-not-found") {
-          throw error;
+          throw error
         }
       }
 
-      await deleteDoc(doc(dbInstance, filesCollectionPath, attachment.id));
-      toast.success("첨부 자료를 삭제했습니다.");
+      await deleteDoc(doc(dbInstance, filesCollectionPath, attachment.id))
+      toast.success("첨부 자료를 삭제했습니다.")
     } catch (error) {
-      console.warn("Failed to delete metrics attachment:", error);
-      toast.error("첨부 자료 삭제에 실패했습니다.");
+      console.warn("Failed to delete metrics attachment:", error)
+      toast.error("첨부 자료 삭제에 실패했습니다.")
     } finally {
       setDeletingAttachmentIds((prev) => {
-        const next = { ...prev };
-        delete next[attachment.id];
-        return next;
-      });
+        const next = { ...prev }
+        delete next[attachment.id]
+        return next
+      })
     }
-  };
+  }
 
   const handleAttachmentDownload = async (attachment: MetricsAttachmentDocument) => {
     if (!firebaseStorage) {
-      toast.error("파일을 내려받을 수 없습니다.");
-      return;
+      toast.error("파일을 내려받을 수 없습니다.")
+      return
     }
 
-    const storageInstance = firebaseStorage;
+    const storageInstance = firebaseStorage
 
     try {
-      const downloadUrl = await getDownloadURL(ref(storageInstance, attachment.storagePath));
-      window.open(downloadUrl, "_blank", "noopener,noreferrer");
+      const downloadUrl = await getDownloadURL(ref(storageInstance, attachment.storagePath))
+      window.open(downloadUrl, "_blank", "noopener,noreferrer")
     } catch (error) {
-      console.warn("Failed to download metrics attachment:", error);
-      toast.error("파일을 내려받지 못했습니다.");
+      console.warn("Failed to download metrics attachment:", error)
+      toast.error("파일을 내려받지 못했습니다.")
     }
-  };
+  }
 
   const renderChart = () => {
+    const activeChartField = selectedChartField ?? {
+      format: "number" as MetricFormat,
+      label: "지표",
+    }
     const commonProps = {
       data: chartData,
       margin: { top: 8, right: 8, left: 8, bottom: 0 },
-    };
+    }
 
     if (chartVariant === "bar") {
       return (
         <BarChart {...commonProps}>
           <CartesianGrid vertical={false} strokeDasharray="3 3" />
-          <XAxis dataKey="month" tickLine={false} axisLine={false} tick={{ fontSize: 10, fill: "#64748b" }} />
+          <XAxis
+            dataKey="month"
+            tickLine={false}
+            axisLine={false}
+            tick={{ fontSize: 10, fill: "#64748b" }}
+          />
           <YAxis
             tickLine={false}
             axisLine={false}
             width={72}
             tick={{ fontSize: 10, fill: "#64748b" }}
-            tickFormatter={(value) => formatAxisValue(value, selectedMetric.format)}
+            tickFormatter={(value) => formatAxisValue(value, activeChartField.format)}
           />
           <Tooltip
             content={
               <MetricTooltip
-                format={selectedMetric.format}
-                metricLabel={selectedMetric.label}
+                format={activeChartField.format}
+                metricLabel={activeChartField.label}
               />
             }
           />
           <Bar dataKey="value" fill="#2563eb" radius={[8, 8, 0, 0]} />
         </BarChart>
-      );
+      )
     }
 
     if (chartVariant === "area") {
@@ -1011,14 +1152,19 @@ export function CompanyMetricsPage({ currentUser, companyId }: CompanyMetricsPag
             axisLine={false}
             width={72}
             tick={{ fontSize: 10, fill: "#64748b" }}
-            tickFormatter={(value) => formatAxisValue(value, selectedMetric.format)}
+            tickFormatter={(value) => formatAxisValue(value, activeChartField.format)}
           />
-          <XAxis dataKey="month" tickLine={false} axisLine={false} tick={{ fontSize: 10, fill: "#64748b" }} />
+          <XAxis
+            dataKey="month"
+            tickLine={false}
+            axisLine={false}
+            tick={{ fontSize: 10, fill: "#64748b" }}
+          />
           <Tooltip
             content={
               <MetricTooltip
-                format={selectedMetric.format}
-                metricLabel={selectedMetric.label}
+                format={activeChartField.format}
+                metricLabel={activeChartField.label}
               />
             }
           />
@@ -1030,7 +1176,7 @@ export function CompanyMetricsPage({ currentUser, companyId }: CompanyMetricsPag
             fill="url(#company-metrics-fill)"
           />
         </AreaChart>
-      );
+      )
     }
 
     return (
@@ -1041,15 +1187,17 @@ export function CompanyMetricsPage({ currentUser, companyId }: CompanyMetricsPag
           axisLine={false}
           width={72}
           tick={{ fontSize: 10, fill: "#64748b" }}
-          tickFormatter={(value) => formatAxisValue(value, selectedMetric.format)}
+          tickFormatter={(value) => formatAxisValue(value, activeChartField.format)}
         />
-        <XAxis dataKey="month" tickLine={false} axisLine={false} tick={{ fontSize: 10, fill: "#64748b" }} />
+        <XAxis
+          dataKey="month"
+          tickLine={false}
+          axisLine={false}
+          tick={{ fontSize: 10, fill: "#64748b" }}
+        />
         <Tooltip
           content={
-            <MetricTooltip
-              format={selectedMetric.format}
-              metricLabel={selectedMetric.label}
-            />
+            <MetricTooltip format={activeChartField.format} metricLabel={activeChartField.label} />
           }
         />
         <Line
@@ -1061,8 +1209,8 @@ export function CompanyMetricsPage({ currentUser, companyId }: CompanyMetricsPag
           activeDot={{ r: 5 }}
         />
       </LineChart>
-    );
-  };
+    )
+  }
 
   return (
     <div className="space-y-5 p-6">
@@ -1076,16 +1224,17 @@ export function CompanyMetricsPage({ currentUser, companyId }: CompanyMetricsPag
             {currentUser.companyName}의 월별 실적을 입력하고 지표별 흐름을 빠르게 확인하세요.
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-        </div>
+        <div className="flex flex-wrap items-center gap-2"></div>
       </div>
 
       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         {summaryFields.map((field) => {
-          const currentValue = getMetricValue(currentMonthData, field.key);
-          const previousValue = previousMonthData ? getMetricValue(previousMonthData, field.key) : undefined;
-          const difference = previousValue === undefined ? 0 : currentValue - previousValue;
-          const isPositive = difference >= 0;
+          const currentValue = getMetricValue(currentMonthData, field.key)
+          const previousValue = previousMonthData
+            ? getMetricValue(previousMonthData, field.key)
+            : undefined
+          const difference = previousValue === undefined ? 0 : currentValue - previousValue
+          const isPositive = difference >= 0
 
           const Icon =
             field.key === "revenue"
@@ -1096,42 +1245,53 @@ export function CompanyMetricsPage({ currentUser, companyId }: CompanyMetricsPag
                   ? Target
                   : field.key === "patents"
                     ? Award
-                    : Sparkles;
+                    : Sparkles
 
           return (
             <Card key={field.key} className="gap-0">
-                <CardContent className="flex h-full min-h-[112px] flex-col justify-between p-3.5">
-                  <div className="flex items-start justify-between gap-2.5">
-                    <div className="space-y-1">
-                      <p className="text-xs font-medium text-muted-foreground">{selectedMonth}월 {field.label}</p>
-                      <p className="text-lg font-semibold text-foreground">
-                        {formatMetricValue(currentValue, field.format)}
-                      </p>
-                    </div>
-                    <span className={cn("flex h-8 w-8 items-center justify-center rounded-lg text-white", field.tone)}>
-                      <Icon className="h-4 w-4" />
-                    </span>
+              <CardContent className="flex h-full min-h-[112px] flex-col justify-between p-3.5">
+                <div className="flex items-start justify-between gap-2.5">
+                  <div className="space-y-1">
+                    <p className="text-xs font-medium text-muted-foreground">
+                      {selectedMonth}월 {field.label}
+                    </p>
+                    <p className="text-lg font-semibold text-foreground">
+                      {formatMetricValue(currentValue, field.format)}
+                    </p>
                   </div>
-
-                  <div className="flex items-center justify-between gap-3">
-                    <p className="text-xs text-muted-foreground">{getMonthDelta(currentValue, previousValue)}</p>
-                    {previousValue !== undefined && (
-                      <span
-                        className={cn(
-                          "inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs font-medium",
-                          isPositive
-                            ? "bg-emerald-50 text-emerald-700"
-                            : "bg-rose-50 text-rose-700",
-                        )}
-                      >
-                        {isPositive ? <TrendingUp className="h-3.5 w-3.5" /> : <TrendingDown className="h-3.5 w-3.5" />}
-                        {Math.abs(difference).toLocaleString()}
-                      </span>
+                  <span
+                    className={cn(
+                      "flex h-8 w-8 items-center justify-center rounded-lg text-white",
+                      field.tone,
                     )}
-                  </div>
-                </CardContent>
+                  >
+                    <Icon className="h-4 w-4" />
+                  </span>
+                </div>
+
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-xs text-muted-foreground">
+                    {getMonthDelta(currentValue, previousValue)}
+                  </p>
+                  {previousValue !== undefined && (
+                    <span
+                      className={cn(
+                        "inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs font-medium",
+                        isPositive ? "bg-emerald-50 text-emerald-700" : "bg-rose-50 text-rose-700",
+                      )}
+                    >
+                      {isPositive ? (
+                        <TrendingUp className="h-3.5 w-3.5" />
+                      ) : (
+                        <TrendingDown className="h-3.5 w-3.5" />
+                      )}
+                      {Math.abs(difference).toLocaleString()}
+                    </span>
+                  )}
+                </div>
+              </CardContent>
             </Card>
-          );
+          )
         })}
       </div>
 
@@ -1142,7 +1302,7 @@ export function CompanyMetricsPage({ currentUser, companyId }: CompanyMetricsPag
               <div className="space-y-1">
                 <CardTitle className="text-base">월별 실적 입력</CardTitle>
                 <CardDescription className="text-xs leading-5">
-                  컬럼 추가/삭제는 저장 버튼을 눌러야 실제 반영됩니다.
+                  공통 지표에 선택한 사업 KPI를 함께 붙여 월별 실적을 입력합니다.
                 </CardDescription>
               </div>
               <div className="flex flex-col items-end gap-1.5">
@@ -1155,9 +1315,15 @@ export function CompanyMetricsPage({ currentUser, companyId }: CompanyMetricsPag
                     type="button"
                     size="sm"
                     onClick={handleSave}
-                    disabled={isSaving || persistedMetricsLoading || !companyId || !isFirebaseConfigured}
+                    disabled={
+                      isSaving || persistedMetricsLoading || !companyId || !isFirebaseConfigured
+                    }
                   >
-                    {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                    {isSaving ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Save className="h-4 w-4" />
+                    )}
                     저장
                   </Button>
                 </div>
@@ -1171,11 +1337,237 @@ export function CompanyMetricsPage({ currentUser, companyId }: CompanyMetricsPag
                 </div>
               </div>
             </div>
-
           </CardHeader>
 
           <CardContent className="flex flex-1 flex-col px-5 pt-4">
-            <div className="mb-4 rounded-lg border bg-slate-50/60 p-3">
+            {programMetricOptions.length > 0 && (
+              <div className="mb-4 rounded-lg border border-blue-200 bg-blue-50/40 p-3">
+                <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                  <div className="space-y-1">
+                    <p className="text-sm font-semibold text-foreground">사업별 KPI 표시</p>
+                    <p className="text-[11px] text-muted-foreground">
+                      공통 지표는 항상 보이고, 선택한 사업 KPI만 이 표와 차트에 함께 붙습니다.
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Popover
+                      open={programFilterOpen}
+                      onOpenChange={(open) => {
+                        setProgramFilterOpen(open)
+                        if (!open) setProgramFilterQuery("")
+                      }}
+                    >
+                      <PopoverTrigger asChild>
+                        <div
+                          role="combobox"
+                          aria-expanded={programFilterOpen}
+                          tabIndex={0}
+                          className="flex h-8 w-full cursor-pointer items-center gap-1 rounded-md border bg-white px-2 py-1 text-sm outline-none transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 sm:w-[280px]"
+                        >
+                          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
+                            {selectedProgramMetrics.length > 0 ? (
+                              <>
+                                {visibleProgramFilterBadges.map((preview) => (
+                                  <Badge
+                                    key={preview.programId}
+                                    variant="secondary"
+                                    className="max-w-[78px] px-1.5 py-0 text-[11px] bg-blue-100 text-blue-700"
+                                  >
+                                    <span className="block truncate">{preview.programName}</span>
+                                  </Badge>
+                                ))}
+                                {hiddenProgramFilterCount > 0 && (
+                                  <Badge
+                                    variant="secondary"
+                                    className="px-1.5 py-0 text-[11px] bg-slate-100 text-slate-600"
+                                  >
+                                    +{hiddenProgramFilterCount}
+                                  </Badge>
+                                )}
+                              </>
+                            ) : (
+                              <span className="px-1 text-[12px] text-slate-500">사업 선택</span>
+                            )}
+                          </div>
+                          {selectedProgramIds.length > 0 && (
+                            <button
+                              type="button"
+                              className="rounded-sm p-0.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                              onClick={(event) => {
+                                event.preventDefault()
+                                event.stopPropagation()
+                                setSelectedProgramIds([])
+                              }}
+                              aria-label="선택 사업 전체 해제"
+                            >
+                              <X className="h-3 w-3" />
+                            </button>
+                          )}
+                          <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                        </div>
+                      </PopoverTrigger>
+                      <PopoverContent
+                        align="end"
+                        className="w-[280px] max-w-[calc(100vw-48px)] p-0"
+                      >
+                        <Command shouldFilter={false}>
+                          <CommandInput
+                            value={programFilterQuery}
+                            onValueChange={setProgramFilterQuery}
+                            placeholder="사업명 검색"
+                          />
+                          <CommandList className="max-h-72">
+                            <CommandEmpty>검색 결과가 없습니다.</CommandEmpty>
+                            <CommandGroup>
+                              {programFilterOptions.map((preview) => {
+                                const selected = selectedProgramIds.includes(preview.programId)
+                                const isDisabled =
+                                  preview.definitions.filter((definition) => definition.active !== false)
+                                    .length === 0
+                                return (
+                                  <CommandItem
+                                    key={preview.programId}
+                                    value={preview.programId}
+                                    disabled={isDisabled}
+                                    onSelect={() => {
+                                      if (isDisabled) return
+                                      handleProgramToggle(preview.programId)
+                                    }}
+                                    className={cn(
+                                      "min-h-8 px-2 py-1 text-sm",
+                                      isDisabled
+                                        ? "cursor-not-allowed opacity-50"
+                                        : "cursor-pointer",
+                                    )}
+                                  >
+                                    <Check
+                                      className={
+                                        selected
+                                          ? "h-3.5 w-3.5 text-blue-600 opacity-100"
+                                          : "h-3.5 w-3.5 opacity-0"
+                                      }
+                                    />
+                                    <div className="flex min-w-0 flex-1 items-center gap-1.5">
+                                      <span className="min-w-0 flex-1 truncate">
+                                        {preview.programName}
+                                      </span>
+                                    </div>
+                                    {isDisabled && (
+                                      <span className="shrink-0 text-[10px] text-slate-400">
+                                        KPI 없음
+                                      </span>
+                                    )}
+                                  </CommandItem>
+                                )
+                              })}
+                            </CommandGroup>
+                          </CommandList>
+                        </Command>
+                        <div className="flex items-center justify-between border-t px-3 py-2">
+                          <div className="min-h-[16px] text-xs text-slate-500">
+                            {selectedProgramIds.length > 0
+                              ? `${selectedProgramIds.length}개 사업 선택됨`
+                              : "\u00A0"}
+                          </div>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className={cn(
+                              "h-7 px-2",
+                              selectedProgramIds.length > 0
+                                ? ""
+                                : "pointer-events-none opacity-0",
+                            )}
+                            onClick={() => setSelectedProgramIds([])}
+                            disabled={selectedProgramIds.length === 0}
+                          >
+                            전체 해제
+                          </Button>
+                        </div>
+                      </PopoverContent>
+                    </Popover>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div className="min-h-0 flex-1 overflow-auto rounded-lg border xl:max-h-[500px]">
+              <Table className="min-w-[980px]">
+                <TableHeader className="bg-muted/30 [&_tr]:sticky [&_tr]:top-0 [&_tr]:z-10 [&_tr]:bg-muted/95">
+                  <TableRow>
+                    <TableHead className="w-[84px]">월</TableHead>
+                    {visibleInputFields.map((field) => (
+                      <TableHead key={field.key}>
+                        <div className="flex items-center gap-2">
+                          <span>{field.label}</span>
+                          <Badge
+                            variant="outline"
+                            className={cn(
+                              "text-[10px]",
+                              field.source === "common"
+                                ? "border-slate-200 bg-white text-slate-500"
+                                : "border-blue-200 bg-blue-50 text-blue-700",
+                            )}
+                          >
+                            {field.badgeLabel}
+                          </Badge>
+                        </div>
+                      </TableHead>
+                    ))}
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {draftMetricsState.data.map((monthData) => (
+                    <TableRow key={monthData.month}>
+                      <TableCell className="font-medium">{monthData.month}월</TableCell>
+                      {visibleInputFields.map((field) => (
+                        <TableCell key={`${monthData.month}-${field.key}`}>
+                          {field.source === "common" ? (
+                            <Input
+                              type="number"
+                              min="0"
+                              inputMode="numeric"
+                              value={String(getMetricValue(monthData, field.commonKey ?? field.key))}
+                              onChange={(event) =>
+                                handleMetricChange(
+                                  monthData.month,
+                                  field.commonKey ?? field.key,
+                                  event.target.value,
+                                )
+                              }
+                              className="h-7 min-w-[96px] text-right text-sm"
+                            />
+                          ) : (
+                            <Input
+                              type="number"
+                              min="0"
+                              inputMode="numeric"
+                              value={String(
+                                programMetricDrafts[field.programId ?? ""]?.rows.find(
+                                  (row) => row.month === monthData.month,
+                                )?.values[field.metricId ?? ""] ?? 0,
+                              )}
+                              onChange={(event) =>
+                                handleProgramMetricChange(
+                                  field.programId ?? "",
+                                  monthData.month,
+                                  field.metricId ?? "",
+                                  event.target.value,
+                                )
+                              }
+                              className="h-7 min-w-[96px] text-right text-sm"
+                            />
+                          )}
+                        </TableCell>
+                      ))}
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+
+            <div className="mt-4 rounded-lg border bg-slate-50/60 p-3">
               <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                 <div className="space-y-1">
                   <div className="flex items-center gap-2">
@@ -1185,7 +1577,8 @@ export function CompanyMetricsPage({ currentUser, companyId }: CompanyMetricsPag
                     </Badge>
                   </div>
                   <p className="text-xs leading-5 text-muted-foreground">
-                    IR 자료, 투자유치 현황표, 증빙 이미지처럼 월별 실적 근거 자료를 함께 보관할 수 있습니다.
+                    IR 자료, 투자유치 현황표, 증빙 이미지처럼 월별 실적 근거 자료를 함께 보관할 수
+                    있습니다.
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
@@ -1196,7 +1589,7 @@ export function CompanyMetricsPage({ currentUser, companyId }: CompanyMetricsPag
                     className="hidden"
                     accept=".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.csv,.jpg,.jpeg,.png,.webp,.hwp,.hwpx"
                     onChange={(event) => {
-                      void handleAttachmentUpload(event.target.files);
+                      void handleAttachmentUpload(event.target.files)
                     }}
                   />
                   <Button
@@ -1231,7 +1624,9 @@ export function CompanyMetricsPage({ currentUser, companyId }: CompanyMetricsPag
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-2">
                           <FileText className="h-4 w-4 shrink-0 text-slate-500" />
-                          <p className="truncate text-sm font-medium text-foreground">{attachment.name}</p>
+                          <p className="truncate text-sm font-medium text-foreground">
+                            {attachment.name}
+                          </p>
                         </div>
                         <p className="mt-1 text-[11px] text-muted-foreground">
                           {formatFileSize(attachment.size)}
@@ -1276,109 +1671,6 @@ export function CompanyMetricsPage({ currentUser, companyId }: CompanyMetricsPag
                 )}
               </div>
             </div>
-
-            <div className="min-h-0 flex-1 overflow-auto rounded-lg border xl:max-h-[500px]">
-              <Table className="min-w-[980px]">
-                <TableHeader className="bg-muted/30 [&_tr]:sticky [&_tr]:top-0 [&_tr]:z-10 [&_tr]:bg-muted/95">
-                  <TableRow>
-                    <TableHead className="w-[84px]">월</TableHead>
-                    {draftMetricFields.map((field) => (
-                      <TableHead key={field.key}>
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="flex items-center gap-2">
-                            <span>{field.label}</span>
-                            <Badge
-                              variant="outline"
-                              className={cn(
-                                "text-[10px]",
-                                field.source === "base"
-                                  ? "border-slate-200 bg-white text-slate-500"
-                                  : "border-emerald-200 bg-emerald-50 text-emerald-700",
-                              )}
-                            >
-                              {field.source === "base" ? "기본" : "사용자"}
-                            </Badge>
-                          </div>
-                          {draftMetricFields.length > 1 && (
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon"
-                              className="h-7 w-7"
-                              onClick={() => handleDeleteField(field.key)}
-                              aria-label={`${field.label} 컬럼 삭제`}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          )}
-                        </div>
-                      </TableHead>
-                    ))}
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {draftMetricsState.data.map((monthData) => (
-                    <TableRow key={monthData.month}>
-                      <TableCell className="font-medium">{monthData.month}월</TableCell>
-                      {draftMetricFields.map((field) => (
-                        <TableCell key={`${monthData.month}-${field.key}`}>
-                          <Input
-                            type="number"
-                            min="0"
-                            inputMode="numeric"
-                            value={String(getMetricValue(monthData, field.key))}
-                            onChange={(event) =>
-                              handleMetricChange(monthData.month, field.key, event.target.value)
-                            }
-                            className="h-7 min-w-[96px] text-right text-sm"
-                          />
-                        </TableCell>
-                      ))}
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-
-            <div className="mt-4 space-y-2 border-t pt-4">
-              <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_120px_auto]">
-                <Input
-                  value={newFieldLabel}
-                  onChange={(event) => setNewFieldLabel(event.target.value)}
-                  placeholder="새 컬럼 이름 예: 투자유치현황"
-                  className="h-8"
-                />
-                <Select value={newFieldFormat} onValueChange={(value: MetricFormat) => setNewFieldFormat(value)}>
-                  <SelectTrigger size="sm">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="number">숫자</SelectItem>
-                    <SelectItem value="currency">금액</SelectItem>
-                  </SelectContent>
-                </Select>
-                <Button type="button" size="sm" onClick={handleAddField}>
-                  <Plus className="h-4 w-4" />
-                  컬럼 추가
-                </Button>
-              </div>
-              {hiddenBaseMetricFields.length > 0 && (
-                <div className="flex flex-wrap items-center gap-1.5">
-                  {hiddenBaseMetricFields.map((field) => (
-                    <Button
-                      key={field.key}
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      className="h-7 px-2.5 text-xs"
-                      onClick={() => handleRestoreBaseField(field.key as BaseMetricKey)}
-                    >
-                      {field.label} 다시 추가
-                    </Button>
-                  ))}
-                </div>
-              )}
-            </div>
           </CardContent>
         </Card>
 
@@ -1400,9 +1692,9 @@ export function CompanyMetricsPage({ currentUser, companyId }: CompanyMetricsPag
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        {savedMetricFields.map((field) => (
+                        {visibleChartFields.map((field) => (
                           <SelectItem key={field.key} value={field.key}>
-                            {field.label}
+                            {field.badgeLabel} · {field.label}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -1433,7 +1725,11 @@ export function CompanyMetricsPage({ currentUser, companyId }: CompanyMetricsPag
 
           <CardContent className="flex flex-1 flex-col px-5 pt-4">
             <div className="mb-3 flex flex-wrap items-center gap-2">
-              <Badge variant="outline">{selectedMetric.label}</Badge>
+              {selectedChartField ? (
+                <Badge variant="outline">
+                  {selectedChartField.badgeLabel} · {selectedChartField.label}
+                </Badge>
+              ) : null}
               <span className="text-[11px] text-muted-foreground">
                 {savedMetricsState.year}년 1월부터 12월까지의 월별 추이
               </span>
@@ -1447,5 +1743,5 @@ export function CompanyMetricsPage({ currentUser, companyId }: CompanyMetricsPag
         </Card>
       </div>
     </div>
-  );
+  )
 }

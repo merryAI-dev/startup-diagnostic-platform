@@ -17,6 +17,13 @@ export type AgendaScope = "internal" | "external";
 
 export type ProgramWeekday = "TUE" | "THU";
 
+export type ProgramKpiDefinition = {
+  id: string;
+  label: string;
+  description: string;
+  active?: boolean;
+};
+
 export interface Program {
   id: string;
   name: string;
@@ -33,6 +40,7 @@ export interface Program {
   periodStart?: string; // YYYY-MM-DD
   periodEnd?: string; // YYYY-MM-DD
   weekdays?: ProgramWeekday[];
+  kpiDefinitions?: ProgramKpiDefinition[];
 }
 
 export type CompanySource = "signup" | "consultant_manual" | "admin_manual" | "legacy_unknown";

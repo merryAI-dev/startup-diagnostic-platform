@@ -693,23 +693,9 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
   }, [companyDocs])
   const [profileList, setProfileList] = useState<RawProfileApprovalDoc[]>([])
   const [users, setUsers] = useState<UserWithPermissions[]>([])
-  const liveCompanyIds = useMemo(() => {
-    return new Set(
-      profileList
-        .filter((doc) => {
-          const role = toApprovalRole(doc.role)
-          return role === "company" && (doc.active === true || !!doc.approvedAt) && !!doc.companyId
-        })
-        .map((doc) => doc.companyId!)
-        .filter((companyId) => companyId.trim().length > 0),
-    )
-  }, [profileList])
   const companyDirectory = useMemo(() => {
     if (isFirebaseConfigured) {
-      const filteredCompanyDocs = needsCompanyDirectory
-        ? companyDocs.filter((doc) => liveCompanyIds.has(doc.id))
-        : companyDocs
-      return filteredCompanyDocs.map(
+      return companyDocs.map(
         (doc): CompanyDirectoryItem => ({
           id: doc.id,
           name: doc.name?.trim() || companyNameById.get(doc.id) || "회사명 미입력",
@@ -733,9 +719,6 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     companyDocs,
     companyNameById,
     isFirebaseConfigured,
-    liveCompanyIds,
-    needsCompanyDirectory,
-    users,
   ])
   const resolveCompanyName = useCallback(
     (value?: string | null) => {
@@ -1488,6 +1471,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
         weekdays: doc.weekdays ?? ["TUE", "THU"],
         companyLimit: doc.companyLimit ?? 0,
         companyIds: doc.companyIds ?? [],
+        kpiDefinitions: doc.kpiDefinitions ?? [],
       })),
     )
   }, [programDocs])
@@ -3815,15 +3799,16 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
           ...(data.periodStart !== undefined ? { periodStart: data.periodStart } : {}),
           ...(data.periodEnd !== undefined ? { periodEnd: data.periodEnd } : {}),
           ...(data.weekdays !== undefined ? { weekdays: data.weekdays } : {}),
+          ...(data.kpiDefinitions !== undefined ? { kpiDefinitions: data.kpiDefinitions } : {}),
         })
       } catch (error) {
         toast.error(getFunctionErrorMessage(error, "사업 정보 저장에 실패했습니다"))
-        return
+        return false
       }
 
       setProgramList(nextProgramList)
       toast.success("사업 정보가 업데이트되었습니다")
-      return
+      return true
     }
 
     const buildRegularOfficeHourTitle = (name: string) => `${name} 정기 오피스아워`
@@ -3858,11 +3843,12 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       const slotsSynced = await syncManagedRegularSlots(consultants, nextProgramList)
       if (!slotsSynced) {
         toast.error("사업 정보는 저장되었지만 정기 슬롯 동기화에 실패했습니다")
-        return
+        return false
       }
     }
 
     toast.success("사업 정보가 업데이트되었습니다")
+    return true
   }
 
   const handleUpdateProgramCompanies = async (programId: string, companyIds: string[]) => {
@@ -4125,7 +4111,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
                 >
                   <SheetContent
                     side="right"
-                    className="w-full gap-0 border-l border-slate-200 bg-white/98 p-0 sm:max-w-2xl"
+                    className="w-full min-h-0 gap-0 overflow-hidden border-l border-slate-200 bg-white/98 p-0 sm:max-w-2xl"
                   >
                     {selectedOfficeHour && (
                       <>

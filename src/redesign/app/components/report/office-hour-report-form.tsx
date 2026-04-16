@@ -709,9 +709,10 @@ export function OfficeHourReportForm({
                 disabled={
                   isSubmitting || !isContentValid || !isAdvisoryContentValid || !isFollowUpValid
                 }
+                loading={isSubmitting}
                 className="flex-1"
               >
-                {isSubmitting ? "저장 중..." : (submitLabel ?? "보고서 제출")}
+                {submitLabel ?? "보고서 제출"}
               </Button>
             </div>
 

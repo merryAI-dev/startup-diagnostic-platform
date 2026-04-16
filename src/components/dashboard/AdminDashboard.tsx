@@ -10,7 +10,15 @@ import {
 } from "firebase/firestore"
 import { getDownloadURL, ref as storageRef } from "firebase/storage"
 import ExcelJS from "exceljs"
-import { CheckCircle2, FileSpreadsheet, Save, Wand2 } from "lucide-react"
+import {
+  Check,
+  CheckCircle2,
+  ChevronsUpDown,
+  FileSpreadsheet,
+  Save,
+  Wand2,
+  X,
+} from "lucide-react"
 import { Fragment, useEffect, useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { toast } from "sonner"
@@ -34,8 +42,29 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/redesign/app/components/ui/dialog"
+import { Button } from "@/redesign/app/components/ui/button"
+import { Badge } from "@/redesign/app/components/ui/badge"
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/redesign/app/components/ui/command"
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/redesign/app/components/ui/popover"
 import { PaginationControls } from "@/redesign/app/components/ui/pagination-controls"
+import { cn } from "@/redesign/app/components/ui/utils"
 import { formatCurrency, formatNumber } from "@/redesign/app/lib/company-metrics-data"
+import {
+  buildProgramMetricFieldKey,
+  normalizeProgramMetrics,
+  type PersistedProgramMetricMap,
+} from "@/redesign/app/lib/program-metrics-store"
 import {
   Select,
   SelectContent,
@@ -56,7 +85,7 @@ import {
 } from "@/types/companyAnalysisReport"
 import type { CompanyInfoRecord } from "@/types/company"
 import type { SelfAssessmentSections } from "@/types/selfAssessment"
-import type { MonthlyMetrics } from "@/redesign/app/lib/types"
+import type { MonthlyMetrics, ProgramKpiDefinition } from "@/redesign/app/lib/types"
 
 type AdminDashboardProps = {
   user: User
@@ -84,6 +113,7 @@ type ProgramSummary = {
   internalTicketLimit?: number
   externalTicketLimit?: number
   companyIds?: string[]
+  kpiDefinitions?: ProgramKpiDefinition[]
 }
 
 type MetricFormat = "number" | "currency"
@@ -101,6 +131,7 @@ type MetricsSnapshot = {
   data: MonthlyMetrics[]
   customFields: CustomMetricField[]
   visibleBaseMetricKeys: string[]
+  programMetrics?: PersistedProgramMetricMap
   updatedAt?: unknown
 }
 
@@ -109,6 +140,18 @@ type MetricChartField = {
   label: string
   format: MetricFormat
   color: string
+}
+
+type VisibleMetricField = {
+  key: string
+  label: string
+  format: MetricFormat
+  color: string
+  source: "common" | "program"
+  badgeLabel: string
+  commonKey?: string
+  programId?: string
+  metricId?: string
 }
 
 type CompanyInfoField = {
@@ -126,7 +169,7 @@ type CompanyInfoSection = {
 
 type VoucherFilterTag = "export" | "innovation"
 
-const COMPANY_PAGE_SIZE = 8
+const COMPANY_PAGE_SIZE = 12
 const METRIC_MONTHS = Array.from({ length: 12 }, (_, index) => index + 1)
 const BASE_METRIC_CHART_FIELDS: MetricChartField[] = [
   { key: "revenue", label: "매출", format: "currency", color: "#2563eb" },
@@ -145,6 +188,7 @@ const CUSTOM_METRIC_CHART_COLORS = [
   "#ca8a04",
 ]
 const DEFAULT_VISIBLE_BASE_METRIC_KEYS = BASE_METRIC_CHART_FIELDS.map((field) => field.key)
+const PROGRAM_METRIC_COLOR = "#4f46e5"
 
 function excelColumnName(columnNumber: number) {
   let column = columnNumber
@@ -254,17 +298,21 @@ function buildRadarChartSvg(radarData: {
   return `
     <svg xmlns="http://www.w3.org/2000/svg" width="${expandedWidth}" height="${expandedHeight}" viewBox="0 0 ${expandedWidth} ${expandedHeight}">
       <rect width="100%" height="100%" fill="#ffffff" />
-      ${[1, 0.75, 0.5, 0.25].map((ratio) => {
-        const points = radarData.axes
-          .map((axis) => {
-            const x = radarData.center + Math.cos(axis.angle) * radarData.radius * ratio + offsetX
-            const y = radarData.center + Math.sin(axis.angle) * radarData.radius * ratio + offsetY
-            return `${x},${y}`
-          })
-          .join(" ")
-        return `<polygon points="${points}" fill="none" stroke="#e2e8f0" stroke-width="1" />`
-      }).join("")}
-      ${radarData.axes.map((axis) => `
+      ${[1, 0.75, 0.5, 0.25]
+        .map((ratio) => {
+          const points = radarData.axes
+            .map((axis) => {
+              const x = radarData.center + Math.cos(axis.angle) * radarData.radius * ratio + offsetX
+              const y = radarData.center + Math.sin(axis.angle) * radarData.radius * ratio + offsetY
+              return `${x},${y}`
+            })
+            .join(" ")
+          return `<polygon points="${points}" fill="none" stroke="#e2e8f0" stroke-width="1" />`
+        })
+        .join("")}
+      ${radarData.axes
+        .map(
+          (axis) => `
         <line
           x1="${radarData.center + offsetX}"
           y1="${radarData.center + offsetY}"
@@ -273,14 +321,21 @@ function buildRadarChartSvg(radarData: {
           stroke="#e2e8f0"
           stroke-width="1"
         />
-      `).join("")}
+      `,
+        )
+        .join("")}
       <polygon points="${shiftedPoints}" fill="rgba(15,118,110,0.18)" stroke="#0f766e" stroke-width="2" />
-      ${radarData.axes.map((axis) => `
+      ${radarData.axes
+        .map(
+          (axis) => `
         <circle cx="${axis.x + offsetX}" cy="${axis.y + offsetY}" r="3" fill="#0f766e" />
-      `).join("")}
-      ${radarData.axes.map((axis) => {
-        const lines = getRadarLabelLines(axis.label)
-        return `
+      `,
+        )
+        .join("")}
+      ${radarData.axes
+        .map((axis) => {
+          const lines = getRadarLabelLines(axis.label)
+          return `
           <text
             x="${axis.labelX + offsetX}"
             y="${axis.labelY + offsetY}"
@@ -289,12 +344,17 @@ function buildRadarChartSvg(radarData: {
             font-family="Malgun Gothic, Apple SD Gothic Neo, sans-serif"
             fill="#475569"
           >
-            ${lines.map((line, index) => `
+            ${lines
+              .map(
+                (line, index) => `
               <tspan x="${axis.labelX + offsetX}" dy="${index === 0 ? 0 : 14}">${line}</tspan>
-            `).join("")}
+            `,
+              )
+              .join("")}
           </text>
         `
-      }).join("")}
+        })
+        .join("")}
     </svg>
   `.trim()
 }
@@ -405,7 +465,12 @@ function normalizeMetricsSnapshot(
     year,
     data: normalizeMonthlyMetrics(data, year),
     customFields,
-    visibleBaseMetricKeys: visibleBaseMetricKeys.length > 0 ? visibleBaseMetricKeys : DEFAULT_VISIBLE_BASE_METRIC_KEYS,
+    visibleBaseMetricKeys:
+      visibleBaseMetricKeys.length > 0 ? visibleBaseMetricKeys : DEFAULT_VISIBLE_BASE_METRIC_KEYS,
+    programMetrics:
+      source.programMetrics && typeof source.programMetrics === "object"
+        ? (source.programMetrics as PersistedProgramMetricMap)
+        : undefined,
     updatedAt: source.updatedAt,
   }
 }
@@ -434,8 +499,8 @@ function getMetricCellValue(item: MonthlyMetrics, key: string) {
 }
 
 function createMetricsCsv(
-  fields: MetricChartField[],
-  rows: MonthlyMetrics[],
+  fields: Array<{ key: string; label: string; format: MetricFormat }>,
+  rows: Array<{ year: number; month: number; values: Record<string, number | null | undefined> }>,
 ) {
   const escapeCell = (value: string) => {
     if (/[",\n]/.test(value)) {
@@ -447,7 +512,10 @@ function createMetricsCsv(
   const headers = ["월", ...fields.map((field) => field.label)]
   const body = rows.map((row) => [
     `${row.year}-${String(row.month).padStart(2, "0")}`,
-    ...fields.map((field) => formatMetricValue(getMetricCellValue(row, field.key), field.format)),
+    ...fields.map((field) => {
+      const value = row.values[field.key]
+      return typeof value === "number" ? formatMetricValue(value, field.format) : ""
+    }),
   ])
 
   return [headers, ...body]
@@ -537,10 +605,7 @@ async function renderSvgToPngDataUrl(svg: string) {
   return canvas.toDataURL("image/png")
 }
 
-export function AdminDashboard({
-  user,
-  onLogout,
-}: AdminDashboardProps) {
+export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
   const navigate = useNavigate()
   const [companies, setCompanies] = useState<CompanySummary[]>([])
   const [selectedCompanyId, setSelectedCompanyId] = useState<string | null>(null)
@@ -549,22 +614,25 @@ export function AdminDashboard({
   const [companyFiles, setCompanyFiles] = useState<
     { id: string; name: string; size: number; downloadUrl: string | null }[]
   >([])
-  const [selfAssessment, setSelfAssessment] = useState<SelfAssessmentSections>(
-    {}
-  )
+  const [selfAssessment, setSelfAssessment] = useState<SelfAssessmentSections>({})
   const [loadingCompanies, setLoadingCompanies] = useState(true)
   const [loadingDetails, setLoadingDetails] = useState(false)
   const [companyQuery, setCompanyQuery] = useState("")
   const [voucherFilterTags, setVoucherFilterTags] = useState<VoucherFilterTag[]>([])
   const [companyPage, setCompanyPage] = useState(1)
-  const [activeTab, setActiveTab] = useState<"info" | "assessment" | "metrics" | "report" | "officeHours">(
-    "info"
-  )
+  const [activeTab, setActiveTab] = useState<
+    "info" | "assessment" | "metrics" | "report" | "officeHours"
+  >("info")
   const [selectedMetricChartKey, setSelectedMetricChartKey] = useState("revenue")
   const [programs, setPrograms] = useState<ProgramSummary[]>([])
   const [selectedCompanyProgramIds, setSelectedCompanyProgramIds] = useState<string[]>([])
+  const [selectedProgramMetricViewIds, setSelectedProgramMetricViewIds] = useState<string[]>([])
+  const [programMetricFilterOpen, setProgramMetricFilterOpen] = useState(false)
+  const [programMetricFilterQuery, setProgramMetricFilterQuery] = useState("")
   const [loadingPrograms, setLoadingPrograms] = useState(false)
-  const [ticketDrafts, setTicketDrafts] = useState<Record<string, { internal: string; external: string }>>({})
+  const [ticketDrafts, setTicketDrafts] = useState<
+    Record<string, { internal: string; external: string }>
+  >({})
   const [editingTicketProgramId, setEditingTicketProgramId] = useState<string | null>(null)
   const [ticketModalDraft, setTicketModalDraft] = useState<{ internal: string; external: string }>({
     internal: "0",
@@ -576,34 +644,22 @@ export function AdminDashboard({
   const [downloadingReport, setDownloadingReport] = useState(false)
   const [downloadingCompanyWorkbook, setDownloadingCompanyWorkbook] = useState(false)
   const [activeSectionFilter, setActiveSectionFilter] = useState<string>("문제")
-  const [reportForm, setReportForm] = useState<CompanyAnalysisReportForm>(EMPTY_COMPANY_ANALYSIS_REPORT_FORM)
+  const [reportForm, setReportForm] = useState<CompanyAnalysisReportForm>(
+    EMPTY_COMPANY_ANALYSIS_REPORT_FORM,
+  )
 
   useEffect(() => {
     let mounted = true
     async function loadCompanies() {
       setLoadingCompanies(true)
       try {
-        const [profileSnapshot, companySnapshot] = await Promise.all([
-          getDocs(collection(db, "profiles")),
-          getDocs(collection(db, "companies")),
-        ])
-        const liveCompanyIds = new Set(
-          profileSnapshot.docs
-            .map((docSnap) => docSnap.data() as ProfileSummary)
-            .filter(
-              (data) =>
-                data.role === "company" &&
-                (data.active === true || !!data.approvedAt) &&
-                typeof data.companyId === "string" &&
-                data.companyId.trim().length > 0,
-            )
-            .map((data) => data.companyId!.trim()),
-        )
+        const companySnapshot = await getDocs(collection(db, "companies"))
         if (!mounted) return
-        const liveCompanyDocs = companySnapshot.docs.filter((docSnap) => liveCompanyIds.has(docSnap.id))
         const companyInfoEntries = await Promise.all(
-          liveCompanyDocs.map(async (docSnap) => {
-            const companyInfoSnap = await getDoc(doc(db, "companies", docSnap.id, "companyInfo", "info"))
+          companySnapshot.docs.map(async (docSnap) => {
+            const companyInfoSnap = await getDoc(
+              doc(db, "companies", docSnap.id, "companyInfo", "info"),
+            )
             const companyInfoData = companyInfoSnap.exists()
               ? (companyInfoSnap.data() as Partial<CompanyInfoRecord>)
               : null
@@ -611,14 +667,16 @@ export function AdminDashboard({
               docSnap.id,
               {
                 hasExportVoucher: isVoucherHeld(companyInfoData?.vouchers?.exportVoucherHeld),
-                hasInnovationVoucher: isVoucherHeld(companyInfoData?.vouchers?.innovationVoucherHeld),
+                hasInnovationVoucher: isVoucherHeld(
+                  companyInfoData?.vouchers?.innovationVoucherHeld,
+                ),
               },
             ] as const
           }),
         )
         if (!mounted) return
         const voucherStatusByCompanyId = new Map(companyInfoEntries)
-        const list = liveCompanyDocs
+        const list = companySnapshot.docs
           .map((docSnap) => {
             const data = docSnap.data() as {
               name?: string | null
@@ -636,7 +694,10 @@ export function AdminDashboard({
           .sort((a, b) => (a.name ?? "").localeCompare(b.name ?? "", "ko-KR"))
         setCompanies(list)
         const first = list[0]
-        if ((!selectedCompanyId || !list.some((company) => company.id === selectedCompanyId)) && first) {
+        if (
+          (!selectedCompanyId || !list.some((company) => company.id === selectedCompanyId)) &&
+          first
+        ) {
           setSelectedCompanyId(first.id)
         }
       } finally {
@@ -664,6 +725,7 @@ export function AdminDashboard({
             internalTicketLimit?: number
             externalTicketLimit?: number
             companyIds?: string[]
+            kpiDefinitions?: ProgramKpiDefinition[]
           }
           return {
             id: docSnap.id,
@@ -671,6 +733,7 @@ export function AdminDashboard({
             internalTicketLimit: data.internalTicketLimit ?? 0,
             externalTicketLimit: data.externalTicketLimit ?? 0,
             companyIds: data.companyIds ?? [],
+            kpiDefinitions: Array.isArray(data.kpiDefinitions) ? data.kpiDefinitions : [],
           }
         })
         setPrograms(list)
@@ -701,26 +764,23 @@ export function AdminDashboard({
       }
       setLoadingDetails(true)
       try {
-        const [infoSnap, assessmentSnap, filesSnap, companySnap, reportSnap, metricsSnap] = await Promise.all([
-          getDoc(doc(db, "companies", selectedCompanyId, "companyInfo", "info")),
-          getDoc(
-            doc(db, "companies", selectedCompanyId, "selfAssessment", "info")
-          ),
-          getDocs(collection(db, "companies", selectedCompanyId, "files")),
-          getDoc(doc(db, "companies", selectedCompanyId)),
-          getDoc(doc(db, "companies", selectedCompanyId, "analysisReport", "current")),
-          getDoc(doc(db, "companies", selectedCompanyId, "metrics", "annual")),
-        ])
+        const [infoSnap, assessmentSnap, filesSnap, companySnap, reportSnap, metricsSnap] =
+          await Promise.all([
+            getDoc(doc(db, "companies", selectedCompanyId, "companyInfo", "info")),
+            getDoc(doc(db, "companies", selectedCompanyId, "selfAssessment", "info")),
+            getDocs(collection(db, "companies", selectedCompanyId, "files")),
+            getDoc(doc(db, "companies", selectedCompanyId)),
+            getDoc(doc(db, "companies", selectedCompanyId, "analysisReport", "current")),
+            getDoc(doc(db, "companies", selectedCompanyId, "metrics", "annual")),
+          ])
         if (!mounted) return
-        const nextCompanyInfo = infoSnap.exists()
-          ? (infoSnap.data() as CompanyInfoRecord)
-          : null
+        const nextCompanyInfo = infoSnap.exists() ? (infoSnap.data() as CompanyInfoRecord) : null
         setCompanyInfo(nextCompanyInfo)
         const nextMetrics = metricsSnap.exists()
           ? normalizeMetricsSnapshot(
-            metricsSnap.data() as Partial<MetricsSnapshot>,
-            selectedCompanyId,
-          )
+              metricsSnap.data() as Partial<MetricsSnapshot>,
+              selectedCompanyId,
+            )
           : null
         setCompanyMetrics(nextMetrics)
         const assessmentData = assessmentSnap.exists()
@@ -746,14 +806,14 @@ export function AdminDashboard({
               size: data.size,
               downloadUrl,
             }
-          })
+          }),
         )
         setCompanyFiles(files)
         const overrideData = companySnap.exists()
           ? (companySnap.data() as {
-            programTicketOverrides?: Record<string, { internal?: number; external?: number }>
-            programs?: string[]
-          })
+              programTicketOverrides?: Record<string, { internal?: number; external?: number }>
+              programs?: string[]
+            })
           : {}
         const overrides = overrideData.programTicketOverrides ?? {}
         const companyProgramIds = Array.isArray(overrideData.programs)
@@ -780,7 +840,9 @@ export function AdminDashboard({
         setTicketDrafts(nextDrafts)
         const companyName =
           nextCompanyInfo?.basic?.companyInfo ||
-          (companySnap.exists() ? ((companySnap.data() as { name?: string | null }).name ?? "") : "")
+          (companySnap.exists()
+            ? ((companySnap.data() as { name?: string | null }).name ?? "")
+            : "")
         const savedReport = reportSnap.exists()
           ? (reportSnap.data() as Partial<CompanyAnalysisReportForm>)
           : null
@@ -834,7 +896,11 @@ export function AdminDashboard({
         fields: [
           { label: "회사 유형", value: formatValue(companyInfo.basic?.companyType) },
           { label: "회사명", value: formatValue(companyInfo.basic?.companyInfo) },
-          { label: "대표 솔루션", value: formatValue(companyInfo.basic?.representativeSolution), span: "full" },
+          {
+            label: "대표 솔루션",
+            value: formatValue(companyInfo.basic?.representativeSolution),
+            span: "full",
+          },
           { label: "웹사이트", value: formatValue(companyInfo.basic?.website), span: "full" },
           { label: "법인 설립일", value: formatValue(companyInfo.basic?.foundedAt) },
           { label: "창업기수", value: formatValue(companyInfo.basic?.founderSerialNumber) },
@@ -856,23 +922,45 @@ export function AdminDashboard({
         ],
       },
       ...(coRepresentativeEnabled
-        ? [{
-            title: "공동대표 정보",
-            description: "공동대표 등록 여부와 상세 정보",
-            fields: [
-              { label: "공동대표 성명", value: formatValue(companyInfo.basic?.ceo?.coRepresentative?.name) },
-              { label: "공동대표 생년월일", value: formatValue(companyInfo.basic?.ceo?.coRepresentative?.birthDate) },
-              { label: "공동대표 성별", value: formatValue(companyInfo.basic?.ceo?.coRepresentative?.gender) },
-              { label: "공동대표 직책", value: formatValue(companyInfo.basic?.ceo?.coRepresentative?.title) },
-            ],
-          } satisfies CompanyInfoSection]
+        ? [
+            {
+              title: "공동대표 정보",
+              description: "공동대표 등록 여부와 상세 정보",
+              fields: [
+                {
+                  label: "공동대표 성명",
+                  value: formatValue(companyInfo.basic?.ceo?.coRepresentative?.name),
+                },
+                {
+                  label: "공동대표 생년월일",
+                  value: formatValue(companyInfo.basic?.ceo?.coRepresentative?.birthDate),
+                },
+                {
+                  label: "공동대표 성별",
+                  value: formatValue(companyInfo.basic?.ceo?.coRepresentative?.gender),
+                },
+                {
+                  label: "공동대표 직책",
+                  value: formatValue(companyInfo.basic?.ceo?.coRepresentative?.title),
+                },
+              ],
+            } satisfies CompanyInfoSection,
+          ]
         : []),
       {
         title: "소재지 및 인력",
         description: "사업장 위치와 현재 인력 현황",
         fields: [
-          { label: "본점 소재지", value: formatValue(companyInfo.locations?.headOffice), span: "full" },
-          { label: "지점/연구소 소재지", value: formatValue(companyInfo.locations?.branchOrLab), span: "full" },
+          {
+            label: "본점 소재지",
+            value: formatValue(companyInfo.locations?.headOffice),
+            span: "full",
+          },
+          {
+            label: "지점/연구소 소재지",
+            value: formatValue(companyInfo.locations?.branchOrLab),
+            span: "full",
+          },
           { label: "정규직", value: formatValue(companyInfo.workforce?.fullTime) },
           { label: "계약직", value: formatValue(companyInfo.workforce?.contract) },
         ],
@@ -884,7 +972,10 @@ export function AdminDashboard({
           { label: "매출액(2025)", value: formatValue(companyInfo.finance?.revenue?.y2025) },
           { label: "매출액(2026)", value: formatValue(companyInfo.finance?.revenue?.y2026) },
           { label: "자본총계", value: formatValue(companyInfo.finance?.capitalTotal) },
-          { label: "2026년 희망 투자액", value: formatValue(companyInfo.fundingPlan?.desiredAmount2026) },
+          {
+            label: "2026년 희망 투자액",
+            value: formatValue(companyInfo.fundingPlan?.desiredAmount2026),
+          },
           { label: "투자전 희망 기업가치", value: formatValue(companyInfo.fundingPlan?.preValue) },
         ],
       },
@@ -893,7 +984,10 @@ export function AdminDashboard({
         description: "인증, 지정, 바우처 보유 현황",
         fields: [
           { label: "인증/지정여부", value: formatValue(companyInfo.certifications?.designation) },
-          { label: "TIPS/LIPS 이력", value: formatValue(companyInfo.certifications?.tipsLipsHistory) },
+          {
+            label: "TIPS/LIPS 이력",
+            value: formatValue(companyInfo.certifications?.tipsLipsHistory),
+          },
           {
             label: "수출바우처 보유 여부",
             value: formatValue(companyInfo.vouchers?.exportVoucherHeld),
@@ -937,7 +1031,11 @@ export function AdminDashboard({
             value: formatListValue(companyInfo.globalExpansion?.targetCountries),
             span: "full",
           },
-          { label: "MYSC 기대사항", value: formatValue(companyInfo.impact?.myscExpectation), span: "full" },
+          {
+            label: "MYSC 기대사항",
+            value: formatValue(companyInfo.impact?.myscExpectation),
+            span: "full",
+          },
         ],
       },
     ]
@@ -954,11 +1052,7 @@ export function AdminDashboard({
 
   const selectedCompanyName = useMemo(() => {
     const selectedCompany = companies.find((company) => company.id === selectedCompanyId)
-    return (
-      companyInfo?.basic?.companyInfo?.trim() ||
-      selectedCompany?.name?.trim() ||
-      "company"
-    )
+    return companyInfo?.basic?.companyInfo?.trim() || selectedCompany?.name?.trim() || "company"
   }, [companies, companyInfo?.basic?.companyInfo, selectedCompanyId])
 
   const metricsUpdatedLabel = useMemo(() => {
@@ -983,58 +1077,160 @@ export function AdminDashboard({
   const hasMetricsDocument = Boolean(companyMetrics)
 
   const metricChartFields = useMemo<MetricChartField[]>(() => {
-    const visibleBaseFields = BASE_METRIC_CHART_FIELDS.filter((field) =>
-      companyMetrics?.visibleBaseMetricKeys?.includes(field.key) ?? true,
+    const visibleBaseFields = BASE_METRIC_CHART_FIELDS.filter(
+      (field) => companyMetrics?.visibleBaseMetricKeys?.includes(field.key) ?? true,
     )
-    const customFields = companyMetrics?.customFields.map((field, index) => ({
-      key: field.key,
-      label: field.label,
-      format: field.format,
-      color: CUSTOM_METRIC_CHART_COLORS[index % CUSTOM_METRIC_CHART_COLORS.length] ?? "#64748b",
-    })) ?? []
+    const customFields =
+      companyMetrics?.customFields.map((field, index) => ({
+        key: field.key,
+        label: field.label,
+        format: field.format,
+        color: CUSTOM_METRIC_CHART_COLORS[index % CUSTOM_METRIC_CHART_COLORS.length] ?? "#64748b",
+      })) ?? []
 
     return [...visibleBaseFields, ...customFields]
   }, [companyMetrics?.customFields, companyMetrics?.visibleBaseMetricKeys])
-
-  const selectedMetricChartField = useMemo(
-    () => metricChartFields.find((field) => field.key === selectedMetricChartKey) ?? metricChartFields[0] ?? null,
-    [metricChartFields, selectedMetricChartKey],
-  )
 
   const emptyMetricsMonthSlots = useMemo(() => {
     return buildRecentMonthSlots(companyMetrics?.year ?? new Date().getFullYear(), 12, 12)
   }, [companyMetrics?.year])
 
-  const metricsChartData = useMemo(() => {
-    if (companyMetrics) {
-      return companyMetrics.data.map((row) => ({
-        label: `${row.month}월`,
-        ...Object.fromEntries(
-          metricChartFields.map((field) => [
-            field.key,
-            getMetricCellValue(row, field.key),
-          ]),
-        ),
-      }))
-    }
+  const participatingPrograms = useMemo(() => {
+    if (selectedCompanyProgramIds.length === 0) return []
+    return programs.filter((program) => selectedCompanyProgramIds.includes(program.id))
+  }, [programs, selectedCompanyProgramIds])
 
-    return emptyMetricsMonthSlots.map((row) => ({
+  const companyProgramMetricViews = useMemo(
+    () =>
+      normalizeProgramMetrics(
+        companyMetrics?.programMetrics,
+        participatingPrograms.map((program) => ({
+          id: program.id,
+          name: program.name,
+          kpiDefinitions: program.kpiDefinitions ?? [],
+        })),
+        companyMetrics?.year ?? new Date().getFullYear(),
+      ),
+    [companyMetrics?.programMetrics, companyMetrics?.year, participatingPrograms],
+  )
+
+  const programMetricViewOptions = useMemo(
+    () => Object.values(companyProgramMetricViews),
+    [companyProgramMetricViews],
+  )
+
+  const selectedProgramMetricViews = useMemo(
+    () =>
+      programMetricViewOptions.filter((record) =>
+        selectedProgramMetricViewIds.includes(record.programId),
+      ),
+    [programMetricViewOptions, selectedProgramMetricViewIds],
+  )
+
+  const visibleMetricFields = useMemo<VisibleMetricField[]>(
+    () => [
+      ...metricChartFields.map((field) => ({
+        key: field.key,
+        label: field.label,
+        format: field.format,
+        color: field.color,
+        source: "common" as const,
+        badgeLabel: "공통",
+        commonKey: field.key,
+      })),
+      ...selectedProgramMetricViews.flatMap((record) =>
+        record.definitions.filter((definition) => definition.active !== false).map((definition) => ({
+          key: buildProgramMetricFieldKey(record.programId, definition.id),
+          label: definition.label,
+          format: "number" as const,
+          color: PROGRAM_METRIC_COLOR,
+          source: "program" as const,
+          badgeLabel: record.programName,
+          programId: record.programId,
+          metricId: definition.id,
+        })),
+      ),
+    ],
+    [metricChartFields, selectedProgramMetricViews],
+  )
+
+  const selectedMetricChartField = useMemo(
+    () =>
+      visibleMetricFields.find((field) => field.key === selectedMetricChartKey) ??
+      visibleMetricFields[0] ??
+      null,
+    [selectedMetricChartKey, visibleMetricFields],
+  )
+
+  const metricsTableRows = useMemo(() => {
+    const baseRows = hasMetricsDocument
+      ? recentMetricsRows.map((row) => ({
+          year: row.year,
+          month: row.month,
+          values: Object.fromEntries(
+            metricChartFields.map((field) => [field.key, getMetricCellValue(row, field.key)]),
+          ) as Record<string, number | null>,
+        }))
+      : emptyMetricsMonthSlots.map((row) => ({
+          year: row.year,
+          month: row.month,
+          values: Object.fromEntries(
+            metricChartFields.map((field) => [field.key, null]),
+          ) as Record<string, number | null>,
+        }))
+
+    return baseRows.map((row) => {
+      const values: Record<string, number | null> = { ...row.values }
+
+      selectedProgramMetricViews.forEach((record) => {
+        const recordRow =
+          record.rows.find((item) => item.year === row.year && item.month === row.month) ??
+          record.rows.find((item) => item.month === row.month)
+
+        record.definitions
+          .filter((definition) => definition.active !== false)
+          .forEach((definition) => {
+            values[buildProgramMetricFieldKey(record.programId, definition.id)] =
+              recordRow?.values[definition.id] ?? null
+          })
+      })
+
+      return {
+        year: row.year,
+        month: row.month,
+        values,
+      }
+    })
+  }, [
+    emptyMetricsMonthSlots,
+    hasMetricsDocument,
+    metricChartFields,
+    recentMetricsRows,
+    selectedProgramMetricViews,
+  ])
+
+  const metricsChartData = useMemo(() => {
+    return metricsTableRows.map((row) => ({
       label: `${row.month}월`,
-      ...Object.fromEntries(metricChartFields.map((field) => [field.key, null])),
+      value: selectedMetricChartField ? row.values[selectedMetricChartField.key] ?? null : null,
     }))
-  }, [companyMetrics, emptyMetricsMonthSlots, metricChartFields])
+  }, [metricsTableRows, selectedMetricChartField])
 
   useEffect(() => {
-    if (metricChartFields.length === 0) return
-    if (!metricChartFields.some((field) => field.key === selectedMetricChartKey)) {
-      setSelectedMetricChartKey(metricChartFields[0]?.key ?? "revenue")
+    if (visibleMetricFields.length === 0) return
+    if (!visibleMetricFields.some((field) => field.key === selectedMetricChartKey)) {
+      setSelectedMetricChartKey(visibleMetricFields[0]?.key ?? "revenue")
     }
-  }, [metricChartFields, selectedMetricChartKey])
+  }, [selectedMetricChartKey, visibleMetricFields])
 
   const handleDownloadMetricsCsv = () => {
     const csvContent = createMetricsCsv(
-      metricChartFields,
-      hasMetricsDocument ? recentMetricsRows : [],
+      visibleMetricFields.map((field) => ({
+        key: field.key,
+        label: `${field.badgeLabel} · ${field.label}`,
+        format: field.format,
+      })),
+      metricsTableRows,
     )
     const blob = new Blob([`\uFEFF${csvContent}`], {
       type: "text/csv;charset=utf-8;",
@@ -1049,10 +1245,30 @@ export function AdminDashboard({
     window.URL.revokeObjectURL(url)
   }
 
-  const participatingPrograms = useMemo(() => {
-    if (selectedCompanyProgramIds.length === 0) return []
-    return programs.filter((program) => selectedCompanyProgramIds.includes(program.id))
-  }, [programs, selectedCompanyProgramIds])
+  const programMetricFilterOptions = useMemo(() => {
+    const normalizedQuery = programMetricFilterQuery.trim().toLowerCase()
+    if (!normalizedQuery) return programMetricViewOptions
+
+    return programMetricViewOptions.filter((record) =>
+      record.programName.toLowerCase().includes(normalizedQuery),
+    )
+  }, [programMetricFilterQuery, programMetricViewOptions])
+
+  const visibleProgramMetricBadges = selectedProgramMetricViews.slice(0, 2)
+  const hiddenProgramMetricCount = Math.max(0, selectedProgramMetricViews.length - 2)
+
+  useEffect(() => {
+    const previewIds = programMetricViewOptions.map((record) => record.programId)
+    setSelectedProgramMetricViewIds((prev) => {
+      return prev.filter((programId) => previewIds.includes(programId))
+    })
+  }, [programMetricViewOptions])
+
+  const toggleProgramMetricView = (programId: string) => {
+    setSelectedProgramMetricViewIds((prev) =>
+      prev.includes(programId) ? prev.filter((id) => id !== programId) : [...prev, programId],
+    )
+  }
 
   const persistTicketDrafts = async (
     nextDrafts: Record<string, { internal: string; external: string }>,
@@ -1125,10 +1341,12 @@ export function AdminDashboard({
     })
   }, [companies, companyQuery, voucherFilterTags])
 
-  const totalCompanyPages = Math.max(
-    1,
-    Math.ceil(filteredCompanies.length / COMPANY_PAGE_SIZE)
-  )
+  const showCompanyPaginationFooter =
+    filteredCompanies.length > COMPANY_PAGE_SIZE ||
+    companyQuery.trim().length > 0 ||
+    voucherFilterTags.length > 0
+
+  const totalCompanyPages = Math.max(1, Math.ceil(filteredCompanies.length / COMPANY_PAGE_SIZE))
 
   const paginatedCompanies = useMemo(() => {
     const startIndex = (companyPage - 1) * COMPANY_PAGE_SIZE
@@ -1151,7 +1369,10 @@ export function AdminDashboard({
       return
     }
 
-    if (!selectedCompanyId || !filteredCompanies.some((company) => company.id === selectedCompanyId)) {
+    if (
+      !selectedCompanyId ||
+      !filteredCompanies.some((company) => company.id === selectedCompanyId)
+    ) {
       setSelectedCompanyId(filteredCompanies[0]?.id ?? null)
     }
   }, [filteredCompanies, selectedCompanyId])
@@ -1171,15 +1392,9 @@ export function AdminDashboard({
       const questions = section.subsections.flatMap((subsection) =>
         subsection.questions.map((question) => {
           const answer =
-            selfAssessment?.[section.storageKey]?.[subsection.storageKey]?.[
-            question.storageKey
-            ]
+            selfAssessment?.[section.storageKey]?.[subsection.storageKey]?.[question.storageKey]
           const answerValue =
-            answer?.answer === true
-              ? "예"
-              : answer?.answer === false
-                ? "아니오"
-                : "미선택"
+            answer?.answer === true ? "예" : answer?.answer === false ? "아니오" : "미선택"
           const score = answer?.answer === true ? question.weight : 0
           sectionScore += score
           return {
@@ -1190,7 +1405,7 @@ export function AdminDashboard({
             reason: answer?.reason ?? "",
             score,
           }
-        })
+        }),
       )
       sectionScores[section.storageKey] = sectionScore
       sectionTotals[section.storageKey] = section.totalScore
@@ -1316,7 +1531,7 @@ export function AdminDashboard({
           updatedAt: serverTimestamp(),
           updatedByUid: user.uid,
         },
-        { merge: true }
+        { merge: true },
       )
 
       setReportForm(nextReportForm)
@@ -1366,7 +1581,7 @@ export function AdminDashboard({
         rowNumber: number,
         startColumn: number,
         endColumn: number,
-        borderColor = "FFCBD5E1"
+        borderColor = "FFCBD5E1",
       ) => {
         for (let column = startColumn; column <= endColumn; column += 1) {
           worksheet.getRow(rowNumber).getCell(column).border = {
@@ -1382,7 +1597,7 @@ export function AdminDashboard({
         text: string,
         charsPerLine: number,
         minHeight = 24,
-        maxHeight = 110
+        maxHeight = 110,
       ) => {
         const lineCount = String(text || "")
           .split("\n")
@@ -1398,7 +1613,7 @@ export function AdminDashboard({
         rowIndex: number,
         label: string,
         value: string,
-        charsPerLine = 120
+        charsPerLine = 120,
       ) => {
         const row = worksheet.getRow(rowIndex)
         row.getCell(2).value = label
@@ -1455,7 +1670,11 @@ export function AdminDashboard({
         ext: { width: 470, height: 320 },
         editAs: "oneCell",
       })
-      for (let row = mainSheetChartRow; row < mainSheetChartRow + mainSheetChartHeightRows; row += 1) {
+      for (
+        let row = mainSheetChartRow;
+        row < mainSheetChartRow + mainSheetChartHeightRows;
+        row += 1
+      ) {
         worksheet.getRow(row).height = 18
       }
 
@@ -1463,7 +1682,7 @@ export function AdminDashboard({
         rowNumber: number,
         label: string,
         value: string,
-        highlighted = false
+        highlighted = false,
       ) => {
         const row = worksheet.getRow(rowNumber)
         worksheet.mergeCells(`H${rowNumber}:I${rowNumber}`)
@@ -1507,13 +1726,18 @@ export function AdminDashboard({
       applyBorderRange(mainSheetChartRow, 8, 10)
 
       let mainSheetScoreRow = mainSheetChartRow + 1
-      writeScoreSummaryRow(mainSheetScoreRow, "총점", `${formatScore(assessmentSummary.totalScore)}/100점`, true)
+      writeScoreSummaryRow(
+        mainSheetScoreRow,
+        "총점",
+        `${formatScore(assessmentSummary.totalScore)}/100점`,
+        true,
+      )
       mainSheetScoreRow += 1
       assessmentSummary.grouped.forEach((section) => {
         writeScoreSummaryRow(
           mainSheetScoreRow,
           section.sectionTitle,
-          `${formatScore(section.sectionScore)}/${formatScore(section.sectionTotal)}점`
+          `${formatScore(section.sectionScore)}/${formatScore(section.sectionTotal)}점`,
         )
         mainSheetScoreRow += 1
       })
@@ -1613,7 +1837,10 @@ export function AdminDashboard({
         return worksheet
       }
 
-      const estimateRowHeight = (values: Array<string | number | null | undefined>, charsPerLine = 40) => {
+      const estimateRowHeight = (
+        values: Array<string | number | null | undefined>,
+        charsPerLine = 40,
+      ) => {
         const longest = values
           .map((value) => String(value ?? ""))
           .reduce((max, value) => Math.max(max, value.length), 0)
@@ -1631,7 +1858,11 @@ export function AdminDashboard({
         if (subtitle) {
           worksheet.mergeCells(`A2:${lastColumn}2`)
           worksheet.getCell("A2").value = subtitle
-          worksheet.getCell("A2").font = { name: "Malgun Gothic", size: 10, color: { argb: "FF64748B" } }
+          worksheet.getCell("A2").font = {
+            name: "Malgun Gothic",
+            size: 10,
+            color: { argb: "FF64748B" },
+          }
           worksheet.getCell("A2").alignment = { vertical: "middle", horizontal: "left" }
           worksheet.getRow(2).height = 20
           return 4
@@ -1640,7 +1871,11 @@ export function AdminDashboard({
         return 3
       }
 
-      const writeSectionTitle = (worksheet: ExcelJS.Worksheet, rowNumber: number, title: string) => {
+      const writeSectionTitle = (
+        worksheet: ExcelJS.Worksheet,
+        rowNumber: number,
+        title: string,
+      ) => {
         const lastColumn = excelColumnName(Math.max(worksheet.columnCount, 1))
         worksheet.mergeCells(`A${rowNumber}:${lastColumn}${rowNumber}`)
         const cell = worksheet.getCell(`A${rowNumber}`)
@@ -1678,7 +1913,9 @@ export function AdminDashboard({
           }
           row.getCell(1).alignment = { vertical: "top", horizontal: "left", wrapText: true }
           row.getCell(1).border = border
-          worksheet.mergeCells(`B${rowNumber}:${excelColumnName(Math.max(worksheet.columnCount, 2))}${rowNumber}`)
+          worksheet.mergeCells(
+            `B${rowNumber}:${excelColumnName(Math.max(worksheet.columnCount, 2))}${rowNumber}`,
+          )
           row.getCell(2).value = value || "-"
           row.getCell(2).font = { name: "Malgun Gothic", size: 10 }
           row.getCell(2).alignment = { vertical: "top", horizontal: "left", wrapText: true }
@@ -1726,7 +1963,14 @@ export function AdminDashboard({
             }
             cell.border = border
           })
-          row.height = estimateRowHeight(values.map((value) => (typeof value === "object" && value && "text" in value ? value.text : String(value ?? ""))), 36)
+          row.height = estimateRowHeight(
+            values.map((value) =>
+              typeof value === "object" && value && "text" in value
+                ? value.text
+                : String(value ?? ""),
+            ),
+            36,
+          )
         })
 
         worksheet.views = [{ state: "frozen", ySplit: startRow }]
@@ -1749,7 +1993,11 @@ export function AdminDashboard({
           : null
 
       const infoSheet = createSheet("기업정보", [22, 54])
-      let rowIndex = writeSheetTitle(infoSheet, "기업정보", `${selectedCompanyName} 기본 정보 · ${generatedAt}`)
+      let rowIndex = writeSheetTitle(
+        infoSheet,
+        "기업정보",
+        `${selectedCompanyName} 기본 정보 · ${generatedAt}`,
+      )
       rowIndex = writeSectionTitle(infoSheet, rowIndex, "기본 정보")
       rowIndex = writeKeyValueRows(infoSheet, rowIndex, [
         ["회사명", toDisplay(companyInfo?.basic?.companyInfo)],
@@ -1797,7 +2045,11 @@ export function AdminDashboard({
       )
 
       const assessmentSheet = createSheet("현황진단", [18, 16, 54, 12, 12, 54])
-      rowIndex = writeSheetTitle(assessmentSheet, "현황 진단", `${selectedCompanyName} 자가진단 결과`)
+      rowIndex = writeSheetTitle(
+        assessmentSheet,
+        "현황 진단",
+        `${selectedCompanyName} 자가진단 결과`,
+      )
       rowIndex = writeSectionTitle(assessmentSheet, rowIndex, "점수 요약")
       rowIndex = writeTable(
         assessmentSheet,
@@ -1829,21 +2081,32 @@ export function AdminDashboard({
         ),
       )
 
-      const metricsSheet = createSheet(
-        "실적",
-        [12, ...metricChartFields.map((field) => Math.max(14, field.label.length + 6))],
+      const metricsSheet = createSheet("실적", [
+        12,
+        ...metricChartFields.map((field) => Math.max(14, field.label.length + 6)),
+      ])
+      rowIndex = writeSheetTitle(
+        metricsSheet,
+        "실적 관리",
+        hasMetricsDocument
+          ? `최근 업데이트 ${metricsUpdatedLabel ?? "기록 없음"}`
+          : "월별 실적 문서 없음",
       )
-      rowIndex = writeSheetTitle(metricsSheet, "실적 관리", hasMetricsDocument ? `최근 업데이트 ${metricsUpdatedLabel ?? "기록 없음"}` : "월별 실적 문서 없음")
       if (!hasMetricsDocument) {
         rowIndex = writeSectionTitle(metricsSheet, rowIndex, "안내")
-        rowIndex = writeKeyValueRows(metricsSheet, rowIndex, [["상태", "월별 실적 문서는 아직 입력되지 않았습니다."]])
+        rowIndex = writeKeyValueRows(metricsSheet, rowIndex, [
+          ["상태", "월별 실적 문서는 아직 입력되지 않았습니다."],
+        ])
         rowIndex += 1
       }
       writeTable(
         metricsSheet,
         rowIndex,
         ["월", ...metricChartFields.map((field) => field.label)],
-        (hasMetricsDocument ? recentMetricsRows : emptyMetricsMonthSlots.map(({ year, month }) => createEmptyMonth(year, month))).map((row) => [
+        (hasMetricsDocument
+          ? recentMetricsRows
+          : emptyMetricsMonthSlots.map(({ year, month }) => createEmptyMonth(year, month))
+        ).map((row) => [
           `${row.year}-${String(row.month).padStart(2, "0")}`,
           ...metricChartFields.map((field) =>
             hasMetricsDocument
@@ -1854,7 +2117,11 @@ export function AdminDashboard({
       )
 
       const reportSheet = createSheet("분석보고서", [24, 70])
-      rowIndex = writeSheetTitle(reportSheet, "분석 보고서", `${selectedCompanyName} 관리자 작성 내용`)
+      rowIndex = writeSheetTitle(
+        reportSheet,
+        "분석 보고서",
+        `${selectedCompanyName} 관리자 작성 내용`,
+      )
       rowIndex = writeSectionTitle(reportSheet, rowIndex, "기본 정보")
       rowIndex = writeKeyValueRows(reportSheet, rowIndex, [
         ["기업명", reportForm.companyName || selectedCompanyName],
@@ -1865,7 +2132,10 @@ export function AdminDashboard({
       rowIndex = writeKeyValueRows(
         reportSheet,
         rowIndex,
-        COMPANY_ANALYSIS_BUSINESS_MODEL_FIELDS.map(({ key, label }) => [label, reportForm[key] || "-"]),
+        COMPANY_ANALYSIS_BUSINESS_MODEL_FIELDS.map(({ key, label }) => [
+          label,
+          reportForm[key] || "-",
+        ]),
       )
       rowIndex += 1
       rowIndex = writeSectionTitle(reportSheet, rowIndex, "기업상황 요약")
@@ -1879,7 +2149,10 @@ export function AdminDashboard({
       rowIndex = writeKeyValueRows(
         reportSheet,
         rowIndex,
-        COMPANY_ANALYSIS_IMPROVEMENT_FIELDS.map(({ key, label }) => [label, reportForm[key] || "-"]),
+        COMPANY_ANALYSIS_IMPROVEMENT_FIELDS.map(({ key, label }) => [
+          label,
+          reportForm[key] || "-",
+        ]),
       )
       rowIndex += 1
       rowIndex = writeSectionTitle(reportSheet, rowIndex, "액셀러레이팅 프로그램 활용 제안")
@@ -1924,9 +2197,7 @@ export function AdminDashboard({
       <div className="flex h-full flex-col">
         <div className="shrink-0 border-b border-slate-200 bg-white px-6 py-5">
           <div className="mx-auto w-full max-w-7xl">
-            <h1 className="text-2xl font-semibold text-slate-900">
-              기업 관리
-            </h1>
+            <h1 className="text-2xl font-semibold text-slate-900">기업 관리</h1>
             <p className="mt-1 text-sm text-slate-500">
               기업 기본 정보, 자가진단표, 실적, 업로드 자료와 티켓 현황을 관리합니다.
             </p>
@@ -1934,77 +2205,109 @@ export function AdminDashboard({
         </div>
         <div className="mx-auto grid h-full w-full max-w-7xl flex-1 min-h-0 gap-6 px-6 py-5 lg:grid-cols-[300px_1fr]">
           <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white lg:sticky lg:top-5 lg:max-h-[calc(100vh-12rem)]">
-            <div className="shrink-0 border-b border-slate-100 px-4 py-4">
-              <div className="text-sm font-semibold text-slate-700">
-                회사 목록
+            <div className="shrink-0 border-b border-slate-100 px-4 py-3.5">
+              <div className="flex items-center justify-between gap-2">
+                <div className="text-sm font-semibold text-slate-700">회사 목록</div>
+                <Badge variant="outline" className="h-6 border-slate-200 bg-slate-50 text-[11px] text-slate-600">
+                  {filteredCompanies.length}개
+                </Badge>
               </div>
               <input
-                className="mt-3 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm focus:border-slate-400 focus:outline-none"
+                className="mt-3 h-9 w-full rounded-lg border border-slate-200 px-3 text-sm focus:border-slate-400 focus:outline-none"
                 placeholder="회사명 검색"
                 value={companyQuery}
                 onChange={(e) => setCompanyQuery(e.target.value)}
               />
-              <div className="mt-3 flex flex-wrap gap-2">
+              <div className="mt-2.5 flex flex-wrap gap-1.5">
                 <button
                   type="button"
                   onClick={() => toggleVoucherFilterTag("export")}
-                  className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold transition ${
+                  className={`inline-flex h-7 items-center gap-1 rounded-full border px-2.5 text-[11px] font-semibold transition ${
                     voucherFilterTags.includes("export")
-                      ? "border-emerald-500 bg-emerald-50 text-emerald-700"
+                      ? "border-slate-500 bg-slate-200 text-slate-800"
                       : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
                   }`}
                 >
-                  {voucherFilterTags.includes("export") ? <CheckCircle2 className="h-3.5 w-3.5" /> : null}
+                  {voucherFilterTags.includes("export") ? (
+                    <CheckCircle2 className="h-3.5 w-3.5" />
+                  ) : null}
                   수출바우처 보유
                 </button>
                 <button
                   type="button"
                   onClick={() => toggleVoucherFilterTag("innovation")}
-                  className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold transition ${
+                  className={`inline-flex h-7 items-center gap-1 rounded-full border px-2.5 text-[11px] font-semibold transition ${
                     voucherFilterTags.includes("innovation")
-                      ? "border-emerald-500 bg-emerald-50 text-emerald-700"
+                      ? "border-slate-500 bg-slate-200 text-slate-800"
                       : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
                   }`}
                 >
-                  {voucherFilterTags.includes("innovation") ? <CheckCircle2 className="h-3.5 w-3.5" /> : null}
+                  {voucherFilterTags.includes("innovation") ? (
+                    <CheckCircle2 className="h-3.5 w-3.5" />
+                  ) : null}
                   혁신바우처 보유
                 </button>
               </div>
             </div>
-            <div className="flex-1 overflow-y-auto p-3">
+            <div className="min-h-0 flex-1 overflow-y-auto p-3">
               {loadingCompanies ? (
-                <div className="rounded-xl border border-slate-100 bg-slate-50 p-3 text-xs text-slate-500">
+                <div className="h-full rounded-xl border border-slate-100 bg-slate-50 p-3 text-xs text-slate-500">
                   회사 목록을 불러오는 중입니다.
                 </div>
               ) : filteredCompanies.length === 0 ? (
-                <div className="rounded-xl border border-slate-100 bg-slate-50 p-3 text-xs text-slate-500">
+                <div className="h-full rounded-xl border border-slate-100 bg-slate-50 p-3 text-xs text-slate-500">
                   검색 결과가 없습니다.
                 </div>
               ) : (
-                <div className="space-y-2">
-                  {paginatedCompanies.map((company) => (
-                    <button
-                      key={company.id}
-                      type="button"
-                      onClick={() => setSelectedCompanyId(company.id)}
-                      className={`w-full rounded-lg border px-3 py-2.5 text-left text-sm transition ${company.id === selectedCompanyId
-                        ? "border-slate-900 bg-slate-900 text-white"
-                        : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                <div className="flex h-full flex-col overflow-hidden rounded-xl bg-white divide-y divide-slate-200">
+                  {paginatedCompanies.map((company) => {
+                    const isSelected = company.id === selectedCompanyId
+                    const companyName = company.name?.trim() || "회사명 없음"
+                    const companyTags = [
+                      company.hasExportVoucher ? "수출바우처" : null,
+                      company.hasInnovationVoucher ? "혁신바우처" : null,
+                    ].filter((tag): tag is string => Boolean(tag))
+
+                    return (
+                      <button
+                        key={company.id}
+                        type="button"
+                        onClick={() => setSelectedCompanyId(company.id)}
+                        className={`w-full px-3 py-2.5 text-left transition ${
+                          isSelected
+                            ? "border-l-2 border-l-slate-900 bg-slate-100 text-slate-950"
+                            : "border-l-2 border-l-transparent bg-white text-slate-700 hover:bg-slate-50"
                         }`}
-                    >
-                      <div className="truncate font-medium">{company.name}</div>
-                    </button>
-                  ))}
+                      >
+                        <div className="flex min-w-0 items-center gap-1.5">
+                          <div className="min-w-0 truncate text-sm font-medium">{companyName}</div>
+                          {companyTags.map((tag) => (
+                            <span
+                              key={`${company.id}-${tag}`}
+                              className={`shrink-0 rounded-full border px-1.5 py-0.5 text-[10px] font-medium ${
+                                tag === "수출바우처"
+                                  ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                                  : "border-sky-200 bg-sky-50 text-sky-700"
+                              }`}
+                            >
+                              {tag}
+                            </span>
+                          ))}
+                        </div>
+                      </button>
+                    )
+                  })}
                 </div>
               )}
             </div>
-            {filteredCompanies.length > COMPANY_PAGE_SIZE ? (
+            {showCompanyPaginationFooter && filteredCompanies.length > 0 ? (
               <div className="shrink-0 border-t border-slate-100 px-3 py-3">
                 <PaginationControls
                   page={companyPage}
                   totalItems={filteredCompanies.length}
                   pageSize={COMPANY_PAGE_SIZE}
                   onPageChange={setCompanyPage}
+                  alwaysShow
                 />
               </div>
             ) : null}
@@ -2019,9 +2322,9 @@ export function AdminDashboard({
                     ? "현황 진단 (자가진단)"
                     : activeTab === "metrics"
                       ? "실적 관리"
-                    : activeTab === "officeHours"
-                      ? "오피스아워"
-                      : "기업진단분석보고서"}
+                      : activeTab === "officeHours"
+                        ? "오피스아워"
+                        : "기업진단분석보고서"}
               </div>
               <div className="flex items-center gap-2">
                 <button
@@ -2039,58 +2342,61 @@ export function AdminDashboard({
               <button
                 type="button"
                 onClick={() => setActiveTab("info")}
-                className={`-mb-px border-b-2 px-3 py-2 text-sm font-semibold transition-colors ${activeTab === "info"
-                  ? "border-slate-900 text-slate-900"
-                  : "border-transparent text-slate-500 hover:text-slate-700"
-                  }`}
+                className={`-mb-px border-b-2 px-3 py-2 text-sm font-semibold transition-colors ${
+                  activeTab === "info"
+                    ? "border-slate-900 text-slate-900"
+                    : "border-transparent text-slate-500 hover:text-slate-700"
+                }`}
               >
                 기업 정보
               </button>
               <button
                 type="button"
                 onClick={() => setActiveTab("assessment")}
-                className={`-mb-px border-b-2 px-3 py-2 text-sm font-semibold transition-colors ${activeTab === "assessment"
-                  ? "border-slate-900 text-slate-900"
-                  : "border-transparent text-slate-500 hover:text-slate-700"
-                  }`}
+                className={`-mb-px border-b-2 px-3 py-2 text-sm font-semibold transition-colors ${
+                  activeTab === "assessment"
+                    ? "border-slate-900 text-slate-900"
+                    : "border-transparent text-slate-500 hover:text-slate-700"
+                }`}
               >
                 현황 진단
               </button>
               <button
                 type="button"
                 onClick={() => setActiveTab("report")}
-                className={`-mb-px border-b-2 px-3 py-2 text-sm font-semibold transition-colors ${activeTab === "report"
-                  ? "border-slate-900 text-slate-900"
-                  : "border-transparent text-slate-500 hover:text-slate-700"
-                  }`}
+                className={`-mb-px border-b-2 px-3 py-2 text-sm font-semibold transition-colors ${
+                  activeTab === "report"
+                    ? "border-slate-900 text-slate-900"
+                    : "border-transparent text-slate-500 hover:text-slate-700"
+                }`}
               >
                 분석 보고서
               </button>
               <button
                 type="button"
                 onClick={() => setActiveTab("metrics")}
-                className={`-mb-px border-b-2 px-3 py-2 text-sm font-semibold transition-colors ${activeTab === "metrics"
-                  ? "border-slate-900 text-slate-900"
-                  : "border-transparent text-slate-500 hover:text-slate-700"
-                  }`}
+                className={`-mb-px border-b-2 px-3 py-2 text-sm font-semibold transition-colors ${
+                  activeTab === "metrics"
+                    ? "border-slate-900 text-slate-900"
+                    : "border-transparent text-slate-500 hover:text-slate-700"
+                }`}
               >
                 실적 관리
               </button>
               <button
                 type="button"
                 onClick={() => setActiveTab("officeHours")}
-                className={`-mb-px border-b-2 px-3 py-2 text-sm font-semibold transition-colors ${activeTab === "officeHours"
-                  ? "border-slate-900 text-slate-900"
-                  : "border-transparent text-slate-500 hover:text-slate-700"
-                  }`}
+                className={`-mb-px border-b-2 px-3 py-2 text-sm font-semibold transition-colors ${
+                  activeTab === "officeHours"
+                    ? "border-slate-900 text-slate-900"
+                    : "border-transparent text-slate-500 hover:text-slate-700"
+                }`}
               >
                 오피스아워
               </button>
             </div>
             <div className="relative flex-1 min-h-0 px-4 py-4 flex flex-col">
-              {loadingDetails ? (
-                <ContentLoadingOverlay />
-              ) : null}
+              {loadingDetails ? <ContentLoadingOverlay /> : null}
               {activeTab === "info" ? (
                 !companyInfo ? (
                   <div className="rounded-xl border border-slate-100 bg-slate-50 p-4 text-xs text-slate-500">
@@ -2119,18 +2425,21 @@ export function AdminDashboard({
                           </div>
                           <div className="min-w-[260px] rounded-2xl border border-white/70 bg-white/80 px-4 py-3 shadow-sm backdrop-blur sm:max-w-[320px]">
                             <div className="flex flex-col gap-1.5 text-[11px] text-slate-500">
-                            {companyInfoSaveInfoItems.map((item) => (
-                              <div key={item.label} className="flex items-center justify-between gap-3">
-                                <span className="font-medium text-slate-400">{item.label}</span>
-                                <span
-                                  className={`text-right ${
-                                    item.value === "-" ? "text-slate-400" : "text-slate-700"
-                                  }`}
+                              {companyInfoSaveInfoItems.map((item) => (
+                                <div
+                                  key={item.label}
+                                  className="flex items-center justify-between gap-3"
                                 >
-                                  {item.value}
-                                </span>
-                              </div>
-                            ))}
+                                  <span className="font-medium text-slate-400">{item.label}</span>
+                                  <span
+                                    className={`text-right ${
+                                      item.value === "-" ? "text-slate-400" : "text-slate-700"
+                                    }`}
+                                  >
+                                    {item.value}
+                                  </span>
+                                </div>
+                              ))}
                             </div>
                           </div>
                         </div>
@@ -2143,202 +2452,229 @@ export function AdminDashboard({
                             className="rounded-2xl border border-slate-200 bg-white p-4"
                           >
                             {(() => {
-                              const { ungrouped, groupedEntries } = groupCompanyInfoFields(section.fields)
+                              const { ungrouped, groupedEntries } = groupCompanyInfoFields(
+                                section.fields,
+                              )
                               return (
                                 <>
-                            <div>
-                              <div className="text-sm font-semibold text-slate-900">
-                                {section.title}
-                              </div>
-                              {section.description ? (
-                                <div className="mt-1 text-xs text-slate-500">
-                                  {section.description}
-                                </div>
-                              ) : null}
-                            </div>
-                            {ungrouped.length > 0 ? (
-                              <div className="mt-3 overflow-hidden rounded-xl border border-slate-200">
-                                <table className="w-full table-fixed border-collapse bg-white text-sm">
-                                  <colgroup>
-                                    <col className="w-[120px]" />
-                                    <col />
-                                    <col className="w-[120px]" />
-                                    <col />
-                                  </colgroup>
-                                  <tbody>
-                                    {buildCompanyInfoTableRows(ungrouped).map((row, rowIndex) => {
-                                    const firstField = row[0]
-                                    if (!firstField) return null
-
-                                    return (
-                                      <tr
-                                        key={`${section.title}-row-${rowIndex}`}
-                                        className={rowIndex > 0 ? "border-t border-slate-100" : ""}
-                                      >
-                                        {row.length === 1 ? (
-                                          <>
-                                            <th className="bg-slate-50 px-3 py-2.5 text-left align-top text-[11px] font-medium text-slate-500">
-                                              {firstField.label}
-                                            </th>
-                                            <td
-                                              colSpan={3}
-                                              className={`px-3 py-2.5 align-top text-sm font-semibold break-words ${
-                                                firstField.value === "-" ? "text-slate-400" : "text-slate-800"
-                                              }`}
-                                              title={firstField.value}
-                                            >
-                                              {firstField.value}
-                                            </td>
-                                          </>
-                                        ) : (
-                                          <>
-                                            {row.map((field) => (
-                                              <Fragment key={`${section.title}-${field.label}`}>
-                                                <th className="bg-slate-50 px-3 py-2.5 text-left align-top text-[11px] font-medium text-slate-500">
-                                                  {field.label}
-                                                </th>
-                                                <td
-                                                  className={`px-3 py-2.5 align-top text-sm font-semibold break-words ${
-                                                    field.value === "-" ? "text-slate-400" : "text-slate-800"
-                                                  }`}
-                                                  title={field.value}
-                                                >
-                                                  {field.value}
-                                                </td>
-                                              </Fragment>
-                                            ))}
-                                          </>
-                                        )}
-                                      </tr>
-                                    )
-                                  })}
-                                  </tbody>
-                                </table>
-                              </div>
-                            ) : null}
-                            {groupedEntries.length > 0 ? (
-                              <div className="mt-3 grid gap-3 lg:grid-cols-2">
-                                {groupedEntries.map(([groupLabel, fields]) => (
-                                  <div
-                                    key={`${section.title}-${groupLabel}`}
-                                    className="overflow-hidden rounded-xl border border-slate-200"
-                                  >
-                                    <div className="border-b border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-600">
-                                      {groupLabel}
+                                  <div>
+                                    <div className="text-sm font-semibold text-slate-900">
+                                      {section.title}
                                     </div>
-                                    <table className="w-full table-fixed border-collapse bg-white text-sm">
-                                      <colgroup>
-                                        <col className="w-[140px]" />
-                                        <col />
-                                      </colgroup>
-                                      <tbody>
-                                        {fields.map((field, index) => (
-                                          <tr
-                                            key={`${section.title}-${groupLabel}-${field.label}`}
-                                            className={index > 0 ? "border-t border-slate-100" : ""}
-                                          >
-                                            <th className="bg-slate-50 px-3 py-2.5 text-left align-top text-[11px] font-medium text-slate-500">
-                                              {field.label.replace(`${groupLabel} `, "")}
-                                            </th>
-                                            <td
-                                              className={`px-3 py-2.5 align-top text-sm font-semibold break-words ${
-                                                field.value === "-" ? "text-slate-400" : "text-slate-800"
-                                              }`}
-                                              title={field.value}
-                                            >
-                                              {field.value}
-                                            </td>
-                                          </tr>
-                                        ))}
-                                      </tbody>
-                                    </table>
+                                    {section.description ? (
+                                      <div className="mt-1 text-xs text-slate-500">
+                                        {section.description}
+                                      </div>
+                                    ) : null}
                                   </div>
-                                ))}
-                              </div>
-                            ) : null}
+                                  {ungrouped.length > 0 ? (
+                                    <div className="mt-3 overflow-hidden rounded-xl border border-slate-200">
+                                      <table className="w-full table-fixed border-collapse bg-white text-sm">
+                                        <colgroup>
+                                          <col className="w-[120px]" />
+                                          <col />
+                                          <col className="w-[120px]" />
+                                          <col />
+                                        </colgroup>
+                                        <tbody>
+                                          {buildCompanyInfoTableRows(ungrouped).map(
+                                            (row, rowIndex) => {
+                                              const firstField = row[0]
+                                              if (!firstField) return null
+
+                                              return (
+                                                <tr
+                                                  key={`${section.title}-row-${rowIndex}`}
+                                                  className={
+                                                    rowIndex > 0 ? "border-t border-slate-100" : ""
+                                                  }
+                                                >
+                                                  {row.length === 1 ? (
+                                                    <>
+                                                      <th className="bg-slate-50 px-3 py-2.5 text-left align-top text-[11px] font-medium text-slate-500">
+                                                        {firstField.label}
+                                                      </th>
+                                                      <td
+                                                        colSpan={3}
+                                                        className={`px-3 py-2.5 align-top text-sm font-semibold break-words ${
+                                                          firstField.value === "-"
+                                                            ? "text-slate-400"
+                                                            : "text-slate-800"
+                                                        }`}
+                                                        title={firstField.value}
+                                                      >
+                                                        {firstField.value}
+                                                      </td>
+                                                    </>
+                                                  ) : (
+                                                    <>
+                                                      {row.map((field) => (
+                                                        <Fragment
+                                                          key={`${section.title}-${field.label}`}
+                                                        >
+                                                          <th className="bg-slate-50 px-3 py-2.5 text-left align-top text-[11px] font-medium text-slate-500">
+                                                            {field.label}
+                                                          </th>
+                                                          <td
+                                                            className={`px-3 py-2.5 align-top text-sm font-semibold break-words ${
+                                                              field.value === "-"
+                                                                ? "text-slate-400"
+                                                                : "text-slate-800"
+                                                            }`}
+                                                            title={field.value}
+                                                          >
+                                                            {field.value}
+                                                          </td>
+                                                        </Fragment>
+                                                      ))}
+                                                    </>
+                                                  )}
+                                                </tr>
+                                              )
+                                            },
+                                          )}
+                                        </tbody>
+                                      </table>
+                                    </div>
+                                  ) : null}
+                                  {groupedEntries.length > 0 ? (
+                                    <div className="mt-3 grid gap-3 lg:grid-cols-2">
+                                      {groupedEntries.map(([groupLabel, fields]) => (
+                                        <div
+                                          key={`${section.title}-${groupLabel}`}
+                                          className="overflow-hidden rounded-xl border border-slate-200"
+                                        >
+                                          <div className="border-b border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-600">
+                                            {groupLabel}
+                                          </div>
+                                          <table className="w-full table-fixed border-collapse bg-white text-sm">
+                                            <colgroup>
+                                              <col className="w-[140px]" />
+                                              <col />
+                                            </colgroup>
+                                            <tbody>
+                                              {fields.map((field, index) => (
+                                                <tr
+                                                  key={`${section.title}-${groupLabel}-${field.label}`}
+                                                  className={
+                                                    index > 0 ? "border-t border-slate-100" : ""
+                                                  }
+                                                >
+                                                  <th className="bg-slate-50 px-3 py-2.5 text-left align-top text-[11px] font-medium text-slate-500">
+                                                    {field.label.replace(`${groupLabel} `, "")}
+                                                  </th>
+                                                  <td
+                                                    className={`px-3 py-2.5 align-top text-sm font-semibold break-words ${
+                                                      field.value === "-"
+                                                        ? "text-slate-400"
+                                                        : "text-slate-800"
+                                                    }`}
+                                                    title={field.value}
+                                                  >
+                                                    {field.value}
+                                                  </td>
+                                                </tr>
+                                              ))}
+                                            </tbody>
+                                          </table>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  ) : null}
                                 </>
                               )
                             })()}
                           </div>
                         ))}
 
-                          <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                            <div className="text-sm font-semibold text-slate-900">
-                              업로드 자료
+                        <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                          <div className="text-sm font-semibold text-slate-900">업로드 자료</div>
+                          <div className="mt-1 text-xs text-slate-500">기업이 제출한 첨부 파일</div>
+                          {companyFiles.length === 0 ? (
+                            <div className="mt-4 rounded-xl border border-slate-100 bg-slate-50/70 px-3 py-3 text-sm text-slate-400">
+                              업로드된 파일이 없습니다.
                             </div>
-                            <div className="mt-1 text-xs text-slate-500">
-                              기업이 제출한 첨부 파일
-                            </div>
-                            {companyFiles.length === 0 ? (
-                              <div className="mt-4 rounded-xl border border-slate-100 bg-slate-50/70 px-3 py-3 text-sm text-slate-400">
-                                업로드된 파일이 없습니다.
-                              </div>
-                            ) : (
-                              <div className="mt-3 overflow-hidden rounded-xl border border-slate-200 bg-white">
-                                {companyFiles.map((file) => (
+                          ) : (
+                            <div className="mt-3 overflow-hidden rounded-xl border border-slate-200 bg-white">
+                              {companyFiles.map((file) => (
+                                <div
+                                  key={file.id}
+                                  className="flex items-center gap-3 px-3 py-2.5 text-xs border-t border-slate-100 first:border-t-0"
+                                >
                                   <div
-                                    key={file.id}
-                                    className="flex items-center gap-3 px-3 py-2.5 text-xs border-t border-slate-100 first:border-t-0"
+                                    className="min-w-0 flex-1 truncate font-medium text-slate-700"
+                                    title={file.name}
                                   >
-                                    <div className="min-w-0 flex-1 truncate font-medium text-slate-700" title={file.name}>
-                                      {file.name}
-                                    </div>
-                                    <div className="shrink-0 text-[11px] text-slate-400">
-                                      {(file.size / (1024 * 1024)).toFixed(1)}MB
-                                    </div>
-                                    {file.downloadUrl ? (
-                                      <a
-                                        href={file.downloadUrl}
-                                        target="_blank"
-                                        rel="noreferrer"
-                                        className="shrink-0 text-[11px] font-medium text-slate-600 transition hover:text-slate-900"
-                                      >
-                                        보기/다운로드
-                                      </a>
-                                    ) : (
-                                      <span className="shrink-0 text-[11px] text-slate-400">링크 준비중</span>
-                                    )}
+                                    {file.name}
                                   </div>
-                                ))}
-                              </div>
-                            )}
-                          </div>
+                                  <div className="shrink-0 text-[11px] text-slate-400">
+                                    {(file.size / (1024 * 1024)).toFixed(1)}MB
+                                  </div>
+                                  {file.downloadUrl ? (
+                                    <a
+                                      href={file.downloadUrl}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="shrink-0 text-[11px] font-medium text-slate-600 transition hover:text-slate-900"
+                                    >
+                                      보기/다운로드
+                                    </a>
+                                  ) : (
+                                    <span className="shrink-0 text-[11px] text-slate-400">
+                                      링크 준비중
+                                    </span>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
 
-                          <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                            <div className="text-sm font-semibold text-slate-900">
-                              투자 이력
-                            </div>
-                            <div className="mt-1 text-xs text-slate-500">
-                              단계, 일시, 금액, 주요주주
-                            </div>
-                            {investmentRows.length === 0 ? (
-                              <div className="mt-4 rounded-xl border border-slate-100 bg-slate-50/70 px-3 py-3 text-sm text-slate-400">
-                                입력된 투자 이력이 없습니다.
-                              </div>
-                            ) : (
-                              <div className="mt-3 overflow-hidden rounded-xl border border-slate-200 bg-white">
-                                {investmentRows.map((row, index) => (
-                                  <div
-                                    key={`${row.stage}-${index}`}
-                                    className="grid grid-cols-[minmax(0,1.1fr)_88px_96px_minmax(0,1fr)] items-center gap-3 px-3 py-2.5 text-xs border-t border-slate-100 first:border-t-0"
-                                  >
-                                    <div className="min-w-0 truncate font-medium text-slate-800" title={row.stage || "단계 미입력"}>
-                                      {row.stage || "단계 미입력"}
-                                    </div>
-                                    <div className="truncate text-slate-500" title={formatValue(row.date)}>
-                                      {formatValue(row.date)}
-                                    </div>
-                                    <div className="truncate text-slate-600" title={formatValue(row.postMoney)}>
-                                      {formatValue(row.postMoney)}
-                                    </div>
-                                    <div className="min-w-0 truncate text-slate-500" title={formatValue(row.majorShareholder)}>
-                                      {formatValue(row.majorShareholder)}
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                            )}
+                        <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                          <div className="text-sm font-semibold text-slate-900">투자 이력</div>
+                          <div className="mt-1 text-xs text-slate-500">
+                            단계, 일시, 금액, 주요주주
                           </div>
+                          {investmentRows.length === 0 ? (
+                            <div className="mt-4 rounded-xl border border-slate-100 bg-slate-50/70 px-3 py-3 text-sm text-slate-400">
+                              입력된 투자 이력이 없습니다.
+                            </div>
+                          ) : (
+                            <div className="mt-3 overflow-hidden rounded-xl border border-slate-200 bg-white">
+                              {investmentRows.map((row, index) => (
+                                <div
+                                  key={`${row.stage}-${index}`}
+                                  className="grid grid-cols-[minmax(0,1.1fr)_88px_96px_minmax(0,1fr)] items-center gap-3 px-3 py-2.5 text-xs border-t border-slate-100 first:border-t-0"
+                                >
+                                  <div
+                                    className="min-w-0 truncate font-medium text-slate-800"
+                                    title={row.stage || "단계 미입력"}
+                                  >
+                                    {row.stage || "단계 미입력"}
+                                  </div>
+                                  <div
+                                    className="truncate text-slate-500"
+                                    title={formatValue(row.date)}
+                                  >
+                                    {formatValue(row.date)}
+                                  </div>
+                                  <div
+                                    className="truncate text-slate-600"
+                                    title={formatValue(row.postMoney)}
+                                  >
+                                    {formatValue(row.postMoney)}
+                                  </div>
+                                  <div
+                                    className="min-w-0 truncate text-slate-500"
+                                    title={formatValue(row.majorShareholder)}
+                                  >
+                                    {formatValue(row.majorShareholder)}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -2346,9 +2682,7 @@ export function AdminDashboard({
               ) : activeTab === "assessment" ? (
                 <div className="flex min-h-0 flex-1 flex-col">
                   <div className="flex flex-wrap items-center justify-between gap-3">
-                    <div className="text-sm font-semibold text-slate-700">
-                      대분류 점수
-                    </div>
+                    <div className="text-sm font-semibold text-slate-700">대분류 점수</div>
                     <div className="rounded-full bg-emerald-600 px-3.5 py-1.5 text-xs font-semibold text-white shadow-sm">
                       총점 {formatScore(assessmentSummary.totalScore)}/100점
                     </div>
@@ -2359,23 +2693,25 @@ export function AdminDashboard({
                         key={`summary-${section.sectionTitle}`}
                         type="button"
                         onClick={() => setActiveSectionFilter(section.sectionTitle)}
-                        className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${activeSectionFilter === section.sectionTitle
-                          ? "border-slate-900 bg-slate-900 text-white"
-                          : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
-                          }`}
+                        className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
+                          activeSectionFilter === section.sectionTitle
+                            ? "border-slate-900 bg-slate-900 text-white"
+                            : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                        }`}
                       >
-                        {section.sectionTitle} {formatScore(section.sectionScore)}/{formatScore(section.sectionTotal)}점
+                        {section.sectionTitle} {formatScore(section.sectionScore)}/
+                        {formatScore(section.sectionTotal)}점
                       </button>
                     ))}
                   </div>
                   {(() => {
                     const filtered = assessmentSummary.grouped.filter(
-                      (section) => section.sectionTitle === activeSectionFilter
+                      (section) => section.sectionTitle === activeSectionFilter,
                     )
-                  if (filtered.length === 1) {
-                    const section = filtered[0]
-                    if (!section) return null
-                    return (
+                    if (filtered.length === 1) {
+                      const section = filtered[0]
+                      if (!section) return null
+                      return (
                         <div className="mt-4 min-h-0 flex-1 overflow-hidden">
                           <div className="rounded-2xl border border-slate-200 bg-white overflow-hidden flex h-full flex-col">
                             <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50 px-4 py-3">
@@ -2383,7 +2719,8 @@ export function AdminDashboard({
                                 {section.sectionTitle}
                               </div>
                               <div className="text-xs font-semibold text-slate-600">
-                                {formatScore(section.sectionScore)}/{formatScore(section.sectionTotal)}점
+                                {formatScore(section.sectionScore)}/
+                                {formatScore(section.sectionTotal)}점
                               </div>
                             </div>
                             <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
@@ -2400,12 +2737,13 @@ export function AdminDashboard({
                                   </div>
                                   <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
                                     <span
-                                      className={`rounded-full px-2 py-0.5 font-semibold ${item.answerLabel === "예"
-                                        ? "bg-emerald-100 text-emerald-700"
-                                        : item.answerLabel === "아니오"
-                                          ? "bg-rose-100 text-rose-700"
-                                          : "bg-slate-100 text-slate-500"
-                                        }`}
+                                      className={`rounded-full px-2 py-0.5 font-semibold ${
+                                        item.answerLabel === "예"
+                                          ? "bg-emerald-100 text-emerald-700"
+                                          : item.answerLabel === "아니오"
+                                            ? "bg-rose-100 text-rose-700"
+                                            : "bg-slate-100 text-slate-500"
+                                      }`}
                                     >
                                       {item.answerLabel}
                                     </span>
@@ -2414,9 +2752,7 @@ export function AdminDashboard({
                                     </span>
                                   </div>
                                   {item.reason ? (
-                                    <div className="mt-2 text-xs text-slate-600">
-                                      {item.reason}
-                                    </div>
+                                    <div className="mt-2 text-xs text-slate-600">{item.reason}</div>
                                   ) : null}
                                 </div>
                               ))}
@@ -2437,7 +2773,8 @@ export function AdminDashboard({
                                 {section.sectionTitle}
                               </div>
                               <div className="text-xs font-semibold text-slate-600">
-                                {formatScore(section.sectionScore)}/{formatScore(section.sectionTotal)}점
+                                {formatScore(section.sectionScore)}/
+                                {formatScore(section.sectionTotal)}점
                               </div>
                             </div>
                             <div className="space-y-3 p-4">
@@ -2454,12 +2791,13 @@ export function AdminDashboard({
                                   </div>
                                   <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
                                     <span
-                                      className={`rounded-full px-2 py-0.5 font-semibold ${item.answerLabel === "예"
-                                        ? "bg-emerald-100 text-emerald-700"
-                                        : item.answerLabel === "아니오"
-                                          ? "bg-rose-100 text-rose-700"
-                                          : "bg-slate-100 text-slate-500"
-                                        }`}
+                                      className={`rounded-full px-2 py-0.5 font-semibold ${
+                                        item.answerLabel === "예"
+                                          ? "bg-emerald-100 text-emerald-700"
+                                          : item.answerLabel === "아니오"
+                                            ? "bg-rose-100 text-rose-700"
+                                            : "bg-slate-100 text-slate-500"
+                                      }`}
                                     >
                                       {item.answerLabel}
                                     </span>
@@ -2468,9 +2806,7 @@ export function AdminDashboard({
                                     </span>
                                   </div>
                                   {item.reason ? (
-                                    <div className="mt-2 text-xs text-slate-600">
-                                      {item.reason}
-                                    </div>
+                                    <div className="mt-2 text-xs text-slate-600">{item.reason}</div>
                                   ) : null}
                                 </div>
                               ))}
@@ -2485,7 +2821,8 @@ export function AdminDashboard({
                 selectedCompanyId ? (
                   <div className="min-h-0 flex-1 space-y-4 overflow-y-auto">
                     <div className="flex items-center justify-end whitespace-nowrap text-xs text-slate-500">
-                      최근 업데이트 {hasMetricsDocument ? (metricsUpdatedLabel ?? "기록 없음") : "실적 문서 없음"}
+                      최근 업데이트{" "}
+                      {hasMetricsDocument ? (metricsUpdatedLabel ?? "기록 없음") : "실적 문서 없음"}
                     </div>
                     {!hasMetricsDocument ? (
                       <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 text-xs text-amber-900">
@@ -2494,59 +2831,222 @@ export function AdminDashboard({
                     ) : null}
 
                     <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="whitespace-nowrap text-sm font-semibold text-slate-800">
-                          12개월 추이
+                      <div className="flex flex-col gap-3 border-b border-slate-100 pb-4 lg:flex-row lg:items-start lg:justify-between">
+                        <div>
+                          <div className="whitespace-nowrap text-sm font-semibold text-slate-800">
+                            12개월 추이
+                          </div>
+                          <div className="mt-1 text-xs text-slate-500">
+                            공통 실적에 선택한 사업 KPI를 같은 표와 차트에 붙여서 봅니다.
+                          </div>
+                        </div>
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
+                          {programMetricViewOptions.length > 0 ? (
+                            <Popover
+                              open={programMetricFilterOpen}
+                              onOpenChange={(open) => {
+                                setProgramMetricFilterOpen(open)
+                                if (!open) setProgramMetricFilterQuery("")
+                              }}
+                            >
+                              <PopoverTrigger asChild>
+                                <div
+                                  role="combobox"
+                                  aria-expanded={programMetricFilterOpen}
+                                  tabIndex={0}
+                                  className="flex h-9 w-full cursor-pointer items-center gap-1 rounded-lg border border-slate-300 bg-white px-2 py-1 text-sm outline-none transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 sm:w-[300px]"
+                                >
+                                  <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
+                                    {selectedProgramMetricViews.length > 0 ? (
+                                      <>
+                                        {visibleProgramMetricBadges.map((record) => (
+                                          <Badge
+                                            key={record.programId}
+                                            variant="secondary"
+                                            className="max-w-[88px] bg-blue-100 px-1.5 py-0 text-[11px] text-blue-700"
+                                          >
+                                            <span className="block truncate">{record.programName}</span>
+                                          </Badge>
+                                        ))}
+                                        {hiddenProgramMetricCount > 0 ? (
+                                          <Badge
+                                            variant="secondary"
+                                            className="bg-slate-100 px-1.5 py-0 text-[11px] text-slate-600"
+                                          >
+                                            +{hiddenProgramMetricCount}
+                                          </Badge>
+                                        ) : null}
+                                      </>
+                                    ) : (
+                                      <span className="px-1 text-[12px] text-slate-500">
+                                        사업 KPI 추가
+                                      </span>
+                                    )}
+                                  </div>
+                                  {selectedProgramMetricViewIds.length > 0 ? (
+                                    <button
+                                      type="button"
+                                      className="rounded-sm p-0.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                                      onClick={(event) => {
+                                        event.preventDefault()
+                                        event.stopPropagation()
+                                        setSelectedProgramMetricViewIds([])
+                                      }}
+                                      aria-label="선택 사업 전체 해제"
+                                    >
+                                      <X className="h-3 w-3" />
+                                    </button>
+                                  ) : null}
+                                  <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                                </div>
+                              </PopoverTrigger>
+                              <PopoverContent
+                                align="end"
+                                className="w-[300px] max-w-[calc(100vw-48px)] p-0"
+                              >
+                                <Command shouldFilter={false}>
+                                  <CommandInput
+                                    value={programMetricFilterQuery}
+                                    onValueChange={setProgramMetricFilterQuery}
+                                    placeholder="사업명 검색"
+                                  />
+                                  <CommandList className="max-h-72">
+                                    <CommandEmpty>검색 결과가 없습니다.</CommandEmpty>
+                                    <CommandGroup>
+                                      {programMetricFilterOptions.map((record) => {
+                                        const isSelected = selectedProgramMetricViewIds.includes(
+                                          record.programId,
+                                        )
+                                        const isDisabled =
+                                          record.definitions.filter(
+                                            (definition) => definition.active !== false,
+                                          ).length === 0
+                                        return (
+                                          <CommandItem
+                                            key={record.programId}
+                                            value={record.programId}
+                                            disabled={isDisabled}
+                                            onSelect={() => {
+                                              if (isDisabled) return
+                                              toggleProgramMetricView(record.programId)
+                                            }}
+                                            className={cn(
+                                              "min-h-8 px-2 py-1 text-sm",
+                                              isDisabled
+                                                ? "cursor-not-allowed opacity-50"
+                                                : "cursor-pointer",
+                                            )}
+                                          >
+                                            <Check
+                                              className={
+                                                isSelected
+                                                  ? "h-3.5 w-3.5 text-blue-600 opacity-100"
+                                                  : "h-3.5 w-3.5 opacity-0"
+                                              }
+                                            />
+                                            <div className="flex min-w-0 flex-1 items-center gap-1.5">
+                                              <span className="min-w-0 flex-1 truncate">
+                                                {record.programName}
+                                              </span>
+                                            </div>
+                                            {isDisabled ? (
+                                              <span className="shrink-0 text-[10px] text-slate-400">
+                                                KPI 없음
+                                              </span>
+                                            ) : null}
+                                          </CommandItem>
+                                        )
+                                      })}
+                                    </CommandGroup>
+                                  </CommandList>
+                                </Command>
+                                <div className="flex items-center justify-between border-t px-3 py-2">
+                                  <div className="min-h-[16px] text-xs text-slate-500">
+                                    {selectedProgramMetricViewIds.length > 0
+                                      ? `${selectedProgramMetricViewIds.length}개 사업 선택됨`
+                                      : "\u00A0"}
+                                  </div>
+                                  <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="sm"
+                                    className={cn(
+                                      "h-7 px-2",
+                                      selectedProgramMetricViewIds.length > 0
+                                        ? ""
+                                        : "pointer-events-none opacity-0",
+                                    )}
+                                    onClick={() => setSelectedProgramMetricViewIds([])}
+                                    disabled={selectedProgramMetricViewIds.length === 0}
+                                  >
+                                    전체 해제
+                                  </Button>
+                                </div>
+                              </PopoverContent>
+                            </Popover>
+                          ) : null}
+                          <button
+                            type="button"
+                            onClick={handleDownloadMetricsCsv}
+                            className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
+                          >
+                            <FileSpreadsheet className="h-4 w-4" />
+                            다운로드
+                          </button>
                         </div>
                       </div>
                       <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(360px,0.85fr)]">
                         <div className="rounded-xl border border-slate-200 bg-white p-4">
-                          <div className="mb-3 flex items-center justify-end">
-                            <button
-                              type="button"
-                              onClick={handleDownloadMetricsCsv}
-                              className="inline-flex items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-                            >
-                              <FileSpreadsheet className="h-4 w-4" />
-                              다운로드
-                            </button>
-                          </div>
                           <div className="max-h-[420px] overflow-auto">
                             <table className="min-w-full w-max border-separate border-spacing-0 text-sm">
                               <thead>
-                              <tr className="text-left text-xs text-slate-400">
-                                <th className="sticky top-0 z-10 border-b border-slate-200 bg-white px-3 py-2 font-semibold whitespace-nowrap">월</th>
-                                {metricChartFields.map((field) => (
-                                  <th
-                                    key={field.key}
-                                    className="sticky top-0 z-10 border-b border-slate-200 bg-white px-3 py-2 font-semibold whitespace-nowrap"
-                                  >
-                                    {field.label}
+                                <tr className="text-left text-xs text-slate-400">
+                                  <th className="sticky top-0 z-10 border-b border-slate-200 bg-white px-3 py-2 font-semibold whitespace-nowrap">
+                                    월
                                   </th>
-                                ))}
-                              </tr>
+                                  {visibleMetricFields.map((field) => (
+                                    <th
+                                      key={field.key}
+                                      className="sticky top-0 z-10 border-b border-slate-200 bg-white px-3 py-2 font-semibold whitespace-nowrap"
+                                    >
+                                      <div className="max-w-[140px] min-w-[88px]">
+                                        <div className="truncate text-slate-700">{field.label}</div>
+                                        <div
+                                          className={cn(
+                                            "mt-0.5 truncate text-[10px] font-medium",
+                                            field.source === "common"
+                                              ? "text-slate-400"
+                                              : "text-blue-600",
+                                          )}
+                                          title={field.badgeLabel}
+                                        >
+                                          {field.badgeLabel}
+                                        </div>
+                                      </div>
+                                    </th>
+                                  ))}
+                                </tr>
                               </thead>
                               <tbody>
-                                {(hasMetricsDocument ? recentMetricsRows : emptyMetricsMonthSlots).map((row) => (
+                                {metricsTableRows.map((row) => (
                                   <tr
                                     key={`${row.year}-${row.month}`}
-                                    className={hasMetricsDocument ? "text-slate-700" : "text-slate-400"}
+                                    className={
+                                      hasMetricsDocument ? "text-slate-700" : "text-slate-400"
+                                    }
                                   >
                                     <td className="border-b border-slate-100 px-3 py-2 font-semibold whitespace-nowrap">
                                       {hasMetricsDocument
                                         ? `${row.month}월`
                                         : `${row.year}.${String(row.month).padStart(2, "0")}`}
                                     </td>
-                                    {metricChartFields.map((field) => (
+                                    {visibleMetricFields.map((field) => (
                                       <td
                                         key={`${row.year}-${row.month}-${field.key}`}
                                         className="border-b border-slate-100 px-3 py-2 whitespace-nowrap"
                                       >
-                                        {hasMetricsDocument
-                                          ? formatMetricValue(
-                                              getMetricCellValue(row as MonthlyMetrics, field.key),
-                                              field.format,
-                                            )
+                                        {typeof row.values[field.key] === "number"
+                                          ? formatMetricValue(row.values[field.key] ?? 0, field.format)
                                           : "-"}
                                       </td>
                                     ))}
@@ -2569,9 +3069,9 @@ export function AdminDashboard({
                                 <SelectValue placeholder="지표 선택" />
                               </SelectTrigger>
                               <SelectContent>
-                                {metricChartFields.map((field) => (
+                                {visibleMetricFields.map((field) => (
                                   <SelectItem key={field.key} value={field.key}>
-                                    {field.label}
+                                    {field.badgeLabel} · {field.label}
                                   </SelectItem>
                                 ))}
                               </SelectContent>
@@ -2597,7 +3097,8 @@ export function AdminDashboard({
                                 <YAxis hide />
                                 <Tooltip
                                   formatter={(value: unknown) => {
-                                    if (typeof value !== "number" || !selectedMetricChartField) return "-"
+                                    if (typeof value !== "number" || !selectedMetricChartField)
+                                      return "-"
                                     return formatMetricValue(value, selectedMetricChartField.format)
                                   }}
                                   labelFormatter={(label) => `${label}`}
@@ -2605,7 +3106,7 @@ export function AdminDashboard({
                                 {selectedMetricChartField ? (
                                   <Line
                                     type="monotone"
-                                    dataKey={selectedMetricChartField.key}
+                                    dataKey="value"
                                     name={selectedMetricChartField.label}
                                     stroke={selectedMetricChartField.color}
                                     strokeWidth={2.5}
@@ -2625,9 +3126,7 @@ export function AdminDashboard({
 
                     {companyFiles.length > 0 ? (
                       <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                        <div className="text-sm font-semibold text-slate-800">
-                          업로드 자료
-                        </div>
+                        <div className="text-sm font-semibold text-slate-800">업로드 자료</div>
                         <div className="mt-3 space-y-2">
                           {companyFiles.map((file) => (
                             <div
@@ -2720,24 +3219,43 @@ export function AdminDashboard({
                                 <div className="space-y-1">
                                   <div className="flex flex-wrap items-center gap-1.5 text-xs whitespace-nowrap">
                                     <span className="inline-flex flex-col items-start gap-0.5">
-                                      <span className="pl-0.5 text-[10px] font-medium uppercase tracking-[0.08em] text-slate-400">기본</span>
+                                      <span className="pl-0.5 text-[10px] font-medium uppercase tracking-[0.08em] text-slate-400">
+                                        기본
+                                      </span>
                                       <span className="rounded-md border border-slate-200 bg-white px-2.5 py-1 font-medium text-slate-600 shadow-[0_1px_1px_rgba(15,23,42,0.03)]">
-                                        내부 <span className="ml-1 font-semibold text-slate-700">{program.internalTicketLimit ?? 0}</span>
+                                        내부{" "}
+                                        <span className="ml-1 font-semibold text-slate-700">
+                                          {program.internalTicketLimit ?? 0}
+                                        </span>
                                         <span className="mx-1.5 text-slate-300">·</span>
-                                        외부 <span className="ml-1 font-semibold text-slate-700">{program.externalTicketLimit ?? 0}</span>
+                                        외부{" "}
+                                        <span className="ml-1 font-semibold text-slate-700">
+                                          {program.externalTicketLimit ?? 0}
+                                        </span>
                                       </span>
                                     </span>
-                                    <span className="mt-4 inline-flex items-center text-slate-300" aria-hidden="true">
+                                    <span
+                                      className="mt-4 inline-flex items-center text-slate-300"
+                                      aria-hidden="true"
+                                    >
                                       <span className="flex h-5 w-5 items-center justify-center rounded-full border border-slate-200 bg-white text-[10px] text-slate-400 shadow-[0_1px_1px_rgba(15,23,42,0.03)]">
                                         →
                                       </span>
                                     </span>
                                     <span className="inline-flex flex-col items-start gap-0.5">
-                                      <span className="pl-0.5 text-[10px] font-medium uppercase tracking-[0.08em] text-slate-400">현재</span>
+                                      <span className="pl-0.5 text-[10px] font-medium uppercase tracking-[0.08em] text-slate-400">
+                                        현재
+                                      </span>
                                       <span className="rounded-md border border-blue-200 bg-blue-50 px-2.5 py-1 font-medium text-blue-700 shadow-[0_1px_1px_rgba(59,130,246,0.08)]">
-                                        내부 <span className="ml-1 font-semibold text-blue-700">{draft.internal || "0"}</span>
+                                        내부{" "}
+                                        <span className="ml-1 font-semibold text-blue-700">
+                                          {draft.internal || "0"}
+                                        </span>
                                         <span className="mx-1.5 text-blue-300">·</span>
-                                        외부 <span className="ml-1 font-semibold text-blue-700">{draft.external || "0"}</span>
+                                        외부{" "}
+                                        <span className="ml-1 font-semibold text-blue-700">
+                                          {draft.external || "0"}
+                                        </span>
                                       </span>
                                     </span>
                                   </div>
@@ -2778,7 +3296,9 @@ export function AdminDashboard({
                           <input
                             inputMode="numeric"
                             value={ticketModalDraft.internal}
-                            onChange={(event) => handleTicketModalChange("internal", event.target.value)}
+                            onChange={(event) =>
+                              handleTicketModalChange("internal", event.target.value)
+                            }
                             className="h-9 w-full rounded-md border border-slate-300 bg-white px-3 text-sm text-slate-800 focus:border-slate-400 focus:outline-none"
                           />
                         </label>
@@ -2787,7 +3307,9 @@ export function AdminDashboard({
                           <input
                             inputMode="numeric"
                             value={ticketModalDraft.external}
-                            onChange={(event) => handleTicketModalChange("external", event.target.value)}
+                            onChange={(event) =>
+                              handleTicketModalChange("external", event.target.value)
+                            }
                             className="h-9 w-full rounded-md border border-slate-300 bg-white px-3 text-sm text-slate-800 focus:border-slate-400 focus:outline-none"
                           />
                         </label>
@@ -2876,9 +3398,7 @@ export function AdminDashboard({
                   </div>
 
                   <div className="rounded-2xl border border-slate-200 bg-white p-2">
-                    <div className="text-sm font-semibold text-slate-700">
-                      현황 분석 점수
-                    </div>
+                    <div className="text-sm font-semibold text-slate-700">현황 분석 점수</div>
                     <div className="mt-1 grid gap-0.5 lg:grid-cols-[316px_1fr] lg:items-center">
                       <div className="-mt-3 flex items-start justify-start -ml-8">
                         <svg
@@ -2890,11 +3410,9 @@ export function AdminDashboard({
                             const points = radarData.axes
                               .map((axis) => {
                                 const x =
-                                  radarData.center +
-                                  Math.cos(axis.angle) * radarData.radius * ratio
+                                  radarData.center + Math.cos(axis.angle) * radarData.radius * ratio
                                 const y =
-                                  radarData.center +
-                                  Math.sin(axis.angle) * radarData.radius * ratio
+                                  radarData.center + Math.sin(axis.angle) * radarData.radius * ratio
                                 return `${x},${y}`
                               })
                               .join(" ")
@@ -2913,14 +3431,8 @@ export function AdminDashboard({
                               key={`axis-${index}`}
                               x1={radarData.center}
                               y1={radarData.center}
-                              x2={
-                                radarData.center +
-                                Math.cos(axis.angle) * radarData.radius
-                              }
-                              y2={
-                                radarData.center +
-                                Math.sin(axis.angle) * radarData.radius
-                              }
+                              x2={radarData.center + Math.cos(axis.angle) * radarData.radius}
+                              y2={radarData.center + Math.sin(axis.angle) * radarData.radius}
                               stroke="#e2e8f0"
                               strokeWidth="1"
                             />
@@ -2972,7 +3484,8 @@ export function AdminDashboard({
                               {section.sectionTitle}
                             </div>
                             <div className="mt-0.5 whitespace-nowrap text-center text-[10px] leading-tight tracking-tight text-slate-600">
-                              {formatScore(section.sectionScore)}/{formatScore(section.sectionTotal)}점
+                              {formatScore(section.sectionScore)}/
+                              {formatScore(section.sectionTotal)}점
                             </div>
                           </div>
                         ))}
@@ -3077,9 +3590,9 @@ export function AdminDashboard({
                   </div>
 
                   <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                      <div className="text-sm font-semibold text-slate-700">
-                        엑셀러레이팅 마일스톤 제안
-                      </div>
+                    <div className="text-sm font-semibold text-slate-700">
+                      엑셀러레이팅 마일스톤 제안
+                    </div>
                     <div className="mt-3 space-y-4">
                       {COMPANY_ANALYSIS_MILESTONE_FIELDS.map(({ key, label }) => (
                         <label
@@ -3106,9 +3619,9 @@ export function AdminDashboard({
                   </div>
                 </div>
               )}
+            </div>
           </div>
         </div>
-      </div>
       </div>
     </div>
   )

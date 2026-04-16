@@ -19,7 +19,6 @@ import { StatusChip } from "@/redesign/app/components/status-chip";
 import { FileUpload } from "@/redesign/app/components/file-upload";
 import {
   AlertDialog,
-  AlertDialogAction,
   AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
@@ -168,6 +167,7 @@ export function DashboardCalendar({
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState<Date | null>(new Date());
   const [cancelTarget, setCancelTarget] = useState<Application | null>(null);
+  const [cancelingApplication, setCancelingApplication] = useState(false);
   const [selectedApplicationId, setSelectedApplicationId] = useState<string | null>(null);
   const [applicationListTab, setApplicationListTab] = useState<"pending" | "rejected">("pending");
   const [isEditingApplication, setIsEditingApplication] = useState(false);
@@ -1018,8 +1018,9 @@ export function DashboardCalendar({
                       savingApplicationEdit
                       || !isEditingRequestSectionsValid
                     }
+                    loading={savingApplicationEdit}
                   >
-                    {savingApplicationEdit ? "저장 중..." : "저장"}
+                    저장
                   </Button>
                 ) : null}
                 <Button onClick={() => setSelectedApplicationId(null)}>닫기</Button>
@@ -1032,6 +1033,7 @@ export function DashboardCalendar({
       <AlertDialog
         open={Boolean(cancelTarget)}
         onOpenChange={(open) => {
+          if (cancelingApplication) return;
           if (!open) setCancelTarget(null);
         }}
       >
@@ -1043,20 +1045,28 @@ export function DashboardCalendar({
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>취소</AlertDialogCancel>
-            <AlertDialogAction
+            <AlertDialogCancel disabled={cancelingApplication}>취소</AlertDialogCancel>
+            <Button
+              type="button"
+              disabled={cancelingApplication}
+              loading={cancelingApplication}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
               onClick={async () => {
-                if (!cancelTarget) return;
-                await Promise.resolve(onCancelApplication(cancelTarget.id));
-                if (selectedApplication?.id === cancelTarget.id) {
-                  setSelectedApplicationId(null);
+                if (!cancelTarget || cancelingApplication) return;
+                setCancelingApplication(true);
+                try {
+                  await Promise.resolve(onCancelApplication(cancelTarget.id));
+                  if (selectedApplication?.id === cancelTarget.id) {
+                    setSelectedApplicationId(null);
+                  }
+                  setCancelTarget(null);
+                } finally {
+                  setCancelingApplication(false);
                 }
-                setCancelTarget(null);
               }}
             >
               삭제
-            </AlertDialogAction>
+            </Button>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
