@@ -4,6 +4,7 @@ import {
   CheckCircle2,
   Clock3,
   Eye,
+  Loader2,
   Plus,
   Search,
   Target,
@@ -11,12 +12,8 @@ import {
   X,
   XCircle,
 } from "lucide-react"
-import { Agenda, Application, Program } from "@/redesign/app/lib/types"
+import { Agenda, Application, Program, ProgramKpiDefinition } from "@/redesign/app/lib/types"
 import { getCompletedHoursByProgram } from "@/redesign/app/lib/program-metrics"
-import {
-  ProgramKpiDefinition,
-  getProgramKpiPreviewDefinitions,
-} from "@/redesign/app/lib/program-kpi-preview"
 import { getCompanyIdsByProgram } from "@/lib/company-program-membership"
 import { StatusChip } from "@/redesign/app/components/status-chip"
 import { Badge } from "@/redesign/app/components/ui/badge"
@@ -38,6 +35,7 @@ import {
 import { Input } from "@/redesign/app/components/ui/input"
 import { Label } from "@/redesign/app/components/ui/label"
 import { Progress } from "@/redesign/app/components/ui/progress"
+import { Switch } from "@/redesign/app/components/ui/switch"
 import {
   Table,
   TableBody,
@@ -55,7 +53,7 @@ interface AdminProgramsProps {
   agendas: Agenda[]
   companies: { id: string; name: string; programs?: string[]; ownerUid?: string | null }[]
   onAddProgram: (data: Omit<Program, "id">) => void
-  onUpdateProgram: (id: string, data: Partial<Program>) => void
+  onUpdateProgram: (id: string, data: Partial<Program>) => Promise<boolean> | boolean
   onUpdateProgramCompanies: (id: string, companyIds: string[]) => Promise<boolean> | boolean
   viewMode?: "management" | "list"
   onNavigate?: (page: string) => void
@@ -120,6 +118,48 @@ function getProgressRate(completed: number, target: number) {
   return Math.min(100, Math.max(0, ratio))
 }
 
+function buildLegacyProgramKpiDefinitionId(programId: string, label: string, index: number) {
+  const normalizedLabel = label
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9가-힣]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+
+  return normalizedLabel ? `${programId}__${normalizedLabel}` : `${programId}__kpi_${index + 1}`
+}
+
+function createProgramKpiDefinitionId(programId: string) {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return `${programId}__kpi_${crypto.randomUUID()}`
+  }
+
+  return `${programId}__kpi_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`
+}
+
+function sanitizeProgramKpiDrafts(
+  metrics: ProgramKpiDraft[],
+): ProgramKpiDefinition[] {
+  const seenIds = new Set<string>()
+
+  return metrics
+    .map((metric) => {
+      const label = metric.label.trim()
+      const rawId = metric.id.trim()
+      return {
+        id: rawId,
+        label,
+        description: metric.description.trim(),
+        active: metric.active !== false,
+      }
+    })
+    .filter((metric) => metric.label)
+    .filter((metric) => {
+      if (seenIds.has(metric.id)) return false
+      seenIds.add(metric.id)
+      return true
+    })
+}
+
 function getTimeValue(value?: Date | string) {
   if (!value) return 0
   if (value instanceof Date) return value.getTime()
@@ -181,6 +221,7 @@ export function AdminPrograms({
   const [selectedCompanyIds, setSelectedCompanyIds] = useState<string[]>([])
   const [programKpiDrafts, setProgramKpiDrafts] = useState<Record<string, ProgramKpiDraft[]>>({})
   const [page, setPage] = useState(1)
+  const [programDetailSaving, setProgramDetailSaving] = useState(false)
 
   const applicationsByProgram = useMemo(() => {
     const grouped = new Map<string, Application[]>()
@@ -328,23 +369,19 @@ export function AdminPrograms({
   }, [companySearchQuery, editingCompanyIds, editingProgram, sortedCompanies])
 
   useEffect(() => {
-    if (programs.length === 0) return
-
-    setProgramKpiDrafts((prev) => {
-      let changed = false
-      const next = { ...prev }
-
-      programs.forEach((program, index) => {
-        if (next[program.id]) return
-        next[program.id] = getProgramKpiPreviewDefinitions(program, index).map((definition) => ({
+    const next = Object.fromEntries(
+      programs.map((program) => [
+        program.id,
+        (program.kpiDefinitions ?? []).map((definition, index) => ({
           ...definition,
-          active: true,
-        }))
-        changed = true
-      })
-
-      return changed ? next : prev
-    })
+          id:
+            definition.id?.trim() ||
+            buildLegacyProgramKpiDefinitionId(program.id, definition.label ?? "", index),
+          active: definition.active !== false,
+        })),
+      ]),
+    )
+    setProgramKpiDrafts(next)
   }, [programs])
 
   useEffect(() => {
@@ -407,6 +444,11 @@ export function AdminPrograms({
     [programKpiDrafts, selectedProgram],
   )
 
+  const editingProgramKpis = useMemo(
+    () => (editingProgram ? (programKpiDrafts[editingProgram.id] ?? []) : []),
+    [editingProgram, programKpiDrafts],
+  )
+
   function updateProgramKpiDraft(
     programId: string,
     metricId: string,
@@ -424,10 +466,8 @@ export function AdminPrograms({
     setProgramKpiDrafts((prev) => {
       const current = prev[programId] ?? []
       const nextMetric: ProgramKpiDraft = {
-        id: `${programId}__draft_${Date.now()}`,
+        id: createProgramKpiDefinitionId(programId),
         label: "",
-        format: "number",
-        unit: "건",
         description: "",
         active: true,
       }
@@ -442,7 +482,18 @@ export function AdminPrograms({
   function removeProgramKpiDraft(programId: string, metricId: string) {
     setProgramKpiDrafts((prev) => ({
       ...prev,
-      [programId]: (prev[programId] ?? []).filter((metric) => metric.id !== metricId),
+      [programId]: (prev[programId] ?? []).map((metric) =>
+        metric.id === metricId ? { ...metric, active: false } : metric,
+      ),
+    }))
+  }
+
+  function restoreProgramKpiDraft(programId: string, metricId: string) {
+    setProgramKpiDrafts((prev) => ({
+      ...prev,
+      [programId]: (prev[programId] ?? []).map((metric) =>
+        metric.id === metricId ? { ...metric, active: true } : metric,
+      ),
     }))
   }
 
@@ -459,12 +510,20 @@ export function AdminPrograms({
               {metrics.map((metric, index) => (
                 <div
                   key={metric.id}
-                  className="rounded-lg border border-slate-200 bg-white px-3 py-2"
+                  className={
+                    metric.active === false
+                      ? "rounded-lg border border-slate-200 bg-slate-50/80 px-3 py-2"
+                      : "rounded-lg border border-slate-200 bg-white px-3 py-2"
+                  }
                 >
                   <div className="flex items-center gap-2">
                     <Badge
                       variant="outline"
-                      className="h-7 shrink-0 border-slate-200 bg-slate-50 px-2 text-[11px] text-slate-600"
+                      className={
+                        metric.active === false
+                          ? "h-7 shrink-0 border-slate-200 bg-white px-2 text-[11px] text-slate-400"
+                          : "h-7 shrink-0 border-slate-200 bg-slate-50 px-2 text-[11px] text-slate-600"
+                      }
                     >
                       KPI {index + 1}
                     </Badge>
@@ -481,19 +540,33 @@ export function AdminPrograms({
                           })
                         }
                         placeholder="예: 투자 유치 건수"
-                        className="h-8"
+                        className={metric.active === false ? "h-8 border-slate-200 bg-white/70 text-slate-400" : "h-8"}
+                        disabled={programDetailSaving || metric.active === false}
                       />
                     </div>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8 shrink-0 text-slate-400 hover:bg-slate-100 hover:text-rose-600"
-                      onClick={() => removeProgramKpiDraft(programId, metric.id)}
-                      aria-label={`KPI ${index + 1} 삭제`}
-                    >
-                      <X className="h-4 w-4" />
-                    </Button>
+                    <div className="flex shrink-0 items-center gap-2 pl-1">
+                      <span
+                        className={
+                          metric.active === false
+                            ? "w-10 text-right text-xs font-medium text-slate-400"
+                            : "w-10 text-right text-xs font-medium text-slate-600"
+                        }
+                      >
+                        {metric.active === false ? "비활성" : "활성"}
+                      </span>
+                      <Switch
+                        checked={metric.active !== false}
+                        onCheckedChange={(checked) => {
+                          if (checked) {
+                            restoreProgramKpiDraft(programId, metric.id)
+                            return
+                          }
+                          removeProgramKpiDraft(programId, metric.id)
+                        }}
+                        aria-label={`KPI ${index + 1} ${metric.active === false ? "활성화" : "비활성화"}`}
+                        disabled={programDetailSaving}
+                      />
+                    </div>
                   </div>
                 </div>
               ))}
@@ -536,7 +609,7 @@ export function AdminPrograms({
     setIsAddDialogOpen(false)
   }
 
-  function handleSaveProgramDetail() {
+  async function handleSaveProgramDetail() {
     if (!editingProgram) return
 
     const name = detailForm.name.trim()
@@ -548,21 +621,33 @@ export function AdminPrograms({
     const companyLimit = numberFromInput(detailForm.companyLimit)
     const maxApplications = internalTicketLimit + externalTicketLimit
 
-    onUpdateProgram(editingProgram.id, {
-      name,
-      description: detailForm.description.trim() || `${name} 사업`,
-      targetHours,
-      internalTicketLimit,
-      externalTicketLimit,
-      maxApplications,
-      usedApplications: Math.min(editingProgram.usedApplications, maxApplications),
-      companyLimit,
-      periodStart: detailForm.periodStart || undefined,
-      periodEnd: detailForm.periodEnd || undefined,
-    })
+    setProgramDetailSaving(true)
+    try {
+      const ok = await Promise.resolve(
+        onUpdateProgram(editingProgram.id, {
+          name,
+          description: detailForm.description.trim() || `${name} 사업`,
+          targetHours,
+          internalTicketLimit,
+          externalTicketLimit,
+          maxApplications,
+          usedApplications: Math.min(editingProgram.usedApplications, maxApplications),
+          companyLimit,
+          periodStart: detailForm.periodStart || undefined,
+          periodEnd: detailForm.periodEnd || undefined,
+          kpiDefinitions: sanitizeProgramKpiDrafts(programKpiDrafts[editingProgram.id] ?? []),
+        }),
+      )
 
-    setIsEditDialogOpen(false)
-    setEditingProgramId(null)
+      if (ok === false) {
+        return
+      }
+
+      setIsEditDialogOpen(false)
+      setEditingProgramId(null)
+    } finally {
+      setProgramDetailSaving(false)
+    }
   }
 
   function openEditDialog(programId: string) {
@@ -1219,13 +1304,33 @@ export function AdminPrograms({
       <Dialog
         open={isEditDialogOpen}
         onOpenChange={(open) => {
+          if (!open && programDetailSaving) {
+            return
+          }
           setIsEditDialogOpen(open)
           if (!open) {
             setEditingProgramId(null)
           }
         }}
       >
-        <DialogContent className="flex max-h-[92vh] flex-col overflow-hidden p-0 sm:max-w-5xl">
+        <DialogContent
+          className="flex max-h-[92vh] flex-col overflow-hidden p-0 sm:max-w-5xl"
+          onEscapeKeyDown={(event) => {
+            if (programDetailSaving) {
+              event.preventDefault()
+            }
+          }}
+          onPointerDownOutside={(event) => {
+            if (programDetailSaving) {
+              event.preventDefault()
+            }
+          }}
+          onInteractOutside={(event) => {
+            if (programDetailSaving) {
+              event.preventDefault()
+            }
+          }}
+        >
           <DialogHeader className="shrink-0 border-b px-8 py-6 pr-14">
             <DialogTitle>사업 상세보기 / 수정</DialogTitle>
           </DialogHeader>
@@ -1272,46 +1377,50 @@ export function AdminPrograms({
                     <div className="grid grid-cols-1 gap-6 px-6 py-5 md:grid-cols-2">
                       <div className="space-y-2">
                         <Label>사업명</Label>
-                        <Input
-                          value={detailForm.name}
-                          onChange={(event) =>
-                            setDetailForm((prev) => ({ ...prev, name: event.target.value }))
-                          }
-                          required
-                        />
+                      <Input
+                        value={detailForm.name}
+                        onChange={(event) =>
+                          setDetailForm((prev) => ({ ...prev, name: event.target.value }))
+                        }
+                        required
+                        disabled={programDetailSaving}
+                      />
                       </div>
 
                       <div className="space-y-2">
                         <Label>사업 설명</Label>
-                        <Textarea
-                          rows={4}
-                          value={detailForm.description}
-                          onChange={(event) =>
-                            setDetailForm((prev) => ({ ...prev, description: event.target.value }))
-                          }
-                        />
+                      <Textarea
+                        rows={4}
+                        value={detailForm.description}
+                        onChange={(event) =>
+                          setDetailForm((prev) => ({ ...prev, description: event.target.value }))
+                        }
+                        disabled={programDetailSaving}
+                      />
                       </div>
 
                       <div className="space-y-2">
                         <Label>기간 시작</Label>
-                        <Input
-                          type="date"
-                          value={detailForm.periodStart}
-                          onChange={(event) =>
-                            setDetailForm((prev) => ({ ...prev, periodStart: event.target.value }))
-                          }
-                        />
+                      <Input
+                        type="date"
+                        value={detailForm.periodStart}
+                        onChange={(event) =>
+                          setDetailForm((prev) => ({ ...prev, periodStart: event.target.value }))
+                        }
+                        disabled={programDetailSaving}
+                      />
                       </div>
 
                       <div className="space-y-2">
                         <Label>기간 종료</Label>
-                        <Input
-                          type="date"
-                          value={detailForm.periodEnd}
-                          onChange={(event) =>
-                            setDetailForm((prev) => ({ ...prev, periodEnd: event.target.value }))
-                          }
-                        />
+                      <Input
+                        type="date"
+                        value={detailForm.periodEnd}
+                        onChange={(event) =>
+                          setDetailForm((prev) => ({ ...prev, periodEnd: event.target.value }))
+                        }
+                        disabled={programDetailSaving}
+                      />
                       </div>
                     </div>
                   </section>
@@ -1335,6 +1444,7 @@ export function AdminPrograms({
                               internalTicketLimit: event.target.value.replace(/[^\d]/g, ""),
                             }))
                           }
+                          disabled={programDetailSaving}
                         />
                       </div>
 
@@ -1349,6 +1459,7 @@ export function AdminPrograms({
                               externalTicketLimit: event.target.value.replace(/[^\d]/g, ""),
                             }))
                           }
+                          disabled={programDetailSaving}
                         />
                       </div>
 
@@ -1363,6 +1474,7 @@ export function AdminPrograms({
                               companyLimit: event.target.value.replace(/[^\d]/g, ""),
                             }))
                           }
+                          disabled={programDetailSaving}
                         />
                       </div>
 
@@ -1377,6 +1489,7 @@ export function AdminPrograms({
                               targetHours: event.target.value.replace(/[^\d]/g, ""),
                             }))
                           }
+                          disabled={programDetailSaving}
                         />
                       </div>
                     </div>
@@ -1390,7 +1503,7 @@ export function AdminPrograms({
                           variant="outline"
                           className="border-slate-200 bg-white text-slate-600"
                         >
-                          {(programKpiDrafts[editingProgram.id] ?? []).length}개
+                          {editingProgramKpis.length}개
                         </Badge>
                       </div>
                       <Button
@@ -1398,16 +1511,14 @@ export function AdminPrograms({
                         variant="outline"
                         size="sm"
                         onClick={() => addProgramKpiDraft(editingProgram.id)}
+                        disabled={programDetailSaving}
                       >
                         <Plus className="mr-2 h-4 w-4" />
                         추가
                       </Button>
                     </div>
                     <div className="px-6 py-5">
-                      {renderProgramKpiDrafts(
-                        editingProgram.id,
-                        programKpiDrafts[editingProgram.id] ?? [],
-                      )}
+                      {renderProgramKpiDrafts(editingProgram.id, editingProgramKpis)}
                     </div>
                   </section>
 
@@ -1431,6 +1542,7 @@ export function AdminPrograms({
                           value={companySearch}
                           onChange={(event) => setCompanySearch(event.target.value)}
                           placeholder="회사명을 입력하세요"
+                          disabled={programDetailSaving}
                         />
                       </div>
 
@@ -1476,6 +1588,7 @@ export function AdminPrograms({
                                         })
                                       }}
                                       className="rounded-full border-slate-300 data-[state=checked]:border-slate-700 data-[state=checked]:bg-slate-700 focus-visible:ring-slate-200"
+                                      disabled={programDetailSaving || companyUpdateSaving}
                                     />
                                     <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-700">
                                       {company.name}
@@ -1494,6 +1607,7 @@ export function AdminPrograms({
                             variant="outline"
                             className="h-10 min-w-12 rounded-full border-slate-200 bg-white px-4 text-slate-700 hover:bg-slate-50"
                             disabled={
+                              programDetailSaving ||
                               companyUpdateSaving ||
                               selectedAvailableIds.length === 0 ||
                               (editingCompanyLimit > 0 &&
@@ -1508,7 +1622,7 @@ export function AdminPrograms({
                             size="sm"
                             variant="outline"
                             className="h-10 min-w-12 rounded-full border-slate-200 bg-white px-4 text-slate-700 hover:bg-slate-50"
-                            disabled={companyUpdateSaving || selectedCompanyIds.length === 0}
+                            disabled={programDetailSaving || companyUpdateSaving || selectedCompanyIds.length === 0}
                             onClick={removeSelectedCompanies}
                           >
                             ←
@@ -1556,13 +1670,14 @@ export function AdminPrograms({
                                         })
                                       }}
                                       className="rounded-full border-slate-300 data-[state=checked]:border-slate-700 data-[state=checked]:bg-slate-700 focus-visible:ring-slate-200"
+                                      disabled={programDetailSaving || companyUpdateSaving}
                                     />
                                     <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-700">
                                       {company.name}
                                     </span>
                                     <button
                                       type="button"
-                                      disabled={companyUpdateSaving}
+                                      disabled={programDetailSaving || companyUpdateSaving}
                                       onClick={() => void removeCompanyFromProgram(company.id)}
                                       className="rounded-full p-1 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
                                       aria-label={`${company.name} 제거`}
@@ -1582,20 +1697,33 @@ export function AdminPrograms({
               </div>
 
               <div className="shrink-0 border-t px-8 py-4">
-                <div className="flex justify-end items-center gap-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => {
-                      setIsEditDialogOpen(false)
-                      setEditingProgramId(null)
-                    }}
-                  >
-                    닫기
-                  </Button>
-                  <Button type="button" onClick={handleSaveProgramDetail}>
-                    저장
-                  </Button>
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-h-[20px] text-sm text-slate-500">
+                    {programDetailSaving ? "저장 중입니다. 완료될 때까지 창이 유지됩니다." : "\u00A0"}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => {
+                        setIsEditDialogOpen(false)
+                        setEditingProgramId(null)
+                      }}
+                      disabled={programDetailSaving}
+                    >
+                      닫기
+                    </Button>
+                    <Button
+                      type="button"
+                      onClick={() => void handleSaveProgramDetail()}
+                      disabled={programDetailSaving}
+                    >
+                      {programDetailSaving ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : null}
+                      저장
+                    </Button>
+                  </div>
                 </div>
               </div>
             </>
