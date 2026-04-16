@@ -354,6 +354,11 @@ export function AdminApplicationDetailModal({
     return value;
   };
 
+  const formatListValue = (value?: string[] | null) => {
+    if (!Array.isArray(value) || value.length === 0) return "-";
+    return value.filter(Boolean).join(", ") || "-";
+  };
+
   const formatScore = (value: number) => {
     const rounded = Math.round(value * 10) / 10;
     return Number.isInteger(rounded) ? `${rounded}` : rounded.toFixed(1);
@@ -651,17 +656,28 @@ export function AdminApplicationDetailModal({
 
               <div className="space-y-2">
                 <Label>안건</Label>
-                <div className="p-3 bg-accent rounded-lg">
+                <div className="rounded-lg border border-slate-200 p-3">
                   <p className="text-sm">{application.agenda}</p>
                 </div>
               </div>
 
               <div className="space-y-2">
                 <Label>요청 내용</Label>
-                <div className="p-3 bg-accent rounded-lg">
+                <div className="rounded-lg border border-slate-200 p-3">
                   <p className="text-sm whitespace-pre-wrap">{application.requestContent}</p>
                 </div>
               </div>
+
+              {(application.status === "rejected" || Boolean(application.rejectionReason?.trim())) && (
+                <div className="space-y-2">
+                  <Label>거절 사유</Label>
+                  <div className="rounded-lg border border-rose-200 bg-rose-50 p-3">
+                    <p className="text-sm whitespace-pre-wrap text-rose-900">
+                      {application.rejectionReason?.trim() || "거절 사유가 등록되지 않았습니다."}
+                    </p>
+                  </div>
+                </div>
+              )}
 
               {attachmentItems.length > 0 && (
                 <div className="space-y-2">
@@ -670,7 +686,7 @@ export function AdminApplicationDetailModal({
                     {attachmentItems.map((item) => (
                       <div
                         key={item.id}
-                        className="flex items-center gap-2 p-2 bg-accent rounded-lg"
+                        className="flex items-center gap-2 rounded-lg border border-slate-200 p-2"
                       >
                         <FileText className="w-4 h-4 text-muted-foreground" />
                         {item.url ? (
@@ -695,7 +711,7 @@ export function AdminApplicationDetailModal({
               {application.projectName && (
                 <div className="space-y-2">
                   <Label>프로젝트명</Label>
-                  <div className="p-3 bg-accent rounded-lg">
+                  <div className="rounded-lg border border-slate-200 p-3">
                     <p className="text-sm">{application.projectName}</p>
                   </div>
                 </div>
@@ -786,6 +802,12 @@ export function AdminApplicationDetailModal({
                     <div className="space-y-4 text-sm text-slate-700">
                       <div className="grid gap-3 sm:grid-cols-2">
                         <div>
+                          <div className="text-xs text-slate-400">회사 유형</div>
+                          <div className="font-semibold">
+                            {formatValue(companyInfo.basic?.companyType)}
+                          </div>
+                        </div>
+                        <div>
                           <div className="text-xs text-slate-400">회사명</div>
                           <div className="font-semibold">
                             {formatValue(companyInfo.basic?.companyInfo)}
@@ -807,6 +829,24 @@ export function AdminApplicationDetailModal({
                           <div className="text-xs text-slate-400">대표 전화번호</div>
                           <div className="font-semibold">
                             {formatValue(companyInfo.basic?.ceo?.phone)}
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-xs text-slate-400">대표자 나이</div>
+                          <div className="font-semibold">
+                            {formatValue(companyInfo.basic?.ceo?.age)}
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-xs text-slate-400">대표자 성별</div>
+                          <div className="font-semibold">
+                            {formatValue(companyInfo.basic?.ceo?.gender)}
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-xs text-slate-400">대표자 국적</div>
+                          <div className="font-semibold">
+                            {formatValue(companyInfo.basic?.ceo?.nationality)}
                           </div>
                         </div>
                         <div>
@@ -833,9 +873,27 @@ export function AdminApplicationDetailModal({
                             {formatValue(companyInfo.basic?.primaryIndustry)}
                           </div>
                         </div>
+                        <div>
+                          <div className="text-xs text-slate-400">웹사이트</div>
+                          <div className="font-semibold break-all">
+                            {formatValue(companyInfo.basic?.website)}
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-xs text-slate-400">이전 창업 횟수</div>
+                          <div className="font-semibold">
+                            {formatValue(companyInfo.basic?.founderSerialNumber)}
+                          </div>
+                        </div>
                       </div>
 
                       <div className="grid gap-3 sm:grid-cols-2">
+                        <div>
+                          <div className="text-xs text-slate-400">대표 솔루션</div>
+                          <div className="font-semibold">
+                            {formatValue(companyInfo.basic?.representativeSolution)}
+                          </div>
+                        </div>
                         <div>
                           <div className="text-xs text-slate-400">본점 소재지</div>
                           <div className="font-semibold">
@@ -846,6 +904,49 @@ export function AdminApplicationDetailModal({
                           <div className="text-xs text-slate-400">지점/연구소 소재지</div>
                           <div className="font-semibold">
                             {formatValue(companyInfo.locations?.branchOrLab)}
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-xs text-slate-400">진출/희망 국가</div>
+                          <div className="font-semibold">
+                            {formatListValue(companyInfo.globalExpansion?.targetCountries)}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <div>
+                          <div className="text-xs text-slate-400">공동대표 여부</div>
+                          <div className="font-semibold">
+                            {companyInfo.basic?.ceo?.coRepresentative
+                              ? companyInfo.basic.ceo.coRepresentative.enabled
+                                ? "예"
+                                : "아니요"
+                              : "-"}
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-xs text-slate-400">공동대표 성명</div>
+                          <div className="font-semibold">
+                            {formatValue(companyInfo.basic?.ceo?.coRepresentative?.name)}
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-xs text-slate-400">공동대표 생년월일</div>
+                          <div className="font-semibold">
+                            {formatValue(companyInfo.basic?.ceo?.coRepresentative?.birthDate)}
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-xs text-slate-400">공동대표 성별</div>
+                          <div className="font-semibold">
+                            {formatValue(companyInfo.basic?.ceo?.coRepresentative?.gender)}
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-xs text-slate-400">공동대표 직책</div>
+                          <div className="font-semibold">
+                            {formatValue(companyInfo.basic?.ceo?.coRepresentative?.title)}
                           </div>
                         </div>
                       </div>
@@ -896,9 +997,57 @@ export function AdminApplicationDetailModal({
                             {formatValue(companyInfo.certifications?.tipsLipsHistory)}
                           </div>
                         </div>
+                        <div>
+                          <div className="text-xs text-slate-400">수출바우처 보유</div>
+                          <div className="font-semibold">
+                            {formatValue(companyInfo.vouchers?.exportVoucherHeld)}
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-xs text-slate-400">수출바우처 금액</div>
+                          <div className="font-semibold">
+                            {formatValue(companyInfo.vouchers?.exportVoucherAmount)}
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-xs text-slate-400">수출바우처 소진율</div>
+                          <div className="font-semibold">
+                            {formatValue(companyInfo.vouchers?.exportVoucherUsageRate)}
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-xs text-slate-400">혁신바우처 보유</div>
+                          <div className="font-semibold">
+                            {formatValue(companyInfo.vouchers?.innovationVoucherHeld)}
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-xs text-slate-400">혁신바우처 금액</div>
+                          <div className="font-semibold">
+                            {formatValue(companyInfo.vouchers?.innovationVoucherAmount)}
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-xs text-slate-400">혁신바우처 소진율</div>
+                          <div className="font-semibold">
+                            {formatValue(companyInfo.vouchers?.innovationVoucherUsageRate)}
+                          </div>
+                        </div>
                       </div>
 
                       <div className="grid gap-3 sm:grid-cols-2">
+                        <div>
+                          <div className="text-xs text-slate-400">SDGs 우선순위 1</div>
+                          <div className="font-semibold">
+                            {formatValue(companyInfo.impact?.sdgPriority1)}
+                          </div>
+                        </div>
+                        <div>
+                          <div className="text-xs text-slate-400">SDGs 우선순위 2</div>
+                          <div className="font-semibold">
+                            {formatValue(companyInfo.impact?.sdgPriority2)}
+                          </div>
+                        </div>
                         <div>
                           <div className="text-xs text-slate-400">2026년 희망 투자액</div>
                           <div className="font-semibold">
@@ -909,6 +1058,12 @@ export function AdminApplicationDetailModal({
                           <div className="text-xs text-slate-400">투자전 희망 기업가치</div>
                           <div className="font-semibold">
                             {formatValue(companyInfo.fundingPlan?.preValue)}
+                          </div>
+                        </div>
+                        <div className="sm:col-span-2">
+                          <div className="text-xs text-slate-400">MYSC 기대사항</div>
+                          <div className="font-semibold whitespace-pre-wrap">
+                            {formatValue(companyInfo.impact?.myscExpectation)}
                           </div>
                         </div>
                       </div>
@@ -1368,8 +1523,9 @@ export function AdminApplicationDetailModal({
               data-testid="application-action-confirm"
               onClick={handleConfirmAction}
               disabled={isActionPending || (actionType === "reject" && rejectReason.trim().length === 0)}
+              loading={isActionPending}
             >
-              {isActionPending ? "처리 중..." : "확인"}
+              확인
             </Button>
           </div>
         </DialogContent>

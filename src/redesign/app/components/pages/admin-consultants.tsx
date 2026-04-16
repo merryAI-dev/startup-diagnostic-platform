@@ -114,9 +114,8 @@ export function AdminConsultants({
     const total = consultants.length
     const active = consultants.filter((item) => item.status === "active").length
     const withLink = consultants.filter((item) => item.fixedMeetingLink).length
-    const withPhone = consultants.filter((item) => item.phone?.trim()).length
     const mapped = consultants.filter((item) => (item.agendaIds ?? []).length > 0).length
-    return { total, active, withLink, withPhone, mapped }
+    return { total, active, withLink, mapped }
   }, [consultants])
 
   const filteredConsultants = useMemo(() => {
@@ -312,12 +311,6 @@ export function AdminConsultants({
             </Card>
             <Card className="w-[160px] sm:w-[176px]">
               <CardContent className="p-3">
-                <div className="text-xs text-muted-foreground">전화번호 등록</div>
-                <div className="mt-1 text-xl font-bold">{consultantStats.withPhone}</div>
-              </CardContent>
-            </Card>
-            <Card className="w-[160px] sm:w-[176px]">
-              <CardContent className="p-3">
                 <div className="text-xs text-muted-foreground">아젠다 매칭 완료</div>
                 <div className="mt-1 text-xl font-bold text-blue-600">{consultantStats.mapped}</div>
               </CardContent>
@@ -417,6 +410,7 @@ export function AdminConsultants({
                                 size="icon"
                                 className="h-9 w-9 shrink-0"
                                 disabled={isSavingMeetingLink}
+                                loading={isSavingMeetingLink}
                                 onClick={() => {
                                   if (isEditingMeetingLink) {
                                     void finishMeetingLinkEdit(consultant)
@@ -516,7 +510,7 @@ export function AdminConsultants({
                                     </DialogDescription>
                                   </DialogHeader>
 
-                                  <div className="space-y-2 max-h-[60vh] overflow-y-auto pr-1">
+                                  <div className="max-h-[320px] space-y-2 overflow-y-auto pr-1">
                                     {agendas.length === 0 ? (
                                       <p className="text-sm text-muted-foreground">
                                         등록된 아젠다가 없습니다. 상단에서 먼저 아젠다를

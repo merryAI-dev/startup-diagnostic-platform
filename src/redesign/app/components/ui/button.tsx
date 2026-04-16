@@ -2,10 +2,11 @@ import * as React from "react";
 import { Slot } from "@radix-ui/react-slot";
 import { cva, type VariantProps } from "class-variance-authority";
 
+import { Spinner } from "@/redesign/app/components/ui/spinner";
 import { cn } from "@/redesign/app/components/ui/utils";
 
 const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive",
+  "relative inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive",
   {
     variants: {
       variant: {
@@ -39,17 +40,39 @@ const Button = React.forwardRef<
   React.ComponentProps<"button"> &
     VariantProps<typeof buttonVariants> & {
       asChild?: boolean;
+      loading?: boolean;
+      loadingText?: React.ReactNode;
+      spinnerClassName?: string;
     }
->(({ className, variant, size, asChild = false, ...props }, ref) => {
+>(({ className, variant, size, asChild = false, loading = false, loadingText, spinnerClassName, children, disabled, ...props }, ref) => {
   const Comp = asChild ? Slot : "button";
+  const content = loading
+    ? loadingText ? (
+        <>
+          <Spinner className={spinnerClassName} />
+          <span>{loadingText}</span>
+        </>
+      ) : (
+        <>
+          <span className="opacity-0">{children}</span>
+          <span className="absolute inset-0 flex items-center justify-center">
+            <Spinner className={spinnerClassName} />
+            <span className="sr-only">로딩 중</span>
+          </span>
+        </>
+      )
+    : children;
 
   return (
     <Comp
       ref={ref}
       data-slot="button"
       className={cn(buttonVariants({ variant, size, className }))}
+      disabled={disabled || loading}
       {...props}
-    />
+    >
+      {content}
+    </Comp>
   );
 });
 

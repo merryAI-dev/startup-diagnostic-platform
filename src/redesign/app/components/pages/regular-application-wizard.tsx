@@ -422,7 +422,7 @@ export function RegularApplicationWizard({
 
   if (isSheetLayout) {
     return (
-      <div className="animate-in fade-in slide-in-from-right-4 flex h-full flex-col duration-300">
+      <div className="animate-in fade-in slide-in-from-right-4 flex min-h-0 flex-1 flex-col duration-300">
         <AlertDialog open={ticketAlertOpen} onOpenChange={setTicketAlertOpen}>
           <AlertDialogContent>
             <AlertDialogHeader>
@@ -447,7 +447,7 @@ export function RegularApplicationWizard({
           <p className="mt-1 text-sm text-slate-500">{activeOfficeHour.title}</p>
         </div>
 
-        <div className="flex-1 overflow-y-auto px-6 py-5">
+        <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
           {showCompactReview ? (
             <div className="space-y-4">
               <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
@@ -713,8 +713,9 @@ export function RegularApplicationWizard({
                   className="flex-1"
                   onClick={handleSubmit}
                   disabled={!canSubmitCompact || isSubmitting}
+                  loading={isSubmitting}
                 >
-                  {isSubmitting ? "제출 중..." : "제출하기"}
+                  제출하기
                 </Button>
               </>
             ) : (
@@ -815,14 +816,15 @@ export function RegularApplicationWizard({
 
           {/* Step 2: Date and Time */}
           {currentStep === 2 && (
-            <div className="space-y-6">
+            <div className="space-y-6 min-h-0">
               <div>
                 <h3 className="mb-4">
                   {hasFixedDateSelection ? "선택한 날짜의 시간을 선택하세요" : "날짜와 시간을 선택하세요"}
                 </h3>
-                <div className="flex gap-8">
-                  {!hasFixedDateSelection && (
-                    <div>
+                <div className="max-h-[min(720px,calc(100dvh-18rem))] overflow-y-auto pr-1">
+                  <div className="grid items-start gap-6 lg:grid-cols-[minmax(320px,360px)_minmax(0,1fr)]">
+                    {!hasFixedDateSelection && (
+                      <div className="min-w-0">
                       <Label className="mb-3 block">신청 가능한 날짜</Label>
                       <Calendar
                         mode="single"
@@ -839,65 +841,64 @@ export function RegularApplicationWizard({
                         }}
                         className="rounded-md border"
                       />
-                    </div>
-                  )}
+                      </div>
+                    )}
 
-                  <div className="flex-1">
-                    {hasFixedDateSelection && selectedDate && (
-                      <div className="mb-4 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
-                        <Label className="mb-1 block">선택한 날짜</Label>
-                        <p className="text-sm text-slate-700">
-                          {format(selectedDate, "yyyy년 M월 d일 (E)", { locale: ko })}
-                        </p>
-                      </div>
-                    )}
-                    <Label className="mb-3 block">시간 선택</Label>
-                    {isScheduleDataLoading ? (
-                      <div className="flex min-h-[320px] items-center justify-center rounded-md border bg-slate-50">
-                        <div className="flex flex-col items-center gap-3 text-center text-sm text-slate-500">
-                          <div className="h-8 w-8 animate-spin rounded-full border-2 border-slate-200 border-t-slate-700" />
-                          <p>최신 신청 현황과 가능 시간을 불러오는 중입니다.</p>
+                    <div className="min-w-0">
+                      {hasFixedDateSelection && selectedDate && (
+                        <div className="mb-4 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
+                          <Label className="mb-1 block">선택한 날짜</Label>
+                          <p className="text-sm text-slate-700">
+                            {format(selectedDate, "yyyy년 M월 d일 (E)", { locale: ko })}
+                          </p>
                         </div>
-                      </div>
-                    ) : selectedDate ? (
-                    <div className="flex-1">
-                      <div className="grid grid-cols-2 gap-2">
-                        {timeSlots.map((slot) => (
-                          <button
-                            key={slot.time}
-                            data-testid={`regular-time-slot-${slot.time.replace(":", "-")}`}
-                            disabled={!slot.available}
-                            onClick={() => {
-                              setSelectedTime(slot.time);
-                            }}
-                            className={cn(
-                              "p-3 rounded-lg border text-sm transition-colors text-left",
-                              !slot.available &&
-                                "opacity-50 cursor-not-allowed bg-gray-50",
-                              slot.available &&
-                                selectedTime === slot.time &&
-                                "border-primary bg-primary text-primary-foreground",
-                              slot.available &&
-                                selectedTime !== slot.time &&
-                                "hover:border-gray-400"
-                            )}
-                            title={slot.reason}
-                          >
-                            {slot.time}
-                            {!slot.available && (
-                              <div className="text-xs text-muted-foreground mt-1">
-                                {slot.reason}
-                              </div>
-                            )}
-                          </button>
-                        ))}
-                      </div>
+                      )}
+                      <Label className="mb-3 block">시간 선택</Label>
+                      {isScheduleDataLoading ? (
+                        <div className="flex min-h-[320px] items-center justify-center rounded-md border bg-slate-50">
+                          <div className="flex flex-col items-center gap-3 text-center text-sm text-slate-500">
+                            <div className="h-8 w-8 animate-spin rounded-full border-2 border-slate-200 border-t-slate-700" />
+                            <p>최신 신청 현황과 가능 시간을 불러오는 중입니다.</p>
+                          </div>
+                        </div>
+                      ) : selectedDate ? (
+                        <div className="grid grid-cols-2 gap-2">
+                          {timeSlots.map((slot) => (
+                            <button
+                              key={slot.time}
+                              data-testid={`regular-time-slot-${slot.time.replace(":", "-")}`}
+                              disabled={!slot.available}
+                              onClick={() => {
+                                setSelectedTime(slot.time);
+                              }}
+                              className={cn(
+                                "rounded-lg border p-3 text-left text-sm transition-colors",
+                                !slot.available &&
+                                  "cursor-not-allowed bg-gray-50 opacity-50",
+                                slot.available &&
+                                  selectedTime === slot.time &&
+                                  "border-primary bg-primary text-primary-foreground",
+                                slot.available &&
+                                  selectedTime !== slot.time &&
+                                  "hover:border-gray-400"
+                              )}
+                              title={slot.reason}
+                            >
+                              {slot.time}
+                              {!slot.available && (
+                                <div className="mt-1 text-xs text-muted-foreground">
+                                  {slot.reason}
+                                </div>
+                              )}
+                            </button>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="flex min-h-[320px] items-center justify-center rounded-md border border-dashed bg-slate-50/80 px-4 text-center text-sm text-slate-500">
+                          신청 가능한 날짜를 먼저 선택해주세요.
+                        </div>
+                      )}
                     </div>
-                    ) : (
-                      <div className="flex min-h-[320px] items-center justify-center rounded-md border border-dashed bg-slate-50/80 px-4 text-center text-sm text-slate-500">
-                        신청 가능한 날짜를 먼저 선택해주세요.
-                      </div>
-                    )}
                   </div>
                 </div>
               </div>
@@ -1118,8 +1119,9 @@ export function RegularApplicationWizard({
                 data-testid="regular-wizard-submit"
                 onClick={handleSubmit}
                 disabled={isSubmitting}
+                loading={isSubmitting}
               >
-                {isSubmitting ? "제출 중..." : "신청 제출"}
+                신청 제출
               </Button>
             )}
           </div>

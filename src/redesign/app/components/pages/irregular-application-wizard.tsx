@@ -595,8 +595,8 @@ export function IrregularApplicationWizard({
                 다음
               </Button>
             ) : (
-              <Button onClick={handleSubmit} disabled={isSubmitting}>
-                {isSubmitting ? "제출 중..." : "신청 제출"}
+              <Button onClick={handleSubmit} disabled={isSubmitting} loading={isSubmitting}>
+                신청 제출
               </Button>
             )}
           </div>
