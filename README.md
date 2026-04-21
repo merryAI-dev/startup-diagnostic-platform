@@ -122,8 +122,6 @@ QA 체크 포인트
 
 **컨설턴트 가이드**
 <img width="8081" height="1912" alt="mermaid-diagram (4)" src="https://github.com/user-attachments/assets/1570c906-e5cb-4fef-9b2d-01d6b3e79410" />
-<img width="3961" height="2738" alt="mermaid-diagram (5)" src="https://github.com/user-attachments/assets/1ecce35d-eba2-473c-b057-6550306f0148" />
-
 **1) 담당 사업 현황(대시보드)**
 1. 전체 신청 현황과 상태별 수치를 확인합니다.
 2. 우선 처리 카드에서 **검토 필요 신청**으로 이동할 수 있습니다.
@@ -159,7 +157,9 @@ QA 체크 포인트
 ---
 
 **어드민 가이드**
-![Uploading mermaid-diagram (4).png…]()
+
+<img width="8081" height="1912" alt="mermaid-diagram (4)" src="https://github.com/user-attachments/assets/68c01ca6-3a4a-4a0f-a0bc-ed6adbd962fb" />
+
 
 **1) 관리자 대시보드**
 1. 전체 신청/검토/확정/완료 수치 확인
