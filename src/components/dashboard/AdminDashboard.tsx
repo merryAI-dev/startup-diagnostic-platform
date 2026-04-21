@@ -917,7 +917,15 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
           { label: "대표자", value: formatValue(companyInfo.basic?.ceo?.name) },
           { label: "대표 이메일", value: formatValue(companyInfo.basic?.ceo?.email) },
           { label: "대표 전화번호", value: formatValue(companyInfo.basic?.ceo?.phone) },
-          { label: "대표 나이", value: formatValue(companyInfo.basic?.ceo?.age) },
+          { label: "대표 생년월일", value: formatValue(companyInfo.basic?.ceo?.birthDate) },
+          ...(companyInfo.basic?.ceo?.age != null
+            ? [
+                {
+                  label: "대표 나이(기존 입력값)",
+                  value: formatValue(companyInfo.basic?.ceo?.age),
+                },
+              ]
+            : []),
           { label: "대표 성별", value: formatValue(companyInfo.basic?.ceo?.gender) },
           { label: "대표 국적", value: formatValue(companyInfo.basic?.ceo?.nationality) },
         ],
@@ -950,7 +958,7 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
         : []),
       {
         title: "소재지 및 인력",
-        description: "사업장 위치와 현재 인력 현황",
+        description: "사업장 위치와 현재 인력 현황 (정규직/계약직은 4대보험 가입자 수 기준)",
         fields: [
           {
             label: "본점 소재지",
@@ -2009,17 +2017,22 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
         "기업정보",
         `${selectedCompanyName} 기본 정보 · ${generatedAt}`,
       )
-      rowIndex = writeSectionTitle(infoSheet, rowIndex, "기본 정보")
-      rowIndex = writeKeyValueRows(infoSheet, rowIndex, [
+      const basicInfoRows: [string, string][] = [
         ["회사명", toDisplay(companyInfo?.basic?.companyInfo)],
         ["대표자", toDisplay(companyInfo?.basic?.ceo?.name)],
         ["대표 이메일", toDisplay(companyInfo?.basic?.ceo?.email)],
         ["대표 전화번호", toDisplay(companyInfo?.basic?.ceo?.phone)],
+        ["대표 생년월일", toDisplay(companyInfo?.basic?.ceo?.birthDate)],
+        ...(companyInfo?.basic?.ceo?.age != null
+          ? [["대표 나이(기존 입력값)", toDisplay(companyInfo?.basic?.ceo?.age)] as [string, string]]
+          : []),
         ["법인 설립일", toDisplay(companyInfo?.basic?.foundedAt)],
         ["사업자등록번호", toDisplay(companyInfo?.basic?.businessNumber)],
         ["주업태", toDisplay(companyInfo?.basic?.primaryBusiness)],
         ["주업종", toDisplay(companyInfo?.basic?.primaryIndustry)],
-      ])
+      ]
+      rowIndex = writeSectionTitle(infoSheet, rowIndex, "기본 정보")
+      rowIndex = writeKeyValueRows(infoSheet, rowIndex, basicInfoRows)
       rowIndex += 1
       rowIndex = writeSectionTitle(infoSheet, rowIndex, "소재지 및 인력")
       rowIndex = writeKeyValueRows(infoSheet, rowIndex, [

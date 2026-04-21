@@ -446,7 +446,7 @@ export function CompanyInfoEditorPanel({
       ],
       representative: [
         "ceoName",
-        "ceoAge",
+        "ceoBirthDate",
         "ceoEmail",
         "ceoPhone",
         "ceoGender",
@@ -1097,6 +1097,22 @@ export function CompanyInfoEditorPanel({
                     disabled={readOnly}
                     onChange={(e) => setForm((prev) => ({ ...prev, ceoName: e.target.value }))}
                     onBlur={() => touch("ceoName")}
+                  />
+                </label>
+                <label className="text-xs text-slate-500 md:col-span-2">
+                  대표자 생년월일
+                  <input
+                    type="date"
+                    className={inputClass(invalid("ceoBirthDate"))}
+                    value={form.ceoBirthDate}
+                    disabled={readOnly}
+                    onChange={(e) =>
+                      setForm((prev) => ({
+                        ...prev,
+                        ceoBirthDate: e.target.value,
+                      }))
+                    }
+                    onBlur={() => touch("ceoBirthDate")}
                   />
                 </label>
                 <label className="text-xs text-slate-500 md:col-span-1">

@@ -832,11 +832,19 @@ export function AdminApplicationDetailModal({
                           </div>
                         </div>
                         <div>
-                          <div className="text-xs text-slate-400">대표자 나이</div>
+                          <div className="text-xs text-slate-400">대표자 생년월일</div>
                           <div className="font-semibold">
-                            {formatValue(companyInfo.basic?.ceo?.age)}
+                            {formatValue(companyInfo.basic?.ceo?.birthDate)}
                           </div>
                         </div>
+                        {companyInfo.basic?.ceo?.age != null ? (
+                          <div>
+                            <div className="text-xs text-slate-400">대표자 나이(기존 입력값)</div>
+                            <div className="font-semibold">
+                              {formatValue(companyInfo.basic?.ceo?.age)}
+                            </div>
+                          </div>
+                        ) : null}
                         <div>
                           <div className="text-xs text-slate-400">대표자 성별</div>
                           <div className="font-semibold">

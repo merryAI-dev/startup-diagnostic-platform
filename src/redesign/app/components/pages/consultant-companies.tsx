@@ -46,6 +46,7 @@ type ManualCompanyDraft = {
   ceoName: string
   ceoEmail: string
   ceoPhone: string
+  ceoBirthDate: string
   ceoAge: string
   ceoGender: string
   ceoNationality: string
@@ -134,6 +135,7 @@ const emptyDraft: ManualCompanyDraft = {
   ceoName: "",
   ceoEmail: "",
   ceoPhone: "",
+  ceoBirthDate: "",
   ceoAge: "",
   ceoGender: "",
   ceoNationality: "",
@@ -282,6 +284,7 @@ const companyInfoFields: Array<{
   { key: "ceoName", label: "대표자 성명" },
   { key: "ceoEmail", label: "대표자 이메일" },
   { key: "ceoPhone", label: "대표자 전화번호" },
+  { key: "ceoBirthDate", label: "대표자 생년월일", type: "date" },
   { key: "ceoAge", label: "대표자 나이" },
   { key: "ceoGender", label: "대표자 성별", type: "select", options: GENDER_OPTIONS },
   { key: "ceoNationality", label: "대표자 국적" },
@@ -379,6 +382,7 @@ const companyInfoSections: Array<{
     description: "대표자와 공동대표 정보를 입력합니다.",
     fieldKeys: [
       "ceoName",
+      "ceoBirthDate",
       "ceoAge",
       "ceoEmail",
       "ceoPhone",
@@ -460,6 +464,7 @@ function buildCompanyInfoRecord(draft: ManualCompanyDraft): CompanyInfoRecord {
         name: draft.ceoName.trim(),
         email: draft.ceoEmail.trim(),
         phone: draft.ceoPhone.trim(),
+        birthDate: draft.ceoBirthDate.trim(),
         age: toNumber(draft.ceoAge),
         gender: draft.ceoGender.trim(),
         nationality: draft.ceoNationality.trim(),
@@ -549,6 +554,7 @@ function draftToCompanyInfoForm(draft: ManualCompanyDraft): CompanyInfoForm {
     ceoName: draft.ceoName,
     ceoEmail: draft.ceoEmail,
     ceoPhone: draft.ceoPhone,
+    ceoBirthDate: draft.ceoBirthDate,
     ceoAge: draft.ceoAge,
     ceoGender: draft.ceoGender,
     ceoNationality: draft.ceoNationality,
@@ -599,6 +605,7 @@ function applyCompanyInfoFormToDraft(
     ceoName: form.ceoName,
     ceoEmail: form.ceoEmail,
     ceoPhone: form.ceoPhone,
+    ceoBirthDate: form.ceoBirthDate,
     ceoAge: form.ceoAge,
     ceoGender: form.ceoGender,
     ceoNationality: form.ceoNationality,
@@ -668,6 +675,7 @@ function buildDraftFromCompanyInfo(
     ceoName: info.basic?.ceo?.name || "",
     ceoEmail: info.basic?.ceo?.email || "",
     ceoPhone: info.basic?.ceo?.phone || "",
+    ceoBirthDate: info.basic?.ceo?.birthDate || "",
     ceoAge: numberToString(info.basic?.ceo?.age),
     ceoGender: info.basic?.ceo?.gender || "",
     ceoNationality: info.basic?.ceo?.nationality || "",
@@ -1665,7 +1673,10 @@ function ManualCompanyInfoView({
     { label: "대표자", value: formatDraftValue(draft, "ceoName") },
     { label: "대표 이메일", value: formatDraftValue(draft, "ceoEmail") },
     { label: "대표 전화번호", value: formatDraftValue(draft, "ceoPhone") },
-    { label: "대표 나이", value: formatDraftValue(draft, "ceoAge") },
+    { label: "대표 생년월일", value: formatDraftValue(draft, "ceoBirthDate") },
+    ...(draft.ceoAge.trim().length > 0
+      ? [{ label: "대표 나이(기존 입력값)", value: formatDraftValue(draft, "ceoAge") }]
+      : []),
     { label: "대표 성별", value: formatDraftValue(draft, "ceoGender") },
     { label: "대표 국적", value: formatDraftValue(draft, "ceoNationality") },
     { label: "공동대표 여부", value: formatDraftValue(draft, "hasCoRepresentative") },

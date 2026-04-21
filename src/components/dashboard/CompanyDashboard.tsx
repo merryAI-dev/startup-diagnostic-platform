@@ -703,7 +703,7 @@ export function CompanyDashboard({
 
     const representativeFields: (keyof CompanyInfoForm)[] = [
       "ceoName",
-      "ceoAge",
+      "ceoBirthDate",
       "ceoEmail",
       "ceoPhone",
       "ceoGender",
@@ -2090,6 +2090,21 @@ export function CompanyDashboard({
                               }))
                             }
                             onBlur={() => markTouched("ceoName")}
+                          />
+                        </label>
+                        <label className="text-xs text-slate-500 md:col-span-2">
+                          대표자 생년월일
+                          <input
+                            type="date"
+                            className={inputClass(isFieldInvalid("ceoBirthDate"))}
+                            value={form.ceoBirthDate}
+                            onChange={(e) =>
+                              setForm((prev) => ({
+                                ...prev,
+                                ceoBirthDate: e.target.value,
+                              }))
+                            }
+                            onBlur={() => markTouched("ceoBirthDate")}
                           />
                         </label>
                         <label className="text-xs text-slate-500 md:col-span-1">
