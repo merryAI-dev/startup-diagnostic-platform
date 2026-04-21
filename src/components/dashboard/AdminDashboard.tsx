@@ -753,6 +753,7 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
     let mounted = true
     async function loadDetails() {
       if (!selectedCompanyId) {
+        setLoadingDetails(false)
         setCompanyInfo(null)
         setCompanyMetrics(null)
         setSelfAssessment({})
@@ -1376,6 +1377,16 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
       setSelectedCompanyId(filteredCompanies[0]?.id ?? null)
     }
   }, [filteredCompanies, selectedCompanyId])
+
+  const detailEmptyStateMessage = useMemo(() => {
+    if (filteredCompanies.length === 0) {
+      if (companyQuery.trim().length > 0 || voucherFilterTags.length > 0) {
+        return "검색 결과에 해당하는 기업이 없습니다."
+      }
+      return "등록된 기업이 없습니다."
+    }
+    return "회사를 먼저 선택해주세요."
+  }, [companyQuery, filteredCompanies.length, voucherFilterTags.length])
 
   const toggleVoucherFilterTag = (tag: VoucherFilterTag) => {
     setVoucherFilterTags((prev) =>
@@ -2259,7 +2270,7 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
                   검색 결과가 없습니다.
                 </div>
               ) : (
-                <div className="flex h-full flex-col overflow-hidden rounded-xl bg-white divide-y divide-slate-200">
+                <div className="min-h-full divide-y divide-slate-200 overflow-hidden rounded-xl bg-white">
                   {paginatedCompanies.map((company) => {
                     const isSelected = company.id === selectedCompanyId
                     const companyName = company.name?.trim() || "회사명 없음"
@@ -2397,7 +2408,11 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
             </div>
             <div className="relative flex-1 min-h-0 px-4 py-4 flex flex-col">
               {loadingDetails ? <ContentLoadingOverlay /> : null}
-              {activeTab === "info" ? (
+              {!selectedCompanyId ? (
+                <div className="rounded-xl border border-slate-100 bg-slate-50 p-4 text-xs text-slate-500">
+                  {detailEmptyStateMessage}
+                </div>
+              ) : activeTab === "info" ? (
                 !companyInfo ? (
                   <div className="rounded-xl border border-slate-100 bg-slate-50 p-4 text-xs text-slate-500">
                     기업 정보가 없습니다.
