@@ -18,7 +18,8 @@ UI에서 **숨겨져 있거나 비노출된 기능(Labs 등)은 설명에서 제
 - 어드민: 전체 운영 관리, 사용자 승인, 프로그램/아젠다/컨설턴트 관리
 
 ---
-
+<img width="12843" height="4916" alt="mermaid-diagram (3)" src="https://github.com/user-attachments/assets/26cbaa72-4ba8-403a-92ef-531dd5cdf044" />
+전체 다이어그램 
 **회원가입 · 승인 · 로그인 흐름**
 1. 회원가입을 진행하면 **승인 대기 상태**가 됩니다.
 2. 어드민이 **사용자 관리 > 가입 승인 대기**에서 승인해야 역할이 확정됩니다.
@@ -40,7 +41,7 @@ QA 체크 포인트
 ---
 
 **회사(기업) 사용자 가이드**
-
+<img width="2341" height="3332" alt="mermaid-diagram (6)" src="https://github.com/user-attachments/assets/af5aad92-69c5-40fe-9119-8351b91c3a19" />
 **1) 대시보드: 오피스아워 일정**
 1. 헤더에 회사명이 표시됩니다.
 2. 좌측에 **티켓 현황(내부/외부, 예약/완료)**이 보입니다.
@@ -120,6 +121,8 @@ QA 체크 포인트
 ---
 
 **컨설턴트 가이드**
+![Uploading mermaid-diagram (4).png…]()
+<img width="3961" height="2738" alt="mermaid-diagram (5)" src="https://github.com/user-attachments/assets/1ecce35d-eba2-473c-b057-6550306f0148" />
 
 **1) 담당 사업 현황(대시보드)**
 1. 전체 신청 현황과 상태별 수치를 확인합니다.
