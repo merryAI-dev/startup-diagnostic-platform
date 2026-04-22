@@ -6,7 +6,7 @@ export type ApplicationStatus =
   | "cancelled"
   | "completed";
 
-export type OfficeHourType = "regular" | "irregular" | "custom";
+export type OfficeHourType = "regular" | "irregular" | "mentoring" | "custom";
 
 export type SessionFormat = "online" | "offline";
 
@@ -290,13 +290,16 @@ export interface MessageTemplate {
 export interface OfficeHourReport {
   id: string;
   applicationId: string;
+  applicationType?: OfficeHourType;
   companyId?: string | null;
   companyName?: string | null;
   consultantId: string;
   consultantName: string;
   date: string;
+  time?: string;
   location: string;
   topic: string;
+  managerName?: string;
   participants: string[];
   content: string;
   followUp: string;

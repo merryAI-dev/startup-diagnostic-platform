@@ -12,7 +12,13 @@ import {
   X,
   XCircle,
 } from "lucide-react"
-import { Agenda, Application, Program, ProgramKpiDefinition } from "@/redesign/app/lib/types"
+import {
+  Agenda,
+  Application,
+  OfficeHourReport,
+  Program,
+  ProgramKpiDefinition,
+} from "@/redesign/app/lib/types"
 import { getCompletedHoursByProgram } from "@/redesign/app/lib/program-metrics"
 import { getCompanyIdsByProgram } from "@/lib/company-program-membership"
 import { StatusChip } from "@/redesign/app/components/status-chip"
@@ -50,6 +56,7 @@ import { PaginationControls } from "@/redesign/app/components/ui/pagination-cont
 interface AdminProgramsProps {
   programs: Program[]
   applications: Application[]
+  reports: OfficeHourReport[]
   agendas: Agenda[]
   companies: { id: string; name: string; programs?: string[]; ownerUid?: string | null }[]
   onAddProgram: (data: Omit<Program, "id">) => void
@@ -197,6 +204,7 @@ function toProgramForm(program: Program | null): ProgramFormState {
 export function AdminPrograms({
   programs,
   applications,
+  reports,
   agendas,
   companies,
   onAddProgram,
@@ -247,8 +255,8 @@ export function AdminPrograms({
   }, [companies, programs])
 
   const completedHoursByProgram = useMemo(
-    () => getCompletedHoursByProgram(applications),
-    [applications],
+    () => getCompletedHoursByProgram(reports),
+    [reports],
   )
 
   const programStats = useMemo<ProgramStats[]>(() => {

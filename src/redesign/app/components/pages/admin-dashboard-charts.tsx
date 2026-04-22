@@ -9,7 +9,7 @@ import {
   Users,
   XCircle,
 } from "lucide-react"
-import { Application, Program, User } from "@/redesign/app/lib/types"
+import { Application, OfficeHourReport, Program, User } from "@/redesign/app/lib/types"
 import { getCompletedHoursByProgram } from "@/redesign/app/lib/program-metrics"
 import { Badge } from "@/redesign/app/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/redesign/app/components/ui/card"
@@ -20,6 +20,7 @@ import { cn } from "@/redesign/app/components/ui/utils"
 
 interface AdminDashboardChartsProps {
   applications: Application[]
+  reports: OfficeHourReport[]
   programs: Program[]
   currentUser: User
 }
@@ -75,6 +76,7 @@ function formatApplicationBreakdown(
 
 export function AdminDashboardCharts({
   applications,
+  reports,
   programs,
   currentUser,
 }: AdminDashboardChartsProps) {
@@ -85,8 +87,8 @@ export function AdminDashboardCharts({
   const isAdminUser = currentUser.role === "admin"
 
   const completedHoursByProgram = useMemo(
-    () => getCompletedHoursByProgram(applications),
-    [applications],
+    () => getCompletedHoursByProgram(reports),
+    [reports],
   )
 
   const programStats = useMemo<ProgramDashboardItem[]>(() => {

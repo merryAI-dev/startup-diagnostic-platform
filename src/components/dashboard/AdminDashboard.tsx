@@ -943,11 +943,10 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
             normalizeStatusAnalysisSections(statusAnalysisData?.sections),
           ),
         )
-        setStatusAnalysisAuthor(
+        const statusAnalysisSavedAuthor =
           typeof statusAnalysisData?.metadata?.author === "string"
             ? statusAnalysisData.metadata.author
-            : "",
-        )
+            : ""
         const files = await Promise.all(
           filesSnap.docs.map(async (docSnap) => {
             const data = docSnap.data() as {
@@ -1009,7 +1008,21 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
         const savedReport = reportSnap.exists()
           ? (reportSnap.data() as Partial<CompanyAnalysisReportForm>)
           : null
-        setReportForm(toCompanyAnalysisReportForm(savedReport, companyName))
+        const normalizedAuthor =
+          (typeof savedReport?.author === "string" ? savedReport.author : "").trim() ||
+          statusAnalysisSavedAuthor.trim()
+        setStatusAnalysisAuthor(normalizedAuthor)
+        setReportForm(
+          toCompanyAnalysisReportForm(
+            savedReport
+              ? {
+                  ...savedReport,
+                  author: normalizedAuthor,
+                }
+              : { author: normalizedAuthor },
+            companyName,
+          ),
+        )
       } finally {
         if (mounted) {
           setLoadingDetails(false)
@@ -1702,24 +1715,41 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
         reportForm.companyName ||
         "회사명 미정"
       const savedAt = new Date().toLocaleString("ko-KR")
+      const normalizedAuthor = reportForm.author.trim()
 
       const nextReportForm = {
         ...reportForm,
+        author: normalizedAuthor,
         companyName,
         createdAt: savedAt,
       }
 
-      await setDoc(
-        doc(db, "companies", selectedCompanyId, "analysisReport", "current"),
-        {
-          ...nextReportForm,
-          companyId: selectedCompanyId,
-          updatedAt: serverTimestamp(),
-          updatedByUid: user.uid,
-        },
-        { merge: true },
-      )
+      await Promise.all([
+        setDoc(
+          doc(db, "companies", selectedCompanyId, "analysisReport", "current"),
+          {
+            ...nextReportForm,
+            companyId: selectedCompanyId,
+            updatedAt: serverTimestamp(),
+            updatedByUid: user.uid,
+          },
+          { merge: true },
+        ),
+        setDoc(
+          doc(db, "companies", selectedCompanyId, "statusAnalysis", "info"),
+          {
+            companyId: selectedCompanyId,
+            metadata: {
+              author: normalizedAuthor,
+              updatedAt: serverTimestamp(),
+              updatedByUid: user.uid,
+            },
+          },
+          { merge: true },
+        ),
+      ])
 
+      setStatusAnalysisAuthor(normalizedAuthor)
       setReportForm(nextReportForm)
       toast.success("분석 보고서가 저장되었습니다")
     } catch (error) {
