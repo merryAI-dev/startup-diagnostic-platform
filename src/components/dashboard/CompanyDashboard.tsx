@@ -2949,6 +2949,9 @@ export function CompanyDashboard({
                             <div className="text-xs text-slate-500">
                               PDF, PNG, AI · 최대 50MB · 여러 파일 가능
                             </div>
+                            <div className="mt-1 text-xs text-slate-500">
+                              IR 자료, 기업소개 자료 등 기업을 설명하는 파일을 올려주세요.
+                            </div>
                           </div>
                         </div>
                       </div>
