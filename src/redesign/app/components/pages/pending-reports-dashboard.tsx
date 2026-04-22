@@ -766,9 +766,9 @@ export function PendingReportsDashboard({
           return {
             report,
             application: syntheticApp,
-            programName: program?.name || "비정기",
+            programName: program?.name || "-",
             programColor: program?.color || "#94a3b8",
-            programId: report.programId || "manual",
+            programId: report.programId || "",
           };
         }
         if (!application) return null;
@@ -825,7 +825,7 @@ export function PendingReportsDashboard({
   const programFilterOptions = useMemo(() => {
     const rowsByProgramId = new Map<string, { id: string; name: string }>();
     reportRows.forEach((row) => {
-      if (!row.programId || rowsByProgramId.has(row.programId)) return;
+      if (!row.programId || row.programName === "-" || rowsByProgramId.has(row.programId)) return;
       rowsByProgramId.set(row.programId, {
         id: row.programId,
         name: row.programName || "알 수 없음",
@@ -1226,10 +1226,14 @@ export function PendingReportsDashboard({
                           <div className="max-w-[180px] truncate">{resolveRowCompanyName(row)}</div>
                         </TableCell>
                         <TableCell>
-                          <div className="flex items-center gap-2">
-                            <span className="w-2 h-2 rounded-full" style={{ backgroundColor: row.programColor }} />
-                            <span className="text-sm">{row.programName}</span>
-                          </div>
+                          {row.programName === "-" ? (
+                            <span className="text-sm text-muted-foreground">-</span>
+                          ) : (
+                            <div className="flex items-center gap-2">
+                              <span className="w-2 h-2 rounded-full" style={{ backgroundColor: row.programColor }} />
+                              <span className="text-sm">{row.programName}</span>
+                            </div>
+                          )}
                         </TableCell>
                         <TableCell className="text-sm text-muted-foreground">
                           {row.consultantName}

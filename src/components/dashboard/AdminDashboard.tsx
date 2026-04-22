@@ -1008,18 +1008,16 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
         const savedReport = reportSnap.exists()
           ? (reportSnap.data() as Partial<CompanyAnalysisReportForm>)
           : null
-        const normalizedAuthor =
-          (typeof savedReport?.author === "string" ? savedReport.author : "").trim() ||
-          statusAnalysisSavedAuthor.trim()
-        setStatusAnalysisAuthor(normalizedAuthor)
+        const reportAuthor = typeof savedReport?.author === "string" ? savedReport.author : ""
+        setStatusAnalysisAuthor(statusAnalysisSavedAuthor.trim())
         setReportForm(
           toCompanyAnalysisReportForm(
             savedReport
               ? {
                   ...savedReport,
-                  author: normalizedAuthor,
+                  author: reportAuthor,
                 }
-              : { author: normalizedAuthor },
+              : { author: reportAuthor },
             companyName,
           ),
         )
@@ -1724,32 +1722,17 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
         createdAt: savedAt,
       }
 
-      await Promise.all([
-        setDoc(
-          doc(db, "companies", selectedCompanyId, "analysisReport", "current"),
-          {
-            ...nextReportForm,
-            companyId: selectedCompanyId,
-            updatedAt: serverTimestamp(),
-            updatedByUid: user.uid,
-          },
-          { merge: true },
-        ),
-        setDoc(
-          doc(db, "companies", selectedCompanyId, "statusAnalysis", "info"),
-          {
-            companyId: selectedCompanyId,
-            metadata: {
-              author: normalizedAuthor,
-              updatedAt: serverTimestamp(),
-              updatedByUid: user.uid,
-            },
-          },
-          { merge: true },
-        ),
-      ])
+      await setDoc(
+        doc(db, "companies", selectedCompanyId, "analysisReport", "current"),
+        {
+          ...nextReportForm,
+          companyId: selectedCompanyId,
+          updatedAt: serverTimestamp(),
+          updatedByUid: user.uid,
+        },
+        { merge: true },
+      )
 
-      setStatusAnalysisAuthor(normalizedAuthor)
       setReportForm(nextReportForm)
       toast.success("분석 보고서가 저장되었습니다")
     } catch (error) {
