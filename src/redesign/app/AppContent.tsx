@@ -82,6 +82,7 @@ import {
   TeamMember,
   User,
   UserRole,
+  OfficeHourType,
   CompanyDirectoryItem,
   Agenda,
   RegularOfficeHour,
@@ -529,12 +530,21 @@ function normalizeReportDoc(report: OfficeHourReport): OfficeHourReport {
   }
   return {
     ...report,
+    applicationType:
+      report.applicationType ??
+      (report.applicationId?.startsWith("manual-mentoring-")
+        ? "mentoring"
+        : report.applicationId?.startsWith("manual-")
+          ? "irregular"
+          : undefined),
     companyId: report.companyId ?? null,
     companyName: report.companyName ?? null,
     consultantName: report.consultantName ?? "컨설턴트",
     date: report.date ?? "",
+    time: report.time ?? "",
     location: report.location ?? "",
     topic: report.topic ?? "",
+    managerName: report.managerName ?? "",
     participants: report.participants ?? [],
     content: report.content ?? "",
     followUp: report.followUp ?? "",
@@ -546,6 +556,25 @@ function normalizeReportDoc(report: OfficeHourReport): OfficeHourReport {
     updatedAt: report.updatedAt ? toDateValue(report.updatedAt) : new Date(),
     completedAt: report.completedAt ? toDateValue(report.completedAt) : undefined,
   }
+}
+
+function resolveManualReportApplicationType(report: Pick<OfficeHourReport, "applicationId" | "applicationType">): OfficeHourType {
+  if (report.applicationType === "mentoring") return "mentoring"
+  if (report.applicationType === "irregular") return "irregular"
+  if (report.applicationId.startsWith("manual-mentoring-")) return "mentoring"
+  return "irregular"
+}
+
+function getManualApplicationOfficeHourTitle(type: OfficeHourType, topic?: string) {
+  const trimmedTopic = topic?.trim()
+  if (trimmedTopic) return trimmedTopic
+  return type === "mentoring" ? "멘토링 일지" : "비정기 오피스아워"
+}
+
+function getManualApplicationAgenda(type: OfficeHourType, topic?: string) {
+  const trimmedTopic = topic?.trim()
+  if (trimmedTopic) return trimmedTopic
+  return type === "mentoring" ? "멘토링" : "비정기 오피스아워"
 }
 
 function omitId<T extends { id: string }>(item: T): Omit<T, "id"> {
@@ -2078,18 +2107,20 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
   )
 
   const openReportFormForApplication = (applicationId: string) => {
-    if (applicationId === "irregular-manual") {
+    if (applicationId === "irregular-manual" || applicationId === "mentoring-manual") {
       const now = new Date()
       const today = formatSafeLocalDateKey(now)
+      const manualType: OfficeHourType =
+        applicationId === "mentoring-manual" ? "mentoring" : "irregular"
       const manualApp: Application = {
-        id: `manual-${Date.now()}`,
-        type: "irregular",
+        id: `manual-${manualType}-${Date.now()}`,
+        type: manualType,
         status: "completed",
-        officeHourTitle: "비정기 오피스아워 (수동)",
+        officeHourTitle: getManualApplicationOfficeHourTitle(manualType),
         consultant: currentConsultant?.name ?? "컨설턴트",
         consultantId: currentConsultant?.id ?? "",
         sessionFormat: "online",
-        agenda: "비정기 오피스아워",
+        agenda: getManualApplicationAgenda(manualType),
         requestContent: "",
         scheduledDate: today,
         createdAt: now,
@@ -4550,6 +4581,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
             <ProtectedRoute allowedRoles={["admin", "consultant", "staff"]}>
               <AdminDashboardInteractive
                 applications={scopedApplications}
+                reports={reports}
                 programs={scopedProgramList}
                 currentUser={scopedUser}
                 onNavigate={handleNavigateLoose}
@@ -4622,6 +4654,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
               <AdminPrograms
                 programs={programList}
                 applications={resolvedApplications}
+                reports={reports}
                 agendas={agendaList}
                 companies={companyDirectory}
                 onAddProgram={handleAddProgram}
@@ -4638,6 +4671,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
               <AdminPrograms
                 programs={programList}
                 applications={resolvedApplications}
+                reports={reports}
                 agendas={agendaList}
                 companies={companyDirectory}
                 onAddProgram={handleAddProgram}
@@ -4674,19 +4708,21 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
                 onEditReport={(report) => {
                   const app = scopedApplications.find((a) => a.id === report.applicationId)
                   if (!app && report.applicationId.startsWith("manual-")) {
+                    const manualType = resolveManualReportApplicationType(report)
                     const syntheticApp: Application = {
                       id: report.applicationId,
-                      type: "irregular",
+                      type: manualType,
                       status: "completed",
                       companyId: report.companyId ?? null,
                       companyName: report.companyName ?? undefined,
-                      officeHourTitle: report.topic?.trim() || "비정기 오피스아워 (수동)",
+                      officeHourTitle: getManualApplicationOfficeHourTitle(manualType, report.topic),
                       consultant: report.consultantName || currentConsultant?.name || "컨설턴트",
                       consultantId: report.consultantId || currentConsultant?.id || "",
                       sessionFormat: "online",
-                      agenda: report.topic?.trim() || "비정기 오피스아워",
+                      agenda: getManualApplicationAgenda(manualType, report.topic),
                       requestContent: "",
                       scheduledDate: report.date || formatSafeLocalDateKey(new Date()),
+                      scheduledTime: report.time || "",
                       programId: report.programId,
                       createdAt: report.createdAt,
                       updatedAt: report.updatedAt,
@@ -4765,6 +4801,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
                 })()
                 const normalizedReportData = {
                   ...reportData,
+                  applicationType: reportFormApplication.type,
                   consultantId:
                     reportData.consultantId ||
                     reportBeingEdited?.consultantId ||

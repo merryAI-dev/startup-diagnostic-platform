@@ -417,7 +417,7 @@ export function ApplicationHistoryCalendar({ applications, onNavigate }: Applica
       {/* Grid View */}
       {viewMode === "list" && (
         <div className="flex-1 p-8 overflow-y-auto">
-          <div className="max-w-6xl mx-auto">
+          <div className="mx-auto max-w-[1600px]">
             <div className="grid grid-cols-3 gap-4">
               {filteredApplications.map((app) => {
                 const statusColor = getStatusColor(app.status);

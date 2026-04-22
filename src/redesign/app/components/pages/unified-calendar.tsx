@@ -733,8 +733,8 @@ export function UnifiedCalendar({
   const pageTitleClassName = "text-2xl font-semibold text-slate-900";
   const pageDescriptionClassName = "mt-1 text-sm text-slate-500";
   const pageContainerClassName = isConsultant
-    ? "mx-auto w-full max-w-[1440px]"
-    : "mx-auto w-full max-w-7xl";
+    ? "mx-auto w-full max-w-[1600px]"
+    : "mx-auto w-full max-w-[1600px]";
   const pageTitle = isConsultant ? "내 일정 캘린더" : "통합 캘린더";
   const pageDescription = isConsultant
     ? "배정된 오피스아워와 개인 일정을 한눈에 확인합니다"

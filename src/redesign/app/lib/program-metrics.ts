@@ -1,25 +1,15 @@
-import { Application } from "@/redesign/app/lib/types"
+import { OfficeHourReport } from "@/redesign/app/lib/types"
 
-const DEFAULT_SESSION_DURATION_HOURS = 1
-
-export function getApplicationDurationHours(application: Application) {
-  const duration = application.duration
-  if (typeof duration === "number" && Number.isFinite(duration) && duration > 0) {
-    return duration
-  }
-  return DEFAULT_SESSION_DURATION_HOURS
-}
-
-export function getCompletedHoursByProgram(applications: Application[]) {
+export function getCompletedHoursByProgram(reports: OfficeHourReport[]) {
   const completedHoursByProgram = new Map<string, number>()
 
-  applications.forEach((application) => {
-    if (application.status !== "completed" || !application.programId) return
-    const currentHours = completedHoursByProgram.get(application.programId) ?? 0
-    completedHoursByProgram.set(
-      application.programId,
-      currentHours + getApplicationDurationHours(application),
-    )
+  reports.forEach((report) => {
+    if (!report.programId) return
+    const duration = report.duration
+    const normalizedDuration =
+      typeof duration === "number" && Number.isFinite(duration) && duration > 0 ? duration : 0
+    const currentHours = completedHoursByProgram.get(report.programId) ?? 0
+    completedHoursByProgram.set(report.programId, currentHours + normalizedDuration)
   })
 
   return completedHoursByProgram

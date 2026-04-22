@@ -80,6 +80,7 @@ function buildCompanyInfoRecord(form: CompanyInfoForm): CompanyInfoRecord {
         name: form.ceoName,
         email: form.ceoEmail,
         phone: form.ceoPhone,
+        birthDate: form.ceoBirthDate,
         age: toNumber(form.ceoAge),
         gender: form.ceoGender,
         nationality: form.ceoNationality,
