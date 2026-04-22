@@ -84,8 +84,18 @@ import {
   type CompanyAnalysisReportForm,
 } from "@/types/companyAnalysisReport"
 import type { CompanyInfoRecord } from "@/types/company"
-import type { SelfAssessmentSections } from "@/types/selfAssessment"
+import type { AnswerValue, SelfAssessmentSections } from "@/types/selfAssessment"
+import {
+  getStatusAnalysisAnswer,
+  getStatusAnalysisReason,
+  normalizeStatusAnalysisSections,
+  sanitizeStatusAnalysisSections,
+  setStatusAnalysisAnswer,
+  setStatusAnalysisReason,
+  type StatusAnalysisSections,
+} from "@/types/statusAnalysis"
 import type { MonthlyMetrics, ProgramKpiDefinition } from "@/redesign/app/lib/types"
+import { normalizeCompanyFileKind, type CompanyFileKind } from "@/lib/company-files"
 
 type AdminDashboardProps = {
   user: User
@@ -96,6 +106,7 @@ type CompanySummary = {
   id: string
   name: string | null
   ownerUid: string
+  programs: string[]
   hasExportVoucher: boolean
   hasInnovationVoucher: boolean
 }
@@ -252,6 +263,117 @@ function groupCompanyInfoFields(fields: CompanyInfoField[]) {
 
 function isVoucherHeld(value: unknown) {
   return typeof value === "string" && value.trim() === "예"
+}
+
+function getAnswerLabel(value: AnswerValue) {
+  return value === true ? "예" : value === false ? "아니오" : "미선택"
+}
+
+function getAnswerBadgeClass(label: string) {
+  return label === "예"
+    ? "bg-emerald-100 text-emerald-700"
+    : label === "아니오"
+      ? "bg-rose-100 text-rose-700"
+      : "bg-slate-100 text-slate-500"
+}
+
+function buildAssessmentSummary(
+  selfAssessment: SelfAssessmentSections,
+  resolveAnswer?: (params: {
+    sectionKey: string
+    subsectionKey: string
+    questionKey: string
+    companyAnswer: AnswerValue
+  }) => AnswerValue,
+) {
+  let totalScore = 0
+  const sectionScores: Record<string, number> = {}
+  const sectionTotals: Record<string, number> = {}
+
+  const grouped = SELF_ASSESSMENT_SECTIONS.map((section) => {
+    let sectionScore = 0
+    const questions = section.subsections.flatMap((subsection) =>
+      subsection.questions.map((question) => {
+        const companyAnswer =
+          selfAssessment?.[section.storageKey]?.[subsection.storageKey]?.[question.storageKey]
+            ?.answer ?? null
+        const resolvedAnswer = resolveAnswer
+          ? resolveAnswer({
+              sectionKey: section.storageKey,
+              subsectionKey: subsection.storageKey,
+              questionKey: question.storageKey,
+              companyAnswer,
+            })
+          : companyAnswer
+        const score = resolvedAnswer === true ? question.weight : 0
+        sectionScore += score
+
+        return {
+          sectionTitle: section.title,
+          sectionKey: section.storageKey,
+          subsectionTitle: subsection.title,
+          subsectionKey: subsection.storageKey,
+          questionText: question.text,
+          questionKey: question.storageKey,
+          answerLabel: getAnswerLabel(resolvedAnswer),
+          companyAnswerLabel: getAnswerLabel(companyAnswer),
+          companyScore: companyAnswer === true ? question.weight : 0,
+          reason:
+            selfAssessment?.[section.storageKey]?.[subsection.storageKey]?.[question.storageKey]
+              ?.reason ?? "",
+          score,
+        }
+      }),
+    )
+
+    sectionScores[section.storageKey] = sectionScore
+    sectionTotals[section.storageKey] = section.totalScore
+    totalScore += sectionScore
+
+    return {
+      sectionTitle: section.title,
+      sectionKey: section.storageKey,
+      sectionScore,
+      sectionTotal: section.totalScore,
+      questions,
+    }
+  })
+
+  return { totalScore, sectionScores, sectionTotals, grouped }
+}
+
+function buildStatusAnalysisSections(
+  selfAssessment: SelfAssessmentSections,
+  existingSections: StatusAnalysisSections = {},
+): StatusAnalysisSections {
+  const nextSections: StatusAnalysisSections = {}
+
+  SELF_ASSESSMENT_SECTIONS.forEach((section) => {
+    const nextSection: Record<string, Record<string, { answer: AnswerValue; reason: string }>> = {}
+
+    section.subsections.forEach((subsection) => {
+      const nextSubsection: Record<string, { answer: AnswerValue; reason: string }> = {}
+
+      subsection.questions.forEach((question) => {
+        const companyAnswer =
+          selfAssessment?.[section.storageKey]?.[subsection.storageKey]?.[question.storageKey]
+            ?.answer ?? null
+        const existingSection =
+          existingSections?.[section.storageKey]?.[subsection.storageKey]?.[question.storageKey]
+
+        nextSubsection[question.storageKey] = {
+          answer: existingSection?.answer ?? companyAnswer,
+          reason: existingSection?.reason ?? "",
+        }
+      })
+
+      nextSection[subsection.storageKey] = nextSubsection
+    })
+
+    nextSections[section.storageKey] = nextSection
+  })
+
+  return nextSections
 }
 
 function getRadarLabelLines(label: string) {
@@ -612,16 +734,18 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
   const [companyInfo, setCompanyInfo] = useState<CompanyInfoRecord | null>(null)
   const [companyMetrics, setCompanyMetrics] = useState<MetricsSnapshot | null>(null)
   const [companyFiles, setCompanyFiles] = useState<
-    { id: string; name: string; size: number; downloadUrl: string | null }[]
+    { id: string; name: string; size: number; downloadUrl: string | null; kind: CompanyFileKind }[]
   >([])
   const [selfAssessment, setSelfAssessment] = useState<SelfAssessmentSections>({})
+  const [statusAnalysisSections, setStatusAnalysisSections] = useState<StatusAnalysisSections>({})
   const [loadingCompanies, setLoadingCompanies] = useState(true)
   const [loadingDetails, setLoadingDetails] = useState(false)
   const [companyQuery, setCompanyQuery] = useState("")
   const [voucherFilterTags, setVoucherFilterTags] = useState<VoucherFilterTag[]>([])
+  const [selectedProgramFilterId, setSelectedProgramFilterId] = useState<string>("all")
   const [companyPage, setCompanyPage] = useState(1)
   const [activeTab, setActiveTab] = useState<
-    "info" | "assessment" | "metrics" | "report" | "officeHours"
+    "info" | "assessment" | "statusAnalysis" | "metrics" | "report" | "officeHours"
   >("info")
   const [selectedMetricChartKey, setSelectedMetricChartKey] = useState("revenue")
   const [programs, setPrograms] = useState<ProgramSummary[]>([])
@@ -641,9 +765,12 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
   const [savingTickets, setSavingTickets] = useState(false)
   const [isGeneratingReport, setIsGeneratingReport] = useState(false)
   const [savingReport, setSavingReport] = useState(false)
+  const [savingStatusAnalysis, setSavingStatusAnalysis] = useState(false)
   const [downloadingReport, setDownloadingReport] = useState(false)
   const [downloadingCompanyWorkbook, setDownloadingCompanyWorkbook] = useState(false)
   const [activeSectionFilter, setActiveSectionFilter] = useState<string>("문제")
+  const [activeStatusAnalysisFilter, setActiveStatusAnalysisFilter] = useState<string>("문제")
+  const [statusAnalysisAuthor, setStatusAnalysisAuthor] = useState("")
   const [reportForm, setReportForm] = useState<CompanyAnalysisReportForm>(
     EMPTY_COMPANY_ANALYSIS_REPORT_FORM,
   )
@@ -681,12 +808,16 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
             const data = docSnap.data() as {
               name?: string | null
               ownerUid?: string
+              programs?: string[]
             }
             const voucherStatus = voucherStatusByCompanyId.get(docSnap.id)
             return {
               id: docSnap.id,
               name: data.name?.trim() || "회사명 미정",
               ownerUid: data.ownerUid ?? "",
+              programs: Array.isArray(data.programs)
+                ? data.programs.filter((value): value is string => typeof value === "string")
+                : [],
               hasExportVoucher: voucherStatus?.hasExportVoucher ?? false,
               hasInnovationVoucher: voucherStatus?.hasInnovationVoucher ?? false,
             }
@@ -757,6 +888,8 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
         setCompanyInfo(null)
         setCompanyMetrics(null)
         setSelfAssessment({})
+        setStatusAnalysisSections({})
+        setStatusAnalysisAuthor("")
         setCompanyFiles([])
         setSelectedCompanyProgramIds([])
         setTicketDrafts({})
@@ -765,7 +898,15 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
       }
       setLoadingDetails(true)
       try {
-        const [infoSnap, assessmentSnap, filesSnap, companySnap, reportSnap, metricsSnap] =
+        const [
+          infoSnap,
+          assessmentSnap,
+          filesSnap,
+          companySnap,
+          reportSnap,
+          metricsSnap,
+          statusAnalysisSnap,
+        ] =
           await Promise.all([
             getDoc(doc(db, "companies", selectedCompanyId, "companyInfo", "info")),
             getDoc(doc(db, "companies", selectedCompanyId, "selfAssessment", "info")),
@@ -773,6 +914,7 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
             getDoc(doc(db, "companies", selectedCompanyId)),
             getDoc(doc(db, "companies", selectedCompanyId, "analysisReport", "current")),
             getDoc(doc(db, "companies", selectedCompanyId, "metrics", "annual")),
+            getDoc(doc(db, "companies", selectedCompanyId, "statusAnalysis", "info")),
           ])
         if (!mounted) return
         const nextCompanyInfo = infoSnap.exists() ? (infoSnap.data() as CompanyInfoRecord) : null
@@ -787,13 +929,32 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
         const assessmentData = assessmentSnap.exists()
           ? (assessmentSnap.data() as { sections?: SelfAssessmentSections })
           : null
-        setSelfAssessment(assessmentData?.sections ?? {})
+        const nextSelfAssessment = assessmentData?.sections ?? {}
+        setSelfAssessment(nextSelfAssessment)
+        const statusAnalysisData = statusAnalysisSnap.exists()
+          ? (statusAnalysisSnap.data() as {
+              sections?: unknown
+              metadata?: { author?: unknown }
+            })
+          : null
+        setStatusAnalysisSections(
+          buildStatusAnalysisSections(
+            nextSelfAssessment,
+            normalizeStatusAnalysisSections(statusAnalysisData?.sections),
+          ),
+        )
+        setStatusAnalysisAuthor(
+          typeof statusAnalysisData?.metadata?.author === "string"
+            ? statusAnalysisData.metadata.author
+            : "",
+        )
         const files = await Promise.all(
           filesSnap.docs.map(async (docSnap) => {
             const data = docSnap.data() as {
               name: string
               size: number
               storagePath: string
+              kind?: CompanyFileKind
             }
             let downloadUrl: string | null = null
             try {
@@ -806,6 +967,7 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
               name: data.name,
               size: data.size,
               downloadUrl,
+              kind: normalizeCompanyFileKind(data.kind),
             }
           }),
         )
@@ -877,6 +1039,16 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
   const investmentRows = useMemo(() => {
     return companyInfo?.investments ?? []
   }, [companyInfo])
+
+  const logoFiles = useMemo(
+    () => companyFiles.filter((file) => file.kind === "logo"),
+    [companyFiles]
+  )
+
+  const attachmentFiles = useMemo(
+    () => companyFiles.filter((file) => file.kind !== "logo"),
+    [companyFiles]
+  )
 
   const participatingProgramNames = useMemo(() => {
     if (selectedCompanyProgramIds.length === 0) return []
@@ -1340,6 +1512,9 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
       if (query && !name.includes(query)) {
         return false
       }
+      if (selectedProgramFilterId !== "all" && !company.programs.includes(selectedProgramFilterId)) {
+        return false
+      }
       if (voucherFilterTags.includes("export") && !company.hasExportVoucher) {
         return false
       }
@@ -1348,12 +1523,13 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
       }
       return true
     })
-  }, [companies, companyQuery, voucherFilterTags])
+  }, [companies, companyQuery, selectedProgramFilterId, voucherFilterTags])
 
   const showCompanyPaginationFooter =
     filteredCompanies.length > COMPANY_PAGE_SIZE ||
     companyQuery.trim().length > 0 ||
-    voucherFilterTags.length > 0
+    voucherFilterTags.length > 0 ||
+    selectedProgramFilterId !== "all"
 
   const totalCompanyPages = Math.max(1, Math.ceil(filteredCompanies.length / COMPANY_PAGE_SIZE))
 
@@ -1364,7 +1540,7 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
 
   useEffect(() => {
     setCompanyPage(1)
-  }, [companyQuery, voucherFilterTags])
+  }, [companyQuery, selectedProgramFilterId, voucherFilterTags])
 
   useEffect(() => {
     setCompanyPage((prev) => Math.min(prev, totalCompanyPages))
@@ -1388,13 +1564,22 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
 
   const detailEmptyStateMessage = useMemo(() => {
     if (filteredCompanies.length === 0) {
-      if (companyQuery.trim().length > 0 || voucherFilterTags.length > 0) {
+      if (
+        companyQuery.trim().length > 0 ||
+        voucherFilterTags.length > 0 ||
+        selectedProgramFilterId !== "all"
+      ) {
         return "검색 결과에 해당하는 기업이 없습니다."
       }
       return "등록된 기업이 없습니다."
     }
     return "회사를 먼저 선택해주세요."
-  }, [companyQuery, filteredCompanies.length, voucherFilterTags.length])
+  }, [companyQuery, filteredCompanies.length, selectedProgramFilterId, voucherFilterTags.length])
+
+  const programFilterOptions = useMemo(
+    () => [...programs].sort((a, b) => a.name.localeCompare(b.name, "ko-KR")),
+    [programs],
+  )
 
   const toggleVoucherFilterTag = (tag: VoucherFilterTag) => {
     setVoucherFilterTags((prev) =>
@@ -1403,43 +1588,25 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
   }
 
   const assessmentSummary = useMemo(() => {
-    let totalScore = 0
-    const sectionScores: Record<string, number> = {}
-    const sectionTotals: Record<string, number> = {}
-    const grouped = SELF_ASSESSMENT_SECTIONS.map((section) => {
-      let sectionScore = 0
-      const questions = section.subsections.flatMap((subsection) =>
-        subsection.questions.map((question) => {
-          const answer =
-            selfAssessment?.[section.storageKey]?.[subsection.storageKey]?.[question.storageKey]
-          const answerValue =
-            answer?.answer === true ? "예" : answer?.answer === false ? "아니오" : "미선택"
-          const score = answer?.answer === true ? question.weight : 0
-          sectionScore += score
-          return {
-            sectionTitle: section.title,
-            subsectionTitle: subsection.title,
-            questionText: question.text,
-            answerLabel: answerValue,
-            reason: answer?.reason ?? "",
-            score,
-          }
-        }),
-      )
-      sectionScores[section.storageKey] = sectionScore
-      sectionTotals[section.storageKey] = section.totalScore
-      totalScore += sectionScore
-      return {
-        sectionTitle: section.title,
-        sectionKey: section.storageKey,
-        sectionScore,
-        sectionTotal: section.totalScore,
-        questions,
-      }
-    })
-
-    return { totalScore, sectionScores, sectionTotals, grouped }
+    return buildAssessmentSummary(selfAssessment)
   }, [selfAssessment])
+
+  const statusAnalysisSummary = useMemo(() => {
+    return buildAssessmentSummary(selfAssessment, ({
+      sectionKey,
+      subsectionKey,
+      questionKey,
+      companyAnswer,
+    }) => {
+      const adminAnswer = getStatusAnalysisAnswer(
+        statusAnalysisSections,
+        sectionKey,
+        subsectionKey,
+        questionKey,
+      )
+      return adminAnswer === null ? companyAnswer : adminAnswer
+    })
+  }, [selfAssessment, statusAnalysisSections])
 
   const radarData = useMemo(() => {
     const size = 320
@@ -1563,6 +1730,37 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
     }
   }
 
+  const handleSaveStatusAnalysis = async () => {
+    if (!selectedCompanyId) {
+      toast.error("회사를 먼저 선택해주세요")
+      return
+    }
+
+    setSavingStatusAnalysis(true)
+    try {
+      await setDoc(
+        doc(db, "companies", selectedCompanyId, "statusAnalysis", "info"),
+        {
+          companyId: selectedCompanyId,
+          sections: sanitizeStatusAnalysisSections(statusAnalysisSections),
+          metadata: {
+            author: statusAnalysisAuthor.trim(),
+            updatedAt: serverTimestamp(),
+            updatedByUid: user.uid,
+            saveType: "final",
+          },
+        },
+        { merge: true },
+      )
+      toast.success("현황 분석이 저장되었습니다")
+    } catch (error) {
+      console.error("Failed to save status analysis:", error)
+      toast.error("현황 분석 저장에 실패했습니다")
+    } finally {
+      setSavingStatusAnalysis(false)
+    }
+  }
+
   const handleDownloadReportExcel = async () => {
     if (!selectedCompanyId) {
       toast.error("회사를 먼저 선택해주세요")
@@ -1675,6 +1873,8 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
 
       let rowIndex = 3
       writeLabelValueRow(rowIndex, "기업명", reportForm.companyName || "")
+      rowIndex += 1
+      writeLabelValueRow(rowIndex, "작성자", reportForm.author || "")
       rowIndex += 1
       writeLabelValueRow(rowIndex, "작성일시", reportForm.createdAt || "")
       rowIndex += 2
@@ -2068,10 +2268,10 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
           : [["-", "입력된 투자 이력이 없습니다.", "-", "-"]],
       )
 
-      const assessmentSheet = createSheet("현황진단", [18, 16, 54, 12, 12, 54])
+      const assessmentSheet = createSheet("자가진단", [18, 16, 54, 12, 12, 54])
       rowIndex = writeSheetTitle(
         assessmentSheet,
-        "현황 진단",
+        "자가 진단",
         `${selectedCompanyName} 자가진단 결과`,
       )
       rowIndex = writeSectionTitle(assessmentSheet, rowIndex, "점수 요약")
@@ -2149,6 +2349,7 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
       rowIndex = writeSectionTitle(reportSheet, rowIndex, "기본 정보")
       rowIndex = writeKeyValueRows(reportSheet, rowIndex, [
         ["기업명", reportForm.companyName || selectedCompanyName],
+        ["작성자", reportForm.author || "-"],
         ["작성일시", reportForm.createdAt || "-"],
       ])
       rowIndex += 1
@@ -2220,33 +2421,46 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
     <div className="bg-transparent h-full">
       <div className="flex h-full flex-col">
         <div className="shrink-0 border-b border-slate-200 bg-white px-6 py-5">
-          <div className="mx-auto w-full max-w-7xl">
+          <div className="mx-auto w-full max-w-[1600px]">
             <h1 className="text-2xl font-semibold text-slate-900">기업 관리</h1>
             <p className="mt-1 text-sm text-slate-500">
               기업 기본 정보, 자가진단표, 실적, 업로드 자료와 티켓 현황을 관리합니다.
             </p>
           </div>
         </div>
-        <div className="mx-auto grid h-full w-full max-w-7xl flex-1 min-h-0 gap-6 px-6 py-5 lg:grid-cols-[300px_1fr]">
-          <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white lg:sticky lg:top-5 lg:max-h-[calc(100vh-12rem)]">
-            <div className="shrink-0 border-b border-slate-100 px-4 py-3.5">
-              <div className="flex items-center justify-between gap-2">
-                <div className="text-sm font-semibold text-slate-700">회사 목록</div>
-                <Badge variant="outline" className="h-6 border-slate-200 bg-slate-50 text-[11px] text-slate-600">
-                  {filteredCompanies.length}개
-                </Badge>
-              </div>
-              <input
-                className="mt-3 h-9 w-full rounded-lg border border-slate-200 px-3 text-sm focus:border-slate-400 focus:outline-none"
-                placeholder="회사명 검색"
-                value={companyQuery}
-                onChange={(e) => setCompanyQuery(e.target.value)}
-              />
-              <div className="mt-2.5 flex flex-wrap gap-1.5">
+        <div className="mx-auto w-full max-w-[1600px] px-6 pt-5">
+          <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-end">
+              <label className="min-w-0 text-xs font-medium text-slate-500 lg:w-[280px] lg:flex-none">
+                회사명
+                <input
+                  className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm font-normal text-slate-700 focus:border-slate-400 focus:outline-none"
+                  placeholder="회사명 검색"
+                  value={companyQuery}
+                  onChange={(e) => setCompanyQuery(e.target.value)}
+                />
+              </label>
+              <label className="w-full min-w-0 text-xs font-medium text-slate-500 lg:w-[320px] lg:flex-none">
+                사업
+                <Select value={selectedProgramFilterId} onValueChange={setSelectedProgramFilterId}>
+                  <SelectTrigger className="mt-1 h-10 border border-slate-200 bg-white text-sm text-slate-700 shadow-none">
+                    <SelectValue placeholder="전체 사업" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">전체 사업</SelectItem>
+                    {programFilterOptions.map((program) => (
+                      <SelectItem key={program.id} value={program.id}>
+                        {program.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </label>
+              <div className="flex flex-wrap gap-1.5 lg:pb-1">
                 <button
                   type="button"
                   onClick={() => toggleVoucherFilterTag("export")}
-                  className={`inline-flex h-7 items-center gap-1 rounded-full border px-2.5 text-[11px] font-semibold transition ${
+                  className={`inline-flex h-9 items-center gap-1 rounded-full border px-3 text-[12px] font-semibold transition ${
                     voucherFilterTags.includes("export")
                       ? "border-slate-500 bg-slate-200 text-slate-800"
                       : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
@@ -2260,7 +2474,7 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
                 <button
                   type="button"
                   onClick={() => toggleVoucherFilterTag("innovation")}
-                  className={`inline-flex h-7 items-center gap-1 rounded-full border px-2.5 text-[11px] font-semibold transition ${
+                  className={`inline-flex h-9 items-center gap-1 rounded-full border px-3 text-[12px] font-semibold transition ${
                     voucherFilterTags.includes("innovation")
                       ? "border-slate-500 bg-slate-200 text-slate-800"
                       : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
@@ -2271,6 +2485,18 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
                   ) : null}
                   혁신바우처 보유
                 </button>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div className="mx-auto grid h-full w-full max-w-[1600px] flex-1 min-h-0 gap-5 px-6 py-5 lg:grid-cols-[260px_minmax(0,1fr)] xl:grid-cols-[280px_minmax(0,1fr)]">
+          <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white lg:sticky lg:top-5 lg:max-h-[calc(100vh-12rem)]">
+            <div className="shrink-0 border-b border-slate-100 px-4 py-3.5">
+              <div className="flex items-center justify-between gap-2">
+                <div className="text-sm font-semibold text-slate-700">회사 목록</div>
+                <Badge variant="outline" className="h-6 border-slate-200 bg-slate-50 text-[11px] text-slate-600">
+                  {filteredCompanies.length}개
+                </Badge>
               </div>
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto p-3">
@@ -2343,7 +2569,9 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
                 {activeTab === "info"
                   ? "기업 정보"
                   : activeTab === "assessment"
-                    ? "현황 진단 (자가진단)"
+                    ? "자가 진단"
+                    : activeTab === "statusAnalysis"
+                      ? "현황 분석"
                     : activeTab === "metrics"
                       ? "실적 관리"
                       : activeTab === "officeHours"
@@ -2383,7 +2611,18 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
                     : "border-transparent text-slate-500 hover:text-slate-700"
                 }`}
               >
-                현황 진단
+                자가 진단
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab("statusAnalysis")}
+                className={`-mb-px border-b-2 px-3 py-2 text-sm font-semibold transition-colors ${
+                  activeTab === "statusAnalysis"
+                    ? "border-slate-900 text-slate-900"
+                    : "border-transparent text-slate-500 hover:text-slate-700"
+                }`}
+              >
+                현황 분석
               </button>
               <button
                 type="button"
@@ -2617,43 +2856,91 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
 
                         <div className="rounded-2xl border border-slate-200 bg-white p-4">
                           <div className="text-sm font-semibold text-slate-900">업로드 자료</div>
-                          <div className="mt-1 text-xs text-slate-500">기업이 제출한 첨부 파일</div>
-                          {companyFiles.length === 0 ? (
+                          <div className="mt-1 text-xs text-slate-500">기업이 제출한 로고와 첨부 파일</div>
+                          {logoFiles.length === 0 && attachmentFiles.length === 0 ? (
                             <div className="mt-4 rounded-xl border border-slate-100 bg-slate-50/70 px-3 py-3 text-sm text-slate-400">
                               업로드된 파일이 없습니다.
                             </div>
                           ) : (
-                            <div className="mt-3 overflow-hidden rounded-xl border border-slate-200 bg-white">
-                              {companyFiles.map((file) => (
-                                <div
-                                  key={file.id}
-                                  className="flex items-center gap-3 px-3 py-2.5 text-xs border-t border-slate-100 first:border-t-0"
-                                >
-                                  <div
-                                    className="min-w-0 flex-1 truncate font-medium text-slate-700"
-                                    title={file.name}
-                                  >
-                                    {file.name}
+                            <div className="mt-3 space-y-4">
+                              {logoFiles.length > 0 ? (
+                                <div>
+                                  <div className="text-xs font-semibold text-slate-600">회사 로고</div>
+                                  <div className="mt-2 overflow-hidden rounded-xl border border-slate-200 bg-white">
+                                    {logoFiles.map((file) => (
+                                      <div
+                                        key={file.id}
+                                        className="flex items-center gap-3 px-3 py-2.5 text-xs border-t border-slate-100 first:border-t-0"
+                                      >
+                                        <div
+                                          className="min-w-0 flex-1 truncate font-medium text-slate-700"
+                                          title={file.name}
+                                        >
+                                          {file.name}
+                                        </div>
+                                        <div className="shrink-0 text-[11px] text-slate-400">
+                                          {(file.size / (1024 * 1024)).toFixed(1)}MB
+                                        </div>
+                                        {file.downloadUrl ? (
+                                          <a
+                                            href={file.downloadUrl}
+                                            target="_blank"
+                                            rel="noreferrer"
+                                            className="shrink-0 text-[11px] font-medium text-slate-600 transition hover:text-slate-900"
+                                          >
+                                            보기/다운로드
+                                          </a>
+                                        ) : (
+                                          <span className="shrink-0 text-[11px] text-slate-400">
+                                            링크 준비중
+                                          </span>
+                                        )}
+                                      </div>
+                                    ))}
                                   </div>
-                                  <div className="shrink-0 text-[11px] text-slate-400">
-                                    {(file.size / (1024 * 1024)).toFixed(1)}MB
-                                  </div>
-                                  {file.downloadUrl ? (
-                                    <a
-                                      href={file.downloadUrl}
-                                      target="_blank"
-                                      rel="noreferrer"
-                                      className="shrink-0 text-[11px] font-medium text-slate-600 transition hover:text-slate-900"
-                                    >
-                                      보기/다운로드
-                                    </a>
-                                  ) : (
-                                    <span className="shrink-0 text-[11px] text-slate-400">
-                                      링크 준비중
-                                    </span>
-                                  )}
                                 </div>
-                              ))}
+                              ) : null}
+                              <div>
+                                <div className="text-xs font-semibold text-slate-600">첨부파일</div>
+                                {attachmentFiles.length === 0 ? (
+                                  <div className="mt-2 rounded-xl border border-slate-100 bg-slate-50/70 px-3 py-3 text-sm text-slate-400">
+                                    업로드된 첨부파일이 없습니다.
+                                  </div>
+                                ) : (
+                                  <div className="mt-2 overflow-hidden rounded-xl border border-slate-200 bg-white">
+                                    {attachmentFiles.map((file) => (
+                                      <div
+                                        key={file.id}
+                                        className="flex items-center gap-3 px-3 py-2.5 text-xs border-t border-slate-100 first:border-t-0"
+                                      >
+                                        <div
+                                          className="min-w-0 flex-1 truncate font-medium text-slate-700"
+                                          title={file.name}
+                                        >
+                                          {file.name}
+                                        </div>
+                                        <div className="shrink-0 text-[11px] text-slate-400">
+                                          {(file.size / (1024 * 1024)).toFixed(1)}MB
+                                        </div>
+                                        {file.downloadUrl ? (
+                                          <a
+                                            href={file.downloadUrl}
+                                            target="_blank"
+                                            rel="noreferrer"
+                                            className="shrink-0 text-[11px] font-medium text-slate-600 transition hover:text-slate-900"
+                                          >
+                                            보기/다운로드
+                                          </a>
+                                        ) : (
+                                          <span className="shrink-0 text-[11px] text-slate-400">
+                                            링크 준비중
+                                          </span>
+                                        )}
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
                             </div>
                           )}
                         </div>
@@ -2844,6 +3131,200 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
                       </div>
                     )
                   })()}
+                </div>
+              ) : activeTab === "statusAnalysis" ? (
+                <div className="flex min-h-0 flex-1 flex-col">
+                  <div className="flex flex-wrap items-start justify-end gap-3">
+                    <div className="flex flex-wrap items-end gap-2">
+                      <label className="flex flex-col gap-1 text-xs font-medium text-slate-500">
+                        <span>작성자</span>
+                        <input
+                          className="h-8 w-40 rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-700 focus:border-slate-400 focus:outline-none"
+                          value={statusAnalysisAuthor}
+                          onChange={(event) => setStatusAnalysisAuthor(event.target.value)}
+                          placeholder="작성자를 입력해주세요."
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => void handleSaveStatusAnalysis()}
+                        disabled={savingStatusAnalysis || !selectedCompanyId}
+                        className="inline-flex h-8 items-center gap-2 rounded-lg border border-emerald-700 bg-emerald-700 px-3 text-xs font-semibold text-white transition hover:border-emerald-800 hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        <Save className="h-3.5 w-3.5" />
+                        {savingStatusAnalysis ? "저장 중..." : "현황 분석 저장"}
+                      </button>
+                    </div>
+                  </div>
+                  <div className="mt-3 border-t border-slate-100 pt-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div className="flex flex-wrap gap-2">
+                        {statusAnalysisSummary.grouped.map((section) => (
+                          <button
+                          key={`status-analysis-${section.sectionTitle}`}
+                          type="button"
+                          onClick={() => setActiveStatusAnalysisFilter(section.sectionTitle)}
+                          className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
+                            activeStatusAnalysisFilter === section.sectionTitle
+                              ? "border-slate-900 bg-slate-900 text-white"
+                              : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                          }`}
+                        >
+                          {section.sectionTitle} {formatScore(section.sectionScore)}/
+                          {formatScore(section.sectionTotal)}점
+                        </button>
+                      ))}
+                      <div className="rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-xs font-semibold text-sky-800">
+                        총점 {formatScore(statusAnalysisSummary.totalScore)}/100점
+                      </div>
+                    </div>
+                  </div>
+                  </div>
+                  <div className="mt-4 min-h-0 flex-1 overflow-y-auto">
+                    <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+                      {statusAnalysisSummary.grouped
+                        .filter((section) => section.sectionTitle === activeStatusAnalysisFilter)
+                        .map((section) => (
+                          <div key={section.sectionTitle} className="flex h-full min-h-0 flex-col">
+                            <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50 px-4 py-3">
+                              <div className="text-sm font-semibold text-slate-800">
+                                {section.sectionTitle}
+                              </div>
+                              <div className="text-xs font-semibold text-slate-600">
+                                {formatScore(section.sectionScore)}/
+                                {formatScore(section.sectionTotal)}점
+                              </div>
+                            </div>
+                            <div className="space-y-3 p-4">
+                              {section.questions.map((item, index) => {
+                                const savedAdminAnswer = getStatusAnalysisAnswer(
+                                  statusAnalysisSections,
+                                  item.sectionKey,
+                                  item.subsectionKey,
+                                  item.questionKey,
+                                )
+                                const comment = getStatusAnalysisReason(
+                                  statusAnalysisSections,
+                                  item.sectionKey,
+                                  item.subsectionKey,
+                                  item.questionKey,
+                                )
+                                return (
+                                  <div
+                                    key={`${section.sectionTitle}-${index}`}
+                                    className="rounded-xl border border-slate-200 bg-slate-50/50 p-3"
+                                  >
+                                    <div className="flex flex-wrap items-start justify-between gap-2">
+                                      <div className="min-w-0 flex-1">
+                                        <div className="text-[11px] font-medium text-slate-400">
+                                          {item.subsectionTitle}
+                                        </div>
+                                        <div className="mt-1 text-sm font-semibold text-slate-800">
+                                          {item.questionText}
+                                        </div>
+                                      </div>
+                                    </div>
+                                    <div className="mt-3 space-y-3">
+                                      <div className="rounded-lg border border-slate-200 bg-white p-2.5">
+                                        <div className="flex items-center justify-between gap-2">
+                                          <div className="text-[11px] font-semibold text-slate-400">
+                                            기업 작성내용
+                                          </div>
+                                          <span
+                                            className={`rounded-full px-2 py-0.5 text-xs font-semibold ${getAnswerBadgeClass(
+                                              item.companyAnswerLabel,
+                                            )}`}
+                                          >
+                                            {item.companyAnswerLabel} · {formatScore(item.companyScore)}점
+                                          </span>
+                                        </div>
+                                        <div className="mt-1 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                                          {item.reason || "작성된 내용이 없습니다."}
+                                        </div>
+                                      </div>
+                                      <div className="rounded-lg border border-sky-200 bg-sky-50/50 p-2.5">
+                                        <div className="flex items-center justify-between gap-2">
+                                          <div className="text-[11px] font-semibold text-sky-700">
+                                            관리자 현황 분석
+                                          </div>
+                                          <span
+                                            className={`rounded-full px-2 py-0.5 text-xs font-semibold ${getAnswerBadgeClass(
+                                              item.answerLabel,
+                                            )}`}
+                                          >
+                                            {item.answerLabel} · {formatScore(item.score)}점
+                                          </span>
+                                        </div>
+                                        <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+                                          <div className="inline-flex rounded-lg border border-slate-200 bg-white p-1">
+                                          {[
+                                            { label: "예", value: true as const },
+                                            { label: "아니오", value: false as const },
+                                          ].map((option) => {
+                                            const selectedAnswer =
+                                              savedAdminAnswer === null
+                                                ? selfAssessment?.[item.sectionKey]?.[
+                                                    item.subsectionKey
+                                                  ]?.[item.questionKey]?.answer ?? null
+                                                : savedAdminAnswer
+                                            const isSelected =
+                                              getAnswerLabel(selectedAnswer) === option.label
+                                            return (
+                                              <button
+                                                key={`${item.questionKey}-${option.label}`}
+                                                type="button"
+                                                className={`rounded-md px-2.5 py-1 text-xs font-semibold transition ${
+                                                  isSelected
+                                                    ? option.value
+                                                      ? "bg-emerald-600 text-white"
+                                                      : "bg-rose-600 text-white"
+                                                    : "text-slate-600 hover:bg-slate-50"
+                                                }`}
+                                                onClick={() =>
+                                                  setStatusAnalysisSections((prev) =>
+                                                    setStatusAnalysisAnswer(
+                                                      prev,
+                                                      item.sectionKey,
+                                                      item.subsectionKey,
+                                                      item.questionKey,
+                                                      option.value,
+                                                    ),
+                                                  )
+                                                }
+                                              >
+                                                {option.label}
+                                              </button>
+                                            )
+                                          })}
+                                        </div>
+                                        </div>
+                                        <textarea
+                                          rows={3}
+                                          className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700"
+                                          placeholder="코멘트를 입력하세요"
+                                          value={comment}
+                                          onChange={(event) =>
+                                            setStatusAnalysisSections((prev) =>
+                                              setStatusAnalysisReason(
+                                                prev,
+                                                item.sectionKey,
+                                                item.subsectionKey,
+                                                item.questionKey,
+                                                event.target.value,
+                                              ),
+                                            )
+                                          }
+                                        />
+                                      </div>
+                                    </div>
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          </div>
+                        ))}
+                    </div>
+                  </div>
                 </div>
               ) : activeTab === "metrics" ? (
                 selectedCompanyId ? (
@@ -3152,11 +3633,11 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
                       </div>
                     </div>
 
-                    {companyFiles.length > 0 ? (
+                    {attachmentFiles.length > 0 ? (
                       <div className="rounded-2xl border border-slate-200 bg-white p-4">
                         <div className="text-sm font-semibold text-slate-800">업로드 자료</div>
                         <div className="mt-3 space-y-2">
-                          {companyFiles.map((file) => (
+                          {attachmentFiles.map((file) => (
                             <div
                               key={file.id}
                               className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-slate-200 bg-slate-50/60 px-3 py-2.5"
@@ -3371,7 +3852,7 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
                           기업진단분석보고서
                         </div>
                         <p className="mt-1 text-xs text-slate-500">
-                          기업 정보와 현황 진단을 바탕으로 AI 초안을 생성한 뒤 수정할 수 있습니다.
+                          기업 정보와 자가 진단을 바탕으로 AI 초안을 생성한 뒤 수정할 수 있습니다.
                         </p>
                       </div>
                       <div className="flex flex-wrap items-center gap-2">
@@ -3406,7 +3887,7 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
                     </div>
                   </div>
 
-                  <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="grid gap-4 sm:grid-cols-3">
                     <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
                       <div className="text-xs font-semibold tracking-[0.08em] text-slate-400">
                         기업명
@@ -3415,6 +3896,20 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
                         {reportForm.companyName || "-"}
                       </div>
                     </div>
+                    <label className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-xs text-slate-500">
+                      작성자
+                      <input
+                        className="mt-2 w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700"
+                        value={reportForm.author}
+                        onChange={(event) =>
+                          setReportForm((prev) => ({
+                            ...prev,
+                            author: event.target.value,
+                          }))
+                        }
+                        placeholder="작성자를 입력하세요"
+                      />
+                    </label>
                     <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
                       <div className="text-xs font-semibold tracking-[0.08em] text-slate-400">
                         작성일시
