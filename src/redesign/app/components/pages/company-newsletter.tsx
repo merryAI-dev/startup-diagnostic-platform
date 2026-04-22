@@ -123,7 +123,7 @@ export function CompanyNewsletter({ currentUser }: CompanyNewsletterProps) {
           <div className="absolute bottom-0 right-0 w-96 h-96 bg-[#5DADE2] rounded-full blur-3xl"></div>
         </div>
 
-        <div className="relative max-w-7xl mx-auto px-8 py-12">
+        <div className="relative mx-auto max-w-[1600px] px-8 py-12">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -225,7 +225,7 @@ export function CompanyNewsletter({ currentUser }: CompanyNewsletterProps) {
 
       {/* 탭 네비게이션 */}
       <div className="bg-white border-b sticky top-0 z-10 shadow-sm">
-        <div className="max-w-7xl mx-auto px-8">
+        <div className="mx-auto max-w-[1600px] px-8">
           <div className="flex gap-8">
             {[
               { id: "overview", label: "종합 현황", icon: BarChart3 },
@@ -249,7 +249,7 @@ export function CompanyNewsletter({ currentUser }: CompanyNewsletterProps) {
         </div>
       </div>
 
-      <div className="max-w-7xl mx-auto px-8 py-8">
+      <div className="mx-auto max-w-[1600px] px-8 py-8">
         <AnimatePresence mode="wait">
           {/* 종합 현황 탭 */}
           {selectedTab === "overview" && (

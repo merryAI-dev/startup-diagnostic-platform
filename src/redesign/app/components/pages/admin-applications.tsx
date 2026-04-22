@@ -57,8 +57,8 @@ export function AdminApplications({
   const [selectedApplicationId, setSelectedApplicationId] = useState<string | null>(null);
   const isConsultantUser = currentUserRole === "consultant";
   const pageContainerClassName = isConsultantUser
-    ? "mx-auto w-full max-w-[1440px]"
-    : "mx-auto w-full max-w-7xl";
+    ? "mx-auto w-full max-w-[1600px]"
+    : "mx-auto w-full max-w-[1600px]";
 
   const parseDateValue = (value?: string | null) => {
     if (!value) return null;

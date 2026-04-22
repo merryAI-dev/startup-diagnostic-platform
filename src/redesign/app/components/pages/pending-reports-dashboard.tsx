@@ -53,6 +53,18 @@ const formatLocalDateText = (
   return date ? format(date, pattern, { locale: ko }) : fallback;
 };
 
+const formatLocalDateTimeText = (
+  date: string | null | undefined,
+  time?: string | null,
+  datePattern = "yyyy.MM.dd",
+  fallback = "-",
+) => {
+  const dateText = formatLocalDateText(date, datePattern, "");
+  if (!dateText) return fallback;
+  const trimmedTime = time?.trim();
+  return trimmedTime ? `${dateText} ${trimmedTime}` : dateText;
+};
+
 const parseReportContent = (raw?: string | null) => {
   const text = (raw ?? "").trim();
   if (!text) {
@@ -244,8 +256,8 @@ export function PendingReportsDashboard({
   const pageTitleClassName = "text-2xl font-semibold text-slate-900";
   const pageDescriptionClassName = "mt-1 text-sm text-slate-500";
   const pageContainerClassName = isConsultantUser
-    ? "mx-auto w-full max-w-[1440px]"
-    : "mx-auto w-full max-w-7xl";
+    ? "mx-auto w-full max-w-[1600px]"
+    : "mx-auto w-full max-w-[1600px]";
   const [reportDateRange, setReportDateRange] = useState<DateRange | undefined>();
   const [reportStatusFilter, setReportStatusFilter] = useState<"all" | "작성" | "미작성">("all");
   const [reportPage, setReportPage] = useState(1);
@@ -409,8 +421,12 @@ export function PendingReportsDashboard({
     try {
       const content = parseReportContent(report.content);
       const participantText = (report.participants ?? []).join(", ");
-      const scheduledDate = formatLocalDateText(application.scheduledDate, "yyyy-MM-dd");
-      const writtenDate = formatLocalDateText(report.date, "yyyy-MM-dd");
+      const scheduledDate = formatLocalDateTimeText(
+        application.scheduledDate,
+        application.scheduledTime,
+        "yyyy-MM-dd",
+      );
+      const writtenDate = formatLocalDateTimeText(report.date, report.time, "yyyy-MM-dd");
 
       const rows: Array<[string, string]> = [
         ["사업", programName],
@@ -421,7 +437,7 @@ export function PendingReportsDashboard({
         ["작성일", writtenDate],
         ["주제", report.topic || "-"],
         ["참여자", participantText || "-"],
-        ["기업의 현황", content.companyStatus || "-"],
+        ["미팅 아젠다", content.companyStatus || "-"],
         ["자문내용", content.advisoryContent || "-"],
         ["팔로업", report.followUp || "-"],
         ["첨부 사진", report.photos?.length ? `${report.photos.length}개` : "-"],
@@ -680,6 +696,7 @@ export function PendingReportsDashboard({
             agenda: report.topic?.trim() || "비정기 오피스아워",
             requestContent: "",
             scheduledDate: report.date,
+            scheduledTime: report.time,
             programId: report.programId,
             createdAt: report.createdAt,
             updatedAt: report.updatedAt,
@@ -1022,7 +1039,7 @@ export function PendingReportsDashboard({
                       <TableHead className="bg-white">기업명</TableHead>
                       <TableHead className="bg-white">사업명</TableHead>
                       <TableHead className="bg-white">컨설턴트</TableHead>
-                      <TableHead className="bg-white">진행일</TableHead>
+                      <TableHead className="bg-white">진행일시</TableHead>
                       <TableHead className="bg-white">작성일</TableHead>
                       <TableHead className="w-[72px] bg-white text-center">다운로드</TableHead>
                       <TableHead className="bg-white text-right">관리</TableHead>
@@ -1070,13 +1087,14 @@ export function PendingReportsDashboard({
                           {row.consultantName}
                         </TableCell>
                         <TableCell className="text-sm">
-                          {row.application.scheduledDate
-                            ? formatLocalDateText(row.application.scheduledDate, "yyyy.MM.dd")
-                            : "-"}
+                          {formatLocalDateTimeText(
+                            row.application.scheduledDate,
+                            row.application.scheduledTime,
+                          )}
                         </TableCell>
                         <TableCell className="text-sm text-muted-foreground">
-                          {row.report?.date
-                            ? formatLocalDateText(row.report.date, "yyyy.MM.dd")
+                          {row.report
+                            ? formatLocalDateTimeText(row.report.date, row.report.time)
                             : "-"}
                         </TableCell>
                         <TableCell className="text-center">
@@ -1223,22 +1241,23 @@ export function PendingReportsDashboard({
                     <div className="text-sm text-slate-900">{resolveRowCompanyName(selectedReportItem)}</div>
                   </div>
                   <div className="space-y-1.5">
-                    <div className="text-xs font-medium text-slate-500">진행일</div>
+                    <div className="text-xs font-medium text-slate-500">진행일시</div>
                     <div className="text-sm text-slate-900">
-                      {selectedReportItem.application.scheduledDate
-                        ? formatLocalDateText(
-                          selectedReportItem.application.scheduledDate,
-                          "yyyy년 M월 d일",
-                        )
-                        : "-"}
+                      {formatLocalDateTimeText(
+                        selectedReportItem.application.scheduledDate,
+                        selectedReportItem.application.scheduledTime,
+                        "yyyy년 M월 d일",
+                      )}
                     </div>
                   </div>
                   <div className="space-y-1.5">
                     <div className="text-xs font-medium text-slate-500">작성일</div>
                     <div className="text-sm text-slate-900">
-                      {selectedReportItem.report.date
-                        ? formatLocalDateText(selectedReportItem.report.date, "yyyy년 M월 d일")
-                        : "-"}
+                      {formatLocalDateTimeText(
+                        selectedReportItem.report.date,
+                        selectedReportItem.report.time,
+                        "yyyy년 M월 d일",
+                      )}
                     </div>
                   </div>
                 </div>
@@ -1258,7 +1277,7 @@ export function PendingReportsDashboard({
                 </div>
 
                 <div className="space-y-2 border-b py-6">
-                  <div className="text-xs font-medium text-slate-500">기업의 현황</div>
+                  <div className="text-xs font-medium text-slate-500">미팅 아젠다</div>
                   <div className="whitespace-pre-wrap break-all text-sm leading-7 text-slate-900">
                     {selectedReportContent.companyStatus || "-"}
                   </div>

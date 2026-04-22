@@ -199,7 +199,7 @@ export function AdminDashboardCharts({
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden bg-slate-50">
       <div className="shrink-0 border-b border-slate-200 bg-white px-6 py-5">
-        <div className="mx-auto flex w-full max-w-7xl flex-col gap-3">
+        <div className="mx-auto flex w-full max-w-[1600px] flex-col gap-3">
           <div>
             <h1 className="text-2xl font-semibold text-slate-900">관리자 대시보드</h1>
             <p className="mt-1 text-sm text-slate-500">
@@ -212,7 +212,7 @@ export function AdminDashboardCharts({
       </div>
 
       <div className="flex min-h-0 flex-1 overflow-hidden">
-        <div className="mx-auto flex min-h-0 h-full w-full max-w-7xl flex-1 flex-col gap-4 px-6 py-4">
+        <div className="mx-auto flex min-h-0 h-full w-full max-w-[1600px] flex-1 flex-col gap-4 px-6 py-4">
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <Card className="bg-white">
               <CardContent className="p-3.5">

@@ -1985,7 +1985,7 @@ export function ConsultantCompaniesPage({
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-gray-50">
       <div className="border-b bg-white px-6 py-5">
-        <div className="mx-auto w-full max-w-7xl">
+        <div className="mx-auto w-full max-w-[1600px]">
           <h1 className="text-2xl font-semibold text-slate-900">기업 등록</h1>
           <p className="mt-1 text-sm text-slate-500">
             회원가입 없이 진행되는 비정기 오피스아워 대상 기업을 등록합니다.
@@ -1994,7 +1994,7 @@ export function ConsultantCompaniesPage({
       </div>
 
       <div className="min-h-0 flex-1 px-6 pb-8 pt-5">
-        <div className="mx-auto w-full max-w-7xl">
+        <div className="mx-auto w-full max-w-[1600px]">
           <section className="flex h-[calc(100vh-230px)] min-h-[440px] flex-col overflow-hidden rounded-lg border bg-white">
             <div className="shrink-0 border-b p-5">
               <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">

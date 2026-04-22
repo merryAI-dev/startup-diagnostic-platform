@@ -45,7 +45,7 @@ export function IrregularOfficeHoursCalendar({ onNavigate }: { onNavigate: (page
       </div>
 
       <div className="flex-1 p-8 overflow-y-auto">
-        <div className="max-w-6xl mx-auto">
+        <div className="mx-auto max-w-[1600px]">
           {/* Categories Grid */}
           <div className="mb-8">
             <h2 className="text-lg font-semibold text-gray-900 mb-4">전문 분야별 컨설턴트</h2>

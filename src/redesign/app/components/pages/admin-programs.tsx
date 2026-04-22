@@ -689,7 +689,7 @@ export function AdminPrograms({
   return (
     <div className="flex h-full min-h-0 flex-col bg-slate-50">
       <div className="shrink-0 border-b bg-white px-6 py-5">
-        <div className="mx-auto flex w-full max-w-7xl items-start justify-between gap-4">
+        <div className="mx-auto flex w-full max-w-[1600px] items-start justify-between gap-4">
           <div>
             <h1 className={pageTitleClassName}>{pageTitle}</h1>
             <p className={pageDescriptionClassName}>{pageDescription}</p>
@@ -707,7 +707,7 @@ export function AdminPrograms({
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col px-6 pb-6 pt-5">
-        <div className="mx-auto flex min-h-0 w-full max-w-7xl flex-1 flex-col">
+        <div className="mx-auto flex min-h-0 w-full max-w-[1600px] flex-1 flex-col">
           {isManagementMode ? (
             <Card className="flex min-h-0 flex-1 flex-col overflow-hidden bg-white">
               <CardHeader className="shrink-0 border-b bg-white">

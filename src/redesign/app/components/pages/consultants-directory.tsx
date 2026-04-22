@@ -42,7 +42,7 @@ export function ConsultantsDirectory({ consultants }: ConsultantsDirectoryProps)
     <div className="min-h-screen bg-gray-50">
       {/* Hero Section */}
       <div className="bg-gradient-to-br from-slate-900 to-slate-700 text-white py-20">
-        <div className="max-w-7xl mx-auto px-8">
+        <div className="mx-auto max-w-[1600px] px-8">
           <h1 className="text-4xl font-bold mb-4">Our Consultants</h1>
           <p className="text-xl text-gray-200 max-w-2xl">
             임팩트 비즈니스 성장을 이끄는 각 분야의 전문가들을 만나보세요
@@ -64,7 +64,7 @@ export function ConsultantsDirectory({ consultants }: ConsultantsDirectoryProps)
         </div>
       </div>
 
-      <div className="max-w-7xl mx-auto px-8 -mt-8">
+      <div className="mx-auto max-w-[1600px] px-8 -mt-8">
         {/* Filter */}
         <div className="bg-white rounded-lg shadow-sm border p-4 mb-8">
           <div className="flex items-center gap-3 flex-wrap">

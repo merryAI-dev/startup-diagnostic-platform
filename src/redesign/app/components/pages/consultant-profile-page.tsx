@@ -94,7 +94,7 @@ export function ConsultantProfilePage({
 }: ConsultantProfilePageProps) {
   const pageTitleClassName = "text-2xl font-semibold text-slate-900";
   const pageDescriptionClassName = "mt-1 text-sm text-slate-500";
-  const consultantPageContainerClassName = "mx-auto w-full max-w-[1440px]";
+  const consultantPageContainerClassName = "mx-auto w-full max-w-[1600px]";
   const [formValues, setFormValues] = useState<ConsultantProfileFormValues>(() =>
     buildInitialValues(consultant, defaultEmail)
   );
