@@ -942,16 +942,6 @@ export function PendingReportsDashboard({
 
         {/* Stats */}
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <div className="rounded-lg border bg-gray-50 px-4 py-2.5">
-            <div className="mb-1 flex items-center justify-between">
-              <span className="text-[11px] text-muted-foreground">미작성</span>
-              <FileText className="h-3.5 w-3.5 text-blue-500" />
-            </div>
-            <div className="text-xl font-bold text-gray-900">
-              {filteredPendingRows.length}건
-            </div>
-          </div>
-
           <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2.5">
             <div className="mb-1 flex items-center justify-between">
               <span className="text-[11px] text-emerald-700">진행 시수</span>
@@ -972,6 +962,16 @@ export function PendingReportsDashboard({
               {formatDurationHours(filteredCompletedDurationHours)}
             </div>
             <p className="mt-0.5 text-[10px] text-indigo-700">작성된 일지의 소요 시간 합계</p>
+          </div>
+
+          <div className="rounded-lg border bg-gray-50 px-4 py-2.5">
+            <div className="mb-1 flex items-center justify-between">
+              <span className="text-[11px] text-muted-foreground">미작성</span>
+              <FileText className="h-3.5 w-3.5 text-blue-500" />
+            </div>
+            <div className="text-xl font-bold text-gray-900">
+              {filteredPendingRows.length}건
+            </div>
           </div>
 
           <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-2.5">
