@@ -55,7 +55,7 @@ service firebase.storage {
     match /company-files/{companyId}/{fileId}/{fileName} {
       function isAllowedFile() {
         return request.resource.size <= 50 * 1024 * 1024
-          && request.resource.name.matches(".*\\.(pdf|PDF|png|PNG|ai|AI)$");
+          && request.resource.name.matches(".*\\.(pdf|PDF|png|PNG|jpg|JPG|jpeg|JPEG|svg|SVG|ai|AI)$");
       }
 
       allow read: if isAdmin() || isCompanyMember(companyId);
