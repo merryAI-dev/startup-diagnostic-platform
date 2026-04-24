@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AX Orchestrate Dashboard</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <header class="topline" aria-label="AX dashboard header">
+        <div class="figure-label">FIG. 01</div>
+        <div>
+          <p class="eyebrow">AXR Operating System</p>
+          <h1>AX Orchestrate Dashboard</h1>
+        </div>
+        <p class="source-line" id="sourceLine">Local CLI Update</p>
+      </header>
+
+      <nav class="view-tabs" aria-label="Dashboard views">
+        <button class="tab-button is-active" type="button" data-view="change">
+          <span>변화 맵</span>
+          <small>경영진/고객</small>
+        </button>
+        <button class="tab-button" type="button" data-view="gantt">
+          <span>실행 간트</span>
+          <small>PM/운영자</small>
+        </button>
+        <button class="tab-button" type="button" data-view="workbench">
+          <span>오늘 작업대</span>
+          <small>팀원</small>
+        </button>
+      </nav>
+
+      <main>
+        <section class="view-panel is-visible" id="view-change" aria-labelledby="change-title">
+          <div class="impact-band">
+            <div>
+              <p class="eyebrow">Impact</p>
+              <h2 id="change-title"></h2>
+            </div>
+            <p id="impactSummary"></p>
+          </div>
+
+          <div class="metric-strip" id="metricStrip"></div>
+
+          <section class="matrix-section" aria-label="AX change matrix">
+            <div class="section-heading">
+              <p class="eyebrow">Pillar x Phase</p>
+              <h3>변화이론 기반 AX 추진 현황</h3>
+            </div>
+            <div class="change-matrix" id="changeMatrix"></div>
+          </section>
+
+          <section class="tool-board" aria-label="Branded AX tools">
+            <div class="section-heading">
+              <p class="eyebrow">Agent / Skill</p>
+              <h3>우리의 AX 도구 체계</h3>
+            </div>
+            <div class="tool-grid" id="toolGrid"></div>
+          </section>
+        </section>
+
+        <section class="view-panel" id="view-gantt" aria-labelledby="gantt-title">
+          <div class="section-heading">
+            <p class="eyebrow">Execution Gantt</p>
+            <h2 id="gantt-title">GitHub/GitGantt 실행판</h2>
+            <p class="support-copy">이슈 번호는 보조 정보로 두고, 운영자가 바로 판단할 수 있는 일정/상태/다음 액션을 먼저 보여줍니다.</p>
+          </div>
+
+          <div class="gantt-toolbar">
+            <div>
+              <span class="toolbar-label">표시 기준</span>
+              <strong id="ganttPeriod"></strong>
+            </div>
+            <div>
+              <span class="toolbar-label">수동 업데이트</span>
+              <strong id="lastUpdated"></strong>
+            </div>
+          </div>
+
+          <div class="gantt-board" id="ganttBoard"></div>
+        </section>
+
+        <section class="view-panel" id="view-workbench" aria-labelledby="workbench-title">
+          <div class="workbench-layout">
+            <aside class="token-panel" aria-label="Codex token usage">
+              <p class="eyebrow">Codex Usage</p>
+              <h2>토큰 사용량</h2>
+              <p class="support-copy">인증값이 아니라 사용량/예산 지표입니다. 로컬 파일이나 CLI로만 갱신합니다.</p>
+              <div class="token-number" id="tokenTotal">0</div>
+              <div class="token-meter" aria-hidden="true"><span id="tokenMeter"></span></div>
+              <dl class="token-list" id="tokenList"></dl>
+            </aside>
+
+            <section class="today-panel">
+              <div class="section-heading">
+                <p class="eyebrow">Today</p>
+                <h2 id="workbench-title">오늘의 AX 작업대</h2>
+                <p class="support-copy">정책 확인, 운영 조율, QA처럼 비개발자도 바로 실행할 수 있는 다음 행동 중심입니다.</p>
+              </div>
+              <div class="work-cards" id="workCards"></div>
+            </section>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="./dashboard-core.js"></script>
+    <script src="./dashboard-data.js"></script>
+    <script src="./app.js"></script>
+  </body>
+</html>
