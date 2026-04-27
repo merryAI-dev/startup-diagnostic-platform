@@ -14,6 +14,7 @@ export type CompanyInfoForm = {
   ceoName: string
   ceoEmail: string
   ceoPhone: string
+  ceoBirthDate: string
   ceoAge: string
   ceoGender: string
   ceoNationality: string
@@ -58,6 +59,7 @@ export type CompanyInfoRecord = {
       name: string
       email: string
       phone: string
+      birthDate: string
       age: number | null
       gender: string
       nationality: string
@@ -137,6 +139,7 @@ export const DEFAULT_FORM: CompanyInfoForm = {
   ceoName: "",
   ceoEmail: "",
   ceoPhone: "",
+  ceoBirthDate: "",
   ceoAge: "",
   ceoGender: "",
   ceoNationality: "",

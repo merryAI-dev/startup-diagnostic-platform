@@ -1,9 +1,10 @@
-import { Application, Program, User } from "@/redesign/app/lib/types";
+import { Application, OfficeHourReport, Program, User } from "@/redesign/app/lib/types";
 import { AdminDashboardCharts } from "@/redesign/app/components/pages/admin-dashboard-charts";
 import { ConsultantDashboard } from "@/redesign/app/components/pages/consultant-dashboard";
 
 interface AdminDashboardInteractiveProps {
   applications: Application[];
+  reports: OfficeHourReport[];
   programs: Program[];
   currentUser: User;
   onNavigate: (page: string, id?: string) => void;
@@ -11,6 +12,7 @@ interface AdminDashboardInteractiveProps {
 
 export function AdminDashboardInteractive({ 
   applications, 
+  reports,
   programs, 
   currentUser,
   onNavigate: _onNavigate
@@ -30,6 +32,7 @@ export function AdminDashboardInteractive({
   return (
     <AdminDashboardCharts
       applications={applications}
+      reports={reports}
       programs={programs}
       currentUser={currentUser}
     />

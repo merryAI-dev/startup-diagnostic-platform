@@ -93,7 +93,7 @@ export function TeamCollaboration({
     <div className="h-full flex flex-col bg-slate-50">
       {/* 헤더 */}
       <div className="bg-white border-b p-6">
-        <div className="max-w-7xl mx-auto">
+        <div className="mx-auto max-w-[1600px]">
           <div className="flex items-center justify-between mb-6">
             <div className="flex items-center gap-3">
               <div className="p-3 bg-gradient-to-br from-[#5DADE2] to-[#0A2540] rounded-xl">
@@ -158,7 +158,7 @@ export function TeamCollaboration({
 
       {/* 팀원 목록 */}
       <ScrollArea className="flex-1 p-6">
-        <div className="max-w-7xl mx-auto space-y-6">
+        <div className="mx-auto max-w-[1600px] space-y-6">
           {/* 활성 멤버 */}
           <div>
             <h2 className="text-lg font-semibold text-[#0A2540] mb-4 flex items-center gap-2">

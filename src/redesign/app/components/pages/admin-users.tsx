@@ -44,7 +44,7 @@ export function AdminUsers({
 }: AdminUsersProps) {
   const pageTitleClassName = "text-2xl font-semibold text-slate-900"
   const pageDescriptionClassName = "mt-1 text-sm text-slate-500"
-  const pageContainerClassName = "mx-auto w-full max-w-7xl"
+  const pageContainerClassName = "mx-auto w-full max-w-[1600px]"
   const [searchQuery, setSearchQuery] = useState("")
   const [statusFilter, setStatusFilter] = useState<string>("all")
   const [roleFilter, setRoleFilter] = useState<string>("all")

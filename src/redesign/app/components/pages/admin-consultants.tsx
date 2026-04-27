@@ -247,7 +247,7 @@ export function AdminConsultants({
   return (
     <div className="flex h-full min-h-0 flex-col bg-slate-50">
       <div className="shrink-0 border-b border-slate-200/80 bg-white/80 px-8 py-4 backdrop-blur-sm">
-        <div className="mx-auto w-full max-w-7xl">
+        <div className="mx-auto w-full max-w-[1600px]">
           <h1 className={pageTitleClassName}>컨설턴트 관리</h1>
           <p className={pageDescriptionClassName}>
             컨설턴트 프로필과 정기 오피스아워(화/목, 09:00~18:00) 가능 시간을 관리합니다
@@ -256,7 +256,7 @@ export function AdminConsultants({
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-        <div className="mx-auto flex min-h-0 w-full max-w-7xl flex-1 flex-col gap-5 px-8 py-6">
+        <div className="mx-auto flex min-h-0 w-full max-w-[1600px] flex-1 flex-col gap-5 px-8 py-6">
           <Card className="shrink-0">
             <CardContent className="p-4">
               <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">

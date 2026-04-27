@@ -722,7 +722,7 @@ function CompanySignupInfo({
     "ceoName",
     "ceoEmail",
     "ceoPhone",
-    "ceoAge",
+    "ceoBirthDate",
     "ceoGender",
     "ceoNationality",
     "hasCoRepresentative",
@@ -746,6 +746,7 @@ function CompanySignupInfo({
     ceoName: "대표자 성명",
     ceoEmail: "대표자 이메일",
     ceoPhone: "대표자 전화번호",
+    ceoBirthDate: "대표자 생년월일",
     ceoAge: "대표자 나이",
     ceoGender: "대표자 성별",
     ceoNationality: "대표자 국적",
@@ -1351,7 +1352,7 @@ function CompanySignupInfo({
 
     const representativeFields: (keyof CompanyInfoForm)[] = [
       "ceoName",
-      "ceoAge",
+      "ceoBirthDate",
       "ceoEmail",
       "ceoPhone",
       "ceoGender",
@@ -1949,6 +1950,21 @@ function CompanySignupInfo({
                         }))
                       }
                       onBlur={() => markTouched("ceoName")}
+                    />
+                  </label>
+                  <label className="text-xs text-slate-500 md:col-span-2">
+                    대표자 생년월일
+                    <input
+                      type="date"
+                      className={inputClass(isFieldInvalid("ceoBirthDate"))}
+                      value={form.ceoBirthDate}
+                      onChange={(e) =>
+                        setForm((prev) => ({
+                          ...prev,
+                          ceoBirthDate: e.target.value,
+                        }))
+                      }
+                      onBlur={() => markTouched("ceoBirthDate")}
                     />
                   </label>
                   <label className="text-xs text-slate-500 md:col-span-1">

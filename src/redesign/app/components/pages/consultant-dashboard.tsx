@@ -23,7 +23,7 @@ export function ConsultantDashboard({
 }: ConsultantDashboardProps) {
   const pageTitleClassName = "text-2xl font-semibold text-slate-900";
   const pageDescriptionClassName = "mt-1 text-sm text-slate-500";
-  const pageContainerClassName = "mx-auto w-full max-w-6xl";
+  const pageContainerClassName = "mx-auto w-full max-w-[1600px]";
   const [selectedView, setSelectedView] = useState<"companies" | "topics" | "monthly" | "growth">("companies");
   const toDate = (value: Date | string) =>
     value instanceof Date ? value : new Date(value);

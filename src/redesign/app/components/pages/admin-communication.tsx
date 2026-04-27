@@ -163,7 +163,7 @@ export function AdminCommunication({
   };
 
   return (
-    <div className="p-8 max-w-7xl mx-auto">
+    <div className="mx-auto max-w-[1600px] p-8">
       {/* Header */}
       <div className="mb-8">
         <div className="flex items-center justify-between mb-2">

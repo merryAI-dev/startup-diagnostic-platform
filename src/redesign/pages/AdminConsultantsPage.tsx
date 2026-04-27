@@ -191,7 +191,7 @@ export function AdminConsultantsPage() {
 
   return (
     <div className="min-h-full bg-background text-foreground">
-      <div className="mx-auto max-w-7xl px-8 py-10">
+      <div className="mx-auto max-w-[1600px] px-8 py-10">
         <div className="mb-8 flex flex-wrap items-center justify-between gap-4">
           <div>
             <h1 className="text-2xl font-bold text-gray-900">

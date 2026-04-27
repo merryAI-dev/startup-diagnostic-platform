@@ -55,7 +55,7 @@ service firebase.storage {
     match /company-files/{companyId}/{fileId}/{fileName} {
       function isAllowedFile() {
         return request.resource.size <= 50 * 1024 * 1024
-          && request.resource.name.matches(".*\\.(pdf|PDF|png|PNG|ai|AI)$");
+          && request.resource.name.matches(".*\\.(pdf|PDF|png|PNG|jpg|JPG|jpeg|JPEG|svg|SVG|ai|AI)$");
       }
 
       allow read: if isAdmin() || isCompanyMember(companyId);
@@ -78,7 +78,7 @@ service firebase.storage {
 
     match /reports/{applicationId}/{fileName} {
       function isAllowedReportImage() {
-        return request.resource.size <= 10 * 1024 * 1024
+        return request.resource.size <= 50 * 1024 * 1024
           && request.resource.name.matches(
             ".*\\.(jpg|JPG|jpeg|JPEG|png|PNG|webp|WEBP|heic|HEIC|heif|HEIF)$"
           );

@@ -9,6 +9,13 @@ import {
 import { Button } from "@/redesign/app/components/ui/button"
 import { Label } from "@/redesign/app/components/ui/label"
 import { Input } from "@/redesign/app/components/ui/input"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/redesign/app/components/ui/select"
 import { Textarea } from "@/redesign/app/components/ui/textarea"
 import { Application, CompanyDirectoryItem, OfficeHourReport } from "@/redesign/app/lib/types"
 import { getSimilarCompanyNameMatches, normalizeCompanyName } from "@/redesign/app/lib/company-name"
@@ -38,6 +45,10 @@ interface OfficeHourReportFormProps {
 const MIN_REPORT_SECTION_LENGTH = 50
 const COMPANY_STATUS_HEADER = "기업의 현황"
 const ADVISORY_CONTENT_HEADER = "자문내용"
+const REPORT_TIME_OPTIONS = Array.from({ length: 24 }, (_, hour) => {
+  const value = `${String(hour).padStart(2, "0")}:00`
+  return { value, label: value }
+})
 
 function buildReportContent(companyStatus: string, advisoryContent: string) {
   return `[${COMPANY_STATUS_HEADER}]\n${companyStatus.trim()}\n\n[${ADVISORY_CONTENT_HEADER}]\n${advisoryContent.trim()}`
@@ -162,13 +173,24 @@ export function OfficeHourReportForm({
   requireCompanySelection = false,
   onSubmit,
 }: OfficeHourReportFormProps) {
+  const dialogTitle =
+    application.type === "mentoring"
+      ? initialReport
+        ? "멘토링 일지 수정"
+        : "멘토링 일지 작성"
+      : initialReport
+        ? "오피스아워 보고서 수정"
+        : "오피스아워 보고서 작성"
+
   const buildFormState = useCallback(() => {
     const parsedContent = parseReportContent(initialReport?.content ?? "")
     if (initialReport) {
       return {
         date: initialReport.date || application.scheduledDate || "",
+        time: initialReport.time || application.scheduledTime || "",
         location: initialReport.location || "",
-        topic: initialReport.topic || application.agenda,
+        topic: initialReport.topic || "",
+        managerName: initialReport.managerName || "",
         participants:
           initialReport.participants && initialReport.participants.length > 0
             ? initialReport.participants
@@ -184,8 +206,10 @@ export function OfficeHourReportForm({
     }
     return {
       date: application.scheduledDate || "",
+      time: application.scheduledTime || "",
       location: application.sessionFormat === "online" ? "온라인 (Zoom/Google Meet)" : "",
-      topic: application.agenda,
+      topic: "",
+      managerName: "",
       participants: [""],
       content: "",
       advisoryContent: "",
@@ -226,6 +250,14 @@ export function OfficeHourReportForm({
     formData.companyQuery,
     selectableCompanies,
   ).slice(0, 8)
+  const reportTimeOptions = (() => {
+    const baseOptions = [...REPORT_TIME_OPTIONS]
+    const trimmed = formData.time.trim()
+    if (trimmed && !baseOptions.some((option) => option.value === trimmed)) {
+      return [{ value: trimmed, label: trimmed }, ...baseOptions]
+    }
+    return baseOptions
+  })()
 
   const removeStoredPhotos = async (photoUrls: string[]) => {
     if (!isFirebaseConfigured || !storage || photoUrls.length === 0) {
@@ -372,8 +404,10 @@ export function OfficeHourReportForm({
         consultantId: initialReport?.consultantId || application.consultantId || "",
         consultantName: initialReport?.consultantName || application.consultant,
         date: formData.date,
+        time: formData.time.trim(),
         location: formData.location,
         topic: formData.topic,
+        managerName: formData.managerName.trim(),
         participants: formData.participants.filter((p) => p.trim() !== ""),
         content: buildReportContent(formData.content, formData.advisoryContent),
         followUp: formData.followUp,
@@ -409,26 +443,21 @@ export function OfficeHourReportForm({
           <div className="flex items-center justify-between gap-4">
             <div>
               <DialogTitle className="text-2xl whitespace-nowrap overflow-hidden text-ellipsis">
-                {initialReport ? "오피스아워 보고서 수정" : "오피스아워 보고서 작성"}
+                {dialogTitle}
               </DialogTitle>
               <p className="text-sm text-muted-foreground mt-1">{application.officeHourTitle}</p>
-              {!initialReport && (
-                <p className="text-xs text-amber-700 mt-1">
-                  세션 종료 후 3일 이내 보고서를 작성해야 합니다.
-                </p>
-              )}
             </div>
             <div className="flex items-center gap-2">
-              <div className="flex items-center gap-2 bg-amber-50 text-amber-700 px-3 py-1.5 rounded-lg border border-amber-200">
-                <AlertCircle className="w-4 h-4" />
-                <span className="text-sm font-medium whitespace-nowrap">
-                  {deadlineInfo
-                    ? deadlineInfo.isOverdue
+              {deadlineInfo && (
+                <div className="flex items-center gap-2 bg-amber-50 text-amber-700 px-3 py-1.5 rounded-lg border border-amber-200">
+                  <AlertCircle className="w-4 h-4" />
+                  <span className="text-sm font-medium whitespace-nowrap">
+                    {deadlineInfo.isOverdue
                       ? `기한 초과 ${deadlineInfo.overdueDays}일`
-                      : `D-${Math.max(0, deadlineInfo.daysLeft)}`
-                    : "작성 필수"}
-                </span>
-              </div>
+                      : `D-${Math.max(0, deadlineInfo.daysLeft)}`}
+                  </span>
+                </div>
+              )}
             </div>
           </div>
         </DialogHeader>
@@ -529,16 +558,51 @@ export function OfficeHourReportForm({
               </div>
             )}
 
-            {/* 일시 */}
-            <div className="space-y-2">
-              <Label htmlFor="date">일시 *</Label>
-              <Input
-                id="date"
-                type="date"
-                value={formData.date}
-                onChange={(e) => setFormData({ ...formData, date: e.target.value })}
-                required
-              />
+            {/* 진행일 / 시작 시간 / 소요 시간 */}
+            <div className="grid grid-cols-[minmax(0,1fr)_9rem_6rem] gap-3">
+              <div className="space-y-2">
+                <Label htmlFor="date">진행일 *</Label>
+                <Input
+                  id="date"
+                  type="date"
+                  value={formData.date}
+                  onChange={(e) => setFormData({ ...formData, date: e.target.value })}
+                  required
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="time">시작 시간</Label>
+                <Select
+                  value={formData.time || undefined}
+                  onValueChange={(value) => setFormData({ ...formData, time: value })}
+                >
+                  <SelectTrigger id="time">
+                    <SelectValue placeholder="시간 선택" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {reportTimeOptions.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="duration">소요 시간 *</Label>
+                <Input
+                  id="duration"
+                  type="number"
+                  step="0.5"
+                  min="0.5"
+                  max="8"
+                  value={formData.duration}
+                  onChange={(e) => setFormData({ ...formData, duration: parseFloat(e.target.value) })}
+                  required
+                />
+              </div>
             </div>
 
             {/* 장소 */}
@@ -562,6 +626,16 @@ export function OfficeHourReportForm({
                 onChange={(e) => setFormData({ ...formData, topic: e.target.value })}
                 placeholder="세션의 주요 주제"
                 required
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="managerName">담당자</Label>
+              <Input
+                id="managerName"
+                value={formData.managerName}
+                onChange={(e) => setFormData({ ...formData, managerName: e.target.value })}
+                placeholder="예: 홍길동"
               />
             </div>
 
@@ -593,24 +667,9 @@ export function OfficeHourReportForm({
               </Button>
             </div>
 
-            {/* 진행 시간 */}
+            {/* 미팅 아젠다 */}
             <div className="space-y-2">
-              <Label htmlFor="duration">실제 진행 시간 (시간) *</Label>
-              <Input
-                id="duration"
-                type="number"
-                step="0.5"
-                min="0.5"
-                max="8"
-                value={formData.duration}
-                onChange={(e) => setFormData({ ...formData, duration: parseFloat(e.target.value) })}
-                required
-              />
-            </div>
-
-            {/* 기업의 현황 */}
-            <div className="space-y-2">
-              <Label htmlFor="content">기업의 현황 *</Label>
+              <Label htmlFor="content">미팅 아젠다 *</Label>
               <Textarea
                 id="content"
                 value={formData.content}

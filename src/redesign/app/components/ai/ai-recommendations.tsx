@@ -44,7 +44,7 @@ export function AIRecommendations({
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50/30 to-slate-50 p-8">
-      <div className="max-w-6xl mx-auto">
+      <div className="mx-auto max-w-[1600px]">
         {/* 헤더 */}
         <motion.div
           initial={{ opacity: 0, y: -20 }}

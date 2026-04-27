@@ -12,7 +12,13 @@ import {
   X,
   XCircle,
 } from "lucide-react"
-import { Agenda, Application, Program, ProgramKpiDefinition } from "@/redesign/app/lib/types"
+import {
+  Agenda,
+  Application,
+  OfficeHourReport,
+  Program,
+  ProgramKpiDefinition,
+} from "@/redesign/app/lib/types"
 import { getCompletedHoursByProgram } from "@/redesign/app/lib/program-metrics"
 import { getCompanyIdsByProgram } from "@/lib/company-program-membership"
 import { StatusChip } from "@/redesign/app/components/status-chip"
@@ -50,6 +56,7 @@ import { PaginationControls } from "@/redesign/app/components/ui/pagination-cont
 interface AdminProgramsProps {
   programs: Program[]
   applications: Application[]
+  reports: OfficeHourReport[]
   agendas: Agenda[]
   companies: { id: string; name: string; programs?: string[]; ownerUid?: string | null }[]
   onAddProgram: (data: Omit<Program, "id">) => void
@@ -197,6 +204,7 @@ function toProgramForm(program: Program | null): ProgramFormState {
 export function AdminPrograms({
   programs,
   applications,
+  reports,
   agendas,
   companies,
   onAddProgram,
@@ -247,8 +255,8 @@ export function AdminPrograms({
   }, [companies, programs])
 
   const completedHoursByProgram = useMemo(
-    () => getCompletedHoursByProgram(applications),
-    [applications],
+    () => getCompletedHoursByProgram(reports),
+    [reports],
   )
 
   const programStats = useMemo<ProgramStats[]>(() => {
@@ -689,7 +697,7 @@ export function AdminPrograms({
   return (
     <div className="flex h-full min-h-0 flex-col bg-slate-50">
       <div className="shrink-0 border-b bg-white px-6 py-5">
-        <div className="mx-auto flex w-full max-w-7xl items-start justify-between gap-4">
+        <div className="mx-auto flex w-full max-w-[1600px] items-start justify-between gap-4">
           <div>
             <h1 className={pageTitleClassName}>{pageTitle}</h1>
             <p className={pageDescriptionClassName}>{pageDescription}</p>
@@ -707,7 +715,7 @@ export function AdminPrograms({
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col px-6 pb-6 pt-5">
-        <div className="mx-auto flex min-h-0 w-full max-w-7xl flex-1 flex-col">
+        <div className="mx-auto flex min-h-0 w-full max-w-[1600px] flex-1 flex-col">
           {isManagementMode ? (
             <Card className="flex min-h-0 flex-1 flex-col overflow-hidden bg-white">
               <CardHeader className="shrink-0 border-b bg-white">

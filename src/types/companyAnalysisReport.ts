@@ -1,5 +1,6 @@
 export type CompanyAnalysisReportForm = {
   companyName: string
+  author: string
   createdAt: string
   businessProblemDefinition: string
   businessItemOverview: string
@@ -32,6 +33,7 @@ export type CompanyAnalysisReportFieldDefinition = {
 
 export const EMPTY_COMPANY_ANALYSIS_REPORT_FORM: CompanyAnalysisReportForm = {
   companyName: "",
+  author: "",
   createdAt: "",
   businessProblemDefinition: "",
   businessItemOverview: "",
