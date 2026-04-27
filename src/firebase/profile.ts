@@ -45,11 +45,13 @@ function normalizeConsentSnapshot(consents?: ConsentSnapshot) {
   const terms = normalizeConsentRecord(consents.terms)
   const privacy = normalizeConsentRecord(consents.privacy)
   const marketing = normalizeConsentRecord(consents.marketing)
+  const serviceNotifications = normalizeConsentRecord(consents.serviceNotifications)
 
   return {
     ...(terms ? { terms } : {}),
     ...(privacy ? { privacy } : {}),
     ...(marketing ? { marketing } : {}),
+    ...(serviceNotifications ? { serviceNotifications } : {}),
   }
 }
 

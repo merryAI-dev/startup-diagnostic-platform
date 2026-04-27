@@ -3098,6 +3098,38 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     )
   }
 
+  const handleToggleServiceNotificationConsent = async (checked: boolean) => {
+    if (!firebaseUser?.uid) {
+      toast.error("로그인 정보를 확인한 뒤 다시 시도해주세요")
+      return
+    }
+
+    const nextServiceNotificationConsent = {
+      consented: checked,
+      version: profile?.consents?.serviceNotifications?.version ?? "v1.0",
+      method: "settings_toggle",
+      userAgent: typeof navigator !== "undefined" ? navigator.userAgent : null,
+    }
+
+    const updated = await profileCrud.update(firebaseUser.uid, {
+      "consents.serviceNotifications.consented": nextServiceNotificationConsent.consented,
+      "consents.serviceNotifications.version": nextServiceNotificationConsent.version,
+      "consents.serviceNotifications.method": nextServiceNotificationConsent.method,
+      "consents.serviceNotifications.userAgent": nextServiceNotificationConsent.userAgent,
+      "consents.serviceNotifications.consentedAt": checked ? serverTimestamp() : deleteField(),
+    })
+
+    if (!updated) {
+      toast.error("서비스 운영 안내 수신 동의 저장에 실패했습니다")
+      return
+    }
+
+    await refreshProfile()
+    toast.success(
+      checked ? "서비스 운영 안내 수신 동의가 저장되었습니다." : "서비스 운영 안내 수신 거부로 변경되었습니다.",
+    )
+  }
+
   const handleUpdateApplication = async (id: string, data: Partial<Application>) => {
     const updatedAt = new Date()
     if (isFirebaseConfigured) {
@@ -4306,6 +4338,15 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
           {currentPage === "settings" && (
             <Settings
               user={user}
+              serviceNotificationConsentEnabled={
+                profile?.role === "company"
+                  ? Boolean(profile?.consents?.serviceNotifications?.consented)
+                  : undefined
+              }
+              serviceNotificationConsentSaving={profileCrud.saving}
+              onToggleServiceNotificationConsent={
+                profile?.role === "company" ? handleToggleServiceNotificationConsent : undefined
+              }
               marketingConsentEnabled={
                 profile?.role === "company"
                   ? Boolean(profile?.consents?.marketing?.consented)

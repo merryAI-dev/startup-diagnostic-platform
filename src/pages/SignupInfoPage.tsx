@@ -452,6 +452,7 @@ function CompanySignupInfo({
   const [consentTerms, setConsentTerms] = useState(false)
   const [consentPrivacy, setConsentPrivacy] = useState(false)
   const [consentMarketing, setConsentMarketing] = useState(false)
+  const [consentServiceNotifications, setConsentServiceNotifications] = useState(false)
   const submitLockRef = useRef(false)
   const [consentError, setConsentError] = useState<string | null>(null)
   const [activeSignupSection, setActiveSignupSection] = useState("company-service")
@@ -1171,6 +1172,12 @@ function CompanySignupInfo({
             },
             marketing: {
               consented: consentMarketing,
+              version: CONSENT_VERSION,
+              method: CONSENT_METHOD,
+              userAgent,
+            },
+            serviceNotifications: {
+              consented: consentServiceNotifications,
               version: CONSENT_VERSION,
               method: CONSENT_METHOD,
               userAgent,
@@ -2893,6 +2900,32 @@ function CompanySignupInfo({
                   이용자는 개인정보 수집·이용에 대한 동의를 거부할 권리가 있습니다. 다만 본 동의는
                   회원가입 및 서비스 이용을 위한 필수 동의로, 동의를 거부할 경우 회원가입이 제한됩니다.
                 </p>
+              </div>
+
+              <label className="flex items-start gap-3 rounded-lg border border-slate-200 px-3 py-2">
+                <input
+                  type="checkbox"
+                  className="mt-1"
+                  checked={consentServiceNotifications}
+                  onChange={(e) => setConsentServiceNotifications(e.target.checked)}
+                />
+                <span>
+                  <span className="font-semibold text-slate-900">
+                    소식 알림 수신 동의
+                  </span>{" "}
+                  <span className="text-slate-500">(선택)</span>
+                  <span className="mt-1 block text-xs text-slate-500">
+                    오피스아워 신청 현황 등 홈페이지 이용에 필요한 안내 사항을 메일 및 카카오톡 알림으로 보내드립니다.
+                  </span>
+                </span>
+              </label>
+              <div className="max-h-36 overflow-y-auto rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs leading-relaxed text-slate-600">
+                <p className="font-semibold text-slate-700">[소식 알림 수신 동의] 선택</p>
+                <p className="mt-2">
+                  오피스아워 신청 현황, 일정 변경, 승인/반려 등 홈페이지 이용에 필요한 안내 사항을 이메일 및 카카오톡으로 발송합니다.
+                </p>
+                <p className="mt-2">수집 항목: 이메일 주소, 휴대전화번호</p>
+                <p className="mt-2">동의하지 않더라도 회원가입은 가능하며, 설정 화면에서 언제든지 변경할 수 있습니다.</p>
               </div>
 
               <label className="flex items-start gap-3 rounded-lg border border-slate-200 px-3 py-2">
