@@ -222,11 +222,16 @@ export function AdminPrograms({
   const [selectedProgramId, setSelectedProgramId] = useState<string | null>(null)
   const [editingProgramId, setEditingProgramId] = useState<string | null>(null)
   const [editingCompanyIds, setEditingCompanyIds] = useState<string[]>([])
+  const [editingAllowedAgendaIds, setEditingAllowedAgendaIds] = useState<string[]>([])
   const [companySearch, setCompanySearch] = useState("")
+  const [agendaSearch, setAgendaSearch] = useState("")
   const [searchQuery, setSearchQuery] = useState("")
   const [companyUpdateSaving, setCompanyUpdateSaving] = useState(false)
+  const [agendaUpdateSaving, setAgendaUpdateSaving] = useState(false)
   const [selectedAvailableIds, setSelectedAvailableIds] = useState<string[]>([])
   const [selectedCompanyIds, setSelectedCompanyIds] = useState<string[]>([])
+  const [selectedAvailableAgendaIds, setSelectedAvailableAgendaIds] = useState<string[]>([])
+  const [selectedAssignedAgendaIds, setSelectedAssignedAgendaIds] = useState<string[]>([])
   const [programKpiDrafts, setProgramKpiDrafts] = useState<Record<string, ProgramKpiDraft[]>>({})
   const [page, setPage] = useState(1)
   const [programDetailSaving, setProgramDetailSaving] = useState(false)
@@ -357,14 +362,32 @@ export function AdminPrograms({
     [sortedCompanies],
   )
   const companySearchQuery = companySearch.trim().toLowerCase()
+  const sortedAgendas = useMemo(
+    () => [...agendas].sort((a, b) => a.name.localeCompare(b.name, "ko-KR")),
+    [agendas],
+  )
+  const agendaById = useMemo(
+    () => new Map(sortedAgendas.map((agenda) => [agenda.id, agenda])),
+    [sortedAgendas],
+  )
+  const agendaSearchQuery = agendaSearch.trim().toLowerCase()
   const editingProgramCompanyIds = useMemo(() => {
     if (!editingProgram) return []
     return companyIdsByProgram.get(editingProgram.id) ?? []
   }, [companyIdsByProgram, editingProgram])
+  const editingProgramAllowedAgendaIds = useMemo(
+    () => editingProgram?.allowedAgendaIds ?? [],
+    [editingProgram],
+  )
   const selectedCompanies = useMemo(() => {
     if (!editingProgram) return []
     return editingCompanyIds.map((id) => companyById.get(id) || { id, name: "회사명 미입력" })
   }, [companyById, editingCompanyIds, editingProgram])
+  const selectedAgendas = useMemo(() => {
+    if (!editingProgram) return []
+    return editingAllowedAgendaIds
+      .map((id) => agendaById.get(id) || { id, name: "알 수 없는 아젠다", scope: "internal", active: false })
+  }, [agendaById, editingAllowedAgendaIds, editingProgram])
   const editingCompanyLimit = numberFromInput(detailForm.companyLimit)
   const availableCompanies = useMemo(() => {
     if (!editingProgram) return []
@@ -375,6 +398,23 @@ export function AdminPrograms({
       return company.name.toLowerCase().includes(companySearchQuery)
     })
   }, [companySearchQuery, editingCompanyIds, editingProgram, sortedCompanies])
+  const availableAgendas = useMemo(() => {
+    if (!editingProgram) return []
+    const currentIds = new Set(editingAllowedAgendaIds)
+    return sortedAgendas.filter((agenda) => {
+      if (currentIds.has(agenda.id)) return false
+      if (!agendaSearchQuery) return true
+      return agenda.name.toLowerCase().includes(agendaSearchQuery)
+    })
+  }, [agendaSearchQuery, editingAllowedAgendaIds, editingProgram, sortedAgendas])
+  const isAllAvailableAgendasSelected =
+    availableAgendas.length > 0 && selectedAvailableAgendaIds.length === availableAgendas.length
+  const isSomeAvailableAgendasSelected =
+    selectedAvailableAgendaIds.length > 0 && selectedAvailableAgendaIds.length < availableAgendas.length
+  const isAllSelectedAgendasChecked =
+    selectedAgendas.length > 0 && selectedAssignedAgendaIds.length === selectedAgendas.length
+  const isSomeSelectedAgendasChecked =
+    selectedAssignedAgendaIds.length > 0 && selectedAssignedAgendaIds.length < selectedAgendas.length
 
   useEffect(() => {
     const next = Object.fromEntries(
@@ -411,16 +451,24 @@ export function AdminPrograms({
     if (!editingProgram) {
       setDetailForm(createDefaultProgramForm())
       setEditingCompanyIds([])
+      setEditingAllowedAgendaIds([])
+      setCompanySearch("")
+      setAgendaSearch("")
       setSelectedAvailableIds([])
       setSelectedCompanyIds([])
+      setSelectedAvailableAgendaIds([])
+      setSelectedAssignedAgendaIds([])
       return
     }
     const nextForm = toProgramForm(editingProgram)
     setDetailForm(nextForm)
     setEditingCompanyIds(editingProgramCompanyIds)
+    setEditingAllowedAgendaIds(editingProgramAllowedAgendaIds)
     setSelectedAvailableIds([])
     setSelectedCompanyIds([])
-  }, [editingProgram, editingProgramCompanyIds])
+    setSelectedAvailableAgendaIds([])
+    setSelectedAssignedAgendaIds([])
+  }, [editingProgram, editingProgramAllowedAgendaIds, editingProgramCompanyIds])
 
   async function updateEditingProgramCompanies(nextCompanyIds: string[]) {
     if (!editingProgram) return
@@ -433,6 +481,24 @@ export function AdminPrograms({
       setSelectedCompanyIds([])
     } finally {
       setCompanyUpdateSaving(false)
+    }
+  }
+
+  async function updateEditingProgramAllowedAgendas(nextAllowedAgendaIds: string[]) {
+    if (!editingProgram) return
+    setAgendaUpdateSaving(true)
+    try {
+      const ok = await Promise.resolve(
+        onUpdateProgram(editingProgram.id, {
+          allowedAgendaIds: nextAllowedAgendaIds,
+        }),
+      )
+      if (ok === false) return
+      setEditingAllowedAgendaIds(nextAllowedAgendaIds)
+      setSelectedAvailableAgendaIds([])
+      setSelectedAssignedAgendaIds([])
+    } finally {
+      setAgendaUpdateSaving(false)
     }
   }
 
@@ -608,6 +674,7 @@ export function AdminPrograms({
       externalTicketLimit,
       companyLimit,
       companyIds: [],
+      allowedAgendaIds: [],
       periodStart: form.periodStart || undefined,
       periodEnd: form.periodEnd || undefined,
       weekdays: ["TUE", "THU"],
@@ -670,6 +737,13 @@ export function AdminPrograms({
     await updateEditingProgramCompanies(nextCompanyIds)
   }
 
+  async function removeAgendaFromProgram(agendaId: string) {
+    if (!editingProgram) return
+    const currentIds = editingAllowedAgendaIds
+    const nextAllowedAgendaIds = currentIds.filter((id) => id !== agendaId)
+    await updateEditingProgramAllowedAgendas(nextAllowedAgendaIds)
+  }
+
   async function addSelectedCompanies() {
     if (!editingProgram) return
     if (selectedAvailableIds.length === 0) return
@@ -685,6 +759,23 @@ export function AdminPrograms({
     const removalSet = new Set(selectedCompanyIds)
     const nextCompanyIds = currentIds.filter((id) => !removalSet.has(id))
     await updateEditingProgramCompanies(nextCompanyIds)
+  }
+
+  async function addSelectedAgendas() {
+    if (!editingProgram) return
+    if (selectedAvailableAgendaIds.length === 0) return
+    const currentIds = editingAllowedAgendaIds
+    const nextAllowedAgendaIds = Array.from(new Set([...currentIds, ...selectedAvailableAgendaIds]))
+    await updateEditingProgramAllowedAgendas(nextAllowedAgendaIds)
+  }
+
+  async function removeSelectedAgendas() {
+    if (!editingProgram) return
+    if (selectedAssignedAgendaIds.length === 0) return
+    const currentIds = editingAllowedAgendaIds
+    const removalSet = new Set(selectedAssignedAgendaIds)
+    const nextAllowedAgendaIds = currentIds.filter((id) => !removalSet.has(id))
+    await updateEditingProgramAllowedAgendas(nextAllowedAgendaIds)
   }
 
   const pageTitle = isManagementMode ? "사업 관리" : "사업별 프로그램"
@@ -1347,7 +1438,7 @@ export function AdminPrograms({
             <>
               <div className="min-h-0 flex-1 overflow-y-auto px-8 py-6">
                 <div className="space-y-6">
-                  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
                     <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
                       <div className="text-[11px] font-medium text-slate-500">사업명</div>
                       <div className="mt-1 truncate text-sm font-semibold text-slate-900">
@@ -1371,6 +1462,12 @@ export function AdminPrograms({
                       <div className="text-[11px] font-medium text-blue-700">목표 시수</div>
                       <div className="mt-1 text-sm font-semibold text-blue-900">
                         {numberFromInput(detailForm.targetHours)}h
+                      </div>
+                    </div>
+                    <div className="rounded-xl border border-violet-200 bg-violet-50/70 px-4 py-3">
+                      <div className="text-[11px] font-medium text-violet-700">허용 아젠다</div>
+                      <div className="mt-1 text-sm font-semibold text-violet-900">
+                        {selectedAgendas.length}개
                       </div>
                     </div>
                   </div>
@@ -1534,6 +1631,261 @@ export function AdminPrograms({
                     <div className="border-b border-slate-200 px-6 py-4">
                       <div>
                         <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                          <Target className="h-4 w-4 text-slate-500" />
+                          사업별 아젠다 관리
+                        </div>
+                        <p className="mt-1 text-xs text-slate-500">
+                          기업이 이 사업을 선택했을 때 열릴 아젠다를 검색 후 연결하거나 제외합니다.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="space-y-5 px-6 py-5">
+                      <div className="space-y-2">
+                        <Label>아젠다 검색</Label>
+                        <Input
+                          value={agendaSearch}
+                          onChange={(event) => setAgendaSearch(event.target.value)}
+                          placeholder="아젠다명을 입력하세요"
+                          disabled={programDetailSaving}
+                        />
+                      </div>
+
+                      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]">
+                        <div className="min-h-0 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50/60">
+                          <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
+                            <div>
+                              <div className="text-sm font-semibold text-slate-900">
+                                선택 가능 아젠다
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <label className="flex items-center gap-2 rounded-md px-2 py-1 text-xs text-slate-600">
+                                <Checkbox
+                                  checked={
+                                    isAllAvailableAgendasSelected
+                                      ? true
+                                      : isSomeAvailableAgendasSelected
+                                        ? "indeterminate"
+                                        : false
+                                  }
+                                  onCheckedChange={(checked) => {
+                                    if (checked) {
+                                      setSelectedAvailableAgendaIds(
+                                        availableAgendas.map((agenda) => agenda.id),
+                                      )
+                                      return
+                                    }
+                                    setSelectedAvailableAgendaIds([])
+                                  }}
+                                  disabled={
+                                    programDetailSaving ||
+                                    agendaUpdateSaving ||
+                                    availableAgendas.length === 0
+                                  }
+                                  className="border-slate-300 data-[state=checked]:border-slate-700 data-[state=checked]:bg-slate-700"
+                                />
+                                전체 선택
+                              </label>
+                              <Badge
+                                variant="outline"
+                                className="border-slate-200 bg-white text-slate-600"
+                              >
+                                {availableAgendas.length}개
+                              </Badge>
+                            </div>
+                          </div>
+                          <div className="h-[360px] overflow-y-auto bg-white">
+                            {availableAgendas.length === 0 ? (
+                              <div className="flex h-full items-center justify-center p-4 text-center text-sm text-slate-500">
+                                추가 가능한 아젠다가 없습니다.
+                              </div>
+                            ) : (
+                              availableAgendas.map((agenda) => {
+                                const checked = selectedAvailableAgendaIds.includes(agenda.id)
+                                return (
+                                  <label
+                                    key={agenda.id}
+                                    className="flex cursor-pointer items-center gap-3 border-b border-slate-200/70 px-4 py-2.5 hover:bg-slate-50/80"
+                                  >
+                                    <Checkbox
+                                      checked={checked}
+                                      onCheckedChange={(nextChecked) => {
+                                        setSelectedAvailableAgendaIds((prev) => {
+                                          if (nextChecked) {
+                                            return [...prev, agenda.id]
+                                          }
+                                          return prev.filter((id) => id !== agenda.id)
+                                        })
+                                      }}
+                                      className="rounded-[4px] border-slate-300 data-[state=checked]:border-slate-700 data-[state=checked]:bg-slate-700 focus-visible:ring-slate-200"
+                                      disabled={programDetailSaving || agendaUpdateSaving}
+                                    />
+                                    <div className="flex min-w-0 flex-1 items-center gap-2">
+                                      <span className="truncate text-sm font-medium text-slate-700">
+                                        {agenda.name}
+                                      </span>
+                                      <Badge
+                                        variant="outline"
+                                        className={
+                                          agenda.scope === "internal"
+                                            ? "h-5 shrink-0 border-amber-200 bg-amber-50 px-1.5 text-[11px] text-amber-700"
+                                            : "h-5 shrink-0 border-rose-200 bg-rose-50 px-1.5 text-[11px] text-rose-700"
+                                        }
+                                      >
+                                        {agenda.scope === "internal" ? "내부" : "외부"}
+                                      </Badge>
+                                    </div>
+                                  </label>
+                                )
+                              })
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="flex flex-row items-center justify-center gap-2 xl:flex-col">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="h-10 min-w-12 rounded-full border-slate-200 bg-white px-4 text-slate-700 hover:bg-slate-50"
+                            disabled={
+                              programDetailSaving ||
+                              agendaUpdateSaving ||
+                              selectedAvailableAgendaIds.length === 0
+                            }
+                            onClick={addSelectedAgendas}
+                          >
+                            →
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="h-10 min-w-12 rounded-full border-slate-200 bg-white px-4 text-slate-700 hover:bg-slate-50"
+                            disabled={
+                              programDetailSaving ||
+                              agendaUpdateSaving ||
+                              selectedAssignedAgendaIds.length === 0
+                            }
+                            onClick={removeSelectedAgendas}
+                          >
+                            ←
+                          </Button>
+                        </div>
+
+                        <div className="min-h-0 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50/60">
+                          <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
+                            <div>
+                              <div className="text-sm font-semibold text-slate-900">
+                                선택된 아젠다
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <label className="flex items-center gap-2 rounded-md px-2 py-1 text-xs text-slate-600">
+                                <Checkbox
+                                  checked={
+                                    isAllSelectedAgendasChecked
+                                      ? true
+                                      : isSomeSelectedAgendasChecked
+                                        ? "indeterminate"
+                                        : false
+                                  }
+                                  onCheckedChange={(checked) => {
+                                    if (checked) {
+                                      setSelectedAssignedAgendaIds(
+                                        selectedAgendas.map((agenda) => agenda.id),
+                                      )
+                                      return
+                                    }
+                                    setSelectedAssignedAgendaIds([])
+                                  }}
+                                  disabled={
+                                    programDetailSaving ||
+                                    agendaUpdateSaving ||
+                                    selectedAgendas.length === 0
+                                  }
+                                  className="border-slate-300 data-[state=checked]:border-slate-700 data-[state=checked]:bg-slate-700"
+                                />
+                                전체 선택
+                              </label>
+                              <Badge
+                                variant="outline"
+                                className="border-slate-200 bg-white text-slate-600"
+                              >
+                                {selectedAgendas.length}개
+                              </Badge>
+                            </div>
+                          </div>
+                          <div className="h-[360px] overflow-y-auto bg-white">
+                            {selectedAgendas.length === 0 ? (
+                              <div className="flex h-full items-center justify-center p-4 text-center text-sm text-slate-500">
+                                아직 허용된 아젠다가 없습니다.
+                              </div>
+                            ) : (
+                              selectedAgendas.map((agenda) => {
+                                const checked = selectedAssignedAgendaIds.includes(agenda.id)
+                                return (
+                                  <label
+                                    key={agenda.id}
+                                    className="flex cursor-pointer items-center gap-3 border-b border-slate-200/70 px-4 py-2.5 hover:bg-slate-50/80"
+                                  >
+                                    <Checkbox
+                                      checked={checked}
+                                      onCheckedChange={(nextChecked) => {
+                                        setSelectedAssignedAgendaIds((prev) => {
+                                          if (nextChecked) {
+                                            return [...prev, agenda.id]
+                                          }
+                                          return prev.filter((id) => id !== agenda.id)
+                                        })
+                                      }}
+                                      className="rounded-[4px] border-slate-300 data-[state=checked]:border-slate-700 data-[state=checked]:bg-slate-700 focus-visible:ring-slate-200"
+                                      disabled={programDetailSaving || agendaUpdateSaving}
+                                    />
+                                    <div className="flex min-w-0 flex-1 items-center gap-2">
+                                      <span className="truncate text-sm font-medium text-slate-700">
+                                        {agenda.name}
+                                      </span>
+                                      <Badge
+                                        variant="outline"
+                                        className={
+                                          agenda.scope === "internal"
+                                            ? "h-5 shrink-0 border-amber-200 bg-amber-50 px-1.5 text-[11px] text-amber-700"
+                                            : "h-5 shrink-0 border-rose-200 bg-rose-50 px-1.5 text-[11px] text-rose-700"
+                                        }
+                                      >
+                                        {agenda.scope === "internal" ? "내부" : "외부"}
+                                      </Badge>
+                                      {agenda.active === false ? (
+                                        <span className="rounded-full bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-500">
+                                          비활성
+                                        </span>
+                                      ) : null}
+                                    </div>
+                                    <button
+                                      type="button"
+                                      disabled={programDetailSaving || agendaUpdateSaving}
+                                      onClick={() => void removeAgendaFromProgram(agenda.id)}
+                                      className="rounded-full p-1 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
+                                      aria-label={`${agenda.name} 제거`}
+                                    >
+                                      <X className="h-3.5 w-3.5" />
+                                    </button>
+                                  </label>
+                                )
+                              })
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </section>
+
+                  <section className="rounded-2xl border border-slate-200 bg-white shadow-xs">
+                    <div className="border-b border-slate-200 px-6 py-4">
+                      <div>
+                        <div className="flex items-center gap-2 text-sm font-semibold text-slate-900">
                           <Users className="h-4 w-4 text-slate-500" />
                           참여 기업 관리
                         </div>
@@ -1561,9 +1913,6 @@ export function AdminPrograms({
                               <div className="text-sm font-semibold text-slate-900">
                                 선택 가능 기업
                               </div>
-                              <p className="mt-0.5 text-xs text-slate-500">
-                                아직 이 사업에 배정되지 않은 기업입니다.
-                              </p>
                             </div>
                             <Badge
                               variant="outline"
@@ -1595,7 +1944,7 @@ export function AdminPrograms({
                                           return prev.filter((id) => id !== company.id)
                                         })
                                       }}
-                                      className="rounded-full border-slate-300 data-[state=checked]:border-slate-700 data-[state=checked]:bg-slate-700 focus-visible:ring-slate-200"
+                                      className="rounded-[4px] border-slate-300 data-[state=checked]:border-slate-700 data-[state=checked]:bg-slate-700 focus-visible:ring-slate-200"
                                       disabled={programDetailSaving || companyUpdateSaving}
                                     />
                                     <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-700">
@@ -1641,11 +1990,8 @@ export function AdminPrograms({
                           <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
                             <div>
                               <div className="text-sm font-semibold text-slate-900">
-                                참여 중 기업
+                                선택된 기업
                               </div>
-                              <p className="mt-0.5 text-xs text-slate-500">
-                                현재 사업에 연결된 기업입니다.
-                              </p>
                             </div>
                             <Badge
                               variant="outline"
@@ -1677,7 +2023,7 @@ export function AdminPrograms({
                                           return prev.filter((id) => id !== company.id)
                                         })
                                       }}
-                                      className="rounded-full border-slate-300 data-[state=checked]:border-slate-700 data-[state=checked]:bg-slate-700 focus-visible:ring-slate-200"
+                                      className="rounded-[4px] border-slate-300 data-[state=checked]:border-slate-700 data-[state=checked]:bg-slate-700 focus-visible:ring-slate-200"
                                       disabled={programDetailSaving || companyUpdateSaving}
                                     />
                                     <span className="min-w-0 flex-1 truncate text-sm font-medium text-slate-700">

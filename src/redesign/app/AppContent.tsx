@@ -447,6 +447,8 @@ function groupProgramsToRegularOfficeHours(programs: Program[]): RegularOfficeHo
         month,
         availableDates: [dateKey],
         description: program.description?.trim() || `${program.name} 사업`,
+        agendaIds: program.allowedAgendaIds ?? [],
+        weekdays: program.weekdays ?? ["TUE", "THU"],
       })
       return
     }
@@ -456,6 +458,8 @@ function groupProgramsToRegularOfficeHours(programs: Program[]): RegularOfficeHo
     grouped.set(groupKey, {
       ...existing,
       availableDates: Array.from(nextDates).sort(),
+      agendaIds: program.allowedAgendaIds ?? [],
+      weekdays: program.weekdays ?? ["TUE", "THU"],
     })
   }
 
@@ -673,7 +677,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
   const needsAgendas =
     needsApplications ||
     needsRegularOfficeHours ||
-    isPage(["admin-agendas", "admin-consultants", "admin-programs"])
+    isPage(["admin-agendas", "admin-consultants", "admin-programs", "admin-program-list"])
   const needsConsultants =
     resolvedRole === "consultant" ||
     isPage([
@@ -1500,6 +1504,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
         weekdays: doc.weekdays ?? ["TUE", "THU"],
         companyLimit: doc.companyLimit ?? 0,
         companyIds: doc.companyIds ?? [],
+        allowedAgendaIds: doc.allowedAgendaIds ?? [],
         kpiDefinitions: doc.kpiDefinitions ?? [],
       })),
     )
@@ -3827,6 +3832,9 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
             ? { externalTicketLimit: data.externalTicketLimit }
             : {}),
           ...(data.companyLimit !== undefined ? { companyLimit: data.companyLimit } : {}),
+          ...(data.allowedAgendaIds !== undefined
+            ? { allowedAgendaIds: data.allowedAgendaIds }
+            : {}),
           ...(data.periodStart !== undefined ? { periodStart: data.periodStart } : {}),
           ...(data.periodEnd !== undefined ? { periodEnd: data.periodEnd } : {}),
           ...(data.weekdays !== undefined ? { weekdays: data.weekdays } : {}),
@@ -4160,11 +4168,6 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
                           agendas={agendaList}
                           layout="sheet"
                           isRealtimeDataLoading={regularWizardRealtimeLoading}
-                          allowedWeekdays={
-                            programList.find(
-                              (program) => program.id === selectedOfficeHour.programId,
-                            )?.weekdays
-                          }
                           remainingInternalTickets={ticketStats.remainingInternal}
                           remainingExternalTickets={ticketStats.remainingExternal}
                           currentApplicant={{
@@ -4201,9 +4204,6 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
               consultants={consultants}
               agendas={agendaList}
               isRealtimeDataLoading={regularWizardRealtimeLoading}
-              allowedWeekdays={
-                programList.find((program) => program.id === selectedOfficeHour.programId)?.weekdays
-              }
               remainingInternalTickets={ticketStats.remainingInternal}
               remainingExternalTickets={ticketStats.remainingExternal}
               currentApplicant={{

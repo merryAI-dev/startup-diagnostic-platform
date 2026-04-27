@@ -1159,6 +1159,10 @@ async function syncProgramDefinitionCore(params) {
       patch.companyLimit,
       toNonNegativeInteger(currentProgram.companyLimit, 0)
     ),
+    allowedAgendaIds:
+      patch.allowedAgendaIds === undefined
+        ? normalizeStringArray(currentProgram.allowedAgendaIds)
+        : normalizeStringArray(patch.allowedAgendaIds),
     periodStart:
       patch.periodStart === undefined ? normalizeString(currentProgram.periodStart) || undefined : normalizeString(patch.periodStart) || undefined,
     periodEnd:
@@ -1637,6 +1641,10 @@ exports.submitRegularApplication = onCall(
       const targetProgramDoc = programDocs.find((program) => program.id === effectiveProgramId);
       if (!targetProgramDoc) {
         throw new HttpsError("failed-precondition", "신청할 사업 정보를 찾을 수 없습니다.");
+      }
+      const allowedAgendaIds = normalizeStringArray(targetProgramDoc.allowedAgendaIds);
+      if (!allowedAgendaIds.includes(agendaId)) {
+        throw new HttpsError("failed-precondition", "선택한 사업에서 신청할 수 없는 아젠다입니다.");
       }
       if (!isProgramDateAvailable(targetProgramDoc, scheduledDate)) {
         throw new HttpsError("failed-precondition", "사업 운영일이 아니어서 신청할 수 없습니다.");
@@ -2532,6 +2540,9 @@ exports.syncProgramDefinition = onCall(
           : {}),
         ...(Object.prototype.hasOwnProperty.call(payload, "companyLimit")
           ? { companyLimit: payload.companyLimit }
+          : {}),
+        ...(Object.prototype.hasOwnProperty.call(payload, "allowedAgendaIds")
+          ? { allowedAgendaIds: payload.allowedAgendaIds }
           : {}),
         ...(Object.prototype.hasOwnProperty.call(payload, "periodStart")
           ? { periodStart: payload.periodStart }

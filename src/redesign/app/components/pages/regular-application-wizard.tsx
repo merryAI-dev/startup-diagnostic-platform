@@ -25,7 +25,6 @@ import {
   RegularOfficeHour,
   SessionFormat,
   FileItem,
-  ProgramWeekday,
 } from "@/redesign/app/lib/types";
 import { getTimeSlots } from "@/redesign/app/lib/time-slots";
 import { formatLocalDateKey, parseLocalDateKey } from "@/redesign/app/lib/date-keys";
@@ -46,7 +45,6 @@ interface RegularApplicationWizardProps {
   consultants: Consultant[];
   agendas: Agenda[];
   isRealtimeDataLoading?: boolean;
-  allowedWeekdays?: ProgramWeekday[];
   remainingInternalTickets: number;
   remainingExternalTickets: number;
   currentApplicant?: {
@@ -133,7 +131,6 @@ export function RegularApplicationWizard({
   consultants,
   agendas,
   isRealtimeDataLoading = false,
-  allowedWeekdays = ["TUE", "THU"],
   remainingInternalTickets,
   remainingExternalTickets,
   currentApplicant,
@@ -209,9 +206,11 @@ export function RegularApplicationWizard({
   const requestContent = requestSectionValidations
     .map(({ label, value }) => `${label}\n${value}`)
     .join("\n\n");
+  const activeAllowedWeekdays = activeOfficeHour.weekdays ?? ["TUE", "THU"];
+  const activeAllowedAgendaIds = activeOfficeHour.agendaIds ?? [];
   const todayStart = startOfDay(new Date());
   const allowedWeekdayNumbers = useMemo(() => {
-    const source = allowedWeekdays.length > 0 ? allowedWeekdays : ["TUE", "THU"];
+    const source = activeAllowedWeekdays.length > 0 ? activeAllowedWeekdays : ["TUE", "THU"];
     return new Set(
       source.flatMap((weekday) => {
         if (weekday === "TUE") return [2];
@@ -219,7 +218,7 @@ export function RegularApplicationWizard({
         return [];
       })
     );
-  }, [allowedWeekdays]);
+  }, [activeAllowedWeekdays]);
   const hasFixedDateSelection = Boolean(preselectedDateKey && selectedDate);
   const isSheetLayout = layout === "sheet";
   const availableDateKeys = useMemo(() => {
@@ -368,7 +367,13 @@ export function RegularApplicationWizard({
       setIsSubmitting(false);
     }
   };
-  const activeAgendas = agendas.filter((agenda) => agenda.active !== false);
+  const activeAgendas = useMemo(() => {
+    const allowedAgendaIdSet = new Set(activeAllowedAgendaIds);
+    return agendas.filter((agenda) => {
+      if (agenda.active === false) return false;
+      return allowedAgendaIdSet.has(agenda.id);
+    });
+  }, [activeAllowedAgendaIds, agendas]);
   const isScheduleDataLoading = isRealtimeDataLoading;
 
   useEffect(() => {
@@ -391,6 +396,14 @@ export function RegularApplicationWizard({
     if (!fallbackOfficeHour) return
     setSelectedOfficeHourId(fallbackOfficeHour.id)
   }, [fixedDateOfficeHours, selectedOfficeHourId])
+
+  useEffect(() => {
+    if (!selectedAgendaId) return;
+    if (activeAgendas.some((agenda) => agenda.id === selectedAgendaId)) return;
+    setSelectedAgendaId("");
+    setSelectedDate(undefined);
+    setSelectedTime("");
+  }, [activeAgendas, selectedAgendaId]);
 
   useEffect(() => {
     setShowCompactReview(false)
@@ -563,7 +576,7 @@ export function RegularApplicationWizard({
                 </Select>
                 {activeAgendas.length === 0 && (
                   <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
-                    활성 아젠다가 없습니다. 관리자에게 아젠다 활성화를 요청해주세요.
+                    이 사업에 연결된 활성 아젠다가 없습니다. 관리자에게 사업별 아젠다 설정을 요청해주세요.
                   </div>
                 )}
               </section>
@@ -799,7 +812,7 @@ export function RegularApplicationWizard({
                   </Select>
                   {activeAgendas.length === 0 && (
                     <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
-                      활성 아젠다가 없습니다. 관리자에게 아젠다 활성화를 요청해주세요.
+                      이 사업에 연결된 활성 아젠다가 없습니다. 관리자에게 사업별 아젠다 설정을 요청해주세요.
                     </div>
                   )}
                   {activeAgendas.length > 0

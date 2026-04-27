@@ -37,6 +37,7 @@ export interface Program {
   externalTicketLimit?: number;
   companyLimit?: number;
   companyIds?: string[];
+  allowedAgendaIds?: string[];
   periodStart?: string; // YYYY-MM-DD
   periodEnd?: string; // YYYY-MM-DD
   weekdays?: ProgramWeekday[];
@@ -165,6 +166,7 @@ export interface RegularOfficeHour {
   availableDates: string[];
   description: string;
   agendaIds?: string[];
+  weekdays?: ProgramWeekday[];
   slots?: {
     id: string;
     date: string;
