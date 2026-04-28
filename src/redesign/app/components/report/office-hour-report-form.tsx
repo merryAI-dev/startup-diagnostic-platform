@@ -197,6 +197,7 @@ export function OfficeHourReportForm({
             : [""],
         content: parsedContent.companyStatus,
         advisoryContent: parsedContent.advisoryContent,
+        meetingRawText: initialReport.meetingRawText || "",
         followUp: initialReport.followUp || "",
         duration: initialReport.duration || application.duration || 1,
         satisfaction: initialReport.satisfaction || 5,
@@ -213,6 +214,7 @@ export function OfficeHourReportForm({
       participants: [""],
       content: "",
       advisoryContent: "",
+      meetingRawText: "",
       followUp: "",
       duration: application.duration || 1,
       satisfaction: 5,
@@ -410,6 +412,7 @@ export function OfficeHourReportForm({
         managerName: formData.managerName.trim(),
         participants: formData.participants.filter((p) => p.trim() !== ""),
         content: buildReportContent(formData.content, formData.advisoryContent),
+        meetingRawText: formData.meetingRawText.trim(),
         followUp: formData.followUp,
         photos: finalPhotos,
         duration: formData.duration,
@@ -718,6 +721,18 @@ export function OfficeHourReportForm({
               <p className={`text-xs ${isFollowUpValid ? "text-emerald-600" : "text-rose-600"}`}>
                 {followUpLength}/{MIN_REPORT_SECTION_LENGTH}자
               </p>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="meetingRawText">스크립트</Label>
+              <Textarea
+                id="meetingRawText"
+                value={formData.meetingRawText}
+                onChange={(e) => setFormData({ ...formData, meetingRawText: e.target.value })}
+                placeholder="회의 녹취 텍스트 원본을 붙여넣어주세요"
+                rows={10}
+                className="min-h-[240px] max-h-[240px] resize-none min-w-0 w-full overflow-y-auto overflow-x-hidden [overflow-wrap:anywhere]"
+              />
             </div>
 
             {/* 사진 업로드 */}
