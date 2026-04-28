@@ -1087,6 +1087,43 @@ async function syncConsultantSchedulingCore(params) {
     });
   }
 
+  if (agendaIds !== undefined) {
+    const currentAgendaIds = normalizeStringArray(currentConsultant.agendaIds);
+    const impactedAgendaIds = Array.from(new Set([...currentAgendaIds, ...nextAgendaIds]));
+
+    if (impactedAgendaIds.length > 0) {
+      const agendaSnaps = await Promise.all(
+        impactedAgendaIds.map((agendaId) => db.collection("agendas").doc(agendaId).get())
+      );
+
+      agendaSnaps.forEach((agendaSnap) => {
+        if (!agendaSnap.exists) return;
+
+        const currentPriorityIds = normalizeStringArray(agendaSnap.data()?.priorityConsultantIds);
+        const hasConsultant = nextAgendaIds.includes(agendaSnap.id);
+        const nextPriorityIds = hasConsultant
+          ? currentPriorityIds.includes(consultantId)
+            ? currentPriorityIds
+            : [...currentPriorityIds, consultantId]
+          : currentPriorityIds.filter((id) => id !== consultantId);
+
+        if (JSON.stringify(nextPriorityIds) === JSON.stringify(currentPriorityIds)) {
+          return;
+        }
+
+        operations.push({
+          type: "set",
+          ref: agendaSnap.ref,
+          data: {
+            priorityConsultantIds: nextPriorityIds,
+            updatedAt: FieldValue.serverTimestamp(),
+          },
+          merge: true,
+        });
+      });
+    }
+  }
+
   for (let index = 0; index < operations.length; index += 500) {
     const batch = db.batch();
     operations.slice(index, index + 500).forEach((operation) => {
@@ -1243,6 +1280,34 @@ function getApplicationPendingConsultantIds(application) {
         .filter(Boolean)
     : [];
   return Array.from(new Set(explicitPendingIds)).sort();
+}
+
+function sortConsultantsByAgendaPriority(consultants, agendaDoc) {
+  const priorityIds = normalizeStringArray(agendaDoc?.priorityConsultantIds);
+  if (priorityIds.length === 0) {
+    throw new HttpsError(
+      "failed-precondition",
+      `${normalizeString(agendaDoc?.name) || "선택한"} 아젠다의 담당 컨설턴트 우선순위가 설정되지 않았습니다.`
+    );
+  }
+
+  const normalizedConsultantIds = Array.from(
+    new Set(consultants.map((consultant) => normalizeString(consultant?.id)).filter(Boolean))
+  );
+  const missingPriorityIds = normalizedConsultantIds.filter(
+    (consultantId) => !priorityIds.includes(consultantId)
+  );
+  if (missingPriorityIds.length > 0) {
+    throw new HttpsError(
+      "failed-precondition",
+      `${normalizeString(agendaDoc?.name) || "선택한"} 아젠다의 담당 컨설턴트 우선순위 설정이 누락되었습니다.`
+    );
+  }
+
+  const consultantById = new Map(consultants.map((consultant) => [consultant.id, consultant]));
+  return priorityIds
+    .map((consultantId) => consultantById.get(consultantId))
+    .filter(Boolean);
 }
 
 function getManualReopenPendingConsultantIds(application, preferredConsultantId = "") {
@@ -1721,6 +1786,11 @@ exports.submitRegularApplication = onCall(
       if (linkedConsultantsSnap.empty) {
         throw new HttpsError("failed-precondition", "선택한 아젠다에 연결된 활성 컨설턴트가 없습니다.");
       }
+      const linkedConsultantEntries = linkedConsultantsSnap.docs.map((doc) => normalizeConsultantDoc(doc));
+      const orderedLinkedConsultants = sortConsultantsByAgendaPriority(
+        linkedConsultantEntries,
+        agendaDoc
+      );
 
       const sameTimeApplicationsQuery = db
         .collection("officeHourApplications")
@@ -1750,10 +1820,16 @@ exports.submitRegularApplication = onCall(
         );
       }
 
-      const assignableConsultantEntries = assignableConsultants
-        .map((doc) => normalizeConsultantDoc(doc))
-        .sort((a, b) => a.id.localeCompare(b.id));
-      const pendingConsultantIds = assignableConsultantEntries.map((consultant) => consultant.id);
+      const assignableConsultantIds = new Set(assignableConsultants.map((doc) => doc.id));
+      const assignedConsultant = orderedLinkedConsultants.find((consultant) =>
+        assignableConsultantIds.has(consultant.id)
+      );
+      if (!assignedConsultant) {
+        throw new HttpsError(
+          "failed-precondition",
+          "선택한 시간에 현재 배정 가능한 컨설턴트가 없어 신청할 수 없습니다."
+        );
+      }
 
       const applicationRef = db.collection("officeHourApplications").doc();
       const createdAt = FieldValue.serverTimestamp();
@@ -1764,7 +1840,7 @@ exports.submitRegularApplication = onCall(
 
       transaction.set(applicationRef, {
         type: "regular",
-        status: "pending",
+        status: "confirmed",
         officeHourId,
         companyId,
         programId: effectiveProgramId || null,
@@ -1773,8 +1849,8 @@ exports.submitRegularApplication = onCall(
           `${normalizeString(targetProgramDoc.name) || "사업"} 정기 오피스아워`,
         agendaId,
         companyName,
-        consultant: "담당자 배정 중",
-        pendingConsultantIds,
+        consultant: normalizeString(assignedConsultant.name) || "담당자 배정 중",
+        consultantId: assignedConsultant.id,
         sessionFormat,
         agenda: normalizeString(agendaDoc.name) || "미지정",
         requestContent,
@@ -1791,7 +1867,8 @@ exports.submitRegularApplication = onCall(
 
       return {
         applicationId: applicationRef.id,
-        pendingConsultantIds,
+        pendingConsultantIds: [],
+        consultantId: assignedConsultant.id,
       };
     });
 

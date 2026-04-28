@@ -502,6 +502,83 @@ function groupProgramsToRegularOfficeHours(programs: Program[]): RegularOfficeHo
   })
 }
 
+function syncAgendaPriorityListsForConsultantChange(
+  agendas: Agenda[],
+  consultantId: string,
+  currentAgendaIds: string[],
+  nextAgendaIds: string[],
+): Agenda[] {
+  const currentSet = new Set(currentAgendaIds)
+  const nextSet = new Set(nextAgendaIds)
+  const impactedAgendaIds = new Set([...currentAgendaIds, ...nextAgendaIds])
+
+  if (impactedAgendaIds.size === 0) {
+    return agendas
+  }
+
+  return agendas.map((agenda) => {
+    if (!impactedAgendaIds.has(agenda.id)) {
+      return agenda
+    }
+
+    const currentPriorityIds = Array.from(new Set(agenda.priorityConsultantIds ?? []))
+    const hadConsultant = currentSet.has(agenda.id)
+    const hasConsultant = nextSet.has(agenda.id)
+
+    let nextPriorityIds = currentPriorityIds
+    if (!hasConsultant) {
+      nextPriorityIds = currentPriorityIds.filter((id) => id !== consultantId)
+    } else if (!hadConsultant && !currentPriorityIds.includes(consultantId)) {
+      nextPriorityIds = [...currentPriorityIds, consultantId]
+    }
+
+    if (JSON.stringify(nextPriorityIds) === JSON.stringify(currentPriorityIds)) {
+      return agenda
+    }
+
+    return {
+      ...agenda,
+      priorityConsultantIds: nextPriorityIds,
+    }
+  })
+}
+
+function sortConsultantsByAgendaPriority(
+  consultants: Consultant[],
+  agendaPriorityIds: string[],
+  agendaName: string,
+): Consultant[] {
+  const normalizedPriorityIds = Array.from(
+    new Set(
+      agendaPriorityIds
+        .map((consultantId) => consultantId.trim())
+        .filter(Boolean),
+    ),
+  )
+  if (normalizedPriorityIds.length === 0) {
+    throw new Error(`${agendaName} 아젠다의 담당 컨설턴트 우선순위가 설정되지 않았습니다.`)
+  }
+
+  const consultantIds = Array.from(
+    new Set(
+      consultants
+        .map((consultant) => consultant.id.trim())
+        .filter(Boolean),
+    ),
+  )
+  const missingPriorityIds = consultantIds.filter(
+    (consultantId) => !normalizedPriorityIds.includes(consultantId),
+  )
+  if (missingPriorityIds.length > 0) {
+    throw new Error(`${agendaName} 아젠다의 담당 컨설턴트 우선순위 설정이 누락되었습니다.`)
+  }
+
+  const consultantById = new Map(consultants.map((consultant) => [consultant.id, consultant]))
+  return normalizedPriorityIds
+    .map((consultantId) => consultantById.get(consultantId))
+    .filter((consultant): consultant is Consultant => Boolean(consultant))
+}
+
 function normalizeApplicationStatus(status?: ApplicationStatus): ApplicationStatus {
   if (status === "review") return "pending"
   return status ?? "pending"
@@ -1439,6 +1516,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
         ...doc,
         scope: doc.scope ?? "internal",
         active: doc.active ?? true,
+        priorityConsultantIds: doc.priorityConsultantIds ?? [],
       })),
     )
   }, [agendaDocs])
@@ -2342,6 +2420,18 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
         return
       }
 
+      let orderedLinkedConsultants: Consultant[]
+      try {
+        orderedLinkedConsultants = sortConsultantsByAgendaPriority(
+          linkedConsultants,
+          agenda.priorityConsultantIds ?? [],
+          agenda.name,
+        )
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : "담당 컨설턴트 우선순위 설정을 확인해주세요.")
+        return
+      }
+
       const assignableConsultants = getAssignableConsultantsAt({
         consultants: linkedConsultants,
         applications,
@@ -2354,6 +2444,15 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
         toast.error(
           "선택한 시간에 현재 배정 가능한 컨설턴트가 없어 신청할 수 없습니다. 다른 시간을 선택해 주세요.",
         )
+        return
+      }
+
+      const assignableConsultantIds = new Set(assignableConsultants.map((consultant) => consultant.id))
+      const assignedConsultant = orderedLinkedConsultants.find((consultant) =>
+        assignableConsultantIds.has(consultant.id),
+      )
+      if (!assignedConsultant) {
+        toast.error("배정 가능한 컨설턴트를 찾지 못했습니다")
         return
       }
 
@@ -2378,15 +2477,15 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       const newApplication: Application = {
         id: `app${Date.now()}`,
         type: "regular",
-        status: "pending",
+        status: "confirmed",
         officeHourId: data.officeHourId,
         companyId: companyRecordId,
         programId: officeHour.programId,
         officeHourTitle: officeHour.title,
         agendaId: data.agendaId,
         companyName: user.companyName,
-        consultant: "담당자 배정 중",
-        pendingConsultantIds: assignableConsultants.map((consultant) => consultant.id),
+        consultant: assignedConsultant.name,
+        consultantId: assignedConsultant.id,
         sessionFormat: data.sessionFormat,
         agenda: agenda.name,
         requestContent: data.requestContent,
@@ -3703,8 +3802,13 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     }
 
     if (!isFirebaseConfigured && hasSchedulingUpdate) {
+      const currentAgendaIds = consultants.find((consultant) => consultant.id === id)?.agendaIds ?? []
+      const nextAgendaIds = schedulingData.agendaIds ?? currentAgendaIds
       const nextConsultants = consultants.map((consultant) =>
         consultant.id === id ? { ...consultant, ...data } : consultant,
+      )
+      setAgendaList((prev) =>
+        syncAgendaPriorityListsForConsultantChange(prev, id, currentAgendaIds, nextAgendaIds),
       )
       const slotsSynced = await syncManagedRegularSlots(nextConsultants)
       if (!slotsSynced) return
@@ -3714,6 +3818,17 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       setConsultants((prev) =>
         prev.map((consultant) => (consultant.id === id ? { ...consultant, ...data } : consultant)),
       )
+      if (schedulingData.agendaIds !== undefined) {
+        const currentAgendaIds = consultants.find((consultant) => consultant.id === id)?.agendaIds ?? []
+        setAgendaList((prev) =>
+          syncAgendaPriorityListsForConsultantChange(
+            prev,
+            id,
+            currentAgendaIds,
+            schedulingData.agendaIds ?? [],
+          ),
+        )
+      }
     }
 
     toast.success(

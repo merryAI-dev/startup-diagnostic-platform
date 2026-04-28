@@ -137,6 +137,7 @@ export interface Agenda {
   scope: AgendaScope;
   description?: string;
   active?: boolean;
+  priorityConsultantIds?: string[];
   // Legacy UI compatibility
   category?: string;
 }

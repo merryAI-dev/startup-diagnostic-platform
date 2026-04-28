@@ -3,6 +3,7 @@ import { Check, Clock3, Mail, Pencil, Phone, UserCog } from "lucide-react"
 import { Agenda, Consultant, ConsultantAvailability } from "@/redesign/app/lib/types"
 import { Badge } from "@/redesign/app/components/ui/badge"
 import { Button } from "@/redesign/app/components/ui/button"
+import { Checkbox } from "@/redesign/app/components/ui/checkbox"
 import { Card, CardContent } from "@/redesign/app/components/ui/card"
 import {
   Dialog,
@@ -95,6 +96,9 @@ export function AdminConsultants({
   const [isScheduleDialogOpen, setIsScheduleDialogOpen] = useState(false)
   const [isAgendaMapDialogOpen, setIsAgendaMapDialogOpen] = useState(false)
   const [draftAgendaIds, setDraftAgendaIds] = useState<string[] | null>(null)
+  const [agendaSearch, setAgendaSearch] = useState("")
+  const [selectedAvailableAgendaIds, setSelectedAvailableAgendaIds] = useState<string[]>([])
+  const [selectedAssignedAgendaIds, setSelectedAssignedAgendaIds] = useState<string[]>([])
   const [draftScheduleAvailability, setDraftScheduleAvailability] = useState<
     ConsultantAvailability[] | null
   >(null)
@@ -142,6 +146,34 @@ export function AdminConsultants({
     [selectedConsultant?.agendaIds],
   )
   const agendaIdsForDialog = draftAgendaIds ?? normalizedSelectedAgendaIds
+  const sortedAgendas = useMemo(
+    () => [...agendas].sort((a, b) => a.name.localeCompare(b.name, "ko-KR")),
+    [agendas],
+  )
+  const agendaSearchQuery = agendaSearch.trim().toLowerCase()
+  const availableAgendas = useMemo(() => {
+    const selectedIds = new Set(agendaIdsForDialog)
+    return sortedAgendas.filter((agenda) => {
+      if (selectedIds.has(agenda.id)) return false
+      if (!agendaSearchQuery) return true
+      return agenda.name.toLowerCase().includes(agendaSearchQuery)
+    })
+  }, [agendaIdsForDialog, agendaSearchQuery, sortedAgendas])
+  const assignedAgendas = useMemo(
+    () =>
+      agendaIdsForDialog
+        .map((agendaId) => agendas.find((agenda) => agenda.id === agendaId))
+        .filter((agenda): agenda is Agenda => Boolean(agenda)),
+    [agendaIdsForDialog, agendas],
+  )
+  const isAllAvailableAgendasSelected =
+    availableAgendas.length > 0 && selectedAvailableAgendaIds.length === availableAgendas.length
+  const isSomeAvailableAgendasSelected =
+    selectedAvailableAgendaIds.length > 0 && selectedAvailableAgendaIds.length < availableAgendas.length
+  const isAllAssignedAgendasSelected =
+    assignedAgendas.length > 0 && selectedAssignedAgendaIds.length === assignedAgendas.length
+  const isSomeAssignedAgendasSelected =
+    selectedAssignedAgendaIds.length > 0 && selectedAssignedAgendaIds.length < assignedAgendas.length
   const isAgendaDirty =
     JSON.stringify(Array.from(new Set(agendaIdsForDialog)).sort()) !==
     JSON.stringify(normalizedSelectedAgendaIds)
@@ -210,6 +242,25 @@ export function AdminConsultants({
     })
     setIsAgendaMapDialogOpen(false)
     setDraftAgendaIds(null)
+  }
+
+  function addSelectedAgendas() {
+    if (selectedAvailableAgendaIds.length === 0) return
+    setDraftAgendaIds((prev) => {
+      const base = prev ?? normalizedSelectedAgendaIds
+      return [...base, ...selectedAvailableAgendaIds.filter((agendaId) => !base.includes(agendaId))]
+    })
+    setSelectedAvailableAgendaIds([])
+  }
+
+  function removeSelectedAgendas() {
+    if (selectedAssignedAgendaIds.length === 0) return
+    setDraftAgendaIds((prev) => {
+      const base = prev ?? normalizedSelectedAgendaIds
+      const removalSet = new Set(selectedAssignedAgendaIds)
+      return base.filter((agendaId) => !removalSet.has(agendaId))
+    })
+    setSelectedAssignedAgendaIds([])
   }
 
   async function commitMeetingLink(consultant: Consultant) {
@@ -482,8 +533,14 @@ export function AdminConsultants({
                                     setDraftAgendaIds(
                                       Array.from(new Set(consultant.agendaIds ?? [])).sort(),
                                     )
+                                    setAgendaSearch("")
+                                    setSelectedAvailableAgendaIds([])
+                                    setSelectedAssignedAgendaIds([])
                                   } else {
                                     setDraftAgendaIds(null)
+                                    setAgendaSearch("")
+                                    setSelectedAvailableAgendaIds([])
+                                    setSelectedAssignedAgendaIds([])
                                   }
                                 }}
                               >
@@ -496,73 +553,223 @@ export function AdminConsultants({
                                       setDraftAgendaIds(
                                         Array.from(new Set(consultant.agendaIds ?? [])).sort(),
                                       )
+                                      setAgendaSearch("")
+                                      setSelectedAvailableAgendaIds([])
+                                      setSelectedAssignedAgendaIds([])
                                     }}
                                   >
                                     아젠다 매칭
                                   </Button>
                                 </DialogTrigger>
-                                <DialogContent className="max-w-2xl">
+                                <DialogContent className="max-h-[90vh] w-[94vw] overflow-hidden sm:max-w-[980px]">
                                   <DialogHeader>
                                     <DialogTitle>{consultant.name} 아젠다 매칭</DialogTitle>
                                     <DialogDescription>
-                                      이 컨설턴트가 담당 가능한 아젠다를 선택하세요. 선택 결과는
-                                      사업 관리 화면의 컨설턴트 선택에 반영됩니다.
+                                      이 컨설턴트가 담당 가능한 아젠다를 검색해서 추가하거나 제거합니다.
                                     </DialogDescription>
                                   </DialogHeader>
 
-                                  <div className="max-h-[320px] space-y-2 overflow-y-auto pr-1">
-                                    {agendas.length === 0 ? (
-                                      <p className="text-sm text-muted-foreground">
-                                        등록된 아젠다가 없습니다. 상단에서 먼저 아젠다를
-                                        추가해주세요.
-                                      </p>
-                                    ) : (
-                                      agendas.map((agenda) => {
-                                        const checked = agendaIdsForDialog.includes(agenda.id)
-                                        return (
-                                          <button
-                                            key={agenda.id}
-                                            type="button"
-                                            aria-pressed={checked}
-                                            onClick={() =>
-                                              toggleConsultantAgenda(agenda.id, !checked)
-                                            }
-                                            className={cn(
-                                              "w-full rounded-lg border px-3 py-2 text-left text-sm transition",
-                                              checked
-                                                ? "border-emerald-300 bg-emerald-50 text-emerald-900"
-                                                : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50",
-                                            )}
-                                          >
-                                            <div className="flex items-center justify-between gap-3">
-                                              <span className="inline-flex min-w-0 items-center gap-2">
-                                                <span
-                                                  className={cn(
-                                                    "inline-flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-[4px] border",
-                                                    checked
-                                                      ? "border-emerald-500 bg-emerald-500"
-                                                      : "border-slate-300 bg-white",
-                                                  )}
-                                                >
-                                                  <Check
-                                                    className={cn(
-                                                      "h-3 w-3 transition-opacity",
-                                                      checked
-                                                        ? "opacity-100 text-white"
-                                                        : "opacity-0 text-transparent",
-                                                    )}
-                                                  />
-                                                </span>
-                                                <span className="truncate">{agenda.name}</span>
-                                              </span>
-                                              <span className="text-xs opacity-90">
-                                                {agenda.scope === "internal" ? "내부" : "외부"}
-                                              </span>
+                                  <div className="space-y-4">
+                                    <div className="space-y-2">
+                                      <Input
+                                        value={agendaSearch}
+                                        onChange={(event) => setAgendaSearch(event.target.value)}
+                                        placeholder="아젠다명을 입력하세요"
+                                      />
+                                    </div>
+
+                                    <div className="grid justify-center grid-cols-[minmax(0,420px)_72px_minmax(0,420px)] gap-4">
+                                      <div className="min-h-0 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50/60">
+                                        <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
+                                          <div className="text-sm font-semibold text-slate-900">
+                                            선택 가능 아젠다
+                                          </div>
+                                          <div className="flex items-center gap-2">
+                                            <label className="flex items-center gap-2 whitespace-nowrap rounded-md px-2 py-1 text-xs text-slate-600">
+                                              <Checkbox
+                                                checked={
+                                                  isAllAvailableAgendasSelected
+                                                    ? true
+                                                    : isSomeAvailableAgendasSelected
+                                                      ? "indeterminate"
+                                                      : false
+                                                }
+                                                onCheckedChange={(checked) => {
+                                                  if (checked) {
+                                                    setSelectedAvailableAgendaIds(
+                                                      availableAgendas.map((agenda) => agenda.id),
+                                                    )
+                                                    return
+                                                  }
+                                                  setSelectedAvailableAgendaIds([])
+                                                }}
+                                                disabled={availableAgendas.length === 0}
+                                                className="border-slate-300 data-[state=checked]:border-slate-700 data-[state=checked]:bg-slate-700"
+                                              />
+                                              전체 선택
+                                            </label>
+                                            <Badge
+                                              variant="outline"
+                                              className="border-slate-200 bg-white text-slate-600"
+                                            >
+                                              {availableAgendas.length}개
+                                            </Badge>
+                                          </div>
+                                        </div>
+                                        <div className="h-[320px] overflow-y-auto bg-white">
+                                          {availableAgendas.length === 0 ? (
+                                            <div className="flex h-full items-center justify-center p-4 text-center text-sm text-slate-500">
+                                              추가 가능한 아젠다가 없습니다.
                                             </div>
-                                          </button>
-                                        )
-                                      })
-                                    )}
+                                          ) : (
+                                            availableAgendas.map((agenda) => {
+                                              const checked = selectedAvailableAgendaIds.includes(agenda.id)
+                                              return (
+                                                <label
+                                                  key={agenda.id}
+                                                  className="flex cursor-pointer items-center gap-3 border-b border-slate-200/70 px-4 py-2.5 hover:bg-slate-50/80"
+                                                >
+                                                  <Checkbox
+                                                    checked={checked}
+                                                    onCheckedChange={(nextChecked) => {
+                                                      setSelectedAvailableAgendaIds((prev) => {
+                                                        if (nextChecked) {
+                                                          return [...prev, agenda.id]
+                                                        }
+                                                        return prev.filter((id) => id !== agenda.id)
+                                                      })
+                                                    }}
+                                                    className="rounded-[4px] border-slate-300 data-[state=checked]:border-slate-700 data-[state=checked]:bg-slate-700 focus-visible:ring-slate-200"
+                                                  />
+                                                  <div className="flex min-w-0 flex-1 items-center gap-2">
+                                                    <span className="truncate text-sm font-medium text-slate-700">
+                                                      {agenda.name}
+                                                    </span>
+                                                    <Badge
+                                                      variant="outline"
+                                                      className={
+                                                        agenda.scope === "internal"
+                                                          ? "h-5 shrink-0 border-amber-200 bg-amber-50 px-1.5 text-[11px] text-amber-700"
+                                                          : "h-5 shrink-0 border-rose-200 bg-rose-50 px-1.5 text-[11px] text-rose-700"
+                                                      }
+                                                    >
+                                                      {agenda.scope === "internal" ? "내부" : "외부"}
+                                                    </Badge>
+                                                  </div>
+                                                </label>
+                                              )
+                                            })
+                                          )}
+                                        </div>
+                                      </div>
+
+                                      <div className="flex flex-row items-center justify-center gap-2 md:flex-col">
+                                        <Button
+                                          type="button"
+                                          size="sm"
+                                          variant="outline"
+                                          className="h-10 min-w-12 rounded-full border-slate-200 bg-white px-4 text-slate-700 hover:bg-slate-50"
+                                          disabled={selectedAvailableAgendaIds.length === 0}
+                                          onClick={addSelectedAgendas}
+                                        >
+                                          →
+                                        </Button>
+                                        <Button
+                                          type="button"
+                                          size="sm"
+                                          variant="outline"
+                                          className="h-10 min-w-12 rounded-full border-slate-200 bg-white px-4 text-slate-700 hover:bg-slate-50"
+                                          disabled={selectedAssignedAgendaIds.length === 0}
+                                          onClick={removeSelectedAgendas}
+                                        >
+                                          ←
+                                        </Button>
+                                      </div>
+
+                                      <div className="min-h-0 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50/60">
+                                        <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
+                                          <div className="text-sm font-semibold text-slate-900">
+                                            선택된 아젠다
+                                          </div>
+                                          <div className="flex items-center gap-2">
+                                            <label className="flex items-center gap-2 whitespace-nowrap rounded-md px-2 py-1 text-xs text-slate-600">
+                                              <Checkbox
+                                                checked={
+                                                  isAllAssignedAgendasSelected
+                                                    ? true
+                                                    : isSomeAssignedAgendasSelected
+                                                      ? "indeterminate"
+                                                      : false
+                                                }
+                                                onCheckedChange={(checked) => {
+                                                  if (checked) {
+                                                    setSelectedAssignedAgendaIds(
+                                                      assignedAgendas.map((agenda) => agenda.id),
+                                                    )
+                                                    return
+                                                  }
+                                                  setSelectedAssignedAgendaIds([])
+                                                }}
+                                                disabled={assignedAgendas.length === 0}
+                                                className="border-slate-300 data-[state=checked]:border-slate-700 data-[state=checked]:bg-slate-700"
+                                              />
+                                              전체 선택
+                                            </label>
+                                            <Badge
+                                              variant="outline"
+                                              className="border-slate-200 bg-white text-slate-600"
+                                            >
+                                              {assignedAgendas.length}개
+                                            </Badge>
+                                          </div>
+                                        </div>
+                                        <div className="h-[320px] overflow-y-auto bg-white">
+                                          {assignedAgendas.length === 0 ? (
+                                            <div className="flex h-full items-center justify-center p-4 text-center text-sm text-slate-500">
+                                              선택된 아젠다가 없습니다.
+                                            </div>
+                                          ) : (
+                                            assignedAgendas.map((agenda) => {
+                                              const checked = selectedAssignedAgendaIds.includes(agenda.id)
+                                              return (
+                                                <label
+                                                  key={agenda.id}
+                                                  className="flex cursor-pointer items-center gap-3 border-b border-slate-200/70 px-4 py-2.5 hover:bg-slate-50/80"
+                                                >
+                                                  <Checkbox
+                                                    checked={checked}
+                                                    onCheckedChange={(nextChecked) => {
+                                                      setSelectedAssignedAgendaIds((prev) => {
+                                                        if (nextChecked) {
+                                                          return [...prev, agenda.id]
+                                                        }
+                                                        return prev.filter((id) => id !== agenda.id)
+                                                      })
+                                                    }}
+                                                    className="rounded-[4px] border-slate-300 data-[state=checked]:border-slate-700 data-[state=checked]:bg-slate-700 focus-visible:ring-slate-200"
+                                                  />
+                                                  <div className="flex min-w-0 flex-1 items-center gap-2">
+                                                    <span className="truncate text-sm font-medium text-slate-700">
+                                                      {agenda.name}
+                                                    </span>
+                                                    <Badge
+                                                      variant="outline"
+                                                      className={
+                                                        agenda.scope === "internal"
+                                                          ? "h-5 shrink-0 border-amber-200 bg-amber-50 px-1.5 text-[11px] text-amber-700"
+                                                          : "h-5 shrink-0 border-rose-200 bg-rose-50 px-1.5 text-[11px] text-rose-700"
+                                                      }
+                                                    >
+                                                      {agenda.scope === "internal" ? "내부" : "외부"}
+                                                    </Badge>
+                                                  </div>
+                                                </label>
+                                              )
+                                            })
+                                          )}
+                                        </div>
+                                      </div>
+                                    </div>
                                   </div>
                                   <div className="mt-4 flex justify-end gap-2">
                                     <Button
@@ -571,6 +778,9 @@ export function AdminConsultants({
                                       onClick={() => {
                                         setIsAgendaMapDialogOpen(false)
                                         setDraftAgendaIds(null)
+                                        setAgendaSearch("")
+                                        setSelectedAvailableAgendaIds([])
+                                        setSelectedAssignedAgendaIds([])
                                       }}
                                     >
                                       취소

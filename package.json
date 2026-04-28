@@ -31,6 +31,7 @@
     "deploy:live:app": "node scripts/firebase-deploy.mjs live app",
     "deploy:both:app": "node scripts/firebase-deploy.mjs both app",
     "qa:regular-office-hours": "node scripts/qa-regular-office-hours.mjs",
+    "migrate:agenda:priority-consultant-ids": "node scripts/backfill-agenda-priority-consultant-ids.mjs",
     "migrate:officehour:created-by-uid": "node scripts/backfill-office-hour-created-by-uid.mjs",
     "migrate:officehour:pending-consultant-ids": "node scripts/backfill-pending-consultant-ids.mjs",
     "report:created-by-uid": "node scripts/report-created-by-uid.mjs",
