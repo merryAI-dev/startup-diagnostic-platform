@@ -176,8 +176,8 @@ export function OfficeHourReportForm({
   const dialogTitle =
     application.type === "mentoring"
       ? initialReport
-        ? "멘토링 일지 수정"
-        : "멘토링 일지 작성"
+        ? "멘토링&사후관리 일지 수정"
+        : "멘토링&사후관리 일지 작성"
       : initialReport
         ? "오피스아워 보고서 수정"
         : "오피스아워 보고서 작성"
