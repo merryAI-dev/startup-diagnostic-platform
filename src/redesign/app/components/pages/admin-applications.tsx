@@ -8,13 +8,15 @@ import { Badge } from "@/redesign/app/components/ui/badge";
 import { DateRangePicker } from "@/redesign/app/components/ui/date-range-picker";
 import { PaginationControls } from "@/redesign/app/components/ui/pagination-controls";
 import { StatusChip } from "@/redesign/app/components/status-chip";
-import { Agenda, Application, ApplicationStatus, ConsultantAvailability, Program } from "@/redesign/app/lib/types";
+import { Agenda, Application, ApplicationStatus, ConsultantMonthlyAvailability, Program } from "@/redesign/app/lib/types";
 import { format } from "date-fns";
 import { ko } from "date-fns/locale";
 import { AdminApplicationDetailModal } from "@/redesign/app/components/pages/admin-application-detail-modal";
 import type { DateRange } from "react-day-picker";
 import { parseLocalDateKey } from "@/redesign/app/lib/date-keys";
 import { getPendingConsultantIds, isApplicationTargetingConsultant } from "@/redesign/app/lib/application-availability";
+import { getMonthlyAvailabilityForMonth } from "@/redesign/app/lib/consultant-monthly-availability";
+import * as regularOfficeHourPolicy from "@/redesign/app/lib/regular-office-hour-policy";
 
 interface AdminApplicationsProps {
   applications: Application[];
@@ -29,7 +31,7 @@ interface AdminApplicationsProps {
   currentConsultantId?: string | null;
   currentConsultantName?: string | null;
   currentConsultantAgendaIds?: string[];
-  currentConsultantAvailability?: ConsultantAvailability[];
+  currentConsultantMonthlyAvailability?: ConsultantMonthlyAvailability;
 }
 
 export function AdminApplications({
@@ -45,7 +47,7 @@ export function AdminApplications({
   currentConsultantId,
   currentConsultantName,
   currentConsultantAgendaIds = [],
-  currentConsultantAvailability = [],
+  currentConsultantMonthlyAvailability = {},
 }: AdminApplicationsProps) {
   const PAGE_SIZE = 10;
   const pageTitleClassName = "text-2xl font-semibold text-slate-900";
@@ -156,9 +158,13 @@ export function AdminApplications({
     if (!app.scheduledDate || !app.scheduledTime) return true;
     const parsedDate = parseLocalDateKey(app.scheduledDate);
     if (!parsedDate) return false;
-    const dayAvailability = currentConsultantAvailability.find(
-      (availability) => availability.dayOfWeek === parsedDate.getDay()
-    );
+    const monthKey = regularOfficeHourPolicy.getMonthKeyFromDateKey(app.scheduledDate);
+    if (!monthKey) return false;
+    const dayAvailability = getMonthlyAvailabilityForMonth(
+      currentConsultantMonthlyAvailability,
+      monthKey,
+      regularOfficeHourPolicy.ALL_DAY_NUMBERS,
+    ).find((availability) => availability.dayOfWeek === parsedDate.getDay());
     if (!dayAvailability) return false;
     const targetTime = normalizeTimeKey(app.scheduledTime);
     return dayAvailability.slots.some(
@@ -339,9 +345,7 @@ export function AdminApplications({
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">전체 상태</SelectItem>
-                  <SelectItem value="pending">수락 대기</SelectItem>
                   <SelectItem value="confirmed">확정</SelectItem>
-                  <SelectItem value="rejected">거절됨</SelectItem>
                   <SelectItem value="cancelled">취소</SelectItem>
                   <SelectItem value="completed">완료</SelectItem>
                 </SelectContent>

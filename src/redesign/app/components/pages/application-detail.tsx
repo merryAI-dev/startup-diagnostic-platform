@@ -6,6 +6,7 @@ import { Textarea } from "@/redesign/app/components/ui/textarea";
 import { Label } from "@/redesign/app/components/ui/label";
 import { Input } from "@/redesign/app/components/ui/input";
 import { StatusChip } from "@/redesign/app/components/status-chip";
+import { ApplicationChangeWindowBadge } from "@/redesign/app/components/application-change-window-badge";
 import { Application, Message } from "@/redesign/app/lib/types";
 import { format } from "date-fns";
 import { ko } from "date-fns/locale";
@@ -27,6 +28,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/redesign/app/components/ui/alert-dialog";
+import { isApplicationChangeWindowOpen } from "@/redesign/app/lib/application-change-window";
 
 interface ApplicationDetailProps {
   application: Application;
@@ -120,9 +122,11 @@ export function ApplicationDetail({
   })();
   const isPendingLike =
     application.status === "pending" || application.status === "review";
+  const isWithinChangeWindow = isApplicationChangeWindowOpen(application.createdAt);
   const canCancel =
-    isCompanyUser
-    && isPendingLike
+    (isCompanyUser || isConsultantUser)
+    && application.status === "confirmed"
+    && isWithinChangeWindow
     && !isSessionEnded;
   const shouldShowConsultant = (consultant?: string) =>
     Boolean(consultant && consultant !== "담당자 배정 중");
@@ -176,7 +180,8 @@ export function ApplicationDetail({
   const canEditCompanyApplication =
     isCompanyUser
     && !isSessionEnded
-    && (isPendingLike || application.status === "confirmed")
+    && application.status === "confirmed"
+    && isWithinChangeWindow
     && Boolean(onUpdateCompanyApplication);
   const [isEditingCompanyApplication, setIsEditingCompanyApplication] = useState(false);
   const [editingRequestContent, setEditingRequestContent] = useState(
@@ -255,6 +260,7 @@ export function ApplicationDetail({
             <div className="flex items-center gap-2 mb-2">
               <h1>{application.officeHourTitle}</h1>
               <StatusChip status={application.status} />
+              <ApplicationChangeWindowBadge application={application} />
             </div>
             {shouldShowConsultant(application.consultant) && (
               <div className="flex items-center gap-2">
@@ -311,7 +317,7 @@ export function ApplicationDetail({
                 onClick={() => setShowCancelDialog(true)}
               >
                 <XCircle className="w-4 h-4 mr-2" />
-                신청 삭제
+                신청 취소
               </Button>
             )}
           </div>
@@ -349,7 +355,7 @@ export function ApplicationDetail({
                   </div>
                 </div>
                 <p className="text-xs text-amber-700">
-                  일정이 바뀌면 다시 수락 대기 상태로 조정됩니다.
+                  일정이 바뀌면 배정 가능한 컨설턴트 기준으로 즉시 다시 배정됩니다.
                 </p>
               </div>
             ) : (
@@ -759,9 +765,9 @@ export function ApplicationDetail({
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>신청을 삭제하시겠습니까?</AlertDialogTitle>
+            <AlertDialogTitle>신청을 취소하시겠습니까?</AlertDialogTitle>
             <AlertDialogDescription>
-              이 작업은 되돌릴 수 없습니다. 삭제하면 신청 내역은 사라집니다.
+              신청을 취소하면 상태가 취소로 변경되며, 신청 이력은 유지됩니다.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -773,7 +779,7 @@ export function ApplicationDetail({
               loading={cancelingApplication}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
-              삭제
+              취소 확정
             </Button>
           </AlertDialogFooter>
         </AlertDialogContent>

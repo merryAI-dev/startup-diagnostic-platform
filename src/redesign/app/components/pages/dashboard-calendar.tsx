@@ -16,6 +16,7 @@ import {
 } from "@/redesign/app/lib/types";
 import { Button } from "@/redesign/app/components/ui/button";
 import { StatusChip } from "@/redesign/app/components/status-chip";
+import { ApplicationChangeWindowBadge } from "@/redesign/app/components/application-change-window-badge";
 import { FileUpload } from "@/redesign/app/components/file-upload";
 import {
   AlertDialog,
@@ -55,6 +56,7 @@ import {
   parseLocalDateKey,
   parseLocalDateTimeKey,
 } from "@/redesign/app/lib/date-keys";
+import { isApplicationChangeWindowOpen } from "@/redesign/app/lib/application-change-window";
 
 interface DashboardCalendarProps {
   applications: Application[];
@@ -169,7 +171,7 @@ export function DashboardCalendar({
   const [cancelTarget, setCancelTarget] = useState<Application | null>(null);
   const [cancelingApplication, setCancelingApplication] = useState(false);
   const [selectedApplicationId, setSelectedApplicationId] = useState<string | null>(null);
-  const [applicationListTab, setApplicationListTab] = useState<"pending" | "rejected">("pending");
+  const [applicationListTab, setApplicationListTab] = useState<"confirmed" | "cancelled">("confirmed");
   const [isEditingApplication, setIsEditingApplication] = useState(false);
   const [editingRequestSections, setEditingRequestSections] = useState<RequestSections>(
     createEmptyRequestSections()
@@ -217,19 +219,12 @@ export function DashboardCalendar({
   };
 
   // 대기중인 신청
-  const pendingApplications = userApplications.filter(
+  const confirmedApplications = userApplications.filter(
     (app) =>
-      (app.status === "pending" || app.status === "review")
+      app.status === "confirmed"
       && !hasSessionEnded(app)
   );
-  const rejectedApplications = userApplications.filter(
-    (app) =>
-      app.status === "rejected"
-      || (
-        (app.status === "pending" || app.status === "review")
-        && hasSessionEnded(app)
-      )
-  );
+  const cancelledApplications = userApplications.filter((app) => app.status === "cancelled");
 
   // 캘린더 날짜 생성
   const monthStart = startOfMonth(currentMonth);
@@ -290,7 +285,7 @@ export function DashboardCalendar({
   };
 
   const currentListApplications =
-    applicationListTab === "pending" ? pendingApplications : rejectedApplications;
+    applicationListTab === "confirmed" ? confirmedApplications : cancelledApplications;
 
   const openApplicationModal = (application: Application) => {
     setSelectedApplicationId(application.id);
@@ -321,18 +316,17 @@ export function DashboardCalendar({
 
   const canDeleteApplication =
     selectedApplication
-    && (selectedApplication.status === "pending" || selectedApplication.status === "review");
+    && selectedApplication.status === "confirmed"
+    && !hasSessionEnded(selectedApplication)
+    && isApplicationChangeWindowOpen(selectedApplication.createdAt);
   const canEditApplication =
     Boolean(
       selectedApplication
       && user.role === "user"
       && onUpdateCompanyApplication
       && !hasSessionEnded(selectedApplication)
-      && (
-        selectedApplication.status === "pending" ||
-        selectedApplication.status === "review" ||
-        selectedApplication.status === "confirmed"
-      )
+      && selectedApplication.status === "confirmed"
+      && isApplicationChangeWindowOpen(selectedApplication.createdAt)
     );
 
   const selectedApplicationAttachments = useMemo(() => {
@@ -368,7 +362,7 @@ export function DashboardCalendar({
     [selectedApplication?.requestContent]
   );
 
-  const listTabButtonClass = (tab: "pending" | "rejected") =>
+  const listTabButtonClass = (tab: "confirmed" | "cancelled") =>
     `group relative flex flex-1 items-center justify-center gap-2 border-b-2 px-2 py-3 text-sm font-semibold whitespace-nowrap transition ${
       applicationListTab === tab
         ? "border-slate-900 text-slate-900"
@@ -459,34 +453,34 @@ export function DashboardCalendar({
                 <div className="flex items-center gap-4">
                 <button
                   type="button"
-                  className={listTabButtonClass("pending")}
-                  onClick={() => setApplicationListTab("pending")}
+                  className={listTabButtonClass("confirmed")}
+                  onClick={() => setApplicationListTab("confirmed")}
                 >
-                  <span>대기중</span>
+                  <span>확정</span>
                   <span
                     className={`rounded-full px-1.5 py-0.5 text-[11px] leading-none transition ${
-                      applicationListTab === "pending"
+                      applicationListTab === "confirmed"
                         ? "bg-slate-900 text-white"
                         : "bg-slate-100 text-slate-500 group-hover:bg-slate-200"
                     }`}
                   >
-                    {pendingApplications.length}
+                    {confirmedApplications.length}
                   </span>
                 </button>
                 <button
                   type="button"
-                  className={listTabButtonClass("rejected")}
-                  onClick={() => setApplicationListTab("rejected")}
+                  className={listTabButtonClass("cancelled")}
+                  onClick={() => setApplicationListTab("cancelled")}
                 >
-                  <span>거절됨</span>
+                  <span>취소</span>
                   <span
                     className={`rounded-full px-1.5 py-0.5 text-[11px] leading-none transition ${
-                      applicationListTab === "rejected"
+                      applicationListTab === "cancelled"
                         ? "bg-slate-900 text-white"
                         : "bg-slate-100 text-slate-500 group-hover:bg-slate-200"
                     }`}
                   >
-                    {rejectedApplications.length}
+                    {cancelledApplications.length}
                   </span>
                 </button>
                 </div>
@@ -523,14 +517,14 @@ export function DashboardCalendar({
                           {metaLine}
                         </p>
                       ) : null}
-                      {applicationListTab === "pending" && applicationsWithoutAssignableConsultantIdSet.has(app.id) ? (
+                      {applicationListTab === "confirmed" && applicationsWithoutAssignableConsultantIdSet.has(app.id) ? (
                         <p className="mt-1 line-clamp-2 text-[11px] text-amber-600">
                           현재 수락 가능한 컨설턴트가 없습니다. 일정조정과 관련하여 관리자에게 문의해주세요.
                         </p>
                       ) : null}
-                      {applicationListTab === "rejected" ? (
-                        <p className="mt-1 line-clamp-2 text-[11px] text-rose-600">
-                          거절 사유: {app.rejectionReason?.trim() || "사유가 등록되지 않았습니다."}
+                      {applicationListTab === "cancelled" ? (
+                        <p className="mt-1 line-clamp-2 text-[11px] text-slate-500">
+                          취소된 신청입니다.
                         </p>
                       ) : (
                         <div className="mt-2 flex justify-end">
@@ -542,7 +536,7 @@ export function DashboardCalendar({
                               setCancelTarget(app);
                             }}
                           >
-                            신청 삭제
+                            신청 취소
                           </button>
                         </div>
                       )}
@@ -552,9 +546,9 @@ export function DashboardCalendar({
               </div>
             ) : (
               <div className="flex min-h-0 flex-1 items-center justify-center rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-center text-xs text-slate-500">
-                {applicationListTab === "pending"
-                  ? "대기중인 신청이 없습니다."
-                  : "거절된 신청이 없습니다."}
+                {applicationListTab === "confirmed"
+                  ? "확정된 신청이 없습니다."
+                  : "취소된 신청이 없습니다."}
               </div>
             )}
           </div>
@@ -767,6 +761,7 @@ export function DashboardCalendar({
                         {getApplicationTypeLabel(selectedApplication)}
                       </span>
                       <StatusChip status={selectedApplication.status} size="sm" />
+                      <ApplicationChangeWindowBadge application={selectedApplication} />
                     </DialogDescription>
                   </div>
                   <div className="-mr-2 flex items-center justify-end gap-2 self-end">
@@ -805,7 +800,7 @@ export function DashboardCalendar({
                         }}
                       >
                         <Trash2 className="mr-2 h-4 w-4" />
-                        신청 삭제
+                        신청 취소
                       </Button>
                     ) : null}
                   </div>
@@ -831,7 +826,7 @@ export function DashboardCalendar({
                     </p>
                     {isEditingApplication ? (
                       <p className="mt-2 text-[11px] text-slate-500">
-                        대기중 리스트에서는 신청 내용과 첨부 파일만 수정할 수 있습니다.
+                        확정 리스트에서는 신청 내용과 첨부 파일만 수정할 수 있습니다.
                       </p>
                     ) : null}
                   </div>
@@ -1039,9 +1034,9 @@ export function DashboardCalendar({
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>신청을 삭제하시겠습니까?</AlertDialogTitle>
+            <AlertDialogTitle>신청을 취소하시겠습니까?</AlertDialogTitle>
             <AlertDialogDescription>
-              신청을 삭제하면 신청 내역은 사라집니다.
+              신청을 취소하면 상태가 취소로 변경되며, 신청 이력은 유지됩니다.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -1065,7 +1060,7 @@ export function DashboardCalendar({
                 }
               }}
             >
-              삭제
+              취소 확정
             </Button>
           </AlertDialogFooter>
         </AlertDialogContent>

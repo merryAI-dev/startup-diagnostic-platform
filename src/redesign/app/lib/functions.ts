@@ -3,6 +3,7 @@ import { functions, isFirebaseConfigured } from "@/redesign/app/lib/firebase";
 import type {
   ApplicationStatus,
   ConsultantAvailability,
+  ConsultantMonthlyAvailability,
   ProgramKpiDefinition,
   ProgramWeekday,
   SessionFormat,
@@ -44,7 +45,7 @@ type TransitionApplicationResult = {
 
 type CancelApplicationResult = {
   applicationId: string;
-  outcome: "deleted" | "rejected";
+  outcome: "cancelled";
   status?: ApplicationStatus;
 };
 
@@ -88,7 +89,7 @@ type UpdateCompanyProgramsResult = {
 
 export type SyncConsultantSchedulingPayload = {
   consultantId?: string;
-  availability?: ConsultantAvailability[];
+  monthlyAvailability?: ConsultantMonthlyAvailability;
   agendaIds?: string[];
   status?: "active" | "inactive";
 };

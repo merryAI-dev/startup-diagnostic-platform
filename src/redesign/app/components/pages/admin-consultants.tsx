@@ -14,6 +14,7 @@ import {
   DialogTrigger,
 } from "@/redesign/app/components/ui/dialog"
 import { Input } from "@/redesign/app/components/ui/input"
+import { Label } from "@/redesign/app/components/ui/label"
 import { PaginationControls } from "@/redesign/app/components/ui/pagination-controls"
 import {
   Select,
@@ -30,7 +31,14 @@ import {
   TableHeader,
   TableRow,
 } from "@/redesign/app/components/ui/table"
+import { ToggleGroup, ToggleGroupItem } from "@/redesign/app/components/ui/toggle-group"
 import { cn } from "@/redesign/app/components/ui/utils"
+import {
+  buildDefaultConsultantAvailability,
+  getConsultantScheduleDayNumbers,
+  getMonthlyAvailabilityForMonth,
+} from "@/redesign/app/lib/consultant-monthly-availability"
+import * as regularOfficeHourPolicy from "@/redesign/app/lib/regular-office-hour-policy"
 
 interface AdminConsultantsProps {
   consultants: Consultant[]
@@ -38,51 +46,11 @@ interface AdminConsultantsProps {
   onUpdateConsultant: (id: string, data: Partial<Consultant>) => Promise<void> | void
 }
 
-const SCHEDULE_DAYS = [
-  { value: 2, label: "화" },
-  { value: 4, label: "목" },
-] as const
-
-const TIME_SLOTS = Array.from({ length: 9 }, (_, index) => {
-  const startHour = 9 + index
-  const endHour = startHour + 1
-  return {
-    start: `${String(startHour).padStart(2, "0")}:00`,
-    end: `${String(endHour).padStart(2, "0")}:00`,
-  }
-})
-
 const PAGE_SIZE = 8
 
-function buildDefaultAvailability(): ConsultantAvailability[] {
-  return SCHEDULE_DAYS.map((day) => ({
-    dayOfWeek: day.value,
-    slots: TIME_SLOTS.map((slot) => ({
-      start: slot.start,
-      end: slot.end,
-      available: false,
-    })),
-  }))
-}
-
-function normalizeAvailability(
-  input: ConsultantAvailability[] | undefined,
-): ConsultantAvailability[] {
-  const base = buildDefaultAvailability()
-  if (!input || input.length === 0) return base
-  return base.map((baseDay) => {
-    const found = input.find((item) => item.dayOfWeek === baseDay.dayOfWeek)
-    if (!found) return baseDay
-    return {
-      ...baseDay,
-      slots: baseDay.slots.map((baseSlot) => {
-        const existing = found.slots.find(
-          (slot) => slot.start === baseSlot.start && slot.end === baseSlot.end,
-        )
-        return existing ?? baseSlot
-      }),
-    }
-  })
+function formatMonthLabel(monthKey: string): string {
+  const [year, month] = monthKey.split("-")
+  return `${year}년 ${Number(month)}월`
 }
 
 export function AdminConsultants({
@@ -108,6 +76,7 @@ export function AdminConsultants({
   const [meetingLinkDrafts, setMeetingLinkDrafts] = useState<Record<string, string>>({})
   const [editingMeetingLinkIds, setEditingMeetingLinkIds] = useState<string[]>([])
   const [savingMeetingLinkIds, setSavingMeetingLinkIds] = useState<string[]>([])
+  const [selectedScheduleMonthKey, setSelectedScheduleMonthKey] = useState("")
 
   const selectedConsultant = useMemo(
     () => consultants.find((consultant) => consultant.id === selectedConsultantId) ?? null,
@@ -126,7 +95,10 @@ export function AdminConsultants({
     const normalizedQuery = searchQuery.trim().toLowerCase()
     return consultants.filter((consultant) => {
       const matchesQuery =
-        !normalizedQuery || consultant.name.toLowerCase().includes(normalizedQuery)
+        !normalizedQuery ||
+        consultant.name.toLowerCase().includes(normalizedQuery) ||
+        consultant.email.toLowerCase().includes(normalizedQuery) ||
+        (consultant.organization ?? "").toLowerCase().includes(normalizedQuery)
       const matchesAgenda =
         agendaFilter === "all" || (consultant.agendaIds ?? []).includes(agendaFilter)
       return matchesQuery && matchesAgenda
@@ -136,10 +108,57 @@ export function AdminConsultants({
     const startIndex = (page - 1) * PAGE_SIZE
     return filteredConsultants.slice(startIndex, startIndex + PAGE_SIZE)
   }, [filteredConsultants, page])
+  const scheduleTargetMonthKey = useMemo(
+    () => regularOfficeHourPolicy.getNextMonthKey(new Date()),
+    [],
+  )
+  const scheduleMonthOptions = useMemo(() => {
+    const keys = new Set<string>([
+      ...(selectedConsultant ? Object.keys(selectedConsultant.monthlyAvailability ?? {}) : []),
+      scheduleTargetMonthKey,
+    ].filter(Boolean))
+    return Array.from(keys).sort((a, b) => b.localeCompare(a))
+  }, [scheduleTargetMonthKey, selectedConsultant])
+  const isScheduleEditable = useMemo(
+    () =>
+      Boolean(
+        selectedScheduleMonthKey &&
+          selectedScheduleMonthKey === scheduleTargetMonthKey &&
+          regularOfficeHourPolicy.canConsultantEditMonthlyAvailability(
+            selectedScheduleMonthKey,
+            new Date(),
+          ),
+      ),
+    [scheduleTargetMonthKey, selectedScheduleMonthKey],
+  )
+  const selectedScheduleDayNumbers = useMemo(
+    () =>
+      getConsultantScheduleDayNumbers({
+        agendaIds: selectedConsultant?.agendaIds,
+        agendas,
+        scope: selectedConsultant?.scope,
+      }),
+    [agendas, selectedConsultant?.agendaIds, selectedConsultant?.scope],
+  )
+  const scheduleDays = useMemo(
+    () =>
+      selectedScheduleDayNumbers.map((value) => ({
+        value,
+        label: value === 2 ? "화" : value === 3 ? "수" : "목",
+      })),
+    [selectedScheduleDayNumbers],
+  )
 
   const normalizedSelectedAvailability = useMemo(
-    () => normalizeAvailability(selectedConsultant?.availability),
-    [selectedConsultant?.availability],
+    () =>
+      selectedScheduleMonthKey
+        ? getMonthlyAvailabilityForMonth(
+            selectedConsultant?.monthlyAvailability,
+            selectedScheduleMonthKey,
+            selectedScheduleDayNumbers,
+          )
+        : buildDefaultConsultantAvailability(selectedScheduleDayNumbers),
+    [selectedScheduleMonthKey, selectedConsultant?.monthlyAvailability, selectedScheduleDayNumbers],
   )
   const normalizedSelectedAgendaIds = useMemo(
     () => Array.from(new Set(selectedConsultant?.agendaIds ?? [])).sort(),
@@ -204,6 +223,12 @@ export function AdminConsultants({
     })
   }, [consultants, editingMeetingLinkIds])
 
+  useEffect(() => {
+    if (!scheduleMonthOptions.includes(selectedScheduleMonthKey)) {
+      setSelectedScheduleMonthKey(scheduleMonthOptions[0] ?? scheduleTargetMonthKey)
+    }
+  }, [scheduleMonthOptions, scheduleTargetMonthKey, selectedScheduleMonthKey])
+
   function toggleSlot(dayOfWeek: number, slotStart: string) {
     setDraftScheduleAvailability((prev) => {
       const base = prev ?? normalizedSelectedAvailability
@@ -220,9 +245,12 @@ export function AdminConsultants({
   }
 
   function handleSaveSchedule() {
-    if (!selectedConsultant) return
+    if (!selectedConsultant || !selectedScheduleMonthKey) return
     onUpdateConsultant(selectedConsultant.id, {
-      availability: scheduleAvailability,
+      monthlyAvailability: {
+        ...(selectedConsultant.monthlyAvailability ?? {}),
+        [selectedScheduleMonthKey]: scheduleAvailability,
+      },
     })
     setIsScheduleDialogOpen(false)
     setDraftScheduleAvailability(null)
@@ -301,7 +329,7 @@ export function AdminConsultants({
         <div className="mx-auto w-full max-w-[1600px]">
           <h1 className={pageTitleClassName}>컨설턴트 관리</h1>
           <p className={pageDescriptionClassName}>
-            컨설턴트 프로필과 정기 오피스아워(화/목, 09:00~18:00) 가능 시간을 관리합니다
+            컨설턴트 프로필과 다음 달 정기 오피스아워 가능 시간을 관리합니다
           </p>
         </div>
       </div>
@@ -315,7 +343,7 @@ export function AdminConsultants({
                   <Input
                     value={searchQuery}
                     onChange={(event) => setSearchQuery(event.target.value)}
-                    placeholder="컨설턴트 이름 검색"
+                    placeholder="이름, 이메일, 소속 검색"
                     className="w-full md:w-64"
                   />
                   <Select value={agendaFilter} onValueChange={setAgendaFilter}>
@@ -371,12 +399,13 @@ export function AdminConsultants({
           <Card className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
             <CardContent className="min-h-0 flex-1 p-0">
               <div className="min-h-0 h-full overflow-auto">
-                <Table className="min-w-[1120px]">
+                <Table className="min-w-[1240px]">
                   <TableHeader className="[&_tr]:sticky [&_tr]:top-0 [&_tr]:z-10 [&_tr]:bg-white">
                     <TableRow className="hover:bg-white">
                       <TableHead className="bg-white">컨설턴트</TableHead>
                       <TableHead className="bg-white">연락처</TableHead>
                       <TableHead className="bg-white">화상링크</TableHead>
+                      <TableHead className="w-[148px] bg-white">구분</TableHead>
                       <TableHead className="bg-white">상태</TableHead>
                       <TableHead className="bg-white">아젠다</TableHead>
                       <TableHead className="bg-white text-right">관리</TableHead>
@@ -386,7 +415,7 @@ export function AdminConsultants({
                     {filteredConsultants.length === 0 && (
                       <TableRow>
                         <TableCell
-                          colSpan={6}
+                          colSpan={7}
                           className="h-24 text-center text-sm text-muted-foreground"
                         >
                           검색 결과가 없습니다.
@@ -478,6 +507,36 @@ export function AdminConsultants({
                                 )}
                               </Button>
                             </div>
+                          </TableCell>
+                          <TableCell>
+                            <ToggleGroup
+                              type="single"
+                              value={consultant.scope}
+                              variant="default"
+                              size="sm"
+                              className="grid w-[124px] grid-cols-2 overflow-hidden rounded-full border border-slate-200 bg-white p-0.5 shadow-none"
+                              onValueChange={(value) => {
+                                if (value !== "internal" && value !== "external") return
+                                void Promise.resolve(
+                                  onUpdateConsultant(consultant.id, {
+                                    scope: value,
+                                  }),
+                                )
+                              }}
+                            >
+                              <ToggleGroupItem
+                                value="internal"
+                                className="h-7 min-w-0 rounded-full border-0 px-0 text-[12px] font-medium text-slate-500 shadow-none first:rounded-full last:rounded-full hover:bg-slate-50 data-[state=on]:bg-amber-50 data-[state=on]:text-amber-700"
+                              >
+                                내부
+                              </ToggleGroupItem>
+                              <ToggleGroupItem
+                                value="external"
+                                className="h-7 min-w-0 rounded-full border-0 px-0 text-[12px] font-medium text-slate-500 shadow-none first:rounded-full last:rounded-full hover:bg-slate-50 data-[state=on]:bg-sky-50 data-[state=on]:text-sky-700"
+                              >
+                                외부
+                              </ToggleGroupItem>
+                            </ToggleGroup>
                           </TableCell>
                           <TableCell>
                             <Badge
@@ -804,8 +863,17 @@ export function AdminConsultants({
                                   setIsScheduleDialogOpen(open)
                                   if (open) {
                                     setSelectedConsultantId(consultant.id)
+                                    setSelectedScheduleMonthKey(scheduleTargetMonthKey)
                                     setDraftScheduleAvailability(
-                                      normalizeAvailability(consultant.availability),
+                                      getMonthlyAvailabilityForMonth(
+                                        consultant.monthlyAvailability,
+                                        scheduleTargetMonthKey,
+                                        getConsultantScheduleDayNumbers({
+                                          agendaIds: consultant.agendaIds,
+                                          agendas,
+                                          scope: consultant.scope,
+                                        }),
+                                      ),
                                     )
                                   } else {
                                     setDraftScheduleAvailability(null)
@@ -818,8 +886,17 @@ export function AdminConsultants({
                                     size="sm"
                                     onClick={() => {
                                       setSelectedConsultantId(consultant.id)
+                                      setSelectedScheduleMonthKey(scheduleTargetMonthKey)
                                       setDraftScheduleAvailability(
-                                        normalizeAvailability(consultant.availability),
+                                        getMonthlyAvailabilityForMonth(
+                                          consultant.monthlyAvailability,
+                                          scheduleTargetMonthKey,
+                                          getConsultantScheduleDayNumbers({
+                                            agendaIds: consultant.agendaIds,
+                                            agendas,
+                                            scope: consultant.scope,
+                                          }),
+                                        ),
                                       )
                                     }}
                                   >
@@ -834,14 +911,38 @@ export function AdminConsultants({
                                       {consultant.name} 컨설턴트 가능 시간
                                     </DialogTitle>
                                     <DialogDescription>
-                                      요일은 화/목 고정이며 09:00부터 18:00까지 1시간 단위로
-                                      설정합니다.
+                                      {scheduleTargetMonthKey} 정기 오피스아워 가능 시간을 설정합니다.
                                     </DialogDescription>
                                   </DialogHeader>
 
                                   <div className="space-y-4 max-h-[65vh] overflow-y-auto pr-1">
+                                    <div className="w-full max-w-[220px]">
+                                      <Label className="mb-2 block">조회 월</Label>
+                                      <Select
+                                        value={selectedScheduleMonthKey}
+                                        onValueChange={setSelectedScheduleMonthKey}
+                                      >
+                                        <SelectTrigger>
+                                          <SelectValue placeholder="월 선택" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                          {scheduleMonthOptions.map((monthKey) => (
+                                            <SelectItem key={monthKey} value={monthKey}>
+                                              {formatMonthLabel(monthKey)}
+                                            </SelectItem>
+                                          ))}
+                                        </SelectContent>
+                                      </Select>
+                                    </div>
+                                    {!isScheduleEditable && (
+                                      <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                                        {selectedScheduleMonthKey === scheduleTargetMonthKey
+                                          ? "컨설턴트 가능 시간은 매월 3주차에 다음 달 일정만 수정할 수 있습니다."
+                                          : "선택한 월 스케줄은 조회 전용입니다."}
+                                      </div>
+                                    )}
                                     {scheduleAvailability.map((day) => {
-                                      const dayInfo = SCHEDULE_DAYS.find(
+                                      const dayInfo = scheduleDays.find(
                                         (item) => item.value === day.dayOfWeek,
                                       )
                                       return (
@@ -859,6 +960,7 @@ export function AdminConsultants({
                                                 onClick={() =>
                                                   toggleSlot(day.dayOfWeek, slot.start)
                                                 }
+                                                disabled={!isScheduleEditable}
                                                 className={cn(
                                                   "rounded-lg border px-2 py-2 text-xs transition",
                                                   slot.available
@@ -898,7 +1000,7 @@ export function AdminConsultants({
                                     <Button
                                       type="button"
                                       onClick={handleSaveSchedule}
-                                      disabled={!isScheduleDirty}
+                                      disabled={!isScheduleEditable || !isScheduleDirty}
                                     >
                                       저장
                                     </Button>

@@ -38,6 +38,7 @@
     "report:consultant-auth-integrity": "node scripts/report-consultant-auth-integrity.mjs",
     "report:consultant-reference-usage": "node scripts/report-consultant-reference-usage.mjs",
     "report:company-profile-integrity": "node scripts/report-company-profile-integrity.mjs",
+    "cleanup:officehour-applications": "node scripts/cleanup-office-hour-applications.mjs",
     "cleanup:orphaned-auth-data": "node scripts/cleanup-orphaned-auth-data.mjs",
     "cleanup:test-accounts": "node scripts/cleanup-test-accounts.mjs"
   },

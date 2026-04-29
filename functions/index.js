@@ -12,6 +12,7 @@ const {
   buildCompanyAnalysisUserPrompt,
 } = require("./ai/company-report-prompt");
 const { generateStructuredJson } = require("./ai/gemini");
+const regularOfficeHourPolicy = require("./regular-office-hour-policy.cjs");
 
 initializeApp();
 
@@ -19,11 +20,11 @@ const db = getFirestore();
 const REGION = process.env.FUNCTION_REGION || "asia-northeast3";
 const GEMINI_API_KEY = defineSecret("GEMINI_API_KEY");
 const SLACK_SIGNUP_REQUEST_WEBHOOK_URL = defineSecret("SLACK_SIGNUP_REQUEST_WEBHOOK_URL");
-const ACTIVE_APPLICATION_STATUSES = new Set(["pending", "confirmed", "completed"]);
-const RESERVED_APPLICATION_STATUSES = new Set(["pending", "confirmed"]);
-const AUTO_REJECT_REASON = "진행 예정 시간이 지나 자동 거절되었습니다.";
+const ACTIVE_APPLICATION_STATUSES = new Set(["confirmed", "completed"]);
+const RESERVED_APPLICATION_STATUSES = new Set(["confirmed"]);
 const AUTO_UNASSIGNABLE_REASON = "해당 시간대에 배정 가능한 컨설턴트가 없어 자동 거절되었습니다.";
 const APPROVAL_ROLE_VALUES = new Set(["admin", "company", "consultant"]);
+const APPLICATION_CHANGE_WINDOW_MS = 72 * 60 * 60 * 1000;
 const DEFAULT_COMPANY_FORM = {
   companyType: "법인",
   companyInfo: "",
@@ -120,6 +121,45 @@ function formatFirestoreDateTime(value) {
   });
 
   return `${formatter.format(date)} KST`;
+}
+
+function toJsDate(value) {
+  if (!value) return null;
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value;
+  }
+  if (typeof value === "string" || typeof value === "number") {
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+  if (typeof value === "object") {
+    if (typeof value.toDate === "function") {
+      const parsed = value.toDate();
+      return Number.isNaN(parsed.getTime()) ? null : parsed;
+    }
+    if (typeof value.toMillis === "function") {
+      const parsed = new Date(value.toMillis());
+      return Number.isNaN(parsed.getTime()) ? null : parsed;
+    }
+    if (typeof value.seconds === "number") {
+      const millis = value.seconds * 1000 + Math.floor((value.nanoseconds || 0) / 1000000);
+      const parsed = new Date(millis);
+      return Number.isNaN(parsed.getTime()) ? null : parsed;
+    }
+  }
+  return null;
+}
+
+function getApplicationChangeDeadline(application) {
+  const createdAt = toJsDate(application?.createdAt);
+  if (!createdAt) return null;
+  return new Date(createdAt.getTime() + APPLICATION_CHANGE_WINDOW_MS);
+}
+
+function isApplicationChangeWindowOpen(application, now = new Date()) {
+  const deadline = getApplicationChangeDeadline(application);
+  if (!deadline) return false;
+  return now.getTime() <= deadline.getTime();
 }
 
 function toSlackFieldValue(value) {
@@ -692,8 +732,31 @@ function buildDefaultConsultantAvailability() {
   }));
 }
 
-function sanitizeConsultantAvailability(value) {
-  const defaults = buildDefaultConsultantAvailability();
+function buildDefaultConsultantAvailabilityForDays(scheduleDays) {
+  const timeSlots = Array.from({ length: 9 }, (_, index) => {
+    const startHour = 9 + index;
+    const endHour = startHour + 1;
+    return {
+      start: `${String(startHour).padStart(2, "0")}:00`,
+      end: `${String(endHour).padStart(2, "0")}:00`,
+    };
+  });
+
+  return scheduleDays.map((dayOfWeek) => ({
+    dayOfWeek,
+    slots: timeSlots.map((slot) => ({
+      start: slot.start,
+      end: slot.end,
+      available: false,
+    })),
+  }));
+}
+
+function buildDefaultConsultantMonthlyAvailability() {
+  return buildDefaultConsultantAvailabilityForDays(regularOfficeHourPolicy.ALL_DAY_NUMBERS);
+}
+
+function sanitizeConsultantAvailabilityWithDefaults(value, defaults) {
   if (!Array.isArray(value) || value.length === 0) {
     return defaults;
   }
@@ -725,6 +788,28 @@ function sanitizeConsultantAvailability(value) {
   });
 }
 
+function sanitizeConsultantAvailability(value) {
+  return sanitizeConsultantAvailabilityWithDefaults(value, buildDefaultConsultantAvailability());
+}
+
+function sanitizeConsultantMonthlyAvailability(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([monthKey]) => regularOfficeHourPolicy.isMonthKey(monthKey))
+      .map(([monthKey, availability]) => [
+        monthKey,
+        sanitizeConsultantAvailabilityWithDefaults(
+          availability,
+          buildDefaultConsultantMonthlyAvailability()
+        ),
+      ])
+  );
+}
+
 function isDateKey(value) {
   return /^\d{4}-\d{2}-\d{2}$/.test(normalizeString(value));
 }
@@ -748,6 +833,7 @@ function getProgramWeekdayNumbers(weekdays) {
   const numbers = [];
   source.forEach((weekday) => {
     if (weekday === "TUE") numbers.push(2);
+    if (weekday === "WED") numbers.push(3);
     if (weekday === "THU") numbers.push(4);
   });
   return numbers;
@@ -759,7 +845,7 @@ function sanitizeProgramWeekdays(value, fallback = ["TUE", "THU"]) {
         new Set(
           value
             .map((item) => normalizeString(item))
-            .filter((item) => item === "TUE" || item === "THU")
+            .filter((item) => item === "TUE" || item === "WED" || item === "THU")
         )
       )
     : [];
@@ -806,7 +892,14 @@ function isProgramDateAvailable(programDoc, dateKey) {
   if (targetDate.getTime() < startDate.getTime() || targetDate.getTime() > endDate.getTime()) {
     return false;
   }
-  return getProgramWeekdayNumbers(programDoc?.weekdays).includes(targetDate.getDay());
+  return regularOfficeHourPolicy.isRegularOfficeHourDateForScope(dateKey);
+}
+
+function isProgramRegularOfficeHourDateAvailable(programDoc, agendaScope, dateKey) {
+  if (!isProgramDateAvailable(programDoc, dateKey)) {
+    return false;
+  }
+  return regularOfficeHourPolicy.isRegularOfficeHourDateForScope(dateKey, agendaScope);
 }
 
 function buildRegularSlotId(programId, consultantId, dateKey, timeKey) {
@@ -868,7 +961,12 @@ function isConsultantAvailableAt(consultant, dateKey, time) {
   const targetDate = parseDateKey(dateKey);
   if (!targetDate) return false;
   const dayOfWeek = targetDate.getDay();
-  const availabilityList = Array.isArray(consultant.availability) ? consultant.availability : [];
+  const monthKey = regularOfficeHourPolicy.getMonthKeyFromDateKey(dateKey);
+  if (!monthKey) return false;
+  const monthlyAvailability = sanitizeConsultantMonthlyAvailability(consultant.monthlyAvailability);
+  const availabilityList = Array.isArray(monthlyAvailability[monthKey])
+    ? monthlyAvailability[monthKey]
+    : buildDefaultConsultantMonthlyAvailability();
   const dayAvailability = availabilityList.find((item) => item?.dayOfWeek === dayOfWeek);
   if (!dayAvailability || !Array.isArray(dayAvailability.slots)) return false;
   return dayAvailability.slots.some(
@@ -996,7 +1094,7 @@ async function syncConsultantSchedulingCore(params) {
     actorRole,
     authEmail,
     authDisplayName,
-    availability,
+    monthlyAvailability,
     agendaIds,
     status,
   } = params;
@@ -1025,6 +1123,7 @@ async function syncConsultantSchedulingCore(params) {
         status: "active",
         agendaIds: [],
         availability: buildDefaultConsultantAvailability(),
+        monthlyAvailability: {},
       };
 
   const nextStatus =
@@ -1033,17 +1132,42 @@ async function syncConsultantSchedulingCore(params) {
       : (status === "inactive" ? "inactive" : "active");
   const nextAgendaIds =
     agendaIds === undefined ? normalizeStringArray(currentConsultant.agendaIds) : normalizeStringArray(agendaIds);
-  const nextAvailability =
-    availability === undefined
-      ? sanitizeConsultantAvailability(currentConsultant.availability)
-      : sanitizeConsultantAvailability(availability);
+  const nextMonthlyAvailability =
+    monthlyAvailability === undefined
+      ? sanitizeConsultantMonthlyAvailability(currentConsultant.monthlyAvailability)
+      : sanitizeConsultantMonthlyAvailability(monthlyAvailability);
 
   const nextConsultant = {
     ...currentConsultant,
     status: nextStatus,
     agendaIds: nextAgendaIds,
-    availability: nextAvailability,
+    monthlyAvailability: nextMonthlyAvailability,
   };
+
+  const changedMonthlyAvailabilityKeys = Array.from(
+    new Set([
+      ...Object.keys(sanitizeConsultantMonthlyAvailability(currentConsultant.monthlyAvailability)),
+      ...Object.keys(nextMonthlyAvailability),
+    ])
+  ).filter((monthKey) => {
+    const currentValue = JSON.stringify(
+      sanitizeConsultantMonthlyAvailability(currentConsultant.monthlyAvailability)[monthKey] ?? []
+    );
+    const nextValue = JSON.stringify(nextMonthlyAvailability[monthKey] ?? []);
+    return currentValue !== nextValue;
+  });
+
+  if (changedMonthlyAvailabilityKeys.length > 0) {
+    const invalidMonthKey = changedMonthlyAvailabilityKeys.find(
+      (monthKey) => !regularOfficeHourPolicy.canConsultantEditMonthlyAvailability(monthKey, new Date())
+    );
+    if (invalidMonthKey) {
+      throw new HttpsError(
+        "failed-precondition",
+        "컨설턴트 가능 시간은 매월 3주차에 다음 달 일정만 수정할 수 있습니다."
+      );
+    }
+  }
 
   await assertConsultantSchedulingChangeAllowed({
     currentConsultant,
@@ -1059,7 +1183,7 @@ async function syncConsultantSchedulingCore(params) {
       ...consultantDocData,
       status: nextStatus,
       agendaIds: nextAgendaIds,
-      availability: nextAvailability,
+      monthlyAvailability: nextMonthlyAvailability,
       updatedAt: FieldValue.serverTimestamp(),
       ...(consultantSnap.exists
         ? {}
@@ -1532,7 +1656,7 @@ async function rejectUnassignableSameTimePendingApplications(
 async function runApplicationMaintenanceCore() {
   const candidateSnap = await db
     .collection("officeHourApplications")
-    .where("status", "in", ["pending", "review", "confirmed"])
+    .where("status", "==", "confirmed")
     .get();
 
   if (candidateSnap.empty) {
@@ -1556,22 +1680,12 @@ async function runApplicationMaintenanceCore() {
 
       const application = applicationSnap.data() || {};
       const currentStatus = normalizeApplicationStatus(application.status);
-      if (!["pending", "confirmed"].includes(currentStatus)) {
+      if (currentStatus !== "confirmed") {
         return { outcome: "skipped" };
       }
 
       if (!hasSessionEnded(application, null, now)) {
         return { outcome: "skipped" };
-      }
-
-      if (currentStatus === "pending") {
-        transaction.update(applicationRef, {
-          status: "rejected",
-          rejectionReason: normalizeString(application.rejectionReason) || AUTO_REJECT_REASON,
-          updatedAt: FieldValue.serverTimestamp(),
-        });
-
-        return { outcome: "rejected" };
       }
 
       transaction.update(applicationRef, {
@@ -1713,11 +1827,17 @@ exports.submitRegularApplication = onCall(
       if (!allowedAgendaIds.includes(agendaId)) {
         throw new HttpsError("failed-precondition", "선택한 사업에서 신청할 수 없는 아젠다입니다.");
       }
-      if (!isProgramDateAvailable(targetProgramDoc, scheduledDate)) {
-        throw new HttpsError("failed-precondition", "사업 운영일이 아니어서 신청할 수 없습니다.");
-      }
 
       const agendaScope = getAgendaScope(agendaDoc);
+      if (!regularOfficeHourPolicy.canCompanyApplyForRegularDate(scheduledDate, new Date())) {
+        throw new HttpsError(
+          "failed-precondition",
+          "정기 오피스아워 신청은 매월 4주차에 다음 달 일정만 신청할 수 있습니다."
+        );
+      }
+      if (!isProgramRegularOfficeHourDateAvailable(targetProgramDoc, agendaScope, scheduledDate)) {
+        throw new HttpsError("failed-precondition", "사업 운영일이 아니어서 신청할 수 없습니다.");
+      }
       const totalTickets = programDocs.reduce(
         (sum, programDoc) => sum + getProgramTicketValue(programDoc, companyDoc, agendaScope),
         0
@@ -1935,11 +2055,17 @@ exports.updateCompanyApplication = onCall(
       }
 
       const currentStatus = normalizeApplicationStatus(application.status);
-      if (!["pending", "confirmed"].includes(currentStatus)) {
-        throw new HttpsError("failed-precondition", "수정할 수 있는 상태가 아닙니다.");
+      if (currentStatus !== "confirmed") {
+        throw new HttpsError("failed-precondition", "확정된 신청만 수정할 수 있습니다.");
       }
       if (hasSessionEnded(application)) {
         throw new HttpsError("failed-precondition", "진행 시간이 지난 신청은 수정할 수 없습니다.");
+      }
+      if (!isApplicationChangeWindowOpen(application, new Date())) {
+        throw new HttpsError(
+          "failed-precondition",
+          "신청 후 72시간이 지나 수정할 수 없습니다."
+        );
       }
 
       const nextScheduledDate = requestedScheduledDate || normalizeString(application.scheduledDate);
@@ -1995,6 +2121,7 @@ exports.updateCompanyApplication = onCall(
         const companyDoc = companySnap.data() || {};
         const agendaDoc = agendaSnap.data() || {};
         const programDoc = { id: programSnap.id, ...(programSnap.data() || {}) };
+        const agendaScope = getAgendaScope(agendaDoc);
         const companyPrograms = Array.isArray(companyDoc.programs)
           ? companyDoc.programs.map((item) => normalizeString(item)).filter(Boolean)
           : [];
@@ -2005,7 +2132,7 @@ exports.updateCompanyApplication = onCall(
         if (agendaDoc.active === false) {
           throw new HttpsError("failed-precondition", "비활성 아젠다는 신청할 수 없습니다.");
         }
-        if (!isProgramDateAvailable(programDoc, nextScheduledDate)) {
+        if (!isProgramRegularOfficeHourDateAvailable(programDoc, agendaScope, nextScheduledDate)) {
           throw new HttpsError("failed-precondition", "사업 운영일이 아니어서 변경할 수 없습니다.");
         }
 
@@ -2049,10 +2176,17 @@ exports.updateCompanyApplication = onCall(
             "선택한 시간에 현재 배정 가능한 컨설턴트가 없어 변경할 수 없습니다."
           );
         }
-
-        const pendingConsultantIds = [...assignableConsultants]
-          .map((consultant) => consultant.id)
-          .sort((a, b) => a.localeCompare(b));
+        const orderedAssignableConsultants = sortConsultantsByAgendaPriority(
+          assignableConsultants,
+          agendaDoc
+        );
+        const assignedConsultant = orderedAssignableConsultants[0];
+        if (!assignedConsultant) {
+          throw new HttpsError(
+            "failed-precondition",
+            "선택한 시간에 현재 배정 가능한 컨설턴트가 없어 변경할 수 없습니다."
+          );
+        }
 
         transaction.update(applicationRef, {
           requestContent,
@@ -2062,10 +2196,10 @@ exports.updateCompanyApplication = onCall(
           scheduledTime: nextScheduledTime,
           officeHourId: buildRegularOfficeHourId(programId, nextScheduledDate) || application.officeHourId,
           officeHourSlotId: FieldValue.delete(),
-          status: "pending",
-          consultant: "담당자 배정 중",
-          consultantId: FieldValue.delete(),
-          pendingConsultantIds,
+          status: "confirmed",
+          consultant: normalizeString(assignedConsultant.name) || "컨설턴트",
+          consultantId: assignedConsultant.id,
+          pendingConsultantIds: FieldValue.delete(),
           reservedConsultantId: FieldValue.delete(),
           rejectionReason: FieldValue.delete(),
           updatedAt: FieldValue.serverTimestamp(),
@@ -2073,7 +2207,7 @@ exports.updateCompanyApplication = onCall(
 
         return {
           applicationId,
-          status: "pending",
+          status: "confirmed",
           scheduleChanged: true,
         };
       }
@@ -2133,41 +2267,47 @@ exports.cancelApplication = onCall(
       const application = applicationSnap.data() || {};
       const currentStatus = normalizeApplicationStatus(application.status);
 
-      if (currentStatus !== "pending") {
-        throw new HttpsError("failed-precondition", "삭제할 수 있는 상태가 아닙니다.");
+      if (currentStatus !== "confirmed") {
+        throw new HttpsError("failed-precondition", "취소할 수 있는 상태가 아닙니다.");
       }
 
       const applicationOwnerUid = normalizeString(application.createdByUid);
       const profileCompanyId = normalizeString(profile.companyId);
       const applicationCompanyId = normalizeString(application.companyId);
-      const canDelete =
+      const consultantId = normalizeString(application.consultantId);
+      const consultantName = normalizeString(application.consultant);
+      const canCancelAsCompany =
         actorRole === "company" &&
         ((applicationOwnerUid && applicationOwnerUid === uid) ||
           (profileCompanyId && applicationCompanyId && profileCompanyId === applicationCompanyId));
+      const canCancelAsConsultant =
+        actorRole === "consultant" &&
+        ((consultantId && consultantId === uid) ||
+          (!consultantId && consultantName && consultantName === normalizeString(profile.name)));
 
-      if (!canDelete) {
-        throw new HttpsError("permission-denied", "신청을 삭제할 권한이 없습니다.");
+      if (!canCancelAsCompany && !canCancelAsConsultant) {
+        throw new HttpsError("permission-denied", "신청을 취소할 권한이 없습니다.");
+      }
+      if (!isApplicationChangeWindowOpen(application, new Date())) {
+        throw new HttpsError(
+          "failed-precondition",
+          "신청 후 72시간이 지나 취소할 수 없습니다."
+        );
       }
 
       if (hasSessionEnded(application)) {
-        transaction.update(applicationRef, {
-          status: "rejected",
-          rejectionReason: normalizeString(application.rejectionReason) || AUTO_REJECT_REASON,
-          updatedAt: FieldValue.serverTimestamp(),
-        });
-
-        return {
-          applicationId,
-          outcome: "rejected",
-          status: "rejected",
-        };
+        throw new HttpsError("failed-precondition", "진행 시간이 지난 신청은 취소할 수 없습니다.");
       }
 
-      transaction.delete(applicationRef);
+      transaction.update(applicationRef, {
+        status: "cancelled",
+        updatedAt: FieldValue.serverTimestamp(),
+      });
 
       return {
         applicationId,
-        outcome: "deleted",
+        outcome: "cancelled",
+        status: "cancelled",
       };
     });
   }
@@ -2275,6 +2415,9 @@ exports.approvePendingUser = onCall(
               status: "active",
               joinedDate: existingConsultant.joinedDate || FieldValue.serverTimestamp(),
               availability: sanitizeConsultantAvailability(existingConsultant.availability),
+              monthlyAvailability: sanitizeConsultantMonthlyAvailability(
+                existingConsultant.monthlyAvailability
+              ),
               ...(phone ? { phone } : {}),
               ...(organization ? { organization } : {}),
               ...(secondaryEmail ? { secondaryEmail } : {}),
@@ -2532,7 +2675,10 @@ exports.syncConsultantScheduling = onCall(
 
     const actorRole = normalizeString(profileSnap.data()?.role);
     const requestedConsultantId = normalizeString(payload.consultantId) || uid;
-    const availabilityProvided = Object.prototype.hasOwnProperty.call(payload, "availability");
+    const monthlyAvailabilityProvided = Object.prototype.hasOwnProperty.call(
+      payload,
+      "monthlyAvailability"
+    );
     const agendaIdsProvided = Object.prototype.hasOwnProperty.call(payload, "agendaIds");
     const statusProvided = Object.prototype.hasOwnProperty.call(payload, "status");
 
@@ -2543,7 +2689,7 @@ exports.syncConsultantScheduling = onCall(
       if (agendaIdsProvided || statusProvided) {
         throw new HttpsError("permission-denied", "컨설턴트는 가능 시간만 수정할 수 있습니다.");
       }
-      if (!availabilityProvided) {
+      if (!monthlyAvailabilityProvided) {
         throw new HttpsError("invalid-argument", "수정할 가능 시간을 확인할 수 없습니다.");
       }
     } else if (actorRole !== "admin") {
@@ -2556,7 +2702,7 @@ exports.syncConsultantScheduling = onCall(
       actorRole,
       authEmail,
       authDisplayName,
-      availability: availabilityProvided ? payload.availability : undefined,
+      monthlyAvailability: monthlyAvailabilityProvided ? payload.monthlyAvailability : undefined,
       agendaIds: agendaIdsProvided ? payload.agendaIds : undefined,
       status: statusProvided ? payload.status : undefined,
     });

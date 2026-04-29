@@ -1,5 +1,7 @@
 import type { Application, Consultant } from "@/redesign/app/lib/types"
 import { parseLocalDateKey } from "@/redesign/app/lib/date-keys"
+import { getConsultantAvailabilityForDate } from "@/redesign/app/lib/consultant-monthly-availability"
+import * as regularOfficeHourPolicy from "@/redesign/app/lib/regular-office-hour-policy"
 
 export function normalizeTimeKey(value?: string): string {
   if (!value) return ""
@@ -28,9 +30,11 @@ export function isConsultantAvailableAt(
   const targetDate = parseLocalDateKey(dateKey)
   if (!targetDate) return false
   const dayOfWeek = targetDate.getDay()
-  const dayAvailability = consultant.availability.find(
-    (availability) => availability.dayOfWeek === dayOfWeek,
-  )
+  const dayAvailability = getConsultantAvailabilityForDate(
+    consultant,
+    dateKey,
+    regularOfficeHourPolicy.ALL_DAY_NUMBERS,
+  ).find((availability) => availability.dayOfWeek === dayOfWeek)
   if (!dayAvailability) return false
   const normalizedTime = normalizeTimeKey(time)
   return dayAvailability.slots.some(

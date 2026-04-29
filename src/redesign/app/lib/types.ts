@@ -15,7 +15,7 @@ export type ApprovalRole = "admin" | "company" | "consultant";
 
 export type AgendaScope = "internal" | "external";
 
-export type ProgramWeekday = "TUE" | "THU";
+export type ProgramWeekday = "TUE" | "WED" | "THU";
 
 export type ProgramKpiDefinition = {
   id: string;
@@ -245,8 +245,10 @@ export interface Consultant {
   rating?: number;
   avatarUrl?: string;
   joinedDate?: Date | string;
+  scope?: AgendaScope;
   agendaIds?: string[]; // 관리자가 매칭한 아젠다 ID 목록
   availability: ConsultantAvailability[];
+  monthlyAvailability?: ConsultantMonthlyAvailability;
 }
 
 export interface ConsultantAvailability {
@@ -257,6 +259,8 @@ export interface ConsultantAvailability {
     available: boolean;
   }[];
 }
+
+export type ConsultantMonthlyAvailability = Record<string, ConsultantAvailability[]>;
 
 export interface UserWithPermissions {
   id: string;

@@ -28,6 +28,7 @@ import {
 } from "@/redesign/app/lib/types";
 import { getTimeSlots } from "@/redesign/app/lib/time-slots";
 import { formatLocalDateKey, parseLocalDateKey } from "@/redesign/app/lib/date-keys";
+import * as regularOfficeHourPolicy from "@/redesign/app/lib/regular-office-hour-policy";
 import {
   getAssignableConsultantsAt,
   hasApplicantConflictAt,
@@ -124,6 +125,34 @@ function isPastScheduledStart(dateKey: string, timeKey: string, now = new Date()
   return normalizedTime < currentTimeKey;
 }
 
+function sortConsultantsByAgendaPriority(
+  consultants: Consultant[],
+  agendaPriorityIds: string[],
+  agendaName: string,
+): Consultant[] {
+  const normalizedPriorityIds = Array.from(
+    new Set(agendaPriorityIds.map((consultantId) => consultantId.trim()).filter(Boolean)),
+  )
+  if (normalizedPriorityIds.length === 0) {
+    throw new Error(`${agendaName} 아젠다의 담당 컨설턴트 우선순위가 설정되지 않았습니다.`)
+  }
+
+  const consultantIds = Array.from(
+    new Set(consultants.map((consultant) => consultant.id.trim()).filter(Boolean)),
+  )
+  const missingPriorityIds = consultantIds.filter(
+    (consultantId) => !normalizedPriorityIds.includes(consultantId),
+  )
+  if (missingPriorityIds.length > 0) {
+    throw new Error(`${agendaName} 아젠다의 담당 컨설턴트 우선순위 설정이 누락되었습니다.`)
+  }
+
+  const consultantById = new Map(consultants.map((consultant) => [consultant.id, consultant]))
+  return normalizedPriorityIds
+    .map((consultantId) => consultantById.get(consultantId))
+    .filter((consultant): consultant is Consultant => Boolean(consultant))
+}
+
 export function RegularApplicationWizard({
   officeHour,
   officeHours,
@@ -191,6 +220,7 @@ export function RegularApplicationWizard({
     : [activeOfficeHour];
   const selectedAgenda = agendas.find((agenda) => agenda.id === selectedAgendaId);
   const isExternalAgendaSelected = selectedAgenda?.scope === "external";
+  const selectedAgendaScope = selectedAgenda?.scope === "external" ? "external" : "internal";
   const agendaName = selectedAgenda?.name;
   const requestSectionValidations = REQUEST_SECTION_META.map(({ key, label }) => {
     const value = requestSections[key].trim();
@@ -206,19 +236,8 @@ export function RegularApplicationWizard({
   const requestContent = requestSectionValidations
     .map(({ label, value }) => `${label}\n${value}`)
     .join("\n\n");
-  const activeAllowedWeekdays = activeOfficeHour.weekdays ?? ["TUE", "THU"];
   const activeAllowedAgendaIds = activeOfficeHour.agendaIds ?? [];
   const todayStart = startOfDay(new Date());
-  const allowedWeekdayNumbers = useMemo(() => {
-    const source = activeAllowedWeekdays.length > 0 ? activeAllowedWeekdays : ["TUE", "THU"];
-    return new Set(
-      source.flatMap((weekday) => {
-        if (weekday === "TUE") return [2];
-        if (weekday === "THU") return [4];
-        return [];
-      })
-    );
-  }, [activeAllowedWeekdays]);
   const hasFixedDateSelection = Boolean(preselectedDateKey && selectedDate);
   const isSheetLayout = layout === "sheet";
   const availableDateKeys = useMemo(() => {
@@ -229,8 +248,18 @@ export function RegularApplicationWizard({
         const parsedDate = parseLocalDateKey(date);
         if (!parsedDate) return;
         const normalizedDate = formatLocalDateKey(parsedDate);
-        const dayOfWeek = parsedDate.getDay();
-        if (!allowedWeekdayNumbers.has(dayOfWeek)) return;
+        if (!regularOfficeHourPolicy.canCompanyApplyForRegularDate(normalizedDate, new Date())) {
+          return;
+        }
+        if (
+          selectedAgendaId &&
+          !regularOfficeHourPolicy.isRegularOfficeHourDateForScope(
+            normalizedDate,
+            selectedAgendaScope,
+          )
+        ) {
+          return;
+        }
         if (selectedAgendaId) {
           const hasAnyAssignableTime = getTimeSlots(normalizedDate).some(
             (timeSlot) =>
@@ -254,20 +283,27 @@ export function RegularApplicationWizard({
 
     return keys;
   }, [
-    allowedWeekdayNumbers,
     applications,
     consultants,
     programOfficeHours,
     selectedAgendaId,
+    selectedAgendaScope,
     todayStart,
     hasFixedDateSelection,
   ]);
   const timeSlots = selectedDate ? (() => {
     const selectedDateKey = format(selectedDate, "yyyy-MM-dd");
+    const isScopeAllowedDate =
+      selectedAgendaId.length === 0
+        ? true
+        : regularOfficeHourPolicy.isRegularOfficeHourDateForScope(
+            selectedDateKey,
+            selectedAgendaScope,
+          )
 
     return getTimeSlots(selectedDateKey).map((slot) => {
       const assignableConsultants =
-        selectedAgendaId.length > 0
+        selectedAgendaId.length > 0 && isScopeAllowedDate
           ? getAssignableConsultantsAt({
               consultants,
               applications,
@@ -286,12 +322,16 @@ export function RegularApplicationWizard({
       });
       const consultantAssignable = assignableConsultants.length > 0;
       const futureSchedulable = !isPastScheduledStart(selectedDateKey, slot.time);
-      const available = consultantAssignable && futureSchedulable && !applicantConflict;
+      const available = isScopeAllowedDate && consultantAssignable && futureSchedulable && !applicantConflict;
       return {
         ...slot,
         available,
         reason: available
           ? undefined
+          : !isScopeAllowedDate
+            ? selectedAgendaScope === "external"
+              ? "외부 오피스아워는 목요일만 신청할 수 있습니다"
+              : "내부 오피스아워는 화요일/수요일만 신청할 수 있습니다"
           : !futureSchedulable
             ? "이미 지난 시간은 신청할 수 없습니다"
           : applicantConflict
@@ -369,12 +409,55 @@ export function RegularApplicationWizard({
   };
   const activeAgendas = useMemo(() => {
     const allowedAgendaIdSet = new Set(activeAllowedAgendaIds);
+    const agendaDateKey =
+      preselectedDateKey || (selectedDate ? formatLocalDateKey(selectedDate) : "");
+    const allowedScopeForDate = agendaDateKey
+      ? regularOfficeHourPolicy.isRegularOfficeHourDateForScope(agendaDateKey, "external")
+        ? "external"
+        : regularOfficeHourPolicy.isRegularOfficeHourDateForScope(agendaDateKey, "internal")
+          ? "internal"
+          : null
+      : null;
     return agendas.filter((agenda) => {
       if (agenda.active === false) return false;
-      return allowedAgendaIdSet.has(agenda.id);
+      if (!allowedAgendaIdSet.has(agenda.id)) return false;
+      if (allowedScopeForDate && agenda.scope !== allowedScopeForDate) return false;
+      return true;
     });
-  }, [activeAllowedAgendaIds, agendas]);
+  }, [activeAllowedAgendaIds, agendas, preselectedDateKey, selectedDate]);
   const isScheduleDataLoading = isRealtimeDataLoading;
+  const selectedDateKey = selectedDate ? formatLocalDateKey(selectedDate) : "";
+  const assignedConsultantPreview = useMemo(() => {
+    if (!selectedAgenda || !selectedDateKey || !selectedTime) return null;
+
+    const assignableConsultants = getAssignableConsultantsAt({
+      consultants,
+      applications,
+      agendaId: selectedAgenda.id,
+      dateKey: selectedDateKey,
+      time: selectedTime,
+    });
+
+    if (assignableConsultants.length === 0) return null;
+
+    try {
+      const orderedAssignableConsultants = sortConsultantsByAgendaPriority(
+        assignableConsultants,
+        selectedAgenda.priorityConsultantIds ?? [],
+        selectedAgenda.name,
+      );
+      return orderedAssignableConsultants[0] ?? null;
+    } catch {
+      return null;
+    }
+  }, [applications, consultants, selectedAgenda, selectedDateKey, selectedTime]);
+  const assignedConsultantPreviewMessage = useMemo(() => {
+    if (!selectedAgenda || !selectedDateKey || !selectedTime) return null;
+    if (!assignedConsultantPreview) {
+      return "현재 기준으로 자동 배정될 담당 컨설턴트를 확인할 수 없습니다.";
+    }
+    return `현재 기준 자동 배정 예정: ${assignedConsultantPreview.name}`;
+  }, [assignedConsultantPreview, selectedAgenda, selectedDateKey, selectedTime]);
 
   useEffect(() => {
     if (isExternalAgendaSelected && sessionFormat !== "online") {
@@ -477,6 +560,8 @@ export function RegularApplicationWizard({
                     </span>
                     <span className="font-medium text-slate-500">아젠다</span>
                     <span className="text-slate-800">{agendaName || "-"}</span>
+                    <span className="font-medium text-slate-500">담당</span>
+                    <span className="text-slate-800">{assignedConsultantPreview?.name || "-"}</span>
                     <span className="font-medium text-slate-500">진행</span>
                     <span className="text-slate-800">
                       {sessionFormat === "online" ? "온라인" : "오프라인"}
@@ -600,29 +685,36 @@ export function RegularApplicationWizard({
                     </div>
                   </div>
                 ) : selectedDate ? (
-                  <div className="grid grid-cols-2 gap-2">
-                    {timeSlots.map((slot) => (
-                      <button
-                        key={slot.time}
-                        data-testid={`regular-time-slot-${slot.time.replace(":", "-")}`}
-                        disabled={!slot.available}
-                        onClick={() => {
-                          setSelectedTime(slot.time);
-                        }}
-                        className={cn(
-                          "rounded-2xl border px-3 py-3 text-left text-sm transition-colors",
-                          !slot.available && "cursor-not-allowed bg-slate-50 text-slate-400",
-                          slot.available && selectedTime === slot.time && "border-slate-900 bg-slate-900 text-white",
-                          slot.available && selectedTime !== slot.time && "bg-white hover:border-slate-400 hover:bg-slate-50"
-                        )}
-                        title={slot.reason}
-                      >
-                        <div className="font-semibold">{slot.time}</div>
-                        <div className="mt-1 text-[11px] leading-4">
-                          {slot.available ? "신청 가능" : slot.reason}
-                        </div>
-                      </button>
-                    ))}
+                  <div className="space-y-3">
+                    <div className="grid grid-cols-2 gap-2">
+                      {timeSlots.map((slot) => (
+                        <button
+                          key={slot.time}
+                          data-testid={`regular-time-slot-${slot.time.replace(":", "-")}`}
+                          disabled={!slot.available}
+                          onClick={() => {
+                            setSelectedTime(slot.time);
+                          }}
+                          className={cn(
+                            "rounded-2xl border px-3 py-3 text-left text-sm transition-colors",
+                            !slot.available && "cursor-not-allowed bg-slate-50 text-slate-400",
+                            slot.available && selectedTime === slot.time && "border-slate-900 bg-slate-900 text-white",
+                            slot.available && selectedTime !== slot.time && "bg-white hover:border-slate-400 hover:bg-slate-50"
+                          )}
+                          title={slot.reason}
+                        >
+                          <div className="font-semibold">{slot.time}</div>
+                          <div className="mt-1 text-[11px] leading-4">
+                            {slot.available ? "신청 가능" : slot.reason}
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                    {selectedTime && assignedConsultantPreviewMessage ? (
+                      <div className="rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-800">
+                        {assignedConsultantPreviewMessage}
+                      </div>
+                    ) : null}
                   </div>
                 ) : (
                   <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-4 py-8 text-center text-sm text-slate-500">
@@ -848,7 +940,6 @@ export function RegularApplicationWizard({
                         }}
                         disabled={(date) => {
                           if (isBefore(date, todayStart)) return true;
-                          if (!allowedWeekdayNumbers.has(date.getDay())) return true;
                           const dateKey = format(date, "yyyy-MM-dd");
                           return !availableDateKeys.has(dateKey);
                         }}
@@ -875,36 +966,43 @@ export function RegularApplicationWizard({
                           </div>
                         </div>
                       ) : selectedDate ? (
-                        <div className="grid grid-cols-2 gap-2">
-                          {timeSlots.map((slot) => (
-                            <button
-                              key={slot.time}
-                              data-testid={`regular-time-slot-${slot.time.replace(":", "-")}`}
-                              disabled={!slot.available}
-                              onClick={() => {
-                                setSelectedTime(slot.time);
-                              }}
-                              className={cn(
-                                "rounded-lg border p-3 text-left text-sm transition-colors",
-                                !slot.available &&
-                                  "cursor-not-allowed bg-gray-50 opacity-50",
-                                slot.available &&
-                                  selectedTime === slot.time &&
-                                  "border-primary bg-primary text-primary-foreground",
-                                slot.available &&
-                                  selectedTime !== slot.time &&
-                                  "hover:border-gray-400"
-                              )}
-                              title={slot.reason}
-                            >
-                              {slot.time}
-                              {!slot.available && (
-                                <div className="mt-1 text-xs text-muted-foreground">
-                                  {slot.reason}
-                                </div>
-                              )}
-                            </button>
-                          ))}
+                        <div className="space-y-3">
+                          <div className="grid grid-cols-2 gap-2">
+                            {timeSlots.map((slot) => (
+                              <button
+                                key={slot.time}
+                                data-testid={`regular-time-slot-${slot.time.replace(":", "-")}`}
+                                disabled={!slot.available}
+                                onClick={() => {
+                                  setSelectedTime(slot.time);
+                                }}
+                                className={cn(
+                                  "rounded-lg border p-3 text-left text-sm transition-colors",
+                                  !slot.available &&
+                                    "cursor-not-allowed bg-gray-50 opacity-50",
+                                  slot.available &&
+                                    selectedTime === slot.time &&
+                                    "border-primary bg-primary text-primary-foreground",
+                                  slot.available &&
+                                    selectedTime !== slot.time &&
+                                    "hover:border-gray-400"
+                                )}
+                                title={slot.reason}
+                              >
+                                {slot.time}
+                                {!slot.available && (
+                                  <div className="mt-1 text-xs text-muted-foreground">
+                                    {slot.reason}
+                                  </div>
+                                )}
+                              </button>
+                            ))}
+                          </div>
+                          {selectedTime && assignedConsultantPreviewMessage ? (
+                            <div className="rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-800">
+                              {assignedConsultantPreviewMessage}
+                            </div>
+                          ) : null}
                         </div>
                       ) : (
                         <div className="flex min-h-[320px] items-center justify-center rounded-md border border-dashed bg-slate-50/80 px-4 text-center text-sm text-slate-500">
@@ -1032,8 +1130,7 @@ export function RegularApplicationWizard({
                 <div className="text-sm text-blue-900">
                   <p className="mb-1">신청 내용을 확인해주세요</p>
                   <p className="text-xs">
-                    제출 후 검토를 거쳐 일정이 확정됩니다. 확정 시 알림을
-                    보내드립니다.
+                    제출 시 우선순위와 가능 시간 기준으로 자동 배정되며 바로 확정됩니다.
                   </p>
                 </div>
               </div>
@@ -1048,6 +1145,18 @@ export function RegularApplicationWizard({
                     <p className="text-sm">
                       {selectedDate && format(selectedDate, "yyyy년 M월 d일 (E)", { locale: ko })}{" "}
                       {selectedTime}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-3">
+                  <div className="w-5 h-5 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0 mt-0.5">
+                    <Check className="w-3 h-3 text-primary" />
+                  </div>
+                  <div className="flex-1">
+                    <Label className="text-muted-foreground">담당 예정</Label>
+                    <p className="text-sm">
+                      {assignedConsultantPreview?.name || "-"}
                     </p>
                   </div>
                 </div>

@@ -7,6 +7,7 @@ import { format, isBefore, startOfDay } from "date-fns";
 import { ko } from "date-fns/locale";
 import { StatusChip } from "@/redesign/app/components/status-chip";
 import { parseLocalDateKey } from "@/redesign/app/lib/date-keys";
+import * as regularOfficeHourPolicy from "@/redesign/app/lib/regular-office-hour-policy";
 
 interface RegularOfficeHourDetailProps {
   officeHour: RegularOfficeHour;
@@ -35,7 +36,10 @@ export function RegularOfficeHourDetail({
   const hasFutureAvailableDate = hasRequestableSlot || officeHour.availableDates.some(
     (date) => {
       const parsed = parseLocalDateKey(date);
-      return parsed ? !isBefore(parsed, startOfDay(now)) : false;
+      return parsed
+        ? !isBefore(parsed, startOfDay(now)) &&
+            regularOfficeHourPolicy.canCompanyApplyForRegularDate(date, now)
+        : false;
     }
   );
   const myApplications = applications.filter(
@@ -93,7 +97,7 @@ export function RegularOfficeHourDetail({
                   </Button>
                   {!hasFutureAvailableDate && (
                     <p className="text-xs text-rose-600 mt-2">
-                      오늘 이전 일정만 남아 있어 신청할 수 없습니다.
+                      현재 신청 기간이 아니거나 신청 가능한 다음 달 일정이 없습니다.
                     </p>
                   )}
                 </div>

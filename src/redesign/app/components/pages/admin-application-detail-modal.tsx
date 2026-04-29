@@ -35,6 +35,7 @@ import {
 import { StatusChip } from "@/redesign/app/components/status-chip";
 import { Badge } from "@/redesign/app/components/ui/badge";
 import { Button } from "@/redesign/app/components/ui/button";
+import { isApplicationChangeWindowOpen } from "@/redesign/app/lib/application-change-window";
 import {
   Dialog,
   DialogContent,
@@ -127,6 +128,7 @@ export function AdminApplicationDetailModal({
   const isSessionEnded = Boolean(sessionEndTime && new Date() >= sessionEndTime);
   const isPendingLike =
     application.status === "pending" || application.status === "review";
+  const isWithinChangeWindow = isApplicationChangeWindowOpen(application.createdAt);
   const attachmentItems = useMemo(() => {
     const names = application.attachments ?? [];
     const urls = application.attachmentUrls ?? [];
@@ -491,23 +493,14 @@ export function AdminApplicationDetailModal({
                         최종 거절
                       </Button>
                     )}
-                    {application.status === "rejected" && !isSessionEnded && (
+                    {application.status === "confirmed" && !isSessionEnded && isWithinChangeWindow && (
                       <Button
                         size="sm"
                         variant="outline"
-                        onClick={() => handleStatusChange("pending")}
-                      >
-                        수락 대기로 변경
-                      </Button>
-                    )}
-                    {application.status === "confirmed" && !isSessionEnded && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => handleStatusChange("pending")}
+                        onClick={() => handleStatusChange("cancelled")}
                       >
                         <XCircle className="w-4 h-4 mr-2" />
-                        수락 대기로 변경
+                        취소
                       </Button>
                     )}
                   </div>

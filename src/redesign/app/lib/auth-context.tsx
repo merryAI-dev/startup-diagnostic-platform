@@ -358,6 +358,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             bio: payload.consultantInfo.bio.trim() || `${consultantName} 컨설턴트`,
             status: "active",
             availability: buildDefaultAvailability(),
+            monthlyAvailability: {},
             joinedDate: new Date().toISOString(),
           },
           { merge: true }
