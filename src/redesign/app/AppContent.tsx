@@ -55,6 +55,7 @@ import {
 } from "@/redesign/app/components/pages/consultant-profile-page"
 import { ConsultantCompaniesPage } from "@/redesign/app/components/pages/consultant-companies"
 import { PendingReportsDashboard } from "@/redesign/app/components/pages/pending-reports-dashboard"
+import { CompanyReadinessDashboard } from "@/redesign/app/components/pages/company-readiness-dashboard"
 import { OfficeHourReportForm } from "@/redesign/app/components/report/office-hour-report-form"
 import { CompanyMetricsPage } from "@/redesign/app/components/pages/company-metrics-page"
 import { CompanyNewsletter } from "@/redesign/app/components/pages/company-newsletter"
@@ -147,6 +148,7 @@ type AppPage =
   | "admin-program-list"
   | "admin-agendas"
   | "pending-reports"
+  | "company-readiness"
   | "company-metrics"
   | "company-newsletter"
   | "messages" // 새로 추가
@@ -842,6 +844,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
         "admin-users",
         "admin-communication",
         "pending-reports",
+        "company-readiness",
         "startup-diagnostic",
       ]),
     [],
@@ -4101,6 +4104,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
           className={`flex min-h-0 min-w-0 flex-1 flex-col bg-gray-50 ${
             currentPage === "admin-applications" ||
             currentPage === "admin-consultants" ||
+            currentPage === "company-readiness" ||
             currentPage === "pending-reports"
               ? "overflow-hidden"
               : "overflow-y-auto"
@@ -4772,6 +4776,12 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
                   toast.success("보고서가 삭제되었습니다")
                 }}
               />
+            </ProtectedRoute>
+          )}
+
+          {currentPage === "company-readiness" && (
+            <ProtectedRoute allowedRoles={["admin", "staff"]}>
+              <CompanyReadinessDashboard />
             </ProtectedRoute>
           )}
 
