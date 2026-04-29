@@ -235,7 +235,7 @@ const resolveManualReportApplicationType = (
 
 const getApplicationTypeLabel = (type?: OfficeHourType) => {
   if (type === "regular") return "정기";
-  if (type === "mentoring") return "멘토링";
+  if (type === "mentoring") return "멘토링&사후관리";
   if (type === "custom") return "기타";
   return "비정기";
 };
@@ -250,13 +250,13 @@ const getApplicationTypeBadgeClassName = (type?: OfficeHourType) => {
 const getManualApplicationOfficeHourTitle = (type: OfficeHourType, topic?: string) => {
   const trimmedTopic = topic?.trim();
   if (trimmedTopic) return trimmedTopic;
-  return type === "mentoring" ? "멘토링 일지" : "비정기 오피스아워";
+  return type === "mentoring" ? "멘토링&사후관리 일지" : "비정기 오피스아워";
 };
 
 const getManualApplicationAgenda = (type: OfficeHourType, topic?: string) => {
   const trimmedTopic = topic?.trim();
   if (trimmedTopic) return trimmedTopic;
-  return type === "mentoring" ? "멘토링" : "비정기 오피스아워";
+  return type === "mentoring" ? "멘토링&사후관리" : "비정기 오피스아워";
 };
 
 interface PendingReportsDashboardProps {
@@ -929,6 +929,24 @@ export function PendingReportsDashboard({
     () => parseReportContent(selectedReportItem?.report.content),
     [selectedReportItem?.report.content]
   );
+  const selectedReportDetailTitle = useMemo(() => {
+    if (!selectedReportItem) {
+      return "오피스아워 일지 상세";
+    }
+
+    const reportType =
+      selectedReportItem.report.applicationType
+      || selectedReportItem.application.type
+      || resolveManualReportApplicationType(selectedReportItem.report);
+
+    if (reportType === "mentoring") {
+      return "멘토링&사후관리 일지 상세";
+    }
+    if (reportType === "irregular") {
+      return "비정기 오피스아워 상세";
+    }
+    return "오피스아워 일지 상세";
+  }, [selectedReportItem]);
 
   useEffect(() => {
     setReportPage(1);
@@ -1151,7 +1169,7 @@ export function PendingReportsDashboard({
                     <SelectItem value="all">전체 유형</SelectItem>
                     <SelectItem value="regular">정기</SelectItem>
                     <SelectItem value="irregular">비정기</SelectItem>
-                    <SelectItem value="mentoring">멘토링</SelectItem>
+                    <SelectItem value="mentoring">멘토링&사후관리</SelectItem>
                   </SelectContent>
                 </Select>
                 <Select
@@ -1187,7 +1205,7 @@ export function PendingReportsDashboard({
                       className="bg-violet-600 text-white hover:bg-violet-700"
                       onClick={() => onCreateReport("mentoring-manual")}
                     >
-                      멘토링 일지 작성
+                      멘토링&사후관리 일지 작성
                     </Button>
                   </>
                 )}
@@ -1396,7 +1414,7 @@ export function PendingReportsDashboard({
           {selectedReportItem && (
             <div className="flex min-h-0 flex-1 flex-col">
               <DialogHeader className="shrink-0 border-b px-6 py-5">
-                <DialogTitle>오피스아워 일지 상세</DialogTitle>
+                <DialogTitle>{selectedReportDetailTitle}</DialogTitle>
               </DialogHeader>
 
               <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6">

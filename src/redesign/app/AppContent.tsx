@@ -568,13 +568,13 @@ function resolveManualReportApplicationType(report: Pick<OfficeHourReport, "appl
 function getManualApplicationOfficeHourTitle(type: OfficeHourType, topic?: string) {
   const trimmedTopic = topic?.trim()
   if (trimmedTopic) return trimmedTopic
-  return type === "mentoring" ? "멘토링 일지" : "비정기 오피스아워"
+  return type === "mentoring" ? "멘토링&사후관리 일지" : "비정기 오피스아워"
 }
 
 function getManualApplicationAgenda(type: OfficeHourType, topic?: string) {
   const trimmedTopic = topic?.trim()
   if (trimmedTopic) return trimmedTopic
-  return type === "mentoring" ? "멘토링" : "비정기 오피스아워"
+  return type === "mentoring" ? "멘토링&사후관리" : "비정기 오피스아워"
 }
 
 function omitId<T extends { id: string }>(item: T): Omit<T, "id"> {
