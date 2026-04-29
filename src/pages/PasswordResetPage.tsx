@@ -26,7 +26,9 @@ export function PasswordResetPage() {
     } catch (error: unknown) {
       const code = readFirebaseErrorCode(error)
 
-      if (code === "auth/invalid-email") {
+      if (code === "auth/firebase-not-configured") {
+        setError("Firebase 환경변수가 설정되지 않았습니다. 로컬 `.env`를 먼저 구성해주세요.")
+      } else if (code === "auth/invalid-email") {
         setError("올바른 이메일 형식이 아닙니다.")
       } else if (code === "auth/too-many-requests") {
         setError("요청이 너무 많습니다. 잠시 후 다시 시도해주세요.")

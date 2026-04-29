@@ -1,11 +1,14 @@
-import { initializeApp } from "firebase/app"
+import { getApp, getApps, initializeApp } from "firebase/app"
+import type { Auth } from "firebase/auth"
 import { getAuth } from "firebase/auth"
+import type { Firestore } from "firebase/firestore"
 import { getFirestore } from "firebase/firestore"
+import type { FirebaseStorage } from "firebase/storage"
 import { getStorage } from "firebase/storage"
 
 
 const firebaseConfig = {
-  apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "",
   authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
   projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
   storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
@@ -14,8 +17,18 @@ const firebaseConfig = {
   measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID
 }
 
-const app = initializeApp(firebaseConfig)
+export const isFirebaseConfigured =
+  firebaseConfig.apiKey !== "" &&
+  firebaseConfig.apiKey !== "your_api_key_here"
 
-export const auth = getAuth(app)
-export const db = getFirestore(app)
-export const storage = getStorage(app)
+const app = isFirebaseConfigured
+  ? (getApps().length === 0 ? initializeApp(firebaseConfig) : getApp())
+  : null
+
+export const auth = (app ? getAuth(app) : null) as Auth
+export const db = (app ? getFirestore(app) : null) as Firestore
+export const storage = (app ? getStorage(app) : null) as FirebaseStorage
+
+if (!isFirebaseConfigured) {
+  console.info("Firebase API key not set - running without Firebase client services.")
+}

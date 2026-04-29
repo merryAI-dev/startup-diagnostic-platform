@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react"
 import { onAuthStateChanged, type User } from "firebase/auth"
-import { auth } from "@/firebase/client"
+import { auth, isFirebaseConfigured } from "@/firebase/client"
 import { getSignupRequest, getUserProfile } from "@/firebase/profile"
 import type { SignupRequest, UserProfile } from "@/types/auth"
 
@@ -21,7 +21,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true)
 
   async function refreshProfile() {
-    if (!auth.currentUser) {
+    if (!isFirebaseConfigured || !auth || !auth.currentUser) {
+      setUser(null)
       setProfile(null)
       setSignupRequest(null)
       return
@@ -40,6 +41,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }
 
   useEffect(() => {
+    if (!isFirebaseConfigured || !auth) {
+      setUser(null)
+      setProfile(null)
+      setSignupRequest(null)
+      setLoading(false)
+      return
+    }
+
     const unsubscribe = onAuthStateChanged(auth, async (nextUser) => {
       setUser(nextUser)
       if (nextUser) {

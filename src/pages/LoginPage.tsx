@@ -64,7 +64,9 @@ export function LoginPage() {
       await routeAfterLogin(result.user.uid)
     } catch (error: unknown) {
       const code = readFirebaseErrorCode(error)
-      if (code === "auth/user-not-found" || code === "auth/invalid-credential") {
+      if (code === "auth/firebase-not-configured") {
+        setError("Firebase 환경변수가 설정되지 않았습니다. 로컬 `.env`를 먼저 구성해주세요.")
+      } else if (code === "auth/user-not-found" || code === "auth/invalid-credential") {
         setError("가입되지 않은 계정이거나 이메일/비밀번호가 올바르지 않습니다.")
       } else if (code === "auth/wrong-password") {
         setError("비밀번호가 올바르지 않습니다.")

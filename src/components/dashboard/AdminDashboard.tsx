@@ -42,6 +42,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/redesign/app/components/ui/dialog"
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/redesign/app/components/ui/sheet"
 import { Button } from "@/redesign/app/components/ui/button"
 import { Badge } from "@/redesign/app/components/ui/badge"
 import {
@@ -771,6 +778,8 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
   const [activeSectionFilter, setActiveSectionFilter] = useState<string>("문제")
   const [activeStatusAnalysisFilter, setActiveStatusAnalysisFilter] = useState<string>("문제")
   const [statusAnalysisAuthor, setStatusAnalysisAuthor] = useState("")
+  const [statusAnalysisUpdatedAt, setStatusAnalysisUpdatedAt] = useState<unknown>(null)
+  const [isStatusAnalysisDrawerOpen, setIsStatusAnalysisDrawerOpen] = useState(false)
   const [reportForm, setReportForm] = useState<CompanyAnalysisReportForm>(
     EMPTY_COMPANY_ANALYSIS_REPORT_FORM,
   )
@@ -934,7 +943,7 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
         const statusAnalysisData = statusAnalysisSnap.exists()
           ? (statusAnalysisSnap.data() as {
               sections?: unknown
-              metadata?: { author?: unknown }
+              metadata?: { author?: unknown; updatedAt?: unknown }
             })
           : null
         setStatusAnalysisSections(
@@ -947,6 +956,7 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
           typeof statusAnalysisData?.metadata?.author === "string"
             ? statusAnalysisData.metadata.author
             : ""
+        setStatusAnalysisUpdatedAt(statusAnalysisData?.metadata?.updatedAt ?? null)
         const files = await Promise.all(
           filesSnap.docs.map(async (docSnap) => {
             const data = docSnap.data() as {
@@ -1765,6 +1775,7 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
         },
         { merge: true },
       )
+      setStatusAnalysisUpdatedAt(new Date())
       toast.success("현황 분석이 저장되었습니다")
     } catch (error) {
       console.error("Failed to save status analysis:", error)
@@ -2433,30 +2444,28 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
   return (
     <div className="bg-transparent h-full">
       <div className="flex h-full flex-col">
-        <div className="shrink-0 border-b border-slate-200 bg-white px-6 py-5">
-          <div className="mx-auto w-full max-w-[1600px]">
-            <h1 className="text-2xl font-semibold text-slate-900">기업 관리</h1>
-            <p className="mt-1 text-sm text-slate-500">
-              기업 기본 정보, 자가진단표, 실적, 업로드 자료와 티켓 현황을 관리합니다.
-            </p>
-          </div>
-        </div>
-        <div className="mx-auto w-full max-w-[1600px] px-6 pt-5">
-          <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
-            <div className="flex flex-col gap-4 lg:flex-row lg:items-end">
-              <label className="min-w-0 text-xs font-medium text-slate-500 lg:w-[280px] lg:flex-none">
+        <div className="shrink-0 border-b border-slate-200 bg-white px-6 py-4">
+          <div className="mx-auto flex w-full max-w-[1600px] flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+            <div className="min-w-0">
+              <h1 className="text-2xl font-semibold text-slate-900">기업 관리</h1>
+              <p className="mt-1 text-sm text-slate-500">
+                기업 기본 정보, 자가진단표, 실적, 업로드 자료와 티켓 현황을 관리합니다.
+              </p>
+            </div>
+            <div className="grid min-w-0 grid-cols-1 gap-3 rounded-2xl border border-slate-200 bg-slate-50/70 px-3 py-3 sm:grid-cols-2 lg:grid-cols-[minmax(180px,0.9fr)_minmax(220px,1.1fr)_auto] lg:items-end xl:max-w-[940px] xl:flex-1">
+              <label className="min-w-0 text-xs font-medium text-slate-500">
                 회사명
                 <input
-                  className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm font-normal text-slate-700 focus:border-slate-400 focus:outline-none"
+                  className="mt-1 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-700 focus:border-slate-400 focus:outline-none"
                   placeholder="회사명 검색"
                   value={companyQuery}
                   onChange={(e) => setCompanyQuery(e.target.value)}
                 />
               </label>
-              <label className="w-full min-w-0 text-xs font-medium text-slate-500 lg:w-[320px] lg:flex-none">
+              <label className="min-w-0 text-xs font-medium text-slate-500">
                 사업
                 <Select value={selectedProgramFilterId} onValueChange={setSelectedProgramFilterId}>
-                  <SelectTrigger className="mt-1 h-10 border border-slate-200 bg-white text-sm text-slate-700 shadow-none">
+                  <SelectTrigger className="mt-1 h-10 w-full min-w-0 border border-slate-200 bg-white text-sm text-slate-700 shadow-none">
                     <SelectValue placeholder="전체 사업" />
                   </SelectTrigger>
                   <SelectContent>
@@ -2469,11 +2478,11 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
                   </SelectContent>
                 </Select>
               </label>
-              <div className="flex flex-wrap gap-1.5 lg:pb-1">
+              <div className="flex flex-wrap gap-1.5 sm:col-span-2 lg:col-span-1 lg:justify-end lg:pb-1">
                 <button
                   type="button"
                   onClick={() => toggleVoucherFilterTag("export")}
-                  className={`inline-flex h-9 items-center gap-1 rounded-full border px-3 text-[12px] font-semibold transition ${
+                  className={`inline-flex h-9 min-w-[118px] items-center justify-center gap-1 whitespace-nowrap rounded-full border px-3 text-[12px] font-semibold transition ${
                     voucherFilterTags.includes("export")
                       ? "border-slate-500 bg-slate-200 text-slate-800"
                       : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
@@ -2487,7 +2496,7 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
                 <button
                   type="button"
                   onClick={() => toggleVoucherFilterTag("innovation")}
-                  className={`inline-flex h-9 items-center gap-1 rounded-full border px-3 text-[12px] font-semibold transition ${
+                  className={`inline-flex h-9 min-w-[118px] items-center justify-center gap-1 whitespace-nowrap rounded-full border px-3 text-[12px] font-semibold transition ${
                     voucherFilterTags.includes("innovation")
                       ? "border-slate-500 bg-slate-200 text-slate-800"
                       : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
@@ -2502,8 +2511,8 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
             </div>
           </div>
         </div>
-        <div className="mx-auto grid h-full w-full max-w-[1600px] flex-1 min-h-0 gap-5 px-6 py-5 lg:grid-cols-[260px_minmax(0,1fr)] xl:grid-cols-[280px_minmax(0,1fr)]">
-          <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white lg:sticky lg:top-5 lg:max-h-[calc(100vh-12rem)]">
+        <div className="mx-auto grid h-full w-full max-w-[1600px] flex-1 min-h-0 gap-5 px-6 py-4 lg:grid-cols-[260px_minmax(0,1fr)] xl:grid-cols-[280px_minmax(0,1fr)]">
+          <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white lg:sticky lg:top-4 lg:max-h-[calc(100vh-8.5rem)]">
             <div className="shrink-0 border-b border-slate-100 px-4 py-3.5">
               <div className="flex items-center justify-between gap-2">
                 <div className="text-sm font-semibold text-slate-700">회사 목록</div>
@@ -2685,8 +2694,8 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
                 ) : (
                   <div className="min-h-0 flex-1 overflow-y-auto text-sm text-slate-700">
                     <div className="space-y-4 pb-1">
-                      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-[radial-gradient(circle_at_top_left,_rgba(148,163,184,0.18),_transparent_42%),linear-gradient(135deg,_#ffffff_0%,_#f8fafc_55%,_#eef2ff_100%)] p-4">
-                        <div className="flex flex-wrap items-start justify-between gap-4">
+                      <div className="overflow-hidden rounded-2xl border border-slate-200 bg-[linear-gradient(135deg,_#ffffff_0%,_#f8fafc_100%)] px-4 py-3">
+                        <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_360px] xl:items-start">
                           <div className="min-w-0 flex-1">
                             <div className="truncate text-xl font-semibold tracking-[-0.02em] text-slate-900">
                               {selectedCompanyName}
@@ -2694,7 +2703,7 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
                             <div className="mt-1 text-sm text-slate-500">
                               기업 기본 정보와 제출 자료를 한 화면에서 확인합니다.
                             </div>
-                            <div className="mt-4 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                            <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-slate-500">
                               <span className="font-medium text-slate-400">참여 사업</span>
                               <span className="rounded-full border border-slate-200 bg-white/80 px-2.5 py-1 font-medium text-slate-600">
                                 {participatingProgramNames.length > 0
@@ -2703,18 +2712,19 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
                               </span>
                             </div>
                           </div>
-                          <div className="min-w-[260px] rounded-2xl border border-white/70 bg-white/80 px-4 py-3 shadow-sm backdrop-blur sm:max-w-[320px]">
-                            <div className="flex flex-col gap-1.5 text-[11px] text-slate-500">
+                          <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5">
+                            <div className="grid gap-x-4 gap-y-1.5 text-[11px] text-slate-500 sm:grid-cols-3 xl:grid-cols-1">
                               {companyInfoSaveInfoItems.map((item) => (
                                 <div
                                   key={item.label}
-                                  className="flex items-center justify-between gap-3"
+                                  className="flex min-w-0 items-center justify-between gap-3"
                                 >
-                                  <span className="font-medium text-slate-400">{item.label}</span>
+                                  <span className="shrink-0 font-medium text-slate-400">{item.label}</span>
                                   <span
-                                    className={`text-right ${
+                                    className={`min-w-0 truncate text-right ${
                                       item.value === "-" ? "text-slate-400" : "text-slate-700"
                                     }`}
+                                    title={item.value}
                                   >
                                     {item.value}
                                   </span>
@@ -3147,27 +3157,40 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
                 </div>
               ) : activeTab === "statusAnalysis" ? (
                 <div className="flex min-h-0 flex-1 flex-col">
-                  <div className="flex flex-wrap items-start justify-end gap-3">
-                    <div className="flex flex-wrap items-end gap-2">
-                      <label className="flex flex-col gap-1 text-xs font-medium text-slate-500">
-                        <span>작성자</span>
-                        <input
-                          className="h-8 w-40 rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-700 focus:border-slate-400 focus:outline-none"
-                          value={statusAnalysisAuthor}
-                          onChange={(event) => setStatusAnalysisAuthor(event.target.value)}
-                          placeholder="작성자를 입력해주세요."
-                        />
-                      </label>
-                      <button
-                        type="button"
-                        onClick={() => void handleSaveStatusAnalysis()}
-                        disabled={savingStatusAnalysis || !selectedCompanyId}
-                        className="inline-flex h-8 items-center gap-2 rounded-lg border border-emerald-700 bg-emerald-700 px-3 text-xs font-semibold text-white transition hover:border-emerald-800 hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        <Save className="h-3.5 w-3.5" />
-                        {savingStatusAnalysis ? "저장 중..." : "현황 분석 저장"}
-                      </button>
+                  <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-slate-50/70 px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
+                    <div className="grid min-w-0 flex-1 gap-2 sm:grid-cols-3">
+                      {[
+                        { label: "작성자", value: statusAnalysisAuthor.trim() || "미입력" },
+                        {
+                          label: "저장 상태",
+                          value: statusAnalysisUpdatedAt ? "final" : "미저장",
+                        },
+                        {
+                          label: "마지막 수정",
+                          value: formatCompanyInfoDateLabel(statusAnalysisUpdatedAt),
+                        },
+                      ].map((item) => (
+                        <div
+                          key={item.label}
+                          className="rounded-xl border border-slate-200 bg-white px-3 py-2"
+                        >
+                          <div className="text-[11px] font-medium text-slate-400">
+                            {item.label}
+                          </div>
+                          <div className="mt-1 truncate text-sm font-semibold text-slate-800">
+                            {item.value}
+                          </div>
+                        </div>
+                      ))}
                     </div>
+                    <button
+                      type="button"
+                      onClick={() => setIsStatusAnalysisDrawerOpen(true)}
+                      disabled={!selectedCompanyId}
+                      className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-lg border border-slate-900 bg-slate-900 px-4 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      현황 분석 작성/수정
+                    </button>
                   </div>
                   <div className="mt-3 border-t border-slate-100 pt-3">
                     <div className="flex flex-wrap items-center gap-2">
@@ -3209,36 +3232,150 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
                               </div>
                             </div>
                             <div className="space-y-3 p-4">
-                              {section.questions.map((item, index) => {
-                                const savedAdminAnswer = getStatusAnalysisAnswer(
-                                  statusAnalysisSections,
-                                  item.sectionKey,
-                                  item.subsectionKey,
-                                  item.questionKey,
-                                )
-                                const comment = getStatusAnalysisReason(
-                                  statusAnalysisSections,
-                                  item.sectionKey,
-                                  item.subsectionKey,
-                                  item.questionKey,
-                                )
-                                return (
-                                  <div
-                                    key={`${section.sectionTitle}-${index}`}
-                                    className="rounded-xl border border-slate-200 bg-slate-50/50 p-3"
-                                  >
-                                    <div className="flex flex-wrap items-start justify-between gap-2">
-                                      <div className="min-w-0 flex-1">
-                                        <div className="text-[11px] font-medium text-slate-400">
-                                          {item.subsectionTitle}
+                              {section.questions.map((item, index) => (
+                                <div
+                                  key={`${section.sectionTitle}-${index}`}
+                                  className="rounded-xl border border-slate-200 bg-slate-50/50 p-3"
+                                >
+                                  <div className="text-[11px] font-medium text-slate-400">
+                                    {item.subsectionTitle}
+                                  </div>
+                                  <div className="mt-1 text-sm font-semibold text-slate-800">
+                                    {item.questionText}
+                                  </div>
+                                  <div className="mt-3 grid gap-2 xl:grid-cols-2">
+                                    <div className="rounded-lg border border-slate-200 bg-white p-2.5">
+                                      <div className="flex items-center justify-between gap-2">
+                                        <div className="text-[11px] font-semibold text-slate-400">
+                                          기업 작성내용
                                         </div>
-                                        <div className="mt-1 text-sm font-semibold text-slate-800">
-                                          {item.questionText}
-                                        </div>
+                                        <span
+                                          className={`rounded-full px-2 py-0.5 text-xs font-semibold ${getAnswerBadgeClass(
+                                            item.companyAnswerLabel,
+                                          )}`}
+                                        >
+                                          {item.companyAnswerLabel} · {formatScore(item.companyScore)}
+                                          점
+                                        </span>
+                                      </div>
+                                      <div className="mt-1 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                                        {item.reason || "작성된 내용이 없습니다."}
                                       </div>
                                     </div>
-                                    <div className="mt-3 space-y-3">
-                                      <div className="rounded-lg border border-slate-200 bg-white p-2.5">
+                                    <div className="rounded-lg border border-sky-200 bg-sky-50/50 p-2.5">
+                                      <div className="flex items-center justify-between gap-2">
+                                        <div className="text-[11px] font-semibold text-sky-700">
+                                          관리자 현황 분석
+                                        </div>
+                                        <span
+                                          className={`rounded-full px-2 py-0.5 text-xs font-semibold ${getAnswerBadgeClass(
+                                            item.answerLabel,
+                                          )}`}
+                                        >
+                                          {item.answerLabel} · {formatScore(item.score)}점
+                                        </span>
+                                      </div>
+                                      <div className="mt-1 rounded-lg border border-sky-100 bg-white px-3 py-2 text-xs text-slate-600">
+                                        {getStatusAnalysisReason(
+                                          statusAnalysisSections,
+                                          item.sectionKey,
+                                          item.subsectionKey,
+                                          item.questionKey,
+                                        ) || "작성된 관리자 코멘트가 없습니다."}
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                    </div>
+                  </div>
+                  <Sheet
+                    open={isStatusAnalysisDrawerOpen}
+                    onOpenChange={setIsStatusAnalysisDrawerOpen}
+                  >
+                    <SheetContent
+                      side="right"
+                      className="flex h-full w-full min-h-0 gap-0 overflow-hidden p-0 sm:max-w-3xl"
+                    >
+                      <div className="flex min-h-0 flex-1 flex-col">
+                        <SheetHeader className="shrink-0 border-b border-slate-200 px-5 py-4 text-left">
+                          <SheetTitle>현황 분석 작성/수정</SheetTitle>
+                          <SheetDescription>
+                            {selectedCompanyName}의 현황 분석 답변과 관리자 코멘트를 편집합니다.
+                          </SheetDescription>
+                        </SheetHeader>
+                        <div className="shrink-0 space-y-3 border-b border-slate-100 px-5 py-4">
+                          <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                            <label className="flex min-w-0 flex-1 flex-col gap-1 text-xs font-medium text-slate-500">
+                              <span>작성자</span>
+                              <input
+                                className="h-9 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-700 focus:border-slate-400 focus:outline-none"
+                                value={statusAnalysisAuthor}
+                                onChange={(event) => setStatusAnalysisAuthor(event.target.value)}
+                                placeholder="작성자를 입력해주세요."
+                              />
+                            </label>
+                            <button
+                              type="button"
+                              onClick={() => void handleSaveStatusAnalysis()}
+                              disabled={savingStatusAnalysis || !selectedCompanyId}
+                              className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-emerald-700 bg-emerald-700 px-3 text-xs font-semibold text-white transition hover:border-emerald-800 hover:bg-emerald-800 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              <Save className="h-3.5 w-3.5" />
+                              {savingStatusAnalysis ? "저장 중..." : "현황 분석 저장"}
+                            </button>
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            {statusAnalysisSummary.grouped.map((section) => (
+                              <button
+                                key={`status-analysis-drawer-${section.sectionTitle}`}
+                                type="button"
+                                onClick={() => setActiveStatusAnalysisFilter(section.sectionTitle)}
+                                className={`rounded-full border px-3 py-1 text-xs font-semibold transition ${
+                                  activeStatusAnalysisFilter === section.sectionTitle
+                                    ? "border-slate-900 bg-slate-900 text-white"
+                                    : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                                }`}
+                              >
+                                {section.sectionTitle} {formatScore(section.sectionScore)}/
+                                {formatScore(section.sectionTotal)}점
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+                          {statusAnalysisSummary.grouped
+                            .filter((section) => section.sectionTitle === activeStatusAnalysisFilter)
+                            .map((section) => (
+                              <div key={section.sectionTitle} className="space-y-3">
+                                {section.questions.map((item, index) => {
+                                  const savedAdminAnswer = getStatusAnalysisAnswer(
+                                    statusAnalysisSections,
+                                    item.sectionKey,
+                                    item.subsectionKey,
+                                    item.questionKey,
+                                  )
+                                  const comment = getStatusAnalysisReason(
+                                    statusAnalysisSections,
+                                    item.sectionKey,
+                                    item.subsectionKey,
+                                    item.questionKey,
+                                  )
+                                  return (
+                                    <div
+                                      key={`${section.sectionTitle}-drawer-${index}`}
+                                      className="rounded-xl border border-slate-200 bg-slate-50/50 p-3"
+                                    >
+                                      <div className="text-[11px] font-medium text-slate-400">
+                                        {item.subsectionTitle}
+                                      </div>
+                                      <div className="mt-1 text-sm font-semibold text-slate-800">
+                                        {item.questionText}
+                                      </div>
+                                      <div className="mt-3 rounded-lg border border-slate-200 bg-white p-2.5">
                                         <div className="flex items-center justify-between gap-2">
                                           <div className="text-[11px] font-semibold text-slate-400">
                                             기업 작성내용
@@ -3248,14 +3385,15 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
                                               item.companyAnswerLabel,
                                             )}`}
                                           >
-                                            {item.companyAnswerLabel} · {formatScore(item.companyScore)}점
+                                            {item.companyAnswerLabel} · {formatScore(item.companyScore)}
+                                            점
                                           </span>
                                         </div>
                                         <div className="mt-1 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-xs text-slate-600">
                                           {item.reason || "작성된 내용이 없습니다."}
                                         </div>
                                       </div>
-                                      <div className="rounded-lg border border-sky-200 bg-sky-50/50 p-2.5">
+                                      <div className="mt-3 rounded-lg border border-sky-200 bg-sky-50/50 p-2.5">
                                         <div className="flex items-center justify-between gap-2">
                                           <div className="text-[11px] font-semibold text-sky-700">
                                             관리자 현황 분석
@@ -3268,8 +3406,7 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
                                             {item.answerLabel} · {formatScore(item.score)}점
                                           </span>
                                         </div>
-                                        <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
-                                          <div className="inline-flex rounded-lg border border-slate-200 bg-white p-1">
+                                        <div className="mt-2 inline-flex rounded-lg border border-slate-200 bg-white p-1">
                                           {[
                                             { label: "예", value: true as const },
                                             { label: "아니오", value: false as const },
@@ -3284,7 +3421,7 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
                                               getAnswerLabel(selectedAnswer) === option.label
                                             return (
                                               <button
-                                                key={`${item.questionKey}-${option.label}`}
+                                                key={`${item.questionKey}-drawer-${option.label}`}
                                                 type="button"
                                                 className={`rounded-md px-2.5 py-1 text-xs font-semibold transition ${
                                                   isSelected
@@ -3310,7 +3447,6 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
                                             )
                                           })}
                                         </div>
-                                        </div>
                                         <textarea
                                           rows={3}
                                           className="mt-2 w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700"
@@ -3330,14 +3466,14 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
                                         />
                                       </div>
                                     </div>
-                                  </div>
-                                )
-                              })}
-                            </div>
-                          </div>
-                        ))}
-                    </div>
-                  </div>
+                                  )
+                                })}
+                              </div>
+                            ))}
+                        </div>
+                      </div>
+                    </SheetContent>
+                  </Sheet>
                 </div>
               ) : activeTab === "metrics" ? (
                 selectedCompanyId ? (

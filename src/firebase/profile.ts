@@ -5,9 +5,10 @@ import {
   serverTimestamp,
   setDoc,
 } from "firebase/firestore"
-import { db } from "@/firebase/client"
+import { db, isFirebaseConfigured } from "@/firebase/client"
 import type { ConsentSnapshot, Role, SignupRequest, UserProfile } from "@/types/auth"
 import type { CompanyInfoForm, CompanyInfoRecord, InvestmentInput } from "@/types/company"
+import { createFirebaseNotConfiguredError } from "@/firebase/errors"
 
 const collectionName = "profiles"
 
@@ -183,6 +184,9 @@ export function buildCompanyInfoRecord(
 }
 
 export async function getUserProfile(uid: string) {
+  if (!isFirebaseConfigured || !db) {
+    return null
+  }
   const ref = doc(db, collectionName, uid)
   const snapshot = await getDoc(ref)
   if (!snapshot.exists()) {
@@ -192,6 +196,9 @@ export async function getUserProfile(uid: string) {
 }
 
 export async function getSignupRequest(uid: string) {
+  if (!isFirebaseConfigured || !db) {
+    return null
+  }
   const ref = doc(db, "signupRequests", uid)
   const snapshot = await getDoc(ref)
   if (!snapshot.exists()) {
@@ -214,6 +221,9 @@ export async function createSignupRequest(
     consents?: ConsentSnapshot
   }
 ) {
+  if (!isFirebaseConfigured || !db) {
+    throw createFirebaseNotConfiguredError()
+  }
   const companyId =
     requestedRole === "company"
       ? (options?.companyId ?? uid)

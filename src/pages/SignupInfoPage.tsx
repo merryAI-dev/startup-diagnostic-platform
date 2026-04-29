@@ -32,6 +32,9 @@ type PendingSignupDraft = {
 
 function getSignupErrorMessage(error: any) {
   const code = error?.code ?? ""
+  if (code === "auth/firebase-not-configured") {
+    return "Firebase 환경변수가 설정되지 않았습니다. 로컬 `.env`를 먼저 구성해주세요."
+  }
   if (code === "auth/email-already-in-use") {
     return "이미 사용 중인 이메일입니다."
   }
@@ -462,6 +465,10 @@ function CompanySignupInfo({
     let active = true
 
     async function loadPrograms() {
+      if (!db) {
+        setAvailablePrograms([])
+        return
+      }
       try {
         const snapshot = await getDocs(
           query(collection(db, "programs"), orderBy("name", "asc"))
