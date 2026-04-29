@@ -2433,30 +2433,28 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
   return (
     <div className="bg-transparent h-full">
       <div className="flex h-full flex-col">
-        <div className="shrink-0 border-b border-slate-200 bg-white px-6 py-5">
-          <div className="mx-auto w-full max-w-[1600px]">
-            <h1 className="text-2xl font-semibold text-slate-900">기업 관리</h1>
-            <p className="mt-1 text-sm text-slate-500">
-              기업 기본 정보, 자가진단표, 실적, 업로드 자료와 티켓 현황을 관리합니다.
-            </p>
-          </div>
-        </div>
-        <div className="mx-auto w-full max-w-[1600px] px-6 pt-5">
-          <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
-            <div className="flex flex-col gap-4 lg:flex-row lg:items-end">
-              <label className="min-w-0 text-xs font-medium text-slate-500 lg:w-[280px] lg:flex-none">
+        <div className="shrink-0 border-b border-slate-200 bg-white px-6 py-4">
+          <div className="mx-auto flex w-full max-w-[1600px] flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+            <div className="min-w-0">
+              <h1 className="text-2xl font-semibold text-slate-900">기업 관리</h1>
+              <p className="mt-1 text-sm text-slate-500">
+                기업 기본 정보, 자가진단표, 실적, 업로드 자료와 티켓 현황을 관리합니다.
+              </p>
+            </div>
+            <div className="grid min-w-0 grid-cols-1 gap-3 rounded-2xl border border-slate-200 bg-slate-50/70 px-3 py-3 sm:grid-cols-2 lg:grid-cols-[minmax(180px,0.9fr)_minmax(220px,1.1fr)_auto] lg:items-end xl:max-w-[940px] xl:flex-1">
+              <label className="min-w-0 text-xs font-medium text-slate-500">
                 회사명
                 <input
-                  className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm font-normal text-slate-700 focus:border-slate-400 focus:outline-none"
+                  className="mt-1 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-700 focus:border-slate-400 focus:outline-none"
                   placeholder="회사명 검색"
                   value={companyQuery}
                   onChange={(e) => setCompanyQuery(e.target.value)}
                 />
               </label>
-              <label className="w-full min-w-0 text-xs font-medium text-slate-500 lg:w-[320px] lg:flex-none">
+              <label className="min-w-0 text-xs font-medium text-slate-500">
                 사업
                 <Select value={selectedProgramFilterId} onValueChange={setSelectedProgramFilterId}>
-                  <SelectTrigger className="mt-1 h-10 border border-slate-200 bg-white text-sm text-slate-700 shadow-none">
+                  <SelectTrigger className="mt-1 h-10 w-full min-w-0 border border-slate-200 bg-white text-sm text-slate-700 shadow-none">
                     <SelectValue placeholder="전체 사업" />
                   </SelectTrigger>
                   <SelectContent>
@@ -2469,11 +2467,11 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
                   </SelectContent>
                 </Select>
               </label>
-              <div className="flex flex-wrap gap-1.5 lg:pb-1">
+              <div className="flex flex-wrap gap-1.5 sm:col-span-2 lg:col-span-1 lg:justify-end lg:pb-1">
                 <button
                   type="button"
                   onClick={() => toggleVoucherFilterTag("export")}
-                  className={`inline-flex h-9 items-center gap-1 rounded-full border px-3 text-[12px] font-semibold transition ${
+                  className={`inline-flex h-9 min-w-[118px] items-center justify-center gap-1 whitespace-nowrap rounded-full border px-3 text-[12px] font-semibold transition ${
                     voucherFilterTags.includes("export")
                       ? "border-slate-500 bg-slate-200 text-slate-800"
                       : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
@@ -2487,7 +2485,7 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
                 <button
                   type="button"
                   onClick={() => toggleVoucherFilterTag("innovation")}
-                  className={`inline-flex h-9 items-center gap-1 rounded-full border px-3 text-[12px] font-semibold transition ${
+                  className={`inline-flex h-9 min-w-[118px] items-center justify-center gap-1 whitespace-nowrap rounded-full border px-3 text-[12px] font-semibold transition ${
                     voucherFilterTags.includes("innovation")
                       ? "border-slate-500 bg-slate-200 text-slate-800"
                       : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
@@ -2502,8 +2500,8 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
             </div>
           </div>
         </div>
-        <div className="mx-auto grid h-full w-full max-w-[1600px] flex-1 min-h-0 gap-5 px-6 py-5 lg:grid-cols-[260px_minmax(0,1fr)] xl:grid-cols-[280px_minmax(0,1fr)]">
-          <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white lg:sticky lg:top-5 lg:max-h-[calc(100vh-12rem)]">
+        <div className="mx-auto grid h-full w-full max-w-[1600px] flex-1 min-h-0 gap-5 px-6 py-4 lg:grid-cols-[260px_minmax(0,1fr)] xl:grid-cols-[280px_minmax(0,1fr)]">
+          <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white lg:sticky lg:top-4 lg:max-h-[calc(100vh-8.5rem)]">
             <div className="shrink-0 border-b border-slate-100 px-4 py-3.5">
               <div className="flex items-center justify-between gap-2">
                 <div className="text-sm font-semibold text-slate-700">회사 목록</div>
