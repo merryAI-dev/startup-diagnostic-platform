@@ -26,6 +26,9 @@ export type SubmitRegularApplicationPayload = {
 type SubmitRegularApplicationResult = {
   applicationId: string;
   pendingConsultantIds: string[];
+  consultantId?: string;
+  calendarSyncStatus?: "synced" | "error" | "deleted" | "skipped";
+  calendarSyncError?: string;
 };
 
 export type TransitionApplicationAction = "claim" | "confirm" | "reject" | "reopen";
@@ -42,12 +45,16 @@ type TransitionApplicationResult = {
   consultant?: string;
   consultantId?: string;
   rejectionReason?: string;
+  calendarSyncStatus?: "synced" | "error" | "deleted" | "skipped";
+  calendarSyncError?: string;
 };
 
 type CancelApplicationResult = {
   applicationId: string;
   outcome: "cancelled";
   status?: ApplicationStatus;
+  calendarSyncStatus?: "synced" | "error" | "deleted" | "skipped";
+  calendarSyncError?: string;
 };
 
 export type UpdateCompanyApplicationPayload = {
@@ -63,12 +70,24 @@ type UpdateCompanyApplicationResult = {
   applicationId: string;
   status: ApplicationStatus;
   scheduleChanged: boolean;
+  calendarSyncStatus?: "synced" | "error" | "deleted" | "skipped";
+  calendarSyncError?: string;
 };
 
 type RunApplicationMaintenanceResult = {
   rejectedCount: number;
   completedCount: number;
   slotCount: number;
+};
+
+type SyncIrregularCalendarSessionsResult = {
+  syncedCount: number;
+  cancelledCount: number;
+  skippedCount: number;
+  errorCount: number;
+  calendarId: string;
+  timeMin: string;
+  timeMax: string;
 };
 
 type ApprovePendingUserResult = {
@@ -254,6 +273,20 @@ export async function runApplicationMaintenanceViaFunction() {
   const callable = httpsCallable<Record<string, never>, RunApplicationMaintenanceResult>(
     functions,
     "runApplicationMaintenance"
+  );
+
+  const result = await callable({});
+  return result.data;
+}
+
+export async function syncIrregularCalendarSessionsViaFunction() {
+  if (!isFirebaseConfigured || !functions) {
+    throw new Error("Firebase Functions is not configured");
+  }
+
+  const callable = httpsCallable<Record<string, never>, SyncIrregularCalendarSessionsResult>(
+    functions,
+    "syncIrregularCalendarSessions"
   );
 
   const result = await callable({});

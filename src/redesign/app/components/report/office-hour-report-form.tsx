@@ -173,6 +173,9 @@ export function OfficeHourReportForm({
   requireCompanySelection = false,
   onSubmit,
 }: OfficeHourReportFormProps) {
+  const calendarSource = application.calendarSource?.type === "google-calendar"
+    ? application.calendarSource
+    : null
   const dialogTitle =
     application.type === "mentoring"
       ? initialReport
@@ -207,10 +210,15 @@ export function OfficeHourReportForm({
     return {
       date: application.scheduledDate || "",
       time: application.scheduledTime || "",
-      location: application.sessionFormat === "online" ? "온라인 (Zoom/Google Meet)" : "",
-      topic: "",
-      managerName: "",
-      participants: [""],
+      location:
+        application.reportPrefill?.location ||
+        (application.sessionFormat === "online" ? "온라인 (Zoom/Google Meet)" : ""),
+      topic: application.reportPrefill?.topic || application.agenda || "",
+      managerName: application.reportPrefill?.managerName || "",
+      participants:
+        application.reportPrefill?.participants && application.reportPrefill.participants.length > 0
+          ? application.reportPrefill.participants
+          : [""],
       content: "",
       advisoryContent: "",
       followUp: "",
@@ -480,6 +488,50 @@ export function OfficeHourReportForm({
 
         <form onSubmit={handleSubmit} className="mt-4 flex min-h-0 flex-1 flex-col min-w-0">
           <div className="min-h-0 flex-1 space-y-6 overflow-y-auto px-6 pb-6">
+            {calendarSource && (
+              <div className="space-y-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-4">
+                <div className="space-y-1">
+                  <div className="text-sm font-semibold text-slate-900">캘린더 원본 정보</div>
+                  <p className="text-xs text-slate-600">
+                    자동 매칭이 완전하지 않더라도 원본 제목과 참석자를 그대로 참고할 수 있습니다.
+                  </p>
+                </div>
+                <div className="space-y-2 text-sm text-slate-700">
+                  <div>
+                    <span className="font-medium text-slate-900">캘린더 제목:</span> {calendarSource.rawTitle}
+                  </div>
+                  <div>
+                    <span className="font-medium text-slate-900">진행 시간:</span>{" "}
+                    {application.scheduledDate || "-"} {application.scheduledTime || ""}
+                    {typeof application.duration === "number" && Number.isFinite(application.duration)
+                      ? ` (${application.duration}시간)`
+                      : ""}
+                  </div>
+                  <div>
+                    <span className="font-medium text-slate-900">장소:</span>{" "}
+                    {calendarSource.location || formData.location || "-"}
+                  </div>
+                  <div>
+                    <span className="font-medium text-slate-900">참석자:</span>{" "}
+                    {calendarSource.attendeeLabels.length > 0
+                      ? calendarSource.attendeeLabels.join(", ")
+                      : "-"}
+                  </div>
+                </div>
+                {calendarSource.matchWarnings && calendarSource.matchWarnings.length > 0 && (
+                  <div className="space-y-1 rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-800">
+                    <div className="flex items-center gap-2 font-medium">
+                      <AlertCircle className="h-4 w-4" />
+                      자동 매칭 확인 필요
+                    </div>
+                    {calendarSource.matchWarnings.map((warning) => (
+                      <p key={warning}>{warning}</p>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
             {requireCompanySelection && (
               <div className="space-y-2">
                 <Label htmlFor="company-search">기업명 *</Label>

@@ -29,8 +29,17 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.role == "consultant";
     }
 
+    function isStaff() {
+      return isActiveUser()
+        && get(/databases/$(database)/documents/profiles/$(request.auth.uid)).data.role == "staff";
+    }
+
     function isInternalOperator() {
       return isAdmin() || isConsultant();
+    }
+
+    function isOfficeHourOperator() {
+      return isAdmin() || isConsultant() || isStaff();
     }
 
     function isCompanyOwner(companyId) {
@@ -322,6 +331,11 @@ service cloud.firestore {
             )
           )
         );
+    }
+
+    match /officeHourCalendarSessions/{sessionId} {
+      allow read: if isOfficeHourOperator();
+      allow create, update, delete: if false;
     }
 
     match /reports/{reportId} {

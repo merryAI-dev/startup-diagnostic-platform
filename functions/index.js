@@ -18,13 +18,25 @@ initializeApp();
 
 const db = getFirestore();
 const REGION = process.env.FUNCTION_REGION || "asia-northeast3";
+const FIREBASE_PROJECT_ID = normalizeString(process.env.GCLOUD_PROJECT || process.env.GCLOUD_PROJECT_NUMBER);
 const GEMINI_API_KEY = defineSecret("GEMINI_API_KEY");
 const SLACK_SIGNUP_REQUEST_WEBHOOK_URL = defineSecret("SLACK_SIGNUP_REQUEST_WEBHOOK_URL");
+const GOOGLE_CALENDAR_CLIENT_ID = defineSecret("GOOGLE_CALENDAR_CLIENT_ID");
+const GOOGLE_CALENDAR_CLIENT_SECRET = defineSecret("GOOGLE_CALENDAR_CLIENT_SECRET");
+const GOOGLE_CALENDAR_REFRESH_TOKEN = defineSecret("GOOGLE_CALENDAR_REFRESH_TOKEN");
+const GOOGLE_CALENDAR_TARGET_CALENDAR_ID = defineSecret("GOOGLE_CALENDAR_TARGET_CALENDAR_ID");
 const ACTIVE_APPLICATION_STATUSES = new Set(["confirmed", "completed"]);
 const RESERVED_APPLICATION_STATUSES = new Set(["confirmed"]);
 const AUTO_UNASSIGNABLE_REASON = "해당 시간대에 배정 가능한 컨설턴트가 없어 자동 거절되었습니다.";
 const APPROVAL_ROLE_VALUES = new Set(["admin", "company", "consultant"]);
 const APPLICATION_CHANGE_WINDOW_MS = 72 * 60 * 60 * 1000;
+const GOOGLE_OAUTH_TOKEN_URL = "https://oauth2.googleapis.com/token";
+const GOOGLE_CALENDAR_API_BASE_URL = "https://www.googleapis.com/calendar/v3";
+const STAGE_FIREBASE_PROJECT_ID = "startup-diagnosis-platform";
+const IRREGULAR_CALENDAR_SESSION_COLLECTION = "officeHourCalendarSessions";
+const IRREGULAR_CALENDAR_TITLE_PREFIX = "[비정기]";
+const IRREGULAR_CALENDAR_SYNC_LOOKBACK_DAYS = 120;
+const IRREGULAR_CALENDAR_SYNC_LOOKAHEAD_DAYS = 180;
 const DEFAULT_COMPANY_FORM = {
   companyType: "법인",
   companyInfo: "",
@@ -160,6 +172,990 @@ function isApplicationChangeWindowOpen(application, now = new Date()) {
   const deadline = getApplicationChangeDeadline(application);
   if (!deadline) return false;
   return now.getTime() <= deadline.getTime();
+}
+
+function normalizeEmail(value) {
+  const normalized = normalizeString(value).toLowerCase();
+  if (!normalized || !normalized.includes("@")) return "";
+  return normalized;
+}
+
+function getGoogleCalendarConfig() {
+  const clientId = normalizeString(GOOGLE_CALENDAR_CLIENT_ID.value());
+  const clientSecret = normalizeString(GOOGLE_CALENDAR_CLIENT_SECRET.value());
+  const refreshToken = normalizeString(GOOGLE_CALENDAR_REFRESH_TOKEN.value());
+  const calendarId = normalizeString(GOOGLE_CALENDAR_TARGET_CALENDAR_ID.value());
+
+  if (!clientId || !clientSecret || !refreshToken || !calendarId) {
+    return null;
+  }
+
+  return {
+    clientId,
+    clientSecret,
+    refreshToken,
+    calendarId,
+  };
+}
+
+function getGoogleCalendarSendUpdatesMode() {
+  return FIREBASE_PROJECT_ID === STAGE_FIREBASE_PROJECT_ID ? "none" : "all";
+}
+
+async function getGoogleCalendarAccessToken(config) {
+  const body = new URLSearchParams({
+    client_id: config.clientId,
+    client_secret: config.clientSecret,
+    refresh_token: config.refreshToken,
+    grant_type: "refresh_token",
+  });
+
+  const response = await fetch(GOOGLE_OAUTH_TOKEN_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: body.toString(),
+  });
+
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(`Google OAuth token request failed: ${response.status} ${message}`);
+  }
+
+  const data = await response.json();
+  const accessToken = normalizeString(data?.access_token);
+  if (!accessToken) {
+    throw new Error("Google OAuth token response did not include access_token");
+  }
+
+  return accessToken;
+}
+
+async function googleCalendarRequest(config, params) {
+  const accessToken = await getGoogleCalendarAccessToken(config);
+  const queryString = params.query ? `?${new URLSearchParams(params.query).toString()}` : "";
+  const response = await fetch(
+    `${GOOGLE_CALENDAR_API_BASE_URL}${params.path}${queryString}`,
+    {
+      method: params.method,
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        ...(params.body ? { "Content-Type": "application/json" } : {}),
+      },
+      ...(params.body ? { body: JSON.stringify(params.body) } : {}),
+    }
+  );
+
+  if (response.status === 204) {
+    return null;
+  }
+
+  if (!response.ok) {
+    const message = await response.text();
+    throw new Error(`Google Calendar API request failed: ${response.status} ${message}`);
+  }
+
+  return response.json();
+}
+
+function buildCalendarParticipantLabel(preferredName, email) {
+  return normalizeString(preferredName) || normalizeEmail(email) || "";
+}
+
+function buildRegularGoogleCalendarTitle(context) {
+  const programName = normalizeString(context.programDoc?.name) || "사업 미지정";
+  const agendaName = normalizeString(context.agendaDoc?.name) || "아젠다 미지정";
+  const companyName =
+    normalizeString(context.companyDoc?.name) ||
+    normalizeString(context.application.companyName) ||
+    "기업 미지정";
+  const consultantLabel = buildCalendarParticipantLabel(
+    context.consultantDoc?.name || context.consultantProfile?.name || context.consultantProfile?.displayName,
+    context.consultantEmail
+  );
+  const pmLabel = buildCalendarParticipantLabel(
+    context.pmProfile?.name || context.pmProfile?.displayName,
+    context.pmEmail
+  );
+  const companyLabel = buildCalendarParticipantLabel(
+    context.companyProfile?.name || context.companyProfile?.displayName,
+    context.companyEmail
+  );
+  const participantSuffix = [consultantLabel, pmLabel, companyLabel].filter(Boolean).join(", ");
+
+  return `[정기]${programName}_${agendaName}_${companyName}${participantSuffix ? `(${participantSuffix})` : ""}`;
+}
+
+function buildRegularGoogleCalendarDescription(context) {
+  const lines = [
+    `사업: ${normalizeString(context.programDoc?.name) || "사업 미지정"}`,
+    `아젠다: ${normalizeString(context.agendaDoc?.name) || "아젠다 미지정"}`,
+    `기업: ${normalizeString(context.companyDoc?.name) || normalizeString(context.application.companyName) || "기업 미지정"}`,
+    `컨설턴트: ${
+      buildCalendarParticipantLabel(
+        context.consultantDoc?.name || context.consultantProfile?.name || context.consultantProfile?.displayName,
+        context.consultantEmail
+      ) || "미지정"
+    }`,
+    `PM: ${
+      buildCalendarParticipantLabel(
+        context.pmProfile?.name || context.pmProfile?.displayName,
+        context.pmEmail
+      ) || "미지정"
+    }`,
+    `기업 담당자: ${
+      buildCalendarParticipantLabel(
+        context.companyProfile?.name || context.companyProfile?.displayName,
+        context.companyEmail
+      ) || "미지정"
+    }`,
+  ];
+
+  const requestContent = normalizeString(context.application.requestContent);
+  if (requestContent) {
+    lines.push("", "[신청 내용]", requestContent);
+  }
+
+  return lines.join("\n");
+}
+
+function getRegularApplicationCalendarEventDateRange(application) {
+  const scheduledDate = normalizeString(application?.scheduledDate);
+  const scheduledTime = normalizeTimeKey(application?.scheduledTime);
+  if (!scheduledDate || !scheduledTime) {
+    throw new Error("Regular application is missing scheduled date/time");
+  }
+
+  const start = new Date(`${scheduledDate}T${scheduledTime}:00+09:00`);
+  if (Number.isNaN(start.getTime())) {
+    throw new Error("Failed to parse regular application scheduled date/time");
+  }
+
+  const durationHours = getApplicationDurationHours(application, null);
+  const end = new Date(start.getTime() + durationHours * 60 * 60 * 1000);
+  return {
+    start: start.toISOString(),
+    end: end.toISOString(),
+  };
+}
+
+async function writeGoogleCalendarSyncState(applicationId, patch) {
+  const payload = {
+    "googleCalendar.updatedAt": FieldValue.serverTimestamp(),
+  };
+
+  if (Object.prototype.hasOwnProperty.call(patch, "status")) {
+    payload["googleCalendar.status"] = patch.status;
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, "calendarId")) {
+    payload["googleCalendar.calendarId"] = patch.calendarId || FieldValue.delete();
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, "eventId")) {
+    payload["googleCalendar.eventId"] = patch.eventId || FieldValue.delete();
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, "title")) {
+    payload["googleCalendar.title"] = patch.title || FieldValue.delete();
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, "attendeeEmails")) {
+    payload["googleCalendar.attendeeEmails"] = Array.isArray(patch.attendeeEmails)
+      ? patch.attendeeEmails
+      : FieldValue.delete();
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, "lastError")) {
+    payload["googleCalendar.lastError"] = patch.lastError || FieldValue.delete();
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, "syncedAt")) {
+    payload["googleCalendar.syncedAt"] = patch.syncedAt;
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, "deletedAt")) {
+    payload["googleCalendar.deletedAt"] = patch.deletedAt;
+  }
+
+  await db.collection("officeHourApplications").doc(applicationId).update(payload);
+}
+
+async function loadRegularApplicationCalendarContext(applicationId) {
+  const applicationSnap = await db.collection("officeHourApplications").doc(applicationId).get();
+  if (!applicationSnap.exists) {
+    return null;
+  }
+
+  const application = {
+    id: applicationSnap.id,
+    ...(applicationSnap.data() || {}),
+  };
+  if (normalizeString(application.type) !== "regular") {
+    return null;
+  }
+
+  const programId = normalizeString(application.programId);
+  const agendaId = normalizeString(application.agendaId);
+  const companyId = normalizeString(application.companyId);
+  const companyUserUid = normalizeString(application.createdByUid);
+  const consultantId = normalizeString(application.consultantId);
+
+  const programRef = programId ? db.collection("programs").doc(programId) : null;
+  const agendaRef = agendaId ? db.collection("agendas").doc(agendaId) : null;
+  const companyRef = companyId ? db.collection("companies").doc(companyId) : null;
+  const companyProfileRef = companyUserUid ? db.collection("profiles").doc(companyUserUid) : null;
+  const consultantProfileRef = consultantId ? db.collection("profiles").doc(consultantId) : null;
+  const consultantRef = consultantId ? db.collection("consultants").doc(consultantId) : null;
+
+  const [
+    programSnap,
+    agendaSnap,
+    companySnap,
+    companyProfileSnap,
+    consultantProfileSnap,
+    consultantSnap,
+  ] = await Promise.all([
+    programRef ? programRef.get() : Promise.resolve(null),
+    agendaRef ? agendaRef.get() : Promise.resolve(null),
+    companyRef ? companyRef.get() : Promise.resolve(null),
+    companyProfileRef ? companyProfileRef.get() : Promise.resolve(null),
+    consultantProfileRef ? consultantProfileRef.get() : Promise.resolve(null),
+    consultantRef ? consultantRef.get() : Promise.resolve(null),
+  ]);
+
+  const programDoc = programSnap?.exists ? { id: programSnap.id, ...(programSnap.data() || {}) } : null;
+  const pmUid = normalizeString(programDoc?.managerUid);
+  const pmProfileSnap = pmUid ? await db.collection("profiles").doc(pmUid).get() : null;
+
+  const companyProfile = companyProfileSnap?.exists ? companyProfileSnap.data() || {} : {};
+  const consultantProfile = consultantProfileSnap?.exists ? consultantProfileSnap.data() || {} : {};
+  const consultantDoc = consultantSnap?.exists ? consultantSnap.data() || {} : {};
+  const pmProfile = pmProfileSnap?.exists ? pmProfileSnap.data() || {} : {};
+
+  return {
+    application,
+    programDoc,
+    agendaDoc: agendaSnap?.exists ? { id: agendaSnap.id, ...(agendaSnap.data() || {}) } : null,
+    companyDoc: companySnap?.exists ? { id: companySnap.id, ...(companySnap.data() || {}) } : null,
+    companyProfile,
+    consultantProfile,
+    consultantDoc,
+    pmProfile,
+    pmUid,
+    pmEmail: normalizeEmail(pmProfile?.email),
+    companyEmail: normalizeEmail(companyProfile?.email),
+    consultantEmail: normalizeEmail(consultantProfile?.email),
+  };
+}
+
+function validateRegularApplicationCalendarParticipants(context) {
+  if (!context.programDoc) {
+    throw new Error("Google Calendar sync failed: program document is missing");
+  }
+  if (!context.agendaDoc) {
+    throw new Error("Google Calendar sync failed: agenda document is missing");
+  }
+  if (!context.companyDoc) {
+    throw new Error("Google Calendar sync failed: company document is missing");
+  }
+  if (!context.pmUid) {
+    throw new Error("Google Calendar sync failed: program manager is not assigned");
+  }
+  if (!context.pmEmail) {
+    throw new Error("Google Calendar sync failed: program manager email is missing");
+  }
+  if (!context.companyEmail) {
+    throw new Error("Google Calendar sync failed: company profile email is missing");
+  }
+  if (!context.consultantEmail) {
+    throw new Error("Google Calendar sync failed: consultant profile email is missing");
+  }
+}
+
+async function upsertRegularApplicationGoogleCalendarEvent(applicationId) {
+  const context = await loadRegularApplicationCalendarContext(applicationId);
+  if (!context) {
+    return { status: "skipped" };
+  }
+
+  if (normalizeApplicationStatus(context.application.status) !== "confirmed") {
+    return deleteRegularApplicationGoogleCalendarEvent(applicationId);
+  }
+
+  const config = getGoogleCalendarConfig();
+  if (!config) {
+    const errorMessage = "Google Calendar sync failed: required secrets are not configured";
+    await writeGoogleCalendarSyncState(applicationId, {
+      status: "error",
+      lastError: errorMessage,
+    });
+    return { status: "error", error: errorMessage };
+  }
+
+  try {
+    validateRegularApplicationCalendarParticipants(context);
+    const { start, end } = getRegularApplicationCalendarEventDateRange(context.application);
+    const title = buildRegularGoogleCalendarTitle(context);
+    const attendeeEmails = [
+      context.pmEmail,
+      context.companyEmail,
+      context.consultantEmail,
+    ].filter(Boolean);
+    const uniqueAttendeeEmails = Array.from(new Set(attendeeEmails));
+    const existingEventId = normalizeString(context.application.googleCalendar?.eventId);
+
+    const eventPayload = {
+      summary: title,
+      description: buildRegularGoogleCalendarDescription(context),
+      start: {
+        dateTime: start,
+        timeZone: "Asia/Seoul",
+      },
+      end: {
+        dateTime: end,
+        timeZone: "Asia/Seoul",
+      },
+      attendees: uniqueAttendeeEmails.map((email) => ({ email })),
+      location: normalizeString(context.application.sessionFormat) === "offline" ? "오프라인" : "온라인",
+      extendedProperties: {
+        private: {
+          applicationId,
+          applicationType: "regular",
+        },
+      },
+    };
+
+    const event = existingEventId
+      ? await googleCalendarRequest(config, {
+          method: "PATCH",
+          path: `/calendars/${encodeURIComponent(config.calendarId)}/events/${encodeURIComponent(existingEventId)}`,
+          query: { sendUpdates: getGoogleCalendarSendUpdatesMode() },
+          body: eventPayload,
+        })
+      : await googleCalendarRequest(config, {
+          method: "POST",
+          path: `/calendars/${encodeURIComponent(config.calendarId)}/events`,
+          query: { sendUpdates: getGoogleCalendarSendUpdatesMode() },
+          body: eventPayload,
+        });
+
+    const eventId = normalizeString(event?.id);
+    if (!eventId) {
+      throw new Error("Google Calendar sync failed: event id is missing in API response");
+    }
+
+    await writeGoogleCalendarSyncState(applicationId, {
+      status: "synced",
+      calendarId: config.calendarId,
+      eventId,
+      title,
+      attendeeEmails: uniqueAttendeeEmails,
+      lastError: "",
+      syncedAt: FieldValue.serverTimestamp(),
+      deletedAt: FieldValue.delete(),
+    });
+
+    return {
+      status: "synced",
+      eventId,
+    };
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    console.error("upsertRegularApplicationGoogleCalendarEvent failed", {
+      applicationId,
+      errorMessage,
+      errorStack: error instanceof Error ? error.stack : null,
+    });
+    await writeGoogleCalendarSyncState(applicationId, {
+      status: "error",
+      lastError: errorMessage,
+    });
+    return {
+      status: "error",
+      error: errorMessage,
+    };
+  }
+}
+
+async function deleteRegularApplicationGoogleCalendarEvent(applicationId) {
+  const context = await loadRegularApplicationCalendarContext(applicationId);
+  if (!context) {
+    return { status: "skipped" };
+  }
+
+  const existingEventId = normalizeString(context.application.googleCalendar?.eventId);
+  if (!existingEventId) {
+    return { status: "skipped" };
+  }
+
+  const config = getGoogleCalendarConfig();
+  if (!config) {
+    const errorMessage = "Google Calendar delete failed: required secrets are not configured";
+    await writeGoogleCalendarSyncState(applicationId, {
+      status: "error",
+      lastError: errorMessage,
+    });
+    return { status: "error", error: errorMessage };
+  }
+
+  try {
+    await googleCalendarRequest(config, {
+      method: "DELETE",
+      path: `/calendars/${encodeURIComponent(config.calendarId)}/events/${encodeURIComponent(existingEventId)}`,
+      query: { sendUpdates: getGoogleCalendarSendUpdatesMode() },
+    });
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    if (!errorMessage.includes("404")) {
+      console.error("deleteRegularApplicationGoogleCalendarEvent failed", {
+        applicationId,
+        errorMessage,
+        errorStack: error instanceof Error ? error.stack : null,
+      });
+      await writeGoogleCalendarSyncState(applicationId, {
+        status: "error",
+        lastError: errorMessage,
+      });
+      return {
+        status: "error",
+        error: errorMessage,
+      };
+    }
+  }
+
+  await writeGoogleCalendarSyncState(applicationId, {
+    status: "deleted",
+    eventId: "",
+    attendeeEmails: null,
+    lastError: "",
+    deletedAt: FieldValue.serverTimestamp(),
+  });
+  return { status: "deleted" };
+}
+
+function normalizeCalendarMatchKey(value) {
+  return normalizeString(value)
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/[.,·ㆍ"'`~!@#$%^&*+=:;<>?()[\]{}|\\/]/gu, "")
+    .replace(/[-_]/gu, "")
+    .replace(/\s+/gu, "")
+    .trim();
+}
+
+function normalizeCalendarCompanyKey(value) {
+  return normalizeCalendarMatchKey(value)
+    .replace(/주식회사/gu, "")
+    .replace(/유한회사/gu, "")
+    .replace(/합자회사/gu, "")
+    .replace(/합명회사/gu, "")
+    .replace(/co?ltd/gu, "")
+    .replace(/colimited/gu, "")
+    .replace(/inc/gu, "")
+    .replace(/corp/gu, "")
+    .replace(/corporation/gu, "")
+    .replace(/ltd/gu, "")
+    .replace(/limited/gu, "")
+    .replace(/llc/gu, "")
+    .trim();
+}
+
+function appendNameIndexEntries(index, key, item) {
+  if (!key) return;
+  const current = index.get(key) || [];
+  current.push(item);
+  index.set(key, current);
+}
+
+function buildNameIndex(items, getNames, normalizer = normalizeCalendarMatchKey) {
+  const index = new Map();
+  items.forEach((item) => {
+    getNames(item)
+      .map((name) => normalizer(name))
+      .filter(Boolean)
+      .forEach((key) => appendNameIndexEntries(index, key, item));
+  });
+  return index;
+}
+
+function dedupeById(items) {
+  const seen = new Set();
+  return items.filter((item) => {
+    const id = normalizeString(item?.id);
+    if (!id || seen.has(id)) {
+      return false;
+    }
+    seen.add(id);
+    return true;
+  });
+}
+
+function findIndexedNameMatches(index, rawName, normalizer = normalizeCalendarMatchKey) {
+  const key = normalizer(rawName);
+  if (!key) return [];
+  return dedupeById(index.get(key) || []);
+}
+
+function getSingleMatch(items) {
+  if (items.length === 1) {
+    return {
+      status: "matched",
+      item: items[0],
+    };
+  }
+  if (items.length > 1) {
+    return {
+      status: "ambiguous",
+      item: null,
+    };
+  }
+  return {
+    status: "unmatched",
+    item: null,
+  };
+}
+
+function getSeoulDateTimeKeysForDate(date) {
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Seoul",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  });
+  const parts = formatter.formatToParts(date);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return {
+    dateKey: `${values.year}-${values.month}-${values.day}`,
+    timeKey: `${values.hour}:${values.minute}`,
+  };
+}
+
+function parseGoogleCalendarEventBoundary(boundary, fallbackTimeKey = "00:00") {
+  const dateTime = normalizeString(boundary?.dateTime);
+  if (dateTime) {
+    const parsed = new Date(dateTime);
+    return Number.isNaN(parsed.getTime()) ? null : parsed;
+  }
+  const dateKey = normalizeString(boundary?.date);
+  if (!dateKey) return null;
+  return parseSeoulDateTime(dateKey, fallbackTimeKey);
+}
+
+function inferCalendarSessionFormat(rawLocation) {
+  const normalized = normalizeString(rawLocation).toLowerCase();
+  if (!normalized) return "online";
+  if (
+    normalized.includes("zoom") ||
+    normalized.includes("meet") ||
+    normalized.includes("teams") ||
+    normalized.includes("online") ||
+    normalized.includes("온라인") ||
+    normalized.includes("webex")
+  ) {
+    return "online";
+  }
+  return "offline";
+}
+
+function parseIrregularCalendarTitle(rawTitle) {
+  const summary = normalizeString(rawTitle);
+  if (!summary.startsWith(IRREGULAR_CALENDAR_TITLE_PREFIX)) {
+    return null;
+  }
+
+  const withoutPrefix = normalizeString(summary.slice(IRREGULAR_CALENDAR_TITLE_PREFIX.length));
+  const participantMatch = withoutPrefix.match(/^(.*)\(([^()]*)\)\s*$/u);
+  const body = normalizeString(participantMatch?.[1] ?? withoutPrefix);
+  const participantLabels = normalizeString(participantMatch?.[2])
+    ? participantMatch[2]
+        .split(",")
+        .map((value) => normalizeString(value))
+        .filter(Boolean)
+    : [];
+  const segments = body.split("_").map((value) => normalizeString(value));
+  const [programName = "", agendaName = "", ...companyNameParts] = segments;
+
+  return {
+    body,
+    programName,
+    agendaName,
+    companyName: companyNameParts.join("_"),
+    participantLabels,
+  };
+}
+
+async function googleCalendarListAllEvents(config, query) {
+  const items = [];
+  let pageToken = "";
+
+  do {
+    const response = await googleCalendarRequest(config, {
+      method: "GET",
+      path: `/calendars/${encodeURIComponent(config.calendarId)}/events`,
+      query: {
+        ...query,
+        ...(pageToken ? { pageToken } : {}),
+      },
+    });
+
+    if (Array.isArray(response?.items)) {
+      items.push(...response.items);
+    }
+    pageToken = normalizeString(response?.nextPageToken);
+  } while (pageToken);
+
+  return items;
+}
+
+async function loadIrregularCalendarSyncReferenceData() {
+  const [programsSnap, agendasSnap, companiesSnap, consultantsSnap, profilesSnap] = await Promise.all([
+    db.collection("programs").get(),
+    db.collection("agendas").get(),
+    db.collection("companies").get(),
+    db.collection("consultants").get(),
+    db.collection("profiles").get(),
+  ]);
+
+  const programs = programsSnap.docs.map((doc) => ({ id: doc.id, ...(doc.data() || {}) }));
+  const agendas = agendasSnap.docs.map((doc) => ({ id: doc.id, ...(doc.data() || {}) }));
+  const companies = companiesSnap.docs.map((doc) => ({ id: doc.id, ...(doc.data() || {}) }));
+  const consultants = consultantsSnap.docs.map((doc) => ({ id: doc.id, ...(doc.data() || {}) }));
+  const profiles = profilesSnap.docs.map((doc) => ({ id: doc.id, ...(doc.data() || {}) }));
+
+  const programsById = new Map(programs.map((item) => [item.id, item]));
+  const companiesById = new Map(companies.map((item) => [item.id, item]));
+  const profilesById = new Map(profiles.map((item) => [item.id, item]));
+
+  const programNameIndex = buildNameIndex(programs, (item) => [item.name]);
+  const agendaNameIndex = buildNameIndex(agendas, (item) => [item.name]);
+  const companyNameIndex = buildNameIndex(
+    companies,
+    (item) => [
+      item.name,
+      item.normalizedName,
+      ...(Array.isArray(item.aliases) ? item.aliases : []),
+    ],
+    normalizeCalendarCompanyKey
+  );
+
+  const consultantByEmail = new Map();
+  consultants.forEach((consultant) => {
+    [consultant.email, consultant.secondaryEmail]
+      .map((value) => normalizeEmail(value))
+      .filter(Boolean)
+      .forEach((email) => {
+        const next = consultantByEmail.get(email) || [];
+        next.push(consultant);
+        consultantByEmail.set(email, next);
+      });
+  });
+
+  const adminProfilesByEmail = new Map();
+  const companyProfilesByEmail = new Map();
+  profiles.forEach((profile) => {
+    const email = normalizeEmail(profile.email);
+    if (!email) return;
+    const role = normalizeString(profile.role);
+    if (role === "admin") {
+      const next = adminProfilesByEmail.get(email) || [];
+      next.push(profile);
+      adminProfilesByEmail.set(email, next);
+    }
+    if (role === "company") {
+      const next = companyProfilesByEmail.get(email) || [];
+      next.push(profile);
+      companyProfilesByEmail.set(email, next);
+    }
+  });
+
+  return {
+    programsById,
+    companiesById,
+    profilesById,
+    programNameIndex,
+    agendaNameIndex,
+    companyNameIndex,
+    consultantByEmail,
+    adminProfilesByEmail,
+    companyProfilesByEmail,
+  };
+}
+
+function buildIrregularCalendarMatchWarnings(sessionDoc) {
+  const warnings = [];
+  if (sessionDoc.programMatchStatus === "unmatched") {
+    warnings.push("일치하는 사업명이 없습니다.");
+  } else if (sessionDoc.programMatchStatus === "ambiguous") {
+    warnings.push("사업명이 여러 개로 매칭됩니다.");
+  }
+
+  if (sessionDoc.agendaMatchStatus === "unmatched") {
+    warnings.push("일치하는 아젠다가 없습니다.");
+  } else if (sessionDoc.agendaMatchStatus === "ambiguous") {
+    warnings.push("아젠다가 여러 개로 매칭됩니다.");
+  }
+
+  if (sessionDoc.companyMatchStatus === "unmatched") {
+    warnings.push("일치하는 기업명이 없습니다.");
+  } else if (sessionDoc.companyMatchStatus === "ambiguous") {
+    warnings.push("기업명이 여러 개로 매칭됩니다.");
+  }
+
+  if (!sessionDoc.consultantId) {
+    warnings.push("참석자 이메일 기준으로 컨설턴트를 찾지 못했습니다.");
+  }
+  if (!sessionDoc.managerEmail) {
+    warnings.push("담당 PM 정보를 확인하지 못했습니다.");
+  }
+  return warnings;
+}
+
+function buildIrregularCalendarSessionDoc(event, config, referenceData, now) {
+  const rawTitle = normalizeString(event?.summary);
+  const parsedTitle = parseIrregularCalendarTitle(rawTitle);
+  if (!parsedTitle) {
+    return null;
+  }
+
+  const startAt = parseGoogleCalendarEventBoundary(event?.start);
+  const endAt = parseGoogleCalendarEventBoundary(event?.end);
+  if (!startAt || !endAt) {
+    throw new Error("Irregular calendar event is missing start/end dateTime");
+  }
+
+  const attendeeEntries = Array.isArray(event?.attendees) ? event.attendees : [];
+  const attendeeEmails = Array.from(
+    new Set(attendeeEntries.map((item) => normalizeEmail(item?.email)).filter(Boolean))
+  );
+  const attendeeLabels = Array.from(
+    new Set(
+      [
+        ...attendeeEntries.map((item) =>
+          buildCalendarParticipantLabel(item?.displayName, normalizeEmail(item?.email))
+        ),
+        ...parsedTitle.participantLabels,
+      ].filter(Boolean)
+    )
+  );
+
+  const programMatch = getSingleMatch(
+    findIndexedNameMatches(referenceData.programNameIndex, parsedTitle.programName)
+  );
+  const agendaMatch = getSingleMatch(
+    findIndexedNameMatches(referenceData.agendaNameIndex, parsedTitle.agendaName)
+  );
+
+  const titleCompanyMatch = getSingleMatch(
+    findIndexedNameMatches(
+      referenceData.companyNameIndex,
+      parsedTitle.companyName,
+      normalizeCalendarCompanyKey
+    )
+  );
+
+  const consultantMatch = getSingleMatch(
+    dedupeById(
+      attendeeEmails.flatMap((email) => referenceData.consultantByEmail.get(email) || [])
+    )
+  );
+
+  const companyProfileMatch = getSingleMatch(
+    dedupeById(
+      attendeeEmails.flatMap((email) => referenceData.companyProfilesByEmail.get(email) || [])
+    )
+  );
+
+  const companyFromAttendee =
+    companyProfileMatch.status === "matched"
+      ? referenceData.companiesById.get(normalizeString(companyProfileMatch.item?.companyId)) || null
+      : null;
+
+  const companyDoc =
+    titleCompanyMatch.item || companyFromAttendee || null;
+  const companyMatchStatus =
+    titleCompanyMatch.status === "matched"
+      ? "matched"
+      : companyFromAttendee
+        ? "matched"
+        : titleCompanyMatch.status;
+  const companyMatchSource =
+    titleCompanyMatch.status === "matched"
+      ? "title"
+      : companyFromAttendee
+        ? "attendee"
+        : "none";
+
+  const matchedProgram = programMatch.item || null;
+  const matchedAgenda = agendaMatch.item || null;
+  const managerProfileFromProgram = matchedProgram
+    ? referenceData.profilesById.get(normalizeString(matchedProgram.managerUid)) || null
+    : null;
+  const adminAttendeeMatch = getSingleMatch(
+    dedupeById(
+      attendeeEmails.flatMap((email) => referenceData.adminProfilesByEmail.get(email) || [])
+    )
+  );
+  const resolvedManagerProfile = managerProfileFromProgram || adminAttendeeMatch.item || null;
+  const managerEmail = normalizeEmail(resolvedManagerProfile?.email);
+  const managerName = buildCalendarParticipantLabel(
+    resolvedManagerProfile?.name || resolvedManagerProfile?.displayName,
+    managerEmail
+  );
+
+  const consultantEmail =
+    consultantMatch.status === "matched"
+      ? normalizeEmail(consultantMatch.item?.email || consultantMatch.item?.secondaryEmail)
+      : "";
+  const consultantName = buildCalendarParticipantLabel(
+    consultantMatch.item?.name,
+    consultantEmail
+  );
+
+  const rawLocation = normalizeString(event?.location);
+  const { dateKey, timeKey } = getSeoulDateTimeKeysForDate(startAt);
+  const durationHoursRaw = (endAt.getTime() - startAt.getTime()) / (60 * 60 * 1000);
+  const duration =
+    Number.isFinite(durationHoursRaw) && durationHoursRaw > 0
+      ? Math.round(durationHoursRaw * 100) / 100
+      : 1;
+
+  const sessionDoc = {
+    source: "google-calendar",
+    sessionType: "irregular",
+    calendarId: config.calendarId,
+    eventId: normalizeString(event?.id),
+    sourceStatus: normalizeString(event?.status) === "cancelled" ? "cancelled" : "active",
+    rawTitle,
+    rawDescription: normalizeString(event?.description) || null,
+    rawLocation: rawLocation || null,
+    rawAttendeeEmails: attendeeEmails,
+    attendeeLabels,
+    sessionFormat: inferCalendarSessionFormat(rawLocation),
+    parsedProgramName: parsedTitle.programName || null,
+    parsedAgendaName: parsedTitle.agendaName || null,
+    parsedCompanyName: parsedTitle.companyName || null,
+    programMatchStatus: programMatch.status,
+    programMatchSource: programMatch.item ? "title" : "none",
+    agendaMatchStatus: agendaMatch.status,
+    agendaMatchSource: agendaMatch.item ? "title" : "none",
+    companyMatchStatus,
+    companyMatchSource,
+    programId: matchedProgram?.id || null,
+    programName: normalizeString(matchedProgram?.name) || parsedTitle.programName || null,
+    agendaId: matchedAgenda?.id || null,
+    agendaName: normalizeString(matchedAgenda?.name) || parsedTitle.agendaName || null,
+    companyId: companyDoc?.id || null,
+    companyName:
+      normalizeString(companyDoc?.name) ||
+      parsedTitle.companyName ||
+      normalizeString(companyProfileMatch.item?.companyName) ||
+      null,
+    companyProfileUid:
+      companyProfileMatch.status === "matched" ? normalizeString(companyProfileMatch.item?.id) : null,
+    consultantId: consultantMatch.item?.id || null,
+    consultantName: consultantName || null,
+    consultantEmail: consultantEmail || null,
+    managerUid: normalizeString(resolvedManagerProfile?.id) || null,
+    managerName: managerName || null,
+    managerEmail: managerEmail || null,
+    scheduledDate: dateKey,
+    scheduledTime: timeKey,
+    scheduledStartAt: startAt,
+    scheduledEndAt: endAt,
+    duration,
+    sourceCreatedAt: toJsDate(event?.created) || startAt,
+    sourceUpdatedAt: toJsDate(event?.updated) || now,
+    lastSyncedAt: now,
+  };
+
+  const matchWarnings = buildIrregularCalendarMatchWarnings(sessionDoc);
+
+  return {
+    ...sessionDoc,
+    matchWarnings,
+    manualReviewRequired: matchWarnings.length > 0,
+  };
+}
+
+async function syncIrregularCalendarSessionsCore(now = new Date()) {
+  const config = getGoogleCalendarConfig();
+  if (!config) {
+    throw new Error("Google Calendar sync failed: required secrets are not configured");
+  }
+
+  const referenceData = await loadIrregularCalendarSyncReferenceData();
+  const timeMin = new Date(now.getTime() - IRREGULAR_CALENDAR_SYNC_LOOKBACK_DAYS * 24 * 60 * 60 * 1000);
+  const timeMax = new Date(now.getTime() + IRREGULAR_CALENDAR_SYNC_LOOKAHEAD_DAYS * 24 * 60 * 60 * 1000);
+  const events = await googleCalendarListAllEvents(config, {
+    timeMin: timeMin.toISOString(),
+    timeMax: timeMax.toISOString(),
+    singleEvents: "true",
+    orderBy: "startTime",
+    showDeleted: "true",
+    maxResults: "2500",
+  });
+
+  let syncedCount = 0;
+  let cancelledCount = 0;
+  let skippedCount = 0;
+  let errorCount = 0;
+
+  for (const event of events) {
+    const eventId = normalizeString(event?.id);
+    if (!eventId) {
+      skippedCount += 1;
+      continue;
+    }
+
+    const rawTitle = normalizeString(event?.summary);
+    const isIrregularEvent = rawTitle.startsWith(IRREGULAR_CALENDAR_TITLE_PREFIX);
+    if (!isIrregularEvent) {
+      skippedCount += 1;
+      continue;
+    }
+
+    try {
+      const nextDoc = buildIrregularCalendarSessionDoc(event, config, referenceData, now);
+      if (!nextDoc) {
+        skippedCount += 1;
+        continue;
+      }
+
+      await db
+        .collection(IRREGULAR_CALENDAR_SESSION_COLLECTION)
+        .doc(eventId)
+        .set(
+          {
+            ...nextDoc,
+            ...(nextDoc.sourceStatus === "cancelled"
+              ? { deletedAt: now }
+              : { deletedAt: FieldValue.delete() }),
+          },
+          { merge: true }
+        );
+
+      if (nextDoc.sourceStatus === "cancelled") {
+        cancelledCount += 1;
+      } else {
+        syncedCount += 1;
+      }
+    } catch (error) {
+      errorCount += 1;
+      console.error("syncIrregularCalendarSessionsCore failed for event", {
+        eventId,
+        errorMessage: error instanceof Error ? error.message : String(error),
+        errorStack: error instanceof Error ? error.stack : null,
+      });
+    }
+  }
+
+  return {
+    syncedCount,
+    cancelledCount,
+    skippedCount,
+    errorCount,
+    calendarId: config.calendarId,
+    timeMin: timeMin.toISOString(),
+    timeMax: timeMax.toISOString(),
+  };
 }
 
 function toSlackFieldValue(value) {
@@ -1026,6 +2022,20 @@ function getApplicationDurationHours(application, slotDoc) {
   return Number.isFinite(raw) && raw > 0 ? raw : 1;
 }
 
+function getSessionStatusTransitionTime(application, slotDoc) {
+  const dateKey = normalizeString(application?.scheduledDate || slotDoc?.date);
+  const timeKey = normalizeTimeKey(application?.scheduledTime || slotDoc?.startTime);
+  if (dateKey && timeKey) {
+    return parseSeoulDateTime(dateKey, timeKey);
+  }
+
+  if (dateKey) {
+    return parseSeoulDateTime(dateKey, "23:59");
+  }
+
+  return null;
+}
+
 function getSessionEndTime(application, slotDoc) {
   const dateKey = normalizeString(application?.scheduledDate || slotDoc?.date);
   const timeKey = normalizeTimeKey(application?.scheduledTime || slotDoc?.startTime);
@@ -1054,9 +2064,9 @@ function getSessionEndTime(application, slotDoc) {
   return null;
 }
 
-function hasSessionEnded(application, slotDoc, now = new Date()) {
-  const endTime = getSessionEndTime(application, slotDoc);
-  return Boolean(endTime && now >= endTime);
+function hasSessionStarted(application, slotDoc, now = new Date()) {
+  const transitionTime = getSessionStatusTransitionTime(application, slotDoc);
+  return Boolean(transitionTime && now >= transitionTime);
 }
 
 function isConsultantAvailableAt(consultant, dateKey, time) {
@@ -1154,7 +2164,7 @@ async function getFutureConfirmedApplicationsForConsultant(consultant) {
     if (normalizeApplicationStatus(application.status) !== "confirmed") {
       return false;
     }
-    return !hasSessionEnded(application, null);
+    return !hasSessionStarted(application, null);
   });
 }
 
@@ -1791,7 +2801,7 @@ async function runApplicationMaintenanceCore() {
         return { outcome: "skipped" };
       }
 
-      if (!hasSessionEnded(application, null, now)) {
+      if (!hasSessionStarted(application, null, now)) {
         return { outcome: "skipped" };
       }
 
@@ -1822,6 +2832,12 @@ exports.submitRegularApplication = onCall(
     region: REGION,
     timeoutSeconds: 30,
     memory: "256MiB",
+    secrets: [
+      GOOGLE_CALENDAR_CLIENT_ID,
+      GOOGLE_CALENDAR_CLIENT_SECRET,
+      GOOGLE_CALENDAR_REFRESH_TOKEN,
+      GOOGLE_CALENDAR_TARGET_CALENDAR_ID,
+    ],
   },
   async (request) => {
     if (!request.auth?.uid) {
@@ -2099,7 +3115,13 @@ exports.submitRegularApplication = onCall(
       };
     });
 
-    return result;
+    const calendarSync = await upsertRegularApplicationGoogleCalendarEvent(result.applicationId);
+
+    return {
+      ...result,
+      calendarSyncStatus: calendarSync.status,
+      ...(calendarSync.error ? { calendarSyncError: calendarSync.error } : {}),
+    };
   }
 );
 
@@ -2108,6 +3130,12 @@ exports.updateCompanyApplication = onCall(
     region: REGION,
     timeoutSeconds: 30,
     memory: "256MiB",
+    secrets: [
+      GOOGLE_CALENDAR_CLIENT_ID,
+      GOOGLE_CALENDAR_CLIENT_SECRET,
+      GOOGLE_CALENDAR_REFRESH_TOKEN,
+      GOOGLE_CALENDAR_TARGET_CALENDAR_ID,
+    ],
   },
   async (request) => {
     if (!request.auth?.uid) {
@@ -2134,7 +3162,7 @@ exports.updateCompanyApplication = onCall(
       throw new HttpsError("invalid-argument", "요청 내용을 입력해주세요.");
     }
 
-    return db.runTransaction(async (transaction) => {
+    const result = await db.runTransaction(async (transaction) => {
       const profileRef = db.collection("profiles").doc(uid);
       const applicationRef = db.collection("officeHourApplications").doc(applicationId);
 
@@ -2165,7 +3193,7 @@ exports.updateCompanyApplication = onCall(
       if (currentStatus !== "confirmed") {
         throw new HttpsError("failed-precondition", "확정된 신청만 수정할 수 있습니다.");
       }
-      if (hasSessionEnded(application)) {
+      if (hasSessionStarted(application)) {
         throw new HttpsError("failed-precondition", "진행 시간이 지난 신청은 수정할 수 없습니다.");
       }
       if (!isApplicationChangeWindowOpen(application, new Date())) {
@@ -2332,6 +3360,13 @@ exports.updateCompanyApplication = onCall(
         scheduleChanged: false,
       };
     });
+
+    const calendarSync = await upsertRegularApplicationGoogleCalendarEvent(result.applicationId);
+    return {
+      ...result,
+      calendarSyncStatus: calendarSync.status,
+      ...(calendarSync.error ? { calendarSyncError: calendarSync.error } : {}),
+    };
   }
 );
 
@@ -2340,6 +3375,12 @@ exports.cancelApplication = onCall(
     region: REGION,
     timeoutSeconds: 30,
     memory: "256MiB",
+    secrets: [
+      GOOGLE_CALENDAR_CLIENT_ID,
+      GOOGLE_CALENDAR_CLIENT_SECRET,
+      GOOGLE_CALENDAR_REFRESH_TOKEN,
+      GOOGLE_CALENDAR_TARGET_CALENDAR_ID,
+    ],
   },
   async (request) => {
     if (!request.auth?.uid) {
@@ -2353,7 +3394,7 @@ exports.cancelApplication = onCall(
       throw new HttpsError("invalid-argument", "신청 식별자가 필요합니다.");
     }
 
-    return db.runTransaction(async (transaction) => {
+    const result = await db.runTransaction(async (transaction) => {
         const profileRef = db.collection("profiles").doc(uid);
         const applicationRef = db.collection("officeHourApplications").doc(applicationId);
 
@@ -2402,7 +3443,7 @@ exports.cancelApplication = onCall(
         );
       }
 
-      if (hasSessionEnded(application)) {
+      if (hasSessionStarted(application)) {
         throw new HttpsError("failed-precondition", "진행 시간이 지난 신청은 취소할 수 없습니다.");
       }
 
@@ -2417,6 +3458,13 @@ exports.cancelApplication = onCall(
         status: "cancelled",
       };
     });
+
+    const calendarSync = await deleteRegularApplicationGoogleCalendarEvent(result.applicationId);
+    return {
+      ...result,
+      calendarSyncStatus: calendarSync.status,
+      ...(calendarSync.error ? { calendarSyncError: calendarSync.error } : {}),
+    };
   }
 );
 
@@ -2875,6 +3923,7 @@ exports.syncProgramDefinition = onCall(
           : {}),
         ...(Object.prototype.hasOwnProperty.call(payload, "allowedAgendaIds")
           ? { allowedAgendaIds: payload.allowedAgendaIds }
+          : {}),
         ...(Object.prototype.hasOwnProperty.call(payload, "managerUid")
           ? { managerUid: payload.managerUid }
           : {}),
@@ -2906,11 +3955,48 @@ exports.scheduledApplicationMaintenance = onSchedule(
   }
 );
 
+exports.syncIrregularCalendarSessions = onCall(
+  {
+    region: REGION,
+    timeoutSeconds: 120,
+    memory: "256MiB",
+    secrets: [
+      GOOGLE_CALENDAR_CLIENT_ID,
+      GOOGLE_CALENDAR_CLIENT_SECRET,
+      GOOGLE_CALENDAR_REFRESH_TOKEN,
+      GOOGLE_CALENDAR_TARGET_CALENDAR_ID,
+    ],
+  },
+  async (request) => {
+    if (!request.auth?.uid) {
+      throw new HttpsError("unauthenticated", "로그인이 필요합니다.");
+    }
+
+    const profileSnap = await db.collection("profiles").doc(request.auth.uid).get();
+    if (!profileSnap.exists) {
+      throw new HttpsError("failed-precondition", "프로필 정보를 찾을 수 없습니다.");
+    }
+
+    const role = normalizeString(profileSnap.data()?.role);
+    if (!["admin", "consultant", "staff"].includes(role)) {
+      throw new HttpsError("permission-denied", "캘린더 동기화 권한이 없습니다.");
+    }
+
+    return syncIrregularCalendarSessionsCore(new Date());
+  }
+);
+
 exports.transitionApplicationStatus = onCall(
   {
     region: REGION,
     timeoutSeconds: 30,
     memory: "256MiB",
+    secrets: [
+      GOOGLE_CALENDAR_CLIENT_ID,
+      GOOGLE_CALENDAR_CLIENT_SECRET,
+      GOOGLE_CALENDAR_REFRESH_TOKEN,
+      GOOGLE_CALENDAR_TARGET_CALENDAR_ID,
+    ],
   },
   async (request) => {
     if (!request.auth?.uid) {
@@ -2931,7 +4017,7 @@ exports.transitionApplicationStatus = onCall(
     }
 
     try {
-      return await db.runTransaction(async (transaction) => {
+      const result = await db.runTransaction(async (transaction) => {
       const profileRef = db.collection("profiles").doc(uid);
       const applicationRef = db.collection("officeHourApplications").doc(applicationId);
 
@@ -2953,7 +4039,7 @@ exports.transitionApplicationStatus = onCall(
       const currentStatus = normalizeApplicationStatus(application.status);
 
       if (action === "claim" || action === "confirm") {
-        if (hasSessionEnded(application)) {
+        if (hasSessionStarted(application)) {
           throw new HttpsError("failed-precondition", "진행 시간이 지나 처리할 수 없습니다.");
         }
       }
@@ -3135,6 +4221,18 @@ exports.transitionApplicationStatus = onCall(
 
         throw new HttpsError("invalid-argument", "지원하지 않는 상태 변경 작업입니다.");
       });
+
+      const nextStatus = normalizeApplicationStatus(result.status);
+      const calendarSync =
+        nextStatus === "confirmed"
+          ? await upsertRegularApplicationGoogleCalendarEvent(result.applicationId)
+          : await deleteRegularApplicationGoogleCalendarEvent(result.applicationId);
+
+      return {
+        ...result,
+        calendarSyncStatus: calendarSync.status,
+        ...(calendarSync.error ? { calendarSyncError: calendarSync.error } : {}),
+      };
     } catch (error) {
       console.error("transitionApplicationStatus failed", {
         uid,
