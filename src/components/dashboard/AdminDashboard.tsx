@@ -12,7 +12,6 @@ import { getDownloadURL, ref as storageRef } from "firebase/storage"
 import ExcelJS from "exceljs"
 import {
   Check,
-  CheckCircle2,
   ChevronsUpDown,
   FileSpreadsheet,
   Save,
@@ -33,6 +32,7 @@ import {
 } from "recharts"
 import { SELF_ASSESSMENT_SECTIONS } from "@/data/selfAssessment"
 import { db, storage } from "@/firebase/client"
+import { ManagedCompanyInfoEditor } from "@/components/dashboard/ManagedCompanyInfoEditor"
 import { generateCompanyAnalysisReportViaFunction } from "@/redesign/app/lib/functions"
 import {
   Dialog,
@@ -72,6 +72,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/redesign/app/components/ui/select"
+import { Switch } from "@/redesign/app/components/ui/switch"
 import { ContentLoadingOverlay } from "@/redesign/app/components/ui/content-loading-overlay"
 import {
   COMPANY_ANALYSIS_AC_FIELDS,
@@ -125,6 +126,7 @@ type ProgramSummary = {
   externalTicketLimit?: number
   companyIds?: string[]
   kpiDefinitions?: ProgramKpiDefinition[]
+  managerUid?: string | null
 }
 
 type MetricFormat = "number" | "currency"
@@ -742,7 +744,9 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
   const [loadingDetails, setLoadingDetails] = useState(false)
   const [companyQuery, setCompanyQuery] = useState("")
   const [voucherFilterTags, setVoucherFilterTags] = useState<VoucherFilterTag[]>([])
+  const [voucherFilterOpen, setVoucherFilterOpen] = useState(false)
   const [selectedProgramFilterId, setSelectedProgramFilterId] = useState<string>("all")
+  const [showManagedCompaniesOnly, setShowManagedCompaniesOnly] = useState(false)
   const [companyPage, setCompanyPage] = useState(1)
   const [activeTab, setActiveTab] = useState<
     "info" | "assessment" | "statusAnalysis" | "metrics" | "report" | "officeHours"
@@ -754,6 +758,7 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
   const [programMetricFilterOpen, setProgramMetricFilterOpen] = useState(false)
   const [programMetricFilterQuery, setProgramMetricFilterQuery] = useState("")
   const [loadingPrograms, setLoadingPrograms] = useState(false)
+  const [managedCompanyEditorOpen, setManagedCompanyEditorOpen] = useState(false)
   const [ticketDrafts, setTicketDrafts] = useState<
     Record<string, { internal: string; external: string }>
   >({})
@@ -857,6 +862,7 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
             externalTicketLimit?: number
             companyIds?: string[]
             kpiDefinitions?: ProgramKpiDefinition[]
+            managerUid?: string | null
           }
           return {
             id: docSnap.id,
@@ -865,6 +871,7 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
             externalTicketLimit: data.externalTicketLimit ?? 0,
             companyIds: data.companyIds ?? [],
             kpiDefinitions: Array.isArray(data.kpiDefinitions) ? data.kpiDefinitions : [],
+            managerUid: typeof data.managerUid === "string" ? data.managerUid : null,
           }
         })
         setPrograms(list)
@@ -1032,6 +1039,10 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
       mounted = false
     }
   }, [programs, selectedCompanyId])
+
+  useEffect(() => {
+    setManagedCompanyEditorOpen(false)
+  }, [activeTab, selectedCompanyId])
 
   const formatValue = (value?: string | number | null) => {
     if (value === null || value === undefined || value === "") return "-"
@@ -1292,6 +1303,18 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
     return programs.filter((program) => selectedCompanyProgramIds.includes(program.id))
   }, [programs, selectedCompanyProgramIds])
 
+  const managedProgramsForSelectedCompany = useMemo(
+    () => participatingPrograms.filter((program) => program.managerUid === user.uid),
+    [participatingPrograms, user.uid],
+  )
+
+  const canEditSelectedCompanyInfo = managedProgramsForSelectedCompany.length > 0
+
+  const managedProgramNamesForSelectedCompany = useMemo(
+    () => managedProgramsForSelectedCompany.map((program) => program.name.trim()).filter(Boolean),
+    [managedProgramsForSelectedCompany],
+  )
+
   const companyProgramMetricViews = useMemo(
     () =>
       normalizeProgramMetrics(
@@ -1516,10 +1539,31 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
     setEditingTicketProgramId(null)
   }
 
+  const managedProgramIdSet = useMemo(
+    () =>
+      new Set(
+        programs.filter((program) => program.managerUid === user.uid).map((program) => program.id),
+      ),
+    [programs, user.uid],
+  )
+
+  const managedCompanyIdSet = useMemo(
+    () =>
+      new Set(
+        companies
+          .filter((company) => company.programs.some((programId) => managedProgramIdSet.has(programId)))
+          .map((company) => company.id),
+      ),
+    [companies, managedProgramIdSet],
+  )
+
   const filteredCompanies = useMemo(() => {
     const query = companyQuery.trim().toLowerCase()
     return companies.filter((company) => {
       const name = (company.name ?? "").toLowerCase()
+      if (showManagedCompaniesOnly && !managedCompanyIdSet.has(company.id)) {
+        return false
+      }
       if (query && !name.includes(query)) {
         return false
       }
@@ -1534,13 +1578,21 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
       }
       return true
     })
-  }, [companies, companyQuery, selectedProgramFilterId, voucherFilterTags])
+  }, [
+    companies,
+    companyQuery,
+    managedCompanyIdSet,
+    selectedProgramFilterId,
+    showManagedCompaniesOnly,
+    voucherFilterTags,
+  ])
 
   const showCompanyPaginationFooter =
     filteredCompanies.length > COMPANY_PAGE_SIZE ||
     companyQuery.trim().length > 0 ||
     voucherFilterTags.length > 0 ||
-    selectedProgramFilterId !== "all"
+    selectedProgramFilterId !== "all" ||
+    showManagedCompaniesOnly
 
   const totalCompanyPages = Math.max(1, Math.ceil(filteredCompanies.length / COMPANY_PAGE_SIZE))
 
@@ -1551,7 +1603,7 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
 
   useEffect(() => {
     setCompanyPage(1)
-  }, [companyQuery, selectedProgramFilterId, voucherFilterTags])
+  }, [companyQuery, selectedProgramFilterId, showManagedCompaniesOnly, voucherFilterTags])
 
   useEffect(() => {
     setCompanyPage((prev) => Math.min(prev, totalCompanyPages))
@@ -1578,18 +1630,39 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
       if (
         companyQuery.trim().length > 0 ||
         voucherFilterTags.length > 0 ||
-        selectedProgramFilterId !== "all"
+        selectedProgramFilterId !== "all" ||
+        showManagedCompaniesOnly
       ) {
         return "검색 결과에 해당하는 기업이 없습니다."
       }
       return "등록된 기업이 없습니다."
     }
     return "회사를 먼저 선택해주세요."
-  }, [companyQuery, filteredCompanies.length, selectedProgramFilterId, voucherFilterTags.length])
+  }, [
+    companyQuery,
+    filteredCompanies.length,
+    selectedProgramFilterId,
+    showManagedCompaniesOnly,
+    voucherFilterTags.length,
+  ])
 
   const programFilterOptions = useMemo(
     () => [...programs].sort((a, b) => a.name.localeCompare(b.name, "ko-KR")),
     [programs],
+  )
+
+  const voucherFilterOptions = useMemo(
+    () =>
+      [
+        { id: "export" as const, label: "수출바우처 보유" },
+        { id: "innovation" as const, label: "혁신바우처 보유" },
+      ] satisfies Array<{ id: VoucherFilterTag; label: string }>,
+    [],
+  )
+
+  const selectedVoucherFilterOptions = useMemo(
+    () => voucherFilterOptions.filter((option) => voucherFilterTags.includes(option.id)),
+    [voucherFilterOptions, voucherFilterTags],
   )
 
   const toggleVoucherFilterTag = (tag: VoucherFilterTag) => {
@@ -2443,61 +2516,135 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
         </div>
         <div className="mx-auto w-full max-w-[1600px] px-6 pt-5">
           <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
-            <div className="flex flex-col gap-4 lg:flex-row lg:items-end">
-              <label className="min-w-0 text-xs font-medium text-slate-500 lg:w-[280px] lg:flex-none">
-                회사명
-                <input
-                  className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm font-normal text-slate-700 focus:border-slate-400 focus:outline-none"
-                  placeholder="회사명 검색"
-                  value={companyQuery}
-                  onChange={(e) => setCompanyQuery(e.target.value)}
-                />
-              </label>
-              <label className="w-full min-w-0 text-xs font-medium text-slate-500 lg:w-[320px] lg:flex-none">
-                사업
-                <Select value={selectedProgramFilterId} onValueChange={setSelectedProgramFilterId}>
-                  <SelectTrigger className="mt-1 h-10 border border-slate-200 bg-white text-sm text-slate-700 shadow-none">
-                    <SelectValue placeholder="전체 사업" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">전체 사업</SelectItem>
-                    {programFilterOptions.map((program) => (
-                      <SelectItem key={program.id} value={program.id}>
-                        {program.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </label>
-              <div className="flex flex-wrap gap-1.5 lg:pb-1">
-                <button
-                  type="button"
-                  onClick={() => toggleVoucherFilterTag("export")}
-                  className={`inline-flex h-9 items-center gap-1 rounded-full border px-3 text-[12px] font-semibold transition ${
-                    voucherFilterTags.includes("export")
-                      ? "border-slate-500 bg-slate-200 text-slate-800"
-                      : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
-                  }`}
-                >
-                  {voucherFilterTags.includes("export") ? (
-                    <CheckCircle2 className="h-3.5 w-3.5" />
-                  ) : null}
-                  수출바우처 보유
-                </button>
-                <button
-                  type="button"
-                  onClick={() => toggleVoucherFilterTag("innovation")}
-                  className={`inline-flex h-9 items-center gap-1 rounded-full border px-3 text-[12px] font-semibold transition ${
-                    voucherFilterTags.includes("innovation")
-                      ? "border-slate-500 bg-slate-200 text-slate-800"
-                      : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
-                  }`}
-                >
-                  {voucherFilterTags.includes("innovation") ? (
-                    <CheckCircle2 className="h-3.5 w-3.5" />
-                  ) : null}
-                  혁신바우처 보유
-                </button>
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+              <div className="flex min-w-0 flex-col gap-4 lg:flex-1 lg:flex-row lg:items-end">
+                <label className="min-w-0 text-xs font-medium text-slate-500 lg:w-[280px] lg:flex-none">
+                  회사명
+                  <input
+                    className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm font-normal text-slate-700 focus:border-slate-400 focus:outline-none"
+                    placeholder="회사명 검색"
+                    value={companyQuery}
+                    onChange={(e) => setCompanyQuery(e.target.value)}
+                  />
+                </label>
+                <label className="w-full min-w-0 text-xs font-medium text-slate-500 lg:w-[320px] lg:flex-none">
+                  사업
+                  <Select value={selectedProgramFilterId} onValueChange={setSelectedProgramFilterId}>
+                    <SelectTrigger className="mt-1 h-10 border border-slate-200 bg-white text-sm text-slate-700 shadow-none">
+                      <SelectValue placeholder="전체 사업" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">전체 사업</SelectItem>
+                      {programFilterOptions.map((program) => (
+                        <SelectItem key={program.id} value={program.id}>
+                          {program.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </label>
+                <label className="w-full min-w-0 text-xs font-medium text-slate-500 lg:w-[280px] lg:flex-none">
+                  바우처 보유여부
+                  <Popover open={voucherFilterOpen} onOpenChange={setVoucherFilterOpen}>
+                    <PopoverTrigger asChild>
+                      <div
+                        role="combobox"
+                        aria-expanded={voucherFilterOpen}
+                        tabIndex={0}
+                        className="mt-1 flex h-10 w-full cursor-pointer items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-sm outline-none transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                      >
+                        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
+                          {selectedVoucherFilterOptions.length > 0 ? (
+                            selectedVoucherFilterOptions.map((option) => (
+                              <Badge
+                                key={option.id}
+                                variant="secondary"
+                                className="bg-slate-100 px-1.5 py-0 text-[11px] text-slate-700"
+                              >
+                                {option.label}
+                              </Badge>
+                            ))
+                          ) : (
+                            <span className="px-1 text-[12px] text-slate-500">전체</span>
+                          )}
+                        </div>
+                        {voucherFilterTags.length > 0 ? (
+                          <button
+                            type="button"
+                            className="rounded-sm p-0.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                            onClick={(event) => {
+                              event.preventDefault()
+                              event.stopPropagation()
+                              setVoucherFilterTags([])
+                            }}
+                            aria-label="바우처 필터 전체 해제"
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        ) : null}
+                        <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                      </div>
+                    </PopoverTrigger>
+                    <PopoverContent align="start" className="w-[280px] p-0">
+                      <Command>
+                        <CommandList>
+                          <CommandGroup>
+                            {voucherFilterOptions.map((option) => {
+                              const isSelected = voucherFilterTags.includes(option.id)
+                              return (
+                                <CommandItem
+                                  key={option.id}
+                                  value={option.id}
+                                  onSelect={() => toggleVoucherFilterTag(option.id)}
+                                  className="min-h-8 cursor-pointer px-2 py-1 text-sm"
+                                >
+                                  <Check
+                                    className={
+                                      isSelected
+                                        ? "h-3.5 w-3.5 text-slate-700 opacity-100"
+                                        : "h-3.5 w-3.5 opacity-0"
+                                    }
+                                  />
+                                  <span className="min-w-0 flex-1">{option.label}</span>
+                                </CommandItem>
+                              )
+                            })}
+                          </CommandGroup>
+                        </CommandList>
+                      </Command>
+                      <div className="flex items-center justify-between border-t px-3 py-2">
+                        <div className="min-h-[16px] text-xs text-slate-500">
+                          {voucherFilterTags.length > 0
+                            ? `${voucherFilterTags.length}개 조건 선택됨`
+                            : "\u00A0"}
+                        </div>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className={cn(
+                            "h-7 px-2",
+                            voucherFilterTags.length > 0 ? "" : "pointer-events-none opacity-0",
+                          )}
+                          onClick={() => setVoucherFilterTags([])}
+                          disabled={voucherFilterTags.length === 0}
+                        >
+                          전체 해제
+                        </Button>
+                      </div>
+                    </PopoverContent>
+                  </Popover>
+                </label>
+              </div>
+              <div className="flex justify-end lg:flex-none">
+                <div className="inline-flex h-10 items-center gap-2">
+                  <span className="text-[12px] font-semibold text-slate-700">내 사업만 보기</span>
+                  <Switch
+                    checked={showManagedCompaniesOnly}
+                    onCheckedChange={setShowManagedCompaniesOnly}
+                    aria-label="내 사업만 보기"
+                  />
+                </div>
               </div>
             </div>
           </div>
@@ -2680,7 +2827,13 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
               ) : activeTab === "info" ? (
                 !companyInfo ? (
                   <div className="rounded-xl border border-slate-100 bg-slate-50 p-4 text-xs text-slate-500">
-                    기업 정보가 없습니다.
+                    <div>기업 정보가 없습니다.</div>
+                    {canEditSelectedCompanyInfo ? (
+                      <div className="mt-2 text-slate-600">
+                        이 기업은 내 담당 사업에 속해 있으므로 상단의 기업정보 수정 버튼으로 입력을
+                        시작할 수 있습니다.
+                      </div>
+                    ) : null}
                   </div>
                 ) : (
                   <div className="min-h-0 flex-1 overflow-y-auto text-sm text-slate-700">
@@ -2722,6 +2875,32 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
                               ))}
                             </div>
                           </div>
+                        </div>
+                      </div>
+
+                      <div
+                        className={`rounded-2xl border px-4 py-3 text-sm ${
+                          canEditSelectedCompanyInfo
+                            ? "border-emerald-200 bg-emerald-50 text-emerald-900"
+                            : "border-slate-200 bg-slate-50 text-slate-600"
+                        }`}
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <div>
+                            {canEditSelectedCompanyInfo
+                              ? "이 기업은 현재 로그인한 PM의 담당 사업에 포함되어 있어 직접 수정할 수 있습니다."
+                              : "이 기업은 현재 로그인한 PM의 담당 사업에 포함되지 않아 조회만 가능합니다."}
+                          </div>
+                          {canEditSelectedCompanyInfo ? (
+                            <button
+                              type="button"
+                              onClick={() => setManagedCompanyEditorOpen(true)}
+                              className="inline-flex shrink-0 items-center gap-2 rounded-lg border border-emerald-800 bg-emerald-900 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-emerald-800"
+                            >
+                              <Save className="h-3.5 w-3.5" />
+                              기업정보 수정
+                            </button>
+                          ) : null}
                         </div>
                       </div>
 
@@ -4159,6 +4338,30 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
           </div>
         </div>
       </div>
+
+      <Dialog open={managedCompanyEditorOpen} onOpenChange={setManagedCompanyEditorOpen}>
+        <DialogContent className="!flex h-[90vh] max-h-[90vh] flex-col !gap-0 overflow-hidden p-0 sm:max-w-[1180px]">
+          <DialogHeader className="border-b border-slate-200 px-6 py-4 text-left">
+            <DialogTitle>기업 정보 수정</DialogTitle>
+            <DialogDescription>
+              현재 로그인한 PM이 담당하는 사업에 속한 기업만 수정할 수 있습니다.
+            </DialogDescription>
+          </DialogHeader>
+          {selectedCompanyId && canEditSelectedCompanyInfo ? (
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+              <ManagedCompanyInfoEditor
+                companyId={selectedCompanyId}
+                companyName={selectedCompanyName}
+                programNames={managedProgramNamesForSelectedCompany}
+                embedded
+                onRequestClose={() => setManagedCompanyEditorOpen(false)}
+              />
+            </div>
+          ) : (
+            <div className="px-6 py-8 text-sm text-slate-500">수정할 수 있는 기업이 아닙니다.</div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

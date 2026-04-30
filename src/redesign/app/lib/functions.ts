@@ -1,5 +1,6 @@
 import { httpsCallable } from "firebase/functions";
 import { functions, isFirebaseConfigured } from "@/redesign/app/lib/firebase";
+import type { CompanyInfoRecord } from "@/types/company";
 import type {
   ApplicationStatus,
   ConsultantAvailability,
@@ -85,6 +86,17 @@ type UpdateCompanyProgramsPayload = {
 type UpdateCompanyProgramsResult = {
   companyId: string;
   programIds: string[];
+};
+
+export type SaveManagedCompanyInfoPayload = {
+  companyId: string;
+  companyInfo: CompanyInfoRecord;
+  saveType: "draft" | "final";
+};
+
+type SaveManagedCompanyInfoResult = {
+  companyId: string;
+  saveType: "draft" | "final";
 };
 
 export type SyncConsultantSchedulingPayload = {
@@ -273,6 +285,22 @@ export async function updateCompanyProgramsViaFunction(
     UpdateCompanyProgramsPayload,
     UpdateCompanyProgramsResult
   >(functions, "updateCompanyPrograms");
+
+  const result = await callable(payload);
+  return result.data;
+}
+
+export async function saveManagedCompanyInfoViaFunction(
+  payload: SaveManagedCompanyInfoPayload
+) {
+  if (!isFirebaseConfigured || !functions) {
+    throw new Error("Firebase Functions is not configured");
+  }
+
+  const callable = httpsCallable<
+    SaveManagedCompanyInfoPayload,
+    SaveManagedCompanyInfoResult
+  >(functions, "saveManagedCompanyInfo");
 
   const result = await callable(payload);
   return result.data;

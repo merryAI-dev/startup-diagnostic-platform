@@ -442,6 +442,48 @@ function normalizeStringArray(values) {
   );
 }
 
+async function assertManagedCompanyEditor(uid, companyId) {
+  const [profileSnap, companySnap] = await Promise.all([
+    db.collection("profiles").doc(uid).get(),
+    db.collection("companies").doc(companyId).get(),
+  ]);
+
+  if (!profileSnap.exists) {
+    throw new HttpsError("permission-denied", "프로필을 찾을 수 없습니다.");
+  }
+  if (!companySnap.exists) {
+    throw new HttpsError("not-found", "회사를 찾을 수 없습니다.");
+  }
+
+  const profile = profileSnap.data() || {};
+  const company = companySnap.data() || {};
+  const role = normalizeApprovalRole(profile.role, "");
+  const isActive = profile.active !== false;
+
+  if (!isActive || (role !== "admin" && role !== "consultant")) {
+    throw new HttpsError("permission-denied", "기업 정보를 수정할 권한이 없습니다.");
+  }
+
+  const companyProgramIds = normalizeStringArray(company.programs);
+  if (companyProgramIds.length === 0) {
+    throw new HttpsError("permission-denied", "담당 사업에 연결된 기업만 수정할 수 있습니다.");
+  }
+
+  const programSnaps = await Promise.all(
+    companyProgramIds.map((programId) => db.collection("programs").doc(programId).get())
+  );
+  const hasManagedProgram = programSnaps.some((programSnap) => {
+    if (!programSnap.exists) return false;
+    return normalizeString(programSnap.data()?.managerUid) === uid;
+  });
+
+  if (!hasManagedProgram) {
+    throw new HttpsError("permission-denied", "담당 기업만 수정할 수 있습니다.");
+  }
+
+  return { company };
+}
+
 function getAffectedProgramIds(currentProgramIds, nextProgramIds) {
   return Array.from(
     new Set([
@@ -628,6 +670,67 @@ exports.updateCompanyPrograms = onCall(
         programIds: nextProgramIds,
       };
     });
+  }
+);
+
+exports.saveManagedCompanyInfo = onCall(
+  {
+    region: REGION,
+  },
+  async (request) => {
+    if (!request.auth?.uid) {
+      throw new HttpsError("unauthenticated", "로그인이 필요합니다.");
+    }
+
+    const companyId = normalizeString(request.data?.companyId);
+    const companyInfo = request.data?.companyInfo;
+    const saveType = request.data?.saveType === "draft" ? "draft" : "final";
+
+    if (!companyId) {
+      throw new HttpsError("invalid-argument", "회사 ID가 필요합니다.");
+    }
+    if (!companyInfo || typeof companyInfo !== "object" || Array.isArray(companyInfo)) {
+      throw new HttpsError("invalid-argument", "기업 정보 payload가 필요합니다.");
+    }
+
+    await assertManagedCompanyEditor(request.auth.uid, companyId);
+
+    const companyInfoRef = db.collection("companies").doc(companyId).collection("companyInfo").doc("info");
+    const existingInfoSnap = await companyInfoRef.get();
+    const existingInfo = existingInfoSnap.exists ? existingInfoSnap.data() || {} : {};
+    const existingMetadata =
+      existingInfo.metadata && typeof existingInfo.metadata === "object" ? existingInfo.metadata : {};
+    const payloadMetadata =
+      companyInfo.metadata && typeof companyInfo.metadata === "object" ? companyInfo.metadata : {};
+    const nextCompanyName = normalizeString(companyInfo?.basic?.companyInfo) || null;
+
+    await companyInfoRef.set(
+      {
+        ...companyInfo,
+        metadata: {
+          ...existingMetadata,
+          ...payloadMetadata,
+          saveType,
+          createdAt: existingMetadata.createdAt || FieldValue.serverTimestamp(),
+          updatedAt: FieldValue.serverTimestamp(),
+          updatedByUid: request.auth.uid,
+        },
+      },
+      { merge: true }
+    );
+
+    await db.collection("companies").doc(companyId).set(
+      {
+        name: nextCompanyName,
+        updatedAt: FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
+
+    return {
+      companyId,
+      saveType,
+    };
   }
 );
 

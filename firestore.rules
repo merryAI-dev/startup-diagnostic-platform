@@ -195,7 +195,7 @@ service cloud.firestore {
       }
 
       allow read: if isCompanyMember(companyId) || isInternalOperator();
-      allow create, update: if isCompanyMember(companyId) || isAdmin() || isConsultantManualCompanyOwnerAfter();
+      allow create, update: if isCompanyMember(companyId) || isConsultantManualCompanyOwnerAfter();
       allow delete: if false;
     }
 
