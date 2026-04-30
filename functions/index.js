@@ -1326,6 +1326,10 @@ async function syncProgramDefinitionCore(params) {
       patch.allowedAgendaIds === undefined
         ? normalizeStringArray(currentProgram.allowedAgendaIds)
         : normalizeStringArray(patch.allowedAgendaIds),
+    managerUid:
+      patch.managerUid === undefined
+        ? normalizeString(currentProgram.managerUid) || null
+        : normalizeString(patch.managerUid) || null,
     periodStart:
       patch.periodStart === undefined ? normalizeString(currentProgram.periodStart) || undefined : normalizeString(patch.periodStart) || undefined,
     periodEnd:
@@ -2768,6 +2772,8 @@ exports.syncProgramDefinition = onCall(
           : {}),
         ...(Object.prototype.hasOwnProperty.call(payload, "allowedAgendaIds")
           ? { allowedAgendaIds: payload.allowedAgendaIds }
+        ...(Object.prototype.hasOwnProperty.call(payload, "managerUid")
+          ? { managerUid: payload.managerUid }
           : {}),
         ...(Object.prototype.hasOwnProperty.call(payload, "periodStart")
           ? { periodStart: payload.periodStart }

@@ -38,6 +38,7 @@ export interface Program {
   companyLimit?: number;
   companyIds?: string[];
   allowedAgendaIds?: string[];
+  managerUid?: string | null;
   periodStart?: string; // YYYY-MM-DD
   periodEnd?: string; // YYYY-MM-DD
   weekdays?: ProgramWeekday[];

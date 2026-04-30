@@ -795,6 +795,24 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
   }, [companyDocs])
   const [profileList, setProfileList] = useState<RawProfileApprovalDoc[]>([])
   const [users, setUsers] = useState<UserWithPermissions[]>([])
+  const adminAssignmentCandidates = useMemo(
+    () =>
+      profileList
+        .filter((doc) => (doc.active === true || !!doc.approvedAt))
+        .filter((doc) => toUserRole(doc.role, "user") === "admin")
+        .map((doc) => ({
+          id: doc.id,
+          email: doc.email?.trim() || "이메일 미입력",
+          active: doc.active === true,
+        }))
+        .sort((a, b) => {
+          if (a.active !== b.active) {
+            return a.active ? -1 : 1
+          }
+          return a.email.localeCompare(b.email, "ko")
+        }),
+    [profileList],
+  )
   const companyDirectory = useMemo(() => {
     if (isFirebaseConfigured) {
       return companyDocs.map(
@@ -1576,6 +1594,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
         companyLimit: doc.companyLimit ?? 0,
         companyIds: doc.companyIds ?? [],
         allowedAgendaIds: doc.allowedAgendaIds ?? [],
+        managerUid: typeof doc.managerUid === "string" ? doc.managerUid : null,
         kpiDefinitions: doc.kpiDefinitions ?? [],
       })),
     )
@@ -3999,6 +4018,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
           ...(data.allowedAgendaIds !== undefined
             ? { allowedAgendaIds: data.allowedAgendaIds }
             : {}),
+          ...(data.managerUid !== undefined ? { managerUid: data.managerUid } : {}),
           ...(data.periodStart !== undefined ? { periodStart: data.periodStart } : {}),
           ...(data.periodEnd !== undefined ? { periodEnd: data.periodEnd } : {}),
           ...(data.weekdays !== undefined ? { weekdays: data.weekdays } : {}),
@@ -4830,6 +4850,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
                 reports={reports}
                 agendas={agendaList}
                 companies={companyDirectory}
+                adminOptions={adminAssignmentCandidates}
                 onAddProgram={handleAddProgram}
                 onUpdateProgram={handleUpdateProgram}
                 onUpdateProgramCompanies={handleUpdateProgramCompanies}
@@ -4847,6 +4868,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
                 reports={reports}
                 agendas={agendaList}
                 companies={companyDirectory}
+                adminOptions={adminAssignmentCandidates}
                 onAddProgram={handleAddProgram}
                 onUpdateProgram={handleUpdateProgram}
                 onUpdateProgramCompanies={handleUpdateProgramCompanies}

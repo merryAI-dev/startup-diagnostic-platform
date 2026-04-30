@@ -41,6 +41,13 @@ import {
 import { Input } from "@/redesign/app/components/ui/input"
 import { Label } from "@/redesign/app/components/ui/label"
 import { Progress } from "@/redesign/app/components/ui/progress"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/redesign/app/components/ui/select"
 import { Switch } from "@/redesign/app/components/ui/switch"
 import {
   Table,
@@ -59,6 +66,7 @@ interface AdminProgramsProps {
   reports: OfficeHourReport[]
   agendas: Agenda[]
   companies: { id: string; name: string; programs?: string[]; ownerUid?: string | null }[]
+  adminOptions: { id: string; email: string; active: boolean }[]
   onAddProgram: (data: Omit<Program, "id">) => void
   onUpdateProgram: (id: string, data: Partial<Program>) => Promise<boolean> | boolean
   onUpdateProgramCompanies: (id: string, companyIds: string[]) => Promise<boolean> | boolean
@@ -72,6 +80,7 @@ type ProgramFormState = {
   internalTicketLimit: string
   externalTicketLimit: string
   companyLimit: string
+  managerUid: string
   targetHours: string
   periodStart: string
   periodEnd: string
@@ -102,6 +111,7 @@ function createDefaultProgramForm(): ProgramFormState {
     internalTicketLimit: "0",
     externalTicketLimit: "0",
     companyLimit: "0",
+    managerUid: "",
     targetHours: "0",
     periodStart: "",
     periodEnd: "",
@@ -195,6 +205,7 @@ function toProgramForm(program: Program | null): ProgramFormState {
     internalTicketLimit: String(program.internalTicketLimit ?? 0),
     externalTicketLimit: String(program.externalTicketLimit ?? 0),
     companyLimit: String(program.companyLimit ?? 0),
+    managerUid: program.managerUid ?? "",
     targetHours: String(program.targetHours),
     periodStart: program.periodStart ?? "",
     periodEnd: program.periodEnd ?? "",
@@ -207,6 +218,7 @@ export function AdminPrograms({
   reports,
   agendas,
   companies,
+  adminOptions,
   onAddProgram,
   onUpdateProgram,
   onUpdateProgramCompanies,
@@ -353,6 +365,10 @@ export function AdminPrograms({
     () => programs.find((program) => program.id === editingProgramId) ?? null,
     [editingProgramId, programs],
   )
+  const adminOptionById = useMemo(
+    () => new Map(adminOptions.map((admin) => [admin.id, admin])),
+    [adminOptions],
+  )
   const sortedCompanies = useMemo(
     () => [...companies].sort((a, b) => a.name.localeCompare(b.name)),
     [companies],
@@ -371,6 +387,10 @@ export function AdminPrograms({
     [sortedAgendas],
   )
   const agendaSearchQuery = agendaSearch.trim().toLowerCase()
+  const editingManagerOption = useMemo(() => {
+    if (!editingProgram?.managerUid) return null
+    return adminOptionById.get(editingProgram.managerUid) ?? null
+  }, [adminOptionById, editingProgram?.managerUid])
   const editingProgramCompanyIds = useMemo(() => {
     if (!editingProgram) return []
     return companyIdsByProgram.get(editingProgram.id) ?? []
@@ -708,6 +728,7 @@ export function AdminPrograms({
           maxApplications,
           usedApplications: Math.min(editingProgram.usedApplications, maxApplications),
           companyLimit,
+          managerUid: detailForm.managerUid.trim() || null,
           periodStart: detailForm.periodStart || undefined,
           periodEnd: detailForm.periodEnd || undefined,
           kpiDefinitions: sanitizeProgramKpiDrafts(programKpiDrafts[editingProgram.id] ?? []),
@@ -784,6 +805,10 @@ export function AdminPrograms({
     : "사업명, 시수 진행률, 신청 횟수를 확인하고 사업을 클릭해 신청내역과 상세 통계를 볼 수 있습니다."
   const pageTitleClassName = "text-2xl font-semibold text-slate-900"
   const pageDescriptionClassName = "mt-1 text-sm text-slate-500"
+  const getManagerEmail = (program: Program) => {
+    if (!program.managerUid) return "미배정"
+    return adminOptionById.get(program.managerUid)?.email ?? "알 수 없는 관리자"
+  }
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-slate-50">
@@ -825,6 +850,7 @@ export function AdminPrograms({
                   <TableHeader className="[&_tr]:sticky [&_tr]:top-0 [&_tr]:z-10 [&_tr]:bg-white">
                     <TableRow className="hover:bg-white">
                       <TableHead className="bg-white">사업명</TableHead>
+                      <TableHead className="bg-white">관리자</TableHead>
                       <TableHead className="bg-white">기간</TableHead>
                       <TableHead className="bg-white">시수 진행률</TableHead>
                       <TableHead className="bg-white">신청 횟수</TableHead>
@@ -835,7 +861,7 @@ export function AdminPrograms({
                     {filteredProgramStats.length === 0 && (
                       <TableRow>
                         <TableCell
-                          colSpan={5}
+                          colSpan={6}
                           className="h-24 text-center text-sm text-muted-foreground"
                         >
                           {searchQuery.trim() ? "검색 결과가 없습니다." : "등록된 사업이 없습니다."}
@@ -853,6 +879,9 @@ export function AdminPrograms({
                             />
                             <span className="font-medium">{item.program.name}</span>
                           </div>
+                        </TableCell>
+                        <TableCell className="text-sm text-muted-foreground">
+                          {getManagerEmail(item.program)}
                         </TableCell>
                         <TableCell className="text-sm text-muted-foreground">
                           {prettyDateRange(item.program.periodStart, item.program.periodEnd)}
@@ -1479,53 +1508,90 @@ export function AdminPrograms({
                         사업명과 설명, 운영 기간을 함께 관리합니다.
                       </p>
                     </div>
-                    <div className="grid grid-cols-1 gap-6 px-6 py-5 md:grid-cols-2">
-                      <div className="space-y-2">
-                        <Label>사업명</Label>
-                      <Input
-                        value={detailForm.name}
-                        onChange={(event) =>
-                          setDetailForm((prev) => ({ ...prev, name: event.target.value }))
-                        }
-                        required
-                        disabled={programDetailSaving}
-                      />
+                    <div className="space-y-6 px-6 py-5">
+                      <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+                        <div className="space-y-2">
+                          <Label>사업명</Label>
+                          <Input
+                            value={detailForm.name}
+                            onChange={(event) =>
+                              setDetailForm((prev) => ({ ...prev, name: event.target.value }))
+                            }
+                            required
+                            disabled={programDetailSaving}
+                          />
+                        </div>
+
+                        <div className="space-y-2">
+                          <Label>사업 설명</Label>
+                          <Textarea
+                            rows={4}
+                            value={detailForm.description}
+                            onChange={(event) =>
+                              setDetailForm((prev) => ({ ...prev, description: event.target.value }))
+                            }
+                            disabled={programDetailSaving}
+                          />
+                        </div>
                       </div>
 
-                      <div className="space-y-2">
-                        <Label>사업 설명</Label>
-                      <Textarea
-                        rows={4}
-                        value={detailForm.description}
-                        onChange={(event) =>
-                          setDetailForm((prev) => ({ ...prev, description: event.target.value }))
-                        }
-                        disabled={programDetailSaving}
-                      />
+                      <div className="rounded-xl border border-slate-200 bg-slate-50/80 px-4 py-4">
+                        <div className="space-y-2">
+                          <Label>관리자 배정</Label>
+                          <Select
+                            value={detailForm.managerUid || "unassigned"}
+                            onValueChange={(value) =>
+                              setDetailForm((prev) => ({
+                                ...prev,
+                                managerUid: value === "unassigned" ? "" : value,
+                              }))
+                            }
+                            disabled={programDetailSaving}
+                          >
+                            <SelectTrigger>
+                              <SelectValue placeholder="관리자를 선택하세요" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="unassigned">미배정</SelectItem>
+                              {adminOptions.map((admin) => (
+                                <SelectItem key={admin.id} value={admin.id}>
+                                  {admin.email}
+                                </SelectItem>
+                              ))}
+                              {editingProgram.managerUid && !editingManagerOption ? (
+                                <SelectItem value={editingProgram.managerUid}>
+                                  알 수 없는 관리자
+                                </SelectItem>
+                              ) : null}
+                            </SelectContent>
+                          </Select>
+                        </div>
                       </div>
 
-                      <div className="space-y-2">
-                        <Label>기간 시작</Label>
-                      <Input
-                        type="date"
-                        value={detailForm.periodStart}
-                        onChange={(event) =>
-                          setDetailForm((prev) => ({ ...prev, periodStart: event.target.value }))
-                        }
-                        disabled={programDetailSaving}
-                      />
-                      </div>
+                      <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+                        <div className="space-y-2">
+                          <Label>기간 시작</Label>
+                          <Input
+                            type="date"
+                            value={detailForm.periodStart}
+                            onChange={(event) =>
+                              setDetailForm((prev) => ({ ...prev, periodStart: event.target.value }))
+                            }
+                            disabled={programDetailSaving}
+                          />
+                        </div>
 
-                      <div className="space-y-2">
-                        <Label>기간 종료</Label>
-                      <Input
-                        type="date"
-                        value={detailForm.periodEnd}
-                        onChange={(event) =>
-                          setDetailForm((prev) => ({ ...prev, periodEnd: event.target.value }))
-                        }
-                        disabled={programDetailSaving}
-                      />
+                        <div className="space-y-2">
+                          <Label>기간 종료</Label>
+                          <Input
+                            type="date"
+                            value={detailForm.periodEnd}
+                            onChange={(event) =>
+                              setDetailForm((prev) => ({ ...prev, periodEnd: event.target.value }))
+                            }
+                            disabled={programDetailSaving}
+                          />
+                        </div>
                       </div>
                     </div>
                   </section>

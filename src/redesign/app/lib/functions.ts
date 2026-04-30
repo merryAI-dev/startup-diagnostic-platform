@@ -115,6 +115,7 @@ export type SyncProgramDefinitionPayload = {
   externalTicketLimit?: number;
   companyLimit?: number;
   allowedAgendaIds?: string[];
+  managerUid?: string | null;
   periodStart?: string;
   periodEnd?: string;
   weekdays?: ProgramWeekday[];
