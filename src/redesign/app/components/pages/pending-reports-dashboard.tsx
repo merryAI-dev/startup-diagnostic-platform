@@ -44,6 +44,8 @@ import { storage as firebaseStorage } from "@/redesign/app/lib/firebase";
 import { toast } from "sonner";
 import { parseLocalDateTimeKey } from "@/redesign/app/lib/date-keys";
 
+const EXCEL_CELL_SAFE_TEXT_LIMIT = 30000;
+
 const parseLocalDate = (value?: string | null) => {
   if (!value) return null;
   const [year, month, day] = value.split("-").map(Number);
@@ -106,6 +108,21 @@ const parseReportContent = (raw?: string | null) => {
     companyStatus: companyStatusMatch?.[1]?.trim() ?? "",
     advisoryContent: advisoryContentMatch?.[1]?.trim() ?? "",
   };
+};
+
+const splitTextForExcelCells = (value: string, chunkSize = EXCEL_CELL_SAFE_TEXT_LIMIT) => {
+  const normalized = value || "";
+  if (normalized.length <= chunkSize) {
+    return [normalized];
+  }
+
+  const chunks: string[] = [];
+  let index = 0;
+  while (index < normalized.length) {
+    chunks.push(normalized.slice(index, index + chunkSize));
+    index += chunkSize;
+  }
+  return chunks;
 };
 
 const isExcelSupportedImageType = (contentType: string) => {
@@ -218,7 +235,7 @@ const resolveManualReportApplicationType = (
 
 const getApplicationTypeLabel = (type?: OfficeHourType) => {
   if (type === "regular") return "정기";
-  if (type === "mentoring") return "멘토링";
+  if (type === "mentoring") return "멘토링&사후관리";
   if (type === "custom") return "기타";
   return "비정기";
 };
@@ -233,13 +250,13 @@ const getApplicationTypeBadgeClassName = (type?: OfficeHourType) => {
 const getManualApplicationOfficeHourTitle = (type: OfficeHourType, topic?: string) => {
   const trimmedTopic = topic?.trim();
   if (trimmedTopic) return trimmedTopic;
-  return type === "mentoring" ? "멘토링 일지" : "비정기 오피스아워";
+  return type === "mentoring" ? "멘토링&사후관리 일지" : "비정기 오피스아워";
 };
 
 const getManualApplicationAgenda = (type: OfficeHourType, topic?: string) => {
   const trimmedTopic = topic?.trim();
   if (trimmedTopic) return trimmedTopic;
-  return type === "mentoring" ? "멘토링" : "비정기 오피스아워";
+  return type === "mentoring" ? "멘토링&사후관리" : "비정기 오피스아워";
 };
 
 interface PendingReportsDashboardProps {
@@ -498,6 +515,7 @@ export function PendingReportsDashboard({
         ["참여자", participantText || "-"],
         ["미팅 아젠다", content.companyStatus || "-"],
         ["자문내용", content.advisoryContent || "-"],
+        ["스크립트", report.meetingRawText || "-"],
         ["팔로업", report.followUp || "-"],
         ["첨부 사진", report.photos?.length ? `${report.photos.length}개` : "-"],
       ];
@@ -520,27 +538,31 @@ export function PendingReportsDashboard({
 
       let rowIndex = 3;
       rows.forEach(([label, value]) => {
-        const row = worksheet.getRow(rowIndex);
-        row.getCell(1).value = label;
-        row.getCell(2).value = value;
-        row.getCell(1).font = { name: "Malgun Gothic", size: 10, bold: true };
-        row.getCell(2).font = { name: "Malgun Gothic", size: 10 };
-        row.getCell(1).alignment = { vertical: "top", wrapText: true };
-        row.getCell(2).alignment = { vertical: "top", wrapText: true };
-        row.getCell(1).fill = {
-          type: "pattern",
-          pattern: "solid",
-          fgColor: { argb: "FFF8FAFC" },
-        };
-        row.eachCell((cell) => {
-          cell.border = {
-            top: { style: "thin", color: { argb: "FFCBD5E1" } },
-            left: { style: "thin", color: { argb: "FFCBD5E1" } },
-            bottom: { style: "thin", color: { argb: "FFCBD5E1" } },
-            right: { style: "thin", color: { argb: "FFCBD5E1" } },
+        const chunks = splitTextForExcelCells(value);
+
+        chunks.forEach((chunk, chunkIndex) => {
+          const row = worksheet.getRow(rowIndex);
+          row.getCell(1).value = chunkIndex === 0 ? label : `${label} (${chunkIndex + 1})`;
+          row.getCell(2).value = chunk;
+          row.getCell(1).font = { name: "Malgun Gothic", size: 10, bold: true };
+          row.getCell(2).font = { name: "Malgun Gothic", size: 10 };
+          row.getCell(1).alignment = { vertical: "top", wrapText: true };
+          row.getCell(2).alignment = { vertical: "top", wrapText: true };
+          row.getCell(1).fill = {
+            type: "pattern",
+            pattern: "solid",
+            fgColor: { argb: "FFF8FAFC" },
           };
+          row.eachCell((cell) => {
+            cell.border = {
+              top: { style: "thin", color: { argb: "FFCBD5E1" } },
+              left: { style: "thin", color: { argb: "FFCBD5E1" } },
+              bottom: { style: "thin", color: { argb: "FFCBD5E1" } },
+              right: { style: "thin", color: { argb: "FFCBD5E1" } },
+            };
+          });
+          rowIndex += 1;
         });
-        rowIndex += 1;
       });
 
       let imageFailures = 0;
@@ -907,6 +929,24 @@ export function PendingReportsDashboard({
     () => parseReportContent(selectedReportItem?.report.content),
     [selectedReportItem?.report.content]
   );
+  const selectedReportDetailTitle = useMemo(() => {
+    if (!selectedReportItem) {
+      return "오피스아워 일지 상세";
+    }
+
+    const reportType =
+      selectedReportItem.report.applicationType
+      || selectedReportItem.application.type
+      || resolveManualReportApplicationType(selectedReportItem.report);
+
+    if (reportType === "mentoring") {
+      return "멘토링&사후관리 일지 상세";
+    }
+    if (reportType === "irregular") {
+      return "비정기 오피스아워 상세";
+    }
+    return "오피스아워 일지 상세";
+  }, [selectedReportItem]);
 
   useEffect(() => {
     setReportPage(1);
@@ -1129,7 +1169,7 @@ export function PendingReportsDashboard({
                     <SelectItem value="all">전체 유형</SelectItem>
                     <SelectItem value="regular">정기</SelectItem>
                     <SelectItem value="irregular">비정기</SelectItem>
-                    <SelectItem value="mentoring">멘토링</SelectItem>
+                    <SelectItem value="mentoring">멘토링&사후관리</SelectItem>
                   </SelectContent>
                 </Select>
                 <Select
@@ -1165,7 +1205,7 @@ export function PendingReportsDashboard({
                       className="bg-violet-600 text-white hover:bg-violet-700"
                       onClick={() => onCreateReport("mentoring-manual")}
                     >
-                      멘토링 일지 작성
+                      멘토링&사후관리 일지 작성
                     </Button>
                   </>
                 )}
@@ -1374,7 +1414,7 @@ export function PendingReportsDashboard({
           {selectedReportItem && (
             <div className="flex min-h-0 flex-1 flex-col">
               <DialogHeader className="shrink-0 border-b px-6 py-5">
-                <DialogTitle>오피스아워 일지 상세</DialogTitle>
+                <DialogTitle>{selectedReportDetailTitle}</DialogTitle>
               </DialogHeader>
 
               <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
@@ -1466,6 +1506,13 @@ export function PendingReportsDashboard({
                   <div className="text-xs font-medium text-slate-500">팔로업</div>
                   <div className="whitespace-pre-wrap break-all text-sm leading-7 text-slate-900">
                     {selectedReportItem.report.followUp || "-"}
+                  </div>
+                </div>
+
+                <div className="space-y-2 border-t py-6">
+                  <div className="text-xs font-medium text-slate-500">스크립트</div>
+                  <div className="max-h-[280px] overflow-y-auto rounded-md border bg-slate-50 px-4 py-3 whitespace-pre-wrap break-all text-sm leading-7 text-slate-900">
+                    {selectedReportItem.report.meetingRawText || "-"}
                   </div>
                 </div>
 

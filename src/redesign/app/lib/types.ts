@@ -302,6 +302,7 @@ export interface OfficeHourReport {
   managerName?: string;
   participants: string[];
   content: string;
+  meetingRawText?: string;
   followUp: string;
   photos: string[];
   duration: number;
