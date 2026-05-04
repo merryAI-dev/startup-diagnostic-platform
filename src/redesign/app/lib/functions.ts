@@ -219,6 +219,24 @@ export type RunBiztalkStageCheckResult = {
   [key: string]: unknown;
 };
 
+export type SendStageTestEmailPayload = {
+  fromEmail: string;
+  replyTo?: string | null;
+  recipients: string[];
+  subject: string;
+  text: string;
+  html?: string;
+};
+
+export type SendStageTestEmailResult = {
+  ok: boolean;
+  sentCount: number;
+  deliveries: Array<{
+    to: string;
+    id: string | null;
+  }>;
+};
+
 export async function submitRegularApplicationViaFunction(
   payload: SubmitRegularApplicationPayload
 ) {
@@ -414,6 +432,22 @@ export async function runBiztalkStageCheckViaFunction(
     RunBiztalkStageCheckPayload,
     RunBiztalkStageCheckResult
   >(functions, "runBiztalkStageCheck")
+
+  const result = await callable(payload)
+  return result.data
+}
+
+export async function sendStageTestEmailViaFunction(
+  payload: SendStageTestEmailPayload
+) {
+  if (!isFirebaseConfigured || !functions) {
+    throw new Error("Firebase Functions is not configured");
+  }
+
+  const callable = httpsCallable<
+    SendStageTestEmailPayload,
+    SendStageTestEmailResult
+  >(functions, "sendStageTestEmail")
 
   const result = await callable(payload)
   return result.data

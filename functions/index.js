@@ -24,6 +24,7 @@ const GEMINI_API_KEY = defineSecret("GEMINI_API_KEY");
 const SLACK_SIGNUP_REQUEST_WEBHOOK_URL = defineSecret("SLACK_SIGNUP_REQUEST_WEBHOOK_URL");
 const BIZTALK_DISPATCH_URL = defineSecret("BIZTALK_DISPATCH_URL");
 const BIZTALK_DISPATCH_TOKEN = defineSecret("BIZTALK_DISPATCH_TOKEN");
+const RESEND_API_KEY = defineSecret("RESEND_API_KEY");
 const GOOGLE_CALENDAR_CLIENT_ID = defineSecret("GOOGLE_CALENDAR_CLIENT_ID");
 const GOOGLE_CALENDAR_CLIENT_SECRET = defineSecret("GOOGLE_CALENDAR_CLIENT_SECRET");
 const GOOGLE_CALENDAR_REFRESH_TOKEN = defineSecret("GOOGLE_CALENDAR_REFRESH_TOKEN");
@@ -182,6 +183,20 @@ function normalizeEmail(value) {
   const normalized = normalizeString(value).toLowerCase();
   if (!normalized || !normalized.includes("@")) return "";
   return normalized;
+}
+
+function normalizeEmailArray(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return Array.from(
+    new Set(
+      value
+        .map((item) => normalizeEmail(item))
+        .filter(Boolean)
+    )
+  );
 }
 
 function isStageProject() {
@@ -1291,6 +1306,69 @@ async function postSlackWebhook(webhookUrl, payload) {
   }
 }
 
+function buildHtmlFallbackFromText(value) {
+  const normalized = normalizeString(value);
+  if (!normalized) {
+    return "";
+  }
+
+  return `<div style="font-family:Arial,sans-serif;font-size:14px;line-height:1.7;color:#111827;white-space:pre-wrap;">${normalized
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll("\"", "&quot;")
+    .replaceAll("'", "&#39;")
+    .replace(
+      /(https?:\/\/[^\s]+)/g,
+      (url) => `<a href="${url}" style="color:#0f766e;text-decoration:underline;">${url}</a>`
+    )}</div>`;
+}
+
+async function parseUpstreamResponse(response) {
+  const contentType = normalizeString(response.headers.get("content-type")).toLowerCase();
+
+  if (contentType.includes("application/json")) {
+    try {
+      return await response.json();
+    } catch {
+      return null;
+    }
+  }
+
+  try {
+    const text = await response.text();
+    return text || null;
+  } catch {
+    return null;
+  }
+}
+
+async function sendResendEmail({ apiKey, fromEmail, replyTo, to, subject, text, html }) {
+  const response = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${apiKey}`,
+      "content-type": "application/json; charset=utf-8",
+      "user-agent": "startup-diagnostic-platform-functions/1.0",
+    },
+    body: JSON.stringify({
+      from: `MYSC <${fromEmail}>`,
+      to: [to],
+      subject,
+      text,
+      html: html || buildHtmlFallbackFromText(text),
+      ...(replyTo ? { reply_to: replyTo } : {}),
+    }),
+  });
+
+  const body = await parseUpstreamResponse(response);
+  if (!response.ok) {
+    throw new Error(`Resend send failed (${response.status}): ${JSON.stringify(body || {})}`);
+  }
+
+  return body;
+}
+
 function sanitizeConsentRecord(value) {
   if (!value || typeof value !== "object") {
     return null;
@@ -1715,6 +1793,91 @@ exports.runBiztalkStageCheck = onCall(
         throw error;
       }
       throw new HttpsError("internal", "BizTalk 점검 호출에 실패했습니다.");
+    }
+  }
+);
+
+exports.sendStageTestEmail = onCall(
+  {
+    region: REGION,
+    timeoutSeconds: 60,
+    memory: "256MiB",
+    secrets: [RESEND_API_KEY],
+  },
+  async (request) => {
+    if (!request.auth?.uid) {
+      throw new HttpsError("unauthenticated", "로그인이 필요합니다.");
+    }
+    if (!isStageProject()) {
+      throw new HttpsError("failed-precondition", "이메일 테스트 발송은 stage 프로젝트에서만 실행할 수 있습니다.");
+    }
+
+    const uid = request.auth.uid;
+    const profileSnap = await db.collection("profiles").doc(uid).get();
+    const role = normalizeString(profileSnap.data()?.role);
+    if (!["admin", "staff", "consultant"].includes(role)) {
+      throw new HttpsError("permission-denied", "이메일 테스트 발송 권한이 없습니다.");
+    }
+
+    const apiKey = normalizeString(RESEND_API_KEY.value());
+    if (!apiKey) {
+      throw new HttpsError("failed-precondition", "RESEND_API_KEY is not configured.");
+    }
+
+    const fromEmail = normalizeEmail(request.data?.fromEmail);
+    const replyTo = normalizeEmail(request.data?.replyTo);
+    const recipients = normalizeEmailArray(request.data?.recipients);
+    const subject = normalizeString(request.data?.subject);
+    const text = typeof request.data?.text === "string" ? request.data.text.trim() : "";
+    const html = typeof request.data?.html === "string" ? request.data.html.trim() : "";
+
+    if (!fromEmail) {
+      throw new HttpsError("invalid-argument", "fromEmail is required.");
+    }
+    if (recipients.length === 0) {
+      throw new HttpsError("invalid-argument", "At least one recipient is required.");
+    }
+    if (!subject) {
+      throw new HttpsError("invalid-argument", "subject is required.");
+    }
+    if (!text && !html) {
+      throw new HttpsError("invalid-argument", "Either text or html is required.");
+    }
+
+    try {
+      const deliveries = [];
+      for (const to of recipients) {
+        const responseBody = await sendResendEmail({
+          apiKey,
+          fromEmail,
+          replyTo,
+          to,
+          subject,
+          text,
+          html,
+        });
+        deliveries.push({
+          to,
+          id: normalizeString(responseBody?.id) || null,
+        });
+      }
+
+      return {
+        ok: true,
+        sentCount: deliveries.length,
+        deliveries,
+      };
+    } catch (error) {
+      console.error("sendStageTestEmail failed", {
+        uid,
+        recipients,
+        errorMessage: error instanceof Error ? error.message : String(error),
+        errorStack: error instanceof Error ? error.stack : null,
+      });
+      throw new HttpsError(
+        "internal",
+        error instanceof Error ? error.message : "이메일 테스트 발송에 실패했습니다."
+      );
     }
   }
 );

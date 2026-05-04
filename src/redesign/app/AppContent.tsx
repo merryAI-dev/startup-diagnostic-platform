@@ -101,6 +101,7 @@ import {
   approvePendingUserViaFunction,
   cancelApplicationViaFunction,
   runApplicationMaintenanceViaFunction,
+  sendStageTestEmailViaFunction,
   syncConsultantSchedulingViaFunction,
   syncIrregularCalendarSessionsViaFunction,
   syncProgramDefinitionViaFunction,
@@ -115,6 +116,7 @@ import {
   hasApplicantConflictAt,
   isApplicationTargetingConsultant,
 } from "@/redesign/app/lib/application-availability"
+import { DEFAULT_STAGE_EMAIL_TEMPLATES } from "@/redesign/app/lib/stage-email-templates"
 import {
   buildDefaultConsultantAvailability,
   getConsultantAvailabilityForDate,
@@ -775,9 +777,16 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     )
   }
 
+  const profileRole = String(profile?.role ?? "")
   const resolvedRole: UserRole =
     roleOverride ??
-    (profile?.role === "admin" ? "admin" : profile?.role === "consultant" ? "consultant" : "user")
+    (profileRole === "admin"
+      ? "admin"
+      : profileRole === "consultant"
+        ? "consultant"
+        : profileRole === "staff"
+          ? "staff"
+          : "user")
   const isAdminLikeRole =
     resolvedRole === "admin" || resolvedRole === "consultant" || resolvedRole === "staff"
   const canAutoTransitionApplications = resolvedRole === "admin" || resolvedRole === "consultant"
@@ -1055,7 +1064,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
   const [selectedApplicationId, setSelectedApplicationId] = useState<string | null>(null)
   const [consultants, setConsultants] = useState<Consultant[]>([])
   const [agendaList, setAgendaList] = useState<Agenda[]>([])
-  const [templates, setTemplates] = useState<MessageTemplate[]>([])
+  const [templates, setTemplates] = useState<MessageTemplate[]>(DEFAULT_STAGE_EMAIL_TEMPLATES)
   const [programList, setProgramList] = useState<Program[]>([])
 
   const [reports, setReports] = useState<OfficeHourReport[]>([])
@@ -4397,6 +4406,17 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     })
   }
 
+  const handleSendStageTestEmail = async (payload: {
+    fromEmail: string
+    replyTo?: string | null
+    recipients: string[]
+    subject: string
+    text: string
+    html?: string
+  }) => {
+    return sendStageTestEmailViaFunction(payload)
+  }
+
   const selectedOfficeHour = visibleRegularOfficeHourList.find(
     (oh) => oh.id === selectedOfficeHourId,
   )
@@ -5035,10 +5055,12 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
               <AdminCommunication
                 templates={templates}
                 applications={scopedApplications}
+                programNameById={programNameById}
                 onAddTemplate={handleAddTemplate}
                 onUpdateTemplate={handleUpdateTemplate}
                 onDeleteTemplate={handleDeleteTemplate}
                 onSendBulkMessage={handleSendBulkMessage}
+                onSendStageTestEmail={handleSendStageTestEmail}
               />
             </ProtectedRoute>
           )}

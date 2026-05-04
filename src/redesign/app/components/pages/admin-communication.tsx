@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Plus, Send, Edit, Trash2, Copy, Mail, MessageSquare } from "lucide-react";
 import { Button } from "@/redesign/app/components/ui/button";
 import { Input } from "@/redesign/app/components/ui/input";
@@ -24,23 +24,56 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/redesign/app/components/ui/tabs";
 import { Checkbox } from "@/redesign/app/components/ui/checkbox";
 import { toast } from "sonner";
+import {
+  buildStageEmailPreview,
+  parseRecipientList,
+} from "@/redesign/app/lib/stage-email-templates";
+
+const variableLabelMap: Record<string, string> = {
+  companyName: "기업명",
+  officeHourTypeLabel: "오피스아워 구분",
+  programName: "사업명",
+  agendaName: "아젠다명",
+  scheduledDateTimeLabel: "진행 일정",
+  locationTypeLabel: "장소 유형",
+  detailLink: "상세 링크",
+  officeHourId: "오피스아워 ID",
+  arrangedScheduleId: "매칭 일정 ID",
+}
+
+function getVariableLabel(variable: string) {
+  return variableLabelMap[variable] ?? variable
+}
 
 interface AdminCommunicationProps {
   templates: MessageTemplate[];
   applications: Application[];
+  programNameById: Map<string, string>;
   onAddTemplate: (data: Omit<MessageTemplate, "id" | "createdAt" | "updatedAt">) => void;
   onUpdateTemplate: (id: string, data: Partial<MessageTemplate>) => void;
   onDeleteTemplate: (id: string) => void;
   onSendBulkMessage: (applicationIds: string[], templateId: string) => void;
+  onSendStageTestEmail: (payload: {
+    fromEmail: string;
+    replyTo?: string | null;
+    recipients: string[];
+    subject: string;
+    text: string;
+    html?: string;
+  }) => Promise<{
+    sentCount: number;
+  }>;
 }
 
 export function AdminCommunication({
   templates,
   applications,
+  programNameById,
   onAddTemplate,
   onUpdateTemplate,
   onDeleteTemplate,
   onSendBulkMessage,
+  onSendStageTestEmail,
 }: AdminCommunicationProps) {
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
@@ -49,6 +82,53 @@ export function AdminCommunication({
   const [selectedApplicationIds, setSelectedApplicationIds] = useState<string[]>([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>("");
   const [previewTemplate, setPreviewTemplate] = useState<MessageTemplate | null>(null);
+  const [selectedStageTemplateId, setSelectedStageTemplateId] = useState<string>("");
+  const [selectedStageApplicationId, setSelectedStageApplicationId] = useState<string>("");
+  const [stageRecipientsText, setStageRecipientsText] = useState("");
+  const [stageFromEmail, setStageFromEmail] = useState("");
+  const [stageReplyTo, setStageReplyTo] = useState("");
+  const [isStageSending, setIsStageSending] = useState(false);
+
+  const availableApplications = useMemo(
+    () => applications.filter((app) => app.status !== "cancelled" && app.status !== "completed"),
+    [applications],
+  );
+
+  useEffect(() => {
+    const firstTemplate = templates[0];
+    if (!selectedStageTemplateId && firstTemplate) {
+      setSelectedStageTemplateId(firstTemplate.id);
+    }
+  }, [selectedStageTemplateId, templates]);
+
+  useEffect(() => {
+    const firstApplication = availableApplications[0];
+    if (!selectedStageApplicationId && firstApplication) {
+      setSelectedStageApplicationId(firstApplication.id);
+    }
+  }, [availableApplications, selectedStageApplicationId]);
+
+  const selectedStageTemplate = useMemo(
+    () => templates.find((template) => template.id === selectedStageTemplateId) ?? null,
+    [selectedStageTemplateId, templates],
+  );
+  const selectedStageApplication = useMemo(
+    () => availableApplications.find((application) => application.id === selectedStageApplicationId) ?? null,
+    [availableApplications, selectedStageApplicationId],
+  );
+  const stagePreview = useMemo(() => {
+    if (!selectedStageTemplate || !selectedStageApplication) {
+      return null;
+    }
+
+    return buildStageEmailPreview(
+      selectedStageTemplate,
+      selectedStageApplication,
+      selectedStageApplication.programId
+        ? (programNameById.get(selectedStageApplication.programId) ?? null)
+        : null,
+    );
+  }, [programNameById, selectedStageApplication, selectedStageTemplate]);
 
   const handleCreateTemplate = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -124,6 +204,48 @@ export function AdminCommunication({
     setSelectedApplicationIds([]);
     setSelectedTemplateId("");
     toast.success(`${selectedApplicationIds.length}건의 메시지가 전송되었습니다`);
+  };
+
+  const handleStageEmailFillApplicant = () => {
+    if (!selectedStageApplication?.applicantEmail) {
+      toast.error("선택한 신청에 신청자 이메일이 없습니다");
+      return;
+    }
+    setStageRecipientsText(selectedStageApplication.applicantEmail);
+  };
+
+  const handleStageEmailSend = async () => {
+    if (!stagePreview || !selectedStageApplication) {
+      toast.error("미리보기 대상 신청과 템플릿을 선택해주세요");
+      return;
+    }
+
+    const recipients = parseRecipientList(stageRecipientsText);
+    if (recipients.length === 0) {
+      toast.error("받는 사람 이메일을 1개 이상 입력해주세요");
+      return;
+    }
+    if (!stageFromEmail.trim()) {
+      toast.error("발신 이메일을 입력해주세요");
+      return;
+    }
+
+    setIsStageSending(true);
+    try {
+      const result = await onSendStageTestEmail({
+        fromEmail: stageFromEmail.trim(),
+        replyTo: stageReplyTo.trim() || null,
+        recipients,
+        subject: stagePreview.subject,
+        text: stagePreview.text,
+        html: stagePreview.html,
+      });
+      toast.success(`${result.sentCount}건의 stage 이메일을 발송했습니다`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "stage 이메일 발송에 실패했습니다");
+    } finally {
+      setIsStageSending(false);
+    }
   };
 
   const toggleApplicationSelection = (id: string) => {
@@ -202,14 +324,15 @@ export function AdminCommunication({
         </div>
       </div>
 
-      <Tabs defaultValue="templates" className="space-y-6">
+      <Tabs defaultValue="templates" className="w-full space-y-6">
         <TabsList>
           <TabsTrigger value="templates">템플릿 관리</TabsTrigger>
           <TabsTrigger value="bulk">일괄 메시지 전송</TabsTrigger>
+          <TabsTrigger value="stage-email">stage 이메일 테스트</TabsTrigger>
         </TabsList>
 
         {/* Templates Tab */}
-        <TabsContent value="templates" className="space-y-4">
+        <TabsContent value="templates" className="w-full space-y-4">
           <div className="flex justify-end">
             <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
               <DialogTrigger asChild>
@@ -344,11 +467,16 @@ export function AdminCommunication({
                 </div>
 
                 {template.variables.length > 0 && (
-                  <div className="flex items-center gap-2 text-xs">
+                  <div className="flex flex-wrap items-center gap-2 text-xs">
                     <span className="text-muted-foreground">사용 변수:</span>
                     {template.variables.map((variable, idx) => (
-                      <Badge key={idx} variant="outline" className="text-xs">
-                        {variable}
+                      <Badge
+                        key={idx}
+                        variant="outline"
+                        className="whitespace-nowrap text-xs"
+                        title={variable}
+                      >
+                        {getVariableLabel(variable)}
                       </Badge>
                     ))}
                   </div>
@@ -359,89 +487,245 @@ export function AdminCommunication({
         </TabsContent>
 
         {/* Bulk Send Tab */}
-        <TabsContent value="bulk" className="space-y-4">
-          <div className="bg-white rounded-lg border p-6">
-            <div className="mb-6">
+        <TabsContent value="bulk" className="w-full space-y-4">
+          <div className="space-y-6">
+            <div className="rounded-lg border bg-white p-6">
+              <h3 className="font-semibold mb-2">템플릿 선택</h3>
+              <p className="text-sm text-muted-foreground mb-4">
+                먼저 템플릿을 고르고, 아래에서 발송 대상을 선택하세요
+              </p>
+              <div className="grid gap-4 2xl:grid-cols-[minmax(0,420px)_minmax(0,1fr)]">
+                <div>
+                  <Select value={selectedTemplateId} onValueChange={setSelectedTemplateId}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="사용할 템플릿을 선택하세요" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {templates.map((template) => (
+                        <SelectItem key={template.id} value={template.id}>
+                          {template.title} ({getCategoryLabel(template.category)})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {selectedTemplateId ? (
+                  <div className="rounded-lg border bg-gray-50 p-4">
+                    {(() => {
+                      const template = templates.find((t) => t.id === selectedTemplateId);
+                      return template ? (
+                        <div>
+                          <p className="text-sm font-medium mb-1">미리보기</p>
+                          <p className="text-sm text-muted-foreground mb-2">
+                            <strong>제목:</strong> {template.subject}
+                          </p>
+                          <p className="text-sm text-muted-foreground whitespace-pre-wrap break-words">
+                            {template.content}
+                          </p>
+                        </div>
+                      ) : null;
+                    })()}
+                  </div>
+                ) : (
+                  <div className="rounded-lg border border-dashed bg-gray-50 p-4 text-sm text-muted-foreground">
+                    템플릿을 선택하면 제목과 본문 미리보기가 표시됩니다.
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="rounded-lg border bg-white p-6">
               <h3 className="font-semibold mb-2">신청 선택</h3>
               <p className="text-sm text-muted-foreground mb-4">
                 메시지를 보낼 신청을 선택하세요
               </p>
-              
-              <div className="space-y-2 max-h-96 overflow-y-auto">
-                {applications
-                  .filter((app) => app.status !== "cancelled" && app.status !== "completed")
-                  .map((app) => (
-                    <div
-                      key={app.id}
-                      className="flex items-center gap-3 p-3 border rounded-lg hover:bg-gray-50"
-                    >
-                      <Checkbox
-                        checked={selectedApplicationIds.includes(app.id)}
-                        onCheckedChange={() => toggleApplicationSelection(app.id)}
-                      />
-                      <div className="flex-1">
-                        <div className="font-medium text-sm">{app.officeHourTitle}</div>
-                        <div className="text-xs text-muted-foreground">
-                          {app.consultant} · {app.agenda}
-                        </div>
+
+              <div className="space-y-2 max-h-[36rem] overflow-y-auto pr-1">
+                {availableApplications.map((app) => (
+                  <div
+                    key={app.id}
+                    className="flex items-start gap-3 rounded-lg border p-3 transition-colors hover:bg-gray-50"
+                  >
+                    <Checkbox
+                      className="mt-0.5"
+                      checked={selectedApplicationIds.includes(app.id)}
+                      onCheckedChange={() => toggleApplicationSelection(app.id)}
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="font-medium text-sm">{app.officeHourTitle}</div>
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        <span className="break-words">
+                          {app.companyName ?? app.applicantName ?? "기업 미지정"}
+                        </span>
+                        {" · "}
+                        <span className="break-words">{app.consultant || "담당자 미지정"}</span>
+                        {" · "}
+                        <span className="break-words">{app.agenda || "아젠다 미지정"}</span>
                       </div>
-                      <Badge variant="outline">{app.status}</Badge>
                     </div>
-                  ))}
+                    <Badge variant="outline" className="shrink-0">
+                      {app.status}
+                    </Badge>
+                  </div>
+                ))}
               </div>
 
-              {selectedApplicationIds.length > 0 && (
-                <div className="mt-4 p-3 bg-blue-50 rounded-lg">
-                  <p className="text-sm text-blue-900">
-                    {selectedApplicationIds.length}개의 신청이 선택되었습니다
+              <div className="mt-4 flex flex-col gap-3 rounded-lg bg-blue-50 p-4 sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-sm text-blue-900">
+                  {selectedApplicationIds.length > 0
+                    ? `${selectedApplicationIds.length}개의 신청이 선택되었습니다`
+                    : "선택된 신청이 없습니다"}
+                </p>
+                <Button
+                  onClick={handleBulkSend}
+                  disabled={selectedApplicationIds.length === 0 || !selectedTemplateId}
+                  className="w-full sm:w-auto"
+                >
+                  <Send className="w-4 h-4 mr-2" />
+                  선택한 {selectedApplicationIds.length}건에 메시지 전송
+                </Button>
+              </div>
+            </div>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="stage-email" className="w-full space-y-4">
+          <div className="grid gap-6 lg:grid-cols-[420px_minmax(0,1fr)]">
+            <div className="space-y-4 rounded-lg border bg-white p-6">
+              <div>
+                <h3 className="font-semibold text-slate-900">발송 대상 데이터</h3>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  선택한 신청 정보로 placeholder가 자동 치환됩니다
+                </p>
+              </div>
+
+              <div>
+                <Label>템플릿</Label>
+                <Select value={selectedStageTemplateId} onValueChange={setSelectedStageTemplateId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="템플릿을 선택하세요" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {templates.map((template) => (
+                      <SelectItem key={template.id} value={template.id}>
+                        {template.title}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div>
+                <Label>신청</Label>
+                <Select value={selectedStageApplicationId} onValueChange={setSelectedStageApplicationId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="신청을 선택하세요" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {availableApplications.map((application) => (
+                      <SelectItem key={application.id} value={application.id}>
+                        {application.companyName ?? application.applicantName ?? "기업 미지정"} · {application.officeHourTitle}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div>
+                <Label htmlFor="stage-from-email">발신 이메일</Label>
+                <Input
+                  id="stage-from-email"
+                  placeholder="no-reply@mail.mysc.co.kr"
+                  value={stageFromEmail}
+                  onChange={(event) => setStageFromEmail(event.target.value)}
+                />
+              </div>
+
+              <div>
+                <Label htmlFor="stage-reply-to">답장 받을 이메일</Label>
+                <Input
+                  id="stage-reply-to"
+                  placeholder="support@mysc.co.kr"
+                  value={stageReplyTo}
+                  onChange={(event) => setStageReplyTo(event.target.value)}
+                />
+              </div>
+
+              <div>
+                <div className="mb-2 flex items-center justify-between">
+                  <Label htmlFor="stage-recipients">받는 사람</Label>
+                  <Button type="button" variant="outline" size="sm" onClick={handleStageEmailFillApplicant}>
+                    신청자 이메일 채우기
+                  </Button>
+                </div>
+                <Textarea
+                  id="stage-recipients"
+                  rows={5}
+                  placeholder={"test1@example.com\ntest2@example.com"}
+                  value={stageRecipientsText}
+                  onChange={(event) => setStageRecipientsText(event.target.value)}
+                />
+                <p className="mt-2 text-xs text-muted-foreground">
+                  쉼표 또는 줄바꿈으로 여러 명을 입력할 수 있으며, 실제 발송은 수신자별 별도 전송으로 처리됩니다.
+                </p>
+              </div>
+
+              {stagePreview && (
+                <div className="rounded-lg border bg-slate-50 p-4">
+                  <p className="mb-3 text-sm font-medium text-slate-900">치환 변수</p>
+                  <div className="space-y-2 text-xs text-slate-600">
+                    {Object.entries(stagePreview.variables).map(([key, value]) => (
+                      <div
+                        key={key}
+                        className="grid grid-cols-[140px_minmax(0,1fr)] items-start gap-3"
+                      >
+                        <span
+                          className="whitespace-nowrap text-slate-500"
+                          title={`{{${key}}}`}
+                        >
+                          {getVariableLabel(key)}
+                        </span>
+                        <span className="break-all text-right">{value || "-"}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-4 rounded-lg border bg-white p-6">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h3 className="font-semibold text-slate-900">메일 미리보기</h3>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    현재 선택값 기준 최종 발송 제목/본문입니다
                   </p>
                 </div>
-              )}
-            </div>
+                <Button
+                  type="button"
+                  onClick={handleStageEmailSend}
+                  disabled={!stagePreview || isStageSending}
+                >
+                  <Mail className="mr-2 h-4 w-4" />
+                  {isStageSending ? "발송 중..." : "stage 이메일 발송"}
+                </Button>
+              </div>
 
-            <div className="mb-6">
-              <h3 className="font-semibold mb-2">템플릿 선택</h3>
-              <Select value={selectedTemplateId} onValueChange={setSelectedTemplateId}>
-                <SelectTrigger>
-                  <SelectValue placeholder="사용할 템플릿을 선택하세요" />
-                </SelectTrigger>
-                <SelectContent>
-                  {templates.map((template) => (
-                    <SelectItem key={template.id} value={template.id}>
-                      {template.title} ({getCategoryLabel(template.category)})
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <div className="rounded-lg border bg-slate-50 p-4">
+                <p className="mb-1 text-xs font-medium text-slate-500">제목</p>
+                <p className="text-sm font-medium text-slate-900">
+                  {stagePreview?.subject ?? "템플릿과 신청을 선택해주세요"}
+                </p>
+              </div>
 
-              {selectedTemplateId && (
-                <div className="mt-3 p-4 border rounded-lg bg-gray-50">
-                  {(() => {
-                    const template = templates.find((t) => t.id === selectedTemplateId);
-                    return template ? (
-                      <div>
-                        <p className="text-sm font-medium mb-1">미리보기:</p>
-                        <p className="text-sm text-muted-foreground mb-2">
-                          <strong>제목:</strong> {template.subject}
-                        </p>
-                        <p className="text-sm text-muted-foreground whitespace-pre-wrap">
-                          {template.content}
-                        </p>
-                      </div>
-                    ) : null;
-                  })()}
+              <div className="rounded-lg border p-5">
+                <p className="mb-3 text-xs font-medium text-slate-500">본문</p>
+                <div className="whitespace-pre-wrap text-sm leading-7 text-slate-800">
+                  {stagePreview?.text ?? "미리보기 없음"}
                 </div>
-              )}
+              </div>
             </div>
-
-            <Button
-              onClick={handleBulkSend}
-              disabled={selectedApplicationIds.length === 0 || !selectedTemplateId}
-              className="w-full"
-            >
-              <Send className="w-4 h-4 mr-2" />
-              선택한 {selectedApplicationIds.length}건에 메시지 전송
-            </Button>
           </div>
         </TabsContent>
       </Tabs>
@@ -546,8 +830,13 @@ export function AdminCommunication({
                   <Label>사용 변수</Label>
                   <div className="flex flex-wrap gap-1 mt-1">
                     {previewTemplate.variables.map((variable, idx) => (
-                      <Badge key={idx} variant="outline">
-                        {variable}
+                      <Badge
+                        key={idx}
+                        variant="outline"
+                        className="whitespace-nowrap"
+                        title={variable}
+                      >
+                        {getVariableLabel(variable)}
                       </Badge>
                     ))}
                   </div>
