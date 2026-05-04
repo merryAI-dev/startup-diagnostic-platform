@@ -11,6 +11,7 @@ const {
   COMPANY_ANALYSIS_SYSTEM_INSTRUCTION,
   buildCompanyAnalysisUserPrompt,
 } = require("./ai/company-report-prompt");
+const { dispatchBiztalkService } = require("./biztalk-dispatch");
 const { generateStructuredJson } = require("./ai/gemini");
 const regularOfficeHourPolicy = require("./regular-office-hour-policy.cjs");
 
@@ -21,6 +22,8 @@ const REGION = process.env.FUNCTION_REGION || "asia-northeast3";
 const FIREBASE_PROJECT_ID = normalizeString(process.env.GCLOUD_PROJECT || process.env.GCLOUD_PROJECT_NUMBER);
 const GEMINI_API_KEY = defineSecret("GEMINI_API_KEY");
 const SLACK_SIGNUP_REQUEST_WEBHOOK_URL = defineSecret("SLACK_SIGNUP_REQUEST_WEBHOOK_URL");
+const BIZTALK_DISPATCH_URL = defineSecret("BIZTALK_DISPATCH_URL");
+const BIZTALK_DISPATCH_TOKEN = defineSecret("BIZTALK_DISPATCH_TOKEN");
 const GOOGLE_CALENDAR_CLIENT_ID = defineSecret("GOOGLE_CALENDAR_CLIENT_ID");
 const GOOGLE_CALENDAR_CLIENT_SECRET = defineSecret("GOOGLE_CALENDAR_CLIENT_SECRET");
 const GOOGLE_CALENDAR_REFRESH_TOKEN = defineSecret("GOOGLE_CALENDAR_REFRESH_TOKEN");
@@ -33,6 +36,7 @@ const APPLICATION_CHANGE_WINDOW_MS = 72 * 60 * 60 * 1000;
 const GOOGLE_OAUTH_TOKEN_URL = "https://oauth2.googleapis.com/token";
 const GOOGLE_CALENDAR_API_BASE_URL = "https://www.googleapis.com/calendar/v3";
 const STAGE_FIREBASE_PROJECT_ID = "startup-diagnosis-platform";
+const LIVE_FIREBASE_PROJECT_ID = "startup-acceleration-platform";
 const IRREGULAR_CALENDAR_SESSION_COLLECTION = "officeHourCalendarSessions";
 const IRREGULAR_CALENDAR_TITLE_PREFIX = "[비정기]";
 const IRREGULAR_CALENDAR_SYNC_LOOKBACK_DAYS = 120;
@@ -178,6 +182,69 @@ function normalizeEmail(value) {
   const normalized = normalizeString(value).toLowerCase();
   if (!normalized || !normalized.includes("@")) return "";
   return normalized;
+}
+
+function isStageProject() {
+  return FIREBASE_PROJECT_ID === STAGE_FIREBASE_PROJECT_ID;
+}
+
+function isLiveProject() {
+  return FIREBASE_PROJECT_ID === LIVE_FIREBASE_PROJECT_ID;
+}
+
+function isPlainObject(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function normalizeStringRecord(value) {
+  if (!isPlainObject(value)) {
+    return {};
+  }
+
+  return Object.fromEntries(
+    Object.entries(value)
+      .map(([key, item]) => [normalizeString(key), normalizeString(item)])
+      .filter(([key, item]) => Boolean(key) && Boolean(item))
+  );
+}
+
+function getBiztalkDispatchConfig() {
+  const url = normalizeString(BIZTALK_DISPATCH_URL.value());
+  const token = normalizeString(BIZTALK_DISPATCH_TOKEN.value());
+
+  if (!url || !token) {
+    return null;
+  }
+
+  return { url, token };
+}
+
+async function callBiztalkDispatch(path, payload) {
+  const config = getBiztalkDispatchConfig();
+  if (!config) {
+    throw new Error("BizTalk dispatch service is not configured.");
+  }
+
+  return dispatchBiztalkService(config, path, payload);
+}
+
+function normalizePhoneNumber(value) {
+  const digits = typeof value === "string" ? value.replace(/\D/g, "") : "";
+  return digits;
+}
+
+function normalizePhoneNumberArray(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return Array.from(
+    new Set(
+      value
+        .map((item) => normalizePhoneNumber(item))
+        .filter(Boolean)
+    )
+  );
 }
 
 function getGoogleCalendarConfig() {
@@ -1582,6 +1649,73 @@ exports.notifySlackOnSignupRequestCreated = onDocumentCreated(
 
     const payload = buildSignupRequestSlackPayload(signupRequest);
     await postSlackWebhook(webhookUrl, payload);
+  }
+);
+
+exports.runBiztalkStageCheck = onCall(
+  {
+    region: REGION,
+    timeoutSeconds: 30,
+    memory: "256MiB",
+    secrets: [BIZTALK_DISPATCH_URL, BIZTALK_DISPATCH_TOKEN],
+  },
+  async (request) => {
+    if (!request.auth?.uid) {
+      throw new HttpsError("unauthenticated", "로그인이 필요합니다.");
+    }
+    if (!isStageProject() && !isLiveProject()) {
+      throw new HttpsError("failed-precondition", "BizTalk 점검은 stage 또는 live 프로젝트에서만 실행할 수 있습니다.");
+    }
+
+    const uid = request.auth.uid;
+    const profileSnap = await db.collection("profiles").doc(uid).get();
+    const role = normalizeString(profileSnap.data()?.role);
+    if (!["admin", "staff"].includes(role)) {
+      throw new HttpsError("permission-denied", "BizTalk 점검 권한이 없습니다.");
+    }
+
+    const mode = normalizeString(request.data?.mode) || "health";
+    const dryRun = request.data?.dryRun === true;
+
+    try {
+      switch (mode) {
+        case "health":
+          return await callBiztalkDispatch("/health", {
+            projectId: FIREBASE_PROJECT_ID,
+          });
+        case "outbound-ip":
+          return await callBiztalkDispatch("/probe/outbound-ip", {
+            projectId: FIREBASE_PROJECT_ID,
+          });
+        case "auth-token":
+          return await callBiztalkDispatch("/probe/auth-token", {
+            projectId: FIREBASE_PROJECT_ID,
+          });
+        case "dispatch-raw":
+          return await callBiztalkDispatch("/dispatch/raw", {
+            callerProjectId: FIREBASE_PROJECT_ID,
+            dryRun,
+            payload: isPlainObject(request.data?.payload) ? request.data.payload : {},
+            headers: normalizeStringRecord(request.data?.headers),
+            query: normalizeStringRecord(request.data?.query),
+            recipients: normalizePhoneNumberArray(request.data?.recipients),
+          });
+        default:
+          throw new HttpsError("invalid-argument", "지원하지 않는 BizTalk 점검 모드입니다.");
+      }
+    } catch (error) {
+      console.error("runBiztalkStageCheck failed", {
+        uid,
+        mode,
+        dryRun,
+        errorMessage: error instanceof Error ? error.message : String(error),
+        errorStack: error instanceof Error ? error.stack : null,
+      });
+      if (error instanceof HttpsError) {
+        throw error;
+      }
+      throw new HttpsError("internal", "BizTalk 점검 호출에 실패했습니다.");
+    }
   }
 );
 

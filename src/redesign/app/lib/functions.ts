@@ -203,6 +203,22 @@ type GenerateCompanyAnalysisReportResult = {
   };
 };
 
+export type BiztalkStageCheckMode = "health" | "outbound-ip" | "auth-token" | "dispatch-raw";
+
+export type RunBiztalkStageCheckPayload = {
+  mode?: BiztalkStageCheckMode;
+  dryRun?: boolean;
+  payload?: Record<string, unknown>;
+  headers?: Record<string, string>;
+  query?: Record<string, string>;
+  recipients?: string[];
+};
+
+export type RunBiztalkStageCheckResult = {
+  ok: boolean;
+  [key: string]: unknown;
+};
+
 export async function submitRegularApplicationViaFunction(
   payload: SubmitRegularApplicationPayload
 ) {
@@ -385,4 +401,20 @@ export async function generateCompanyAnalysisReportViaFunction(
 
   const result = await callable(payload);
   return result.data;
+}
+
+export async function runBiztalkStageCheckViaFunction(
+  payload: RunBiztalkStageCheckPayload = {}
+) {
+  if (!isFirebaseConfigured || !functions) {
+    throw new Error("Firebase Functions is not configured");
+  }
+
+  const callable = httpsCallable<
+    RunBiztalkStageCheckPayload,
+    RunBiztalkStageCheckResult
+  >(functions, "runBiztalkStageCheck")
+
+  const result = await callable(payload)
+  return result.data
 }
