@@ -63,6 +63,28 @@ interface AdminCommunicationProps {
   }) => Promise<{
     sentCount: number;
   }>;
+  onSendStageSlackDmTest: (payload: {
+    userId: string;
+    text: string;
+  }) => Promise<{
+    channel: string | null;
+    ts: string | null;
+  }>;
+  onSendStageSlackChannelAvailabilityTest: (payload: {
+    channelId: string;
+    monthKey: string;
+  }) => Promise<{
+    channel: string | null;
+    ts: string | null;
+    monthKey: string;
+    missingCount: number;
+    missingConsultants: Array<{
+      id: string;
+      name: string;
+      email: string;
+    }>;
+    skippedMissingScopeCount: number;
+  }>;
 }
 
 export function AdminCommunication({
@@ -74,6 +96,8 @@ export function AdminCommunication({
   onDeleteTemplate,
   onSendBulkMessage,
   onSendStageTestEmail,
+  onSendStageSlackDmTest,
+  onSendStageSlackChannelAvailabilityTest,
 }: AdminCommunicationProps) {
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
@@ -88,6 +112,17 @@ export function AdminCommunication({
   const [stageFromEmail, setStageFromEmail] = useState("");
   const [stageReplyTo, setStageReplyTo] = useState("");
   const [isStageSending, setIsStageSending] = useState(false);
+  const [stageSlackUserId, setStageSlackUserId] = useState("");
+  const [stageSlackMessage, setStageSlackMessage] = useState(
+    "오피스아워 일지 작성 Slack DM 타겟팅 테스트입니다."
+  );
+  const [isStageSlackSending, setIsStageSlackSending] = useState(false);
+  const [stageSlackChannelId, setStageSlackChannelId] = useState("");
+  const [stageSlackMonthKey, setStageSlackMonthKey] = useState(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  });
+  const [isStageSlackChannelSending, setIsStageSlackChannelSending] = useState(false);
 
   const availableApplications = useMemo(
     () => applications.filter((app) => app.status !== "cancelled" && app.status !== "completed"),
@@ -248,6 +283,56 @@ export function AdminCommunication({
     }
   };
 
+  const handleStageSlackDmSend = async () => {
+    if (!stageSlackUserId.trim()) {
+      toast.error("Slack User ID를 입력해주세요");
+      return;
+    }
+    if (!stageSlackMessage.trim()) {
+      toast.error("보낼 메시지를 입력해주세요");
+      return;
+    }
+
+    setIsStageSlackSending(true);
+    try {
+      const result = await onSendStageSlackDmTest({
+        userId: stageSlackUserId.trim(),
+        text: stageSlackMessage.trim(),
+      });
+      toast.success(`Slack DM 전송 완료${result.channel ? ` (${result.channel})` : ""}`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Slack DM 테스트 발송에 실패했습니다");
+    } finally {
+      setIsStageSlackSending(false);
+    }
+  };
+
+  const handleStageSlackChannelSend = async () => {
+    if (!stageSlackChannelId.trim()) {
+      toast.error("Slack Channel ID를 입력해주세요");
+      return;
+    }
+    if (!/^\d{4}-\d{2}$/u.test(stageSlackMonthKey.trim())) {
+      toast.error("YYYY-MM 형식의 월을 입력해주세요");
+      return;
+    }
+
+    setIsStageSlackChannelSending(true);
+    try {
+      const result = await onSendStageSlackChannelAvailabilityTest({
+        channelId: stageSlackChannelId.trim(),
+        monthKey: stageSlackMonthKey.trim(),
+      });
+      toast.success(
+        `Slack 채널 알림 전송 완료 (${result.monthKey}, ${result.missingCount}명)`
+      );
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Slack 채널 테스트 발송에 실패했습니다");
+    } finally {
+      setIsStageSlackChannelSending(false);
+    }
+  };
+
   const toggleApplicationSelection = (id: string) => {
     setSelectedApplicationIds((prev) =>
       prev.includes(id) ? prev.filter((appId) => appId !== id) : [...prev, id]
@@ -329,6 +414,8 @@ export function AdminCommunication({
           <TabsTrigger value="templates">템플릿 관리</TabsTrigger>
           <TabsTrigger value="bulk">일괄 메시지 전송</TabsTrigger>
           <TabsTrigger value="stage-email">stage 이메일 테스트</TabsTrigger>
+          <TabsTrigger value="stage-slack">stage Slack DM 테스트</TabsTrigger>
+          <TabsTrigger value="stage-slack-channel">stage Slack 채널 테스트</TabsTrigger>
         </TabsList>
 
         {/* Templates Tab */}
@@ -723,6 +810,159 @@ export function AdminCommunication({
                 <p className="mb-3 text-xs font-medium text-slate-500">본문</p>
                 <div className="whitespace-pre-wrap text-sm leading-7 text-slate-800">
                   {stagePreview?.text ?? "미리보기 없음"}
+                </div>
+              </div>
+            </div>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="stage-slack" className="w-full space-y-4">
+          <div className="grid gap-6 lg:grid-cols-[420px_minmax(0,1fr)]">
+            <div className="space-y-4 rounded-lg border bg-white p-6">
+              <div>
+                <h3 className="font-semibold text-slate-900">Slack DM 대상</h3>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  같은 워크스페이스 사용자의 Slack User ID로 직접 DM을 보냅니다
+                </p>
+              </div>
+
+              <div>
+                <Label htmlFor="stage-slack-user-id">Slack User ID</Label>
+                <Input
+                  id="stage-slack-user-id"
+                  placeholder="U0ABVB219AB"
+                  value={stageSlackUserId}
+                  onChange={(event) => setStageSlackUserId(event.target.value)}
+                />
+                <p className="mt-2 text-xs text-muted-foreground">
+                  프로필 메뉴의 Copy member ID로 확인한 U... 값을 입력하세요.
+                </p>
+              </div>
+
+              <div>
+                <Label htmlFor="stage-slack-message">메시지</Label>
+                <Textarea
+                  id="stage-slack-message"
+                  rows={8}
+                  placeholder="Slack DM 테스트 메시지"
+                  value={stageSlackMessage}
+                  onChange={(event) => setStageSlackMessage(event.target.value)}
+                />
+              </div>
+            </div>
+
+            <div className="space-y-4 rounded-lg border bg-white p-6">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h3 className="font-semibold text-slate-900">발송 미리보기</h3>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Slack DM 타겟팅이 되는지 최소 구성으로 확인합니다
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  onClick={handleStageSlackDmSend}
+                  disabled={!stageSlackUserId.trim() || !stageSlackMessage.trim() || isStageSlackSending}
+                >
+                  <MessageSquare className="mr-2 h-4 w-4" />
+                  {isStageSlackSending ? "발송 중..." : "stage Slack DM 발송"}
+                </Button>
+              </div>
+
+              <div className="rounded-lg border bg-slate-50 p-4">
+                <p className="mb-1 text-xs font-medium text-slate-500">대상</p>
+                <p className="text-sm font-medium text-slate-900">
+                  {stageSlackUserId.trim() || "Slack User ID를 입력해주세요"}
+                </p>
+              </div>
+
+              <div className="rounded-lg border p-5">
+                <p className="mb-3 text-xs font-medium text-slate-500">본문</p>
+                <div className="whitespace-pre-wrap text-sm leading-7 text-slate-800">
+                  {stageSlackMessage.trim() || "메시지를 입력해주세요"}
+                </div>
+              </div>
+            </div>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="stage-slack-channel" className="w-full space-y-4">
+          <div className="grid gap-6 lg:grid-cols-[420px_minmax(0,1fr)]">
+            <div className="space-y-4 rounded-lg border bg-white p-6">
+              <div>
+                <h3 className="font-semibold text-slate-900">Slack 채널 대상</h3>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  해당 월에 가능시간을 제출하지 않은 활성 내부 컨설턴트의 이메일 목록을 채널로 보냅니다
+                </p>
+              </div>
+
+              <div>
+                <Label htmlFor="stage-slack-channel-id">Slack Channel ID</Label>
+                <Input
+                  id="stage-slack-channel-id"
+                  placeholder="C0123456789"
+                  value={stageSlackChannelId}
+                  onChange={(event) => setStageSlackChannelId(event.target.value)}
+                />
+                <p className="mt-2 text-xs text-muted-foreground">
+                  채널 상세 정보의 Copy channel ID로 확인한 C... 또는 G... 값을 입력하세요.
+                </p>
+              </div>
+
+              <div>
+                <Label htmlFor="stage-slack-month-key">대상 월</Label>
+                <Input
+                  id="stage-slack-month-key"
+                  placeholder="2026-05"
+                  value={stageSlackMonthKey}
+                  onChange={(event) => setStageSlackMonthKey(event.target.value)}
+                />
+                <p className="mt-2 text-xs text-muted-foreground">
+                  `monthlyAvailabilityMeta` 기준으로 미제출자를 계산합니다.
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-4 rounded-lg border bg-white p-6">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h3 className="font-semibold text-slate-900">발송 미리보기</h3>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Firestore에서 계산한 결과를 그대로 Slack 채널에 보냅니다
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  onClick={handleStageSlackChannelSend}
+                  disabled={
+                    !stageSlackChannelId.trim() ||
+                    !stageSlackMonthKey.trim() ||
+                    isStageSlackChannelSending
+                  }
+                >
+                  <MessageSquare className="mr-2 h-4 w-4" />
+                  {isStageSlackChannelSending ? "발송 중..." : "stage Slack 채널 발송"}
+                </Button>
+              </div>
+
+              <div className="rounded-lg border bg-slate-50 p-4">
+                <p className="mb-1 text-xs font-medium text-slate-500">대상 채널</p>
+                <p className="text-sm font-medium text-slate-900">
+                  {stageSlackChannelId.trim() || "Slack Channel ID를 입력해주세요"}
+                </p>
+              </div>
+
+              <div className="rounded-lg border bg-slate-50 p-4">
+                <p className="mb-1 text-xs font-medium text-slate-500">대상 월</p>
+                <p className="text-sm font-medium text-slate-900">
+                  {stageSlackMonthKey.trim() || "YYYY-MM 형식으로 입력해주세요"}
+                </p>
+              </div>
+
+              <div className="rounded-lg border p-5">
+                <p className="mb-3 text-xs font-medium text-slate-500">전송 내용</p>
+                <div className="whitespace-pre-wrap text-sm leading-7 text-slate-800">
+                  {`[stage] ${stageSlackMonthKey.trim() || "YYYY-MM"} 가능시간 미제출 내부 컨설턴트 집계 결과를 채널로 전송합니다.`}
                 </div>
               </div>
             </div>

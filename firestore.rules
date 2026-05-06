@@ -258,6 +258,7 @@ service cloud.firestore {
           && consultantId == request.auth.uid
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
             "name",
+            "scope",
             "title",
             "email",
             "phone",

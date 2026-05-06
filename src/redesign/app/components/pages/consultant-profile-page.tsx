@@ -22,6 +22,7 @@ import * as regularOfficeHourPolicy from "@/redesign/app/lib/regular-office-hour
 
 export type ConsultantProfileFormValues = {
   name: string;
+  scope: "internal" | "external" | "";
   organization: string;
   email: string;
   phone: string;
@@ -77,6 +78,7 @@ function buildInitialValues(
 ): ConsultantProfileFormValues {
   return {
     name: consultant?.name ?? "",
+    scope: consultant?.scope ?? "",
     organization: consultant?.organization ?? "",
     email: consultant?.email ?? defaultEmail ?? "",
     phone: formatPhoneNumber(consultant?.phone ?? ""),
@@ -185,6 +187,7 @@ export function ConsultantProfilePage({
     if (consultant?.scope === "external") return "외부"
     return "미설정"
   }, [consultant?.scope]);
+  const isScopeEditable = embedded ? !consultant : true;
   const consultantAgendaText = useMemo(() => {
     const matchedAgendaNames = (consultant?.agendaIds ?? [])
       .map((agendaId) => agendas.find((agenda) => agenda.id === agendaId)?.name)
@@ -247,6 +250,7 @@ export function ConsultantProfilePage({
   const requiresBio = false;
   const isInvalid =
     !formValues.name.trim() ||
+    (formValues.scope !== "internal" && formValues.scope !== "external") ||
     !formValues.organization.trim() ||
     !formValues.email.trim() ||
     !formValues.phone.trim() ||
@@ -281,7 +285,13 @@ export function ConsultantProfilePage({
     return !["secondaryEmail", "secondaryPhone"].includes(key);
   };
   const isFieldInvalid = (key: keyof ConsultantProfileFormValues) =>
-    Boolean(touchedFields[key] && isFieldRequired(key) && !formValues[key].trim());
+    Boolean(
+      touchedFields[key] &&
+        isFieldRequired(key) &&
+        (key === "scope"
+          ? formValues.scope !== "internal" && formValues.scope !== "external"
+          : !formValues[key].trim())
+    );
   const getFieldClassName = (key: keyof ConsultantProfileFormValues) =>
     cn(
       embedded && [
@@ -337,10 +347,35 @@ export function ConsultantProfilePage({
           >
             <div className="md:col-span-2 grid grid-cols-1 gap-4 md:grid-cols-2">
               <div>
-                <Label className="mb-2 block">구분</Label>
-                <div className="text-[13px] font-medium text-slate-600">
-                  {consultantScopeLabel}
-                </div>
+                <Label className="mb-2 block">
+                  구분
+                  {isScopeEditable ? requiredMark : null}
+                </Label>
+                {isScopeEditable ? (
+                  <Select
+                    value={formValues.scope}
+                    onValueChange={(value) => {
+                      if (value !== "internal" && value !== "external") return
+                      updateField("scope", value)
+                    }}
+                  >
+                    <SelectTrigger
+                      className={getFieldClassName("scope")}
+                      aria-invalid={isFieldInvalid("scope")}
+                      onBlur={() => handleFieldBlur("scope")}
+                    >
+                      <SelectValue placeholder="내부/외부 선택" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="internal">내부</SelectItem>
+                      <SelectItem value="external">외부</SelectItem>
+                    </SelectContent>
+                  </Select>
+                ) : (
+                  <div className="text-[13px] font-medium text-slate-600">
+                    {consultantScopeLabel}
+                  </div>
+                )}
               </div>
               <div>
                 <Label className="mb-2 block">담당 아젠다</Label>

@@ -22,6 +22,7 @@ const REGION = process.env.FUNCTION_REGION || "asia-northeast3";
 const FIREBASE_PROJECT_ID = normalizeString(process.env.GCLOUD_PROJECT || process.env.GCLOUD_PROJECT_NUMBER);
 const GEMINI_API_KEY = defineSecret("GEMINI_API_KEY");
 const SLACK_SIGNUP_REQUEST_WEBHOOK_URL = defineSecret("SLACK_SIGNUP_REQUEST_WEBHOOK_URL");
+const SLACK_BOT_TOKEN = defineSecret("SLACK_BOT_TOKEN");
 const BIZTALK_DISPATCH_URL = defineSecret("BIZTALK_DISPATCH_URL");
 const BIZTALK_DISPATCH_TOKEN = defineSecret("BIZTALK_DISPATCH_TOKEN");
 const RESEND_API_KEY = defineSecret("RESEND_API_KEY");
@@ -1245,6 +1246,22 @@ function toSlackFieldValue(value) {
   return normalized || "(missing)";
 }
 
+function normalizeSlackMemberId(value) {
+  const normalized = normalizeString(value).toUpperCase();
+  if (!/^[UW][A-Z0-9]{8,}$/u.test(normalized)) {
+    return "";
+  }
+  return normalized;
+}
+
+function normalizeSlackChannelId(value) {
+  const normalized = normalizeString(value).toUpperCase();
+  if (!/^[CG][A-Z0-9]{8,}$/u.test(normalized)) {
+    return "";
+  }
+  return normalized;
+}
+
 function buildSignupRequestSlackPayload(signupRequest) {
   const requestedRole = normalizeApprovalRole(
     signupRequest.requestedRole || signupRequest.role || "",
@@ -1304,6 +1321,64 @@ async function postSlackWebhook(webhookUrl, payload) {
     const responseText = await response.text();
     throw new Error(`Slack webhook failed (${response.status}): ${responseText || "empty response"}`);
   }
+}
+
+async function postSlackApi(path, token, payload) {
+  const response = await fetch(`https://slack.com/api/${path}`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/json; charset=utf-8",
+    },
+    body: JSON.stringify(payload),
+  });
+
+  const body = await parseUpstreamResponse(response);
+  if (!response.ok) {
+    throw new Error(`Slack API failed (${response.status}): ${JSON.stringify(body || {})}`);
+  }
+  if (!body || body.ok !== true) {
+    throw new Error(`Slack API returned an error: ${JSON.stringify(body || {})}`);
+  }
+  return body;
+}
+
+async function sendSlackDirectMessage({ token, userId, text }) {
+  return postSlackApi("chat.postMessage", token, {
+    channel: userId,
+    text,
+  });
+}
+
+async function sendSlackChannelMessage({ token, channelId, text }) {
+  return postSlackApi("chat.postMessage", token, {
+    channel: channelId,
+    text,
+  });
+}
+
+function buildStageSlackAvailabilityAlertText({
+  monthKey,
+  missingConsultants,
+  skippedMissingScopeCount,
+}) {
+  const header = `[stage] ${monthKey} 가능시간 미제출 내부 컨설턴트 ${missingConsultants.length}명`;
+  const lines =
+    missingConsultants.length > 0
+      ? missingConsultants.map((consultant) => {
+          const email = normalizeString(consultant.email) || "이메일 미입력";
+          return `- ${normalizeString(consultant.name) || consultant.id} <${email}>`;
+        })
+      : ["- 모두 제출 완료"];
+
+  if (skippedMissingScopeCount > 0) {
+    lines.push(
+      "",
+      `주의: scope 미설정 활성 컨설턴트 ${skippedMissingScopeCount}명은 집계에서 제외됨`
+    );
+  }
+
+  return [header, ...lines].join("\n");
 }
 
 function buildHtmlFallbackFromText(value) {
@@ -1882,6 +1957,162 @@ exports.sendStageTestEmail = onCall(
   }
 );
 
+exports.sendStageSlackDmTest = onCall(
+  {
+    region: REGION,
+    timeoutSeconds: 60,
+    memory: "256MiB",
+    secrets: [SLACK_BOT_TOKEN],
+  },
+  async (request) => {
+    if (!request.auth?.uid) {
+      throw new HttpsError("unauthenticated", "로그인이 필요합니다.");
+    }
+    if (!isStageProject()) {
+      throw new HttpsError("failed-precondition", "Slack DM 테스트는 stage 프로젝트에서만 실행할 수 있습니다.");
+    }
+
+    const uid = request.auth.uid;
+    const profileSnap = await db.collection("profiles").doc(uid).get();
+    const role = normalizeString(profileSnap.data()?.role);
+    if (!["admin", "staff", "consultant"].includes(role)) {
+      throw new HttpsError("permission-denied", "Slack DM 테스트 권한이 없습니다.");
+    }
+
+    const token = normalizeString(SLACK_BOT_TOKEN.value());
+    if (!token) {
+      throw new HttpsError("failed-precondition", "SLACK_BOT_TOKEN is not configured.");
+    }
+
+    const userId = normalizeSlackMemberId(request.data?.userId);
+    const text = normalizeString(request.data?.text);
+    if (!userId) {
+      throw new HttpsError("invalid-argument", "A valid Slack user ID is required.");
+    }
+    if (!text) {
+      throw new HttpsError("invalid-argument", "text is required.");
+    }
+
+    try {
+      const result = await sendSlackDirectMessage({
+        token,
+        userId,
+        text,
+      });
+
+      return {
+        ok: true,
+        channel: normalizeString(result.channel) || null,
+        ts: normalizeString(result.ts) || null,
+      };
+    } catch (error) {
+      console.error("sendStageSlackDmTest failed", {
+        uid,
+        userId,
+        errorMessage: error instanceof Error ? error.message : String(error),
+        errorStack: error instanceof Error ? error.stack : null,
+      });
+      throw new HttpsError(
+        "internal",
+        error instanceof Error ? error.message : "Slack DM 테스트 발송에 실패했습니다."
+      );
+    }
+  }
+);
+
+exports.sendStageSlackChannelAvailabilityTest = onCall(
+  {
+    region: REGION,
+    timeoutSeconds: 60,
+    memory: "256MiB",
+    secrets: [SLACK_BOT_TOKEN],
+  },
+  async (request) => {
+    if (!request.auth?.uid) {
+      throw new HttpsError("unauthenticated", "로그인이 필요합니다.");
+    }
+    if (!isStageProject()) {
+      throw new HttpsError("failed-precondition", "Slack 채널 테스트는 stage 프로젝트에서만 실행할 수 있습니다.");
+    }
+
+    const uid = request.auth.uid;
+    const profileSnap = await db.collection("profiles").doc(uid).get();
+    const role = normalizeString(profileSnap.data()?.role);
+    if (!["admin", "staff", "consultant"].includes(role)) {
+      throw new HttpsError("permission-denied", "Slack 채널 테스트 권한이 없습니다.");
+    }
+
+    const token = normalizeString(SLACK_BOT_TOKEN.value());
+    if (!token) {
+      throw new HttpsError("failed-precondition", "SLACK_BOT_TOKEN is not configured.");
+    }
+
+    const channelId = normalizeSlackChannelId(request.data?.channelId);
+    const monthKey = normalizeString(request.data?.monthKey);
+    if (!channelId) {
+      throw new HttpsError("invalid-argument", "A valid Slack channel ID is required.");
+    }
+    if (!regularOfficeHourPolicy.isMonthKey(monthKey)) {
+      throw new HttpsError("invalid-argument", "A valid monthKey (YYYY-MM) is required.");
+    }
+
+    try {
+      const consultantsSnap = await db
+        .collection("consultants")
+        .where("status", "==", "active")
+        .get();
+
+      const normalizedConsultants = consultantsSnap.docs.map((doc) => normalizeConsultantDoc(doc));
+      const skippedMissingScopeCount = normalizedConsultants.filter(
+        (consultant) => !normalizeString(consultant.scope)
+      ).length;
+      const missingConsultants = normalizedConsultants
+        .filter((consultant) => normalizeString(consultant.scope) === "internal")
+        .filter((consultant) => !consultant.monthlyAvailabilityMeta?.[monthKey])
+        .map((consultant) => ({
+          id: consultant.id,
+          name: normalizeString(consultant.name) || "이름 미입력",
+          email: normalizeString(consultant.email),
+        }))
+        .sort((a, b) => a.name.localeCompare(b.name, "ko"));
+
+      const text = buildStageSlackAvailabilityAlertText({
+        monthKey,
+        missingConsultants,
+        skippedMissingScopeCount,
+      });
+
+      const result = await sendSlackChannelMessage({
+        token,
+        channelId,
+        text,
+      });
+
+      return {
+        ok: true,
+        channel: normalizeString(result.channel) || null,
+        ts: normalizeString(result.ts) || null,
+        monthKey,
+        missingCount: missingConsultants.length,
+        missingConsultants,
+        skippedMissingScopeCount,
+      };
+    } catch (error) {
+      console.error("sendStageSlackChannelAvailabilityTest failed", {
+        uid,
+        channelId,
+        monthKey,
+        errorMessage: error instanceof Error ? error.message : String(error),
+        errorStack: error instanceof Error ? error.stack : null,
+      });
+      throw new HttpsError(
+        "internal",
+        error instanceof Error ? error.message : "Slack 채널 테스트 발송에 실패했습니다."
+      );
+    }
+  }
+);
+
 exports.updateCompanyPrograms = onCall(
   {
     region: REGION,
@@ -2206,6 +2437,33 @@ function sanitizeConsultantMonthlyAvailability(value) {
   );
 }
 
+function sanitizeConsultantMonthlyAvailabilityMeta(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([monthKey, meta]) => {
+        if (!regularOfficeHourPolicy.isMonthKey(monthKey)) {
+          return false;
+        }
+        return meta && typeof meta === "object" && !Array.isArray(meta);
+      })
+      .map(([monthKey, meta]) => {
+        const normalizedSubmittedByUid = normalizeString(meta.submittedByUid);
+        return [
+          monthKey,
+          {
+            status: "submitted",
+            ...(meta.submittedAt ? { submittedAt: meta.submittedAt } : {}),
+            ...(normalizedSubmittedByUid ? { submittedByUid: normalizedSubmittedByUid } : {}),
+          },
+        ];
+      })
+  );
+}
+
 function isDateKey(value) {
   return /^\d{4}-\d{2}-\d{2}$/.test(normalizeString(value));
 }
@@ -2421,9 +2679,12 @@ function getApplicationProgramId(application) {
 }
 
 function normalizeConsultantDoc(consultantSnap) {
+  const data = consultantSnap.data() || {};
   return {
     id: consultantSnap.id,
-    ...(consultantSnap.data() || {}),
+    ...data,
+    monthlyAvailability: sanitizeConsultantMonthlyAvailability(data.monthlyAvailability),
+    monthlyAvailabilityMeta: sanitizeConsultantMonthlyAvailabilityMeta(data.monthlyAvailabilityMeta),
   };
 }
 
@@ -2505,6 +2766,7 @@ async function syncConsultantSchedulingCore(params) {
     authEmail,
     authDisplayName,
     monthlyAvailability,
+    monthlyAvailabilityMeta,
     agendaIds,
     status,
   } = params;
@@ -2534,6 +2796,7 @@ async function syncConsultantSchedulingCore(params) {
         agendaIds: [],
         availability: buildDefaultConsultantAvailability(),
         monthlyAvailability: {},
+        monthlyAvailabilityMeta: {},
       };
 
   const nextStatus =
@@ -2546,12 +2809,36 @@ async function syncConsultantSchedulingCore(params) {
     monthlyAvailability === undefined
       ? sanitizeConsultantMonthlyAvailability(currentConsultant.monthlyAvailability)
       : sanitizeConsultantMonthlyAvailability(monthlyAvailability);
+  const currentMonthlyAvailabilityMeta = sanitizeConsultantMonthlyAvailabilityMeta(
+    currentConsultant.monthlyAvailabilityMeta
+  );
+  const providedMonthlyAvailabilityMeta =
+    monthlyAvailabilityMeta === undefined
+      ? undefined
+      : sanitizeConsultantMonthlyAvailabilityMeta(monthlyAvailabilityMeta);
+  const nextMonthlyAvailabilityMeta =
+    providedMonthlyAvailabilityMeta === undefined
+      ? currentMonthlyAvailabilityMeta
+      : {
+          ...currentMonthlyAvailabilityMeta,
+          ...Object.fromEntries(
+            Object.keys(providedMonthlyAvailabilityMeta).map((monthKey) => [
+              monthKey,
+              {
+                status: "submitted",
+                submittedAt: FieldValue.serverTimestamp(),
+                submittedByUid: actorUid,
+              },
+            ])
+          ),
+        };
 
   const nextConsultant = {
     ...currentConsultant,
     status: nextStatus,
     agendaIds: nextAgendaIds,
     monthlyAvailability: nextMonthlyAvailability,
+    monthlyAvailabilityMeta: nextMonthlyAvailabilityMeta,
   };
 
   const changedMonthlyAvailabilityKeys = Array.from(
@@ -2594,6 +2881,7 @@ async function syncConsultantSchedulingCore(params) {
       status: nextStatus,
       agendaIds: nextAgendaIds,
       monthlyAvailability: nextMonthlyAvailability,
+      monthlyAvailabilityMeta: nextMonthlyAvailabilityMeta,
       updatedAt: FieldValue.serverTimestamp(),
       ...(consultantSnap.exists
         ? {}
@@ -3839,6 +4127,7 @@ exports.approvePendingUser = onCall(
             {};
 
           const phone = normalizeString(source.phone);
+          const scope = normalizeString(source.scope);
           const organization = normalizeString(source.organization);
           const secondaryEmail = normalizeString(source.secondaryEmail);
           const secondaryPhone = normalizeString(source.secondaryPhone);
@@ -3870,6 +4159,10 @@ exports.approvePendingUser = onCall(
               monthlyAvailability: sanitizeConsultantMonthlyAvailability(
                 existingConsultant.monthlyAvailability
               ),
+              monthlyAvailabilityMeta: sanitizeConsultantMonthlyAvailabilityMeta(
+                existingConsultant.monthlyAvailabilityMeta
+              ),
+              ...((scope === "internal" || scope === "external") ? { scope } : {}),
               ...(phone ? { phone } : {}),
               ...(organization ? { organization } : {}),
               ...(secondaryEmail ? { secondaryEmail } : {}),
@@ -4131,8 +4424,25 @@ exports.syncConsultantScheduling = onCall(
       payload,
       "monthlyAvailability"
     );
+    const monthlyAvailabilityMetaProvided = Object.prototype.hasOwnProperty.call(
+      payload,
+      "monthlyAvailabilityMeta"
+    );
     const agendaIdsProvided = Object.prototype.hasOwnProperty.call(payload, "agendaIds");
     const statusProvided = Object.prototype.hasOwnProperty.call(payload, "status");
+
+    if (monthlyAvailabilityMetaProvided && !monthlyAvailabilityProvided) {
+      throw new HttpsError(
+        "invalid-argument",
+        "월별 가능 시간 제출 상태는 가능 시간 저장과 함께만 수정할 수 있습니다."
+      );
+    }
+    if (monthlyAvailabilityProvided && !monthlyAvailabilityMetaProvided) {
+      throw new HttpsError(
+        "invalid-argument",
+        "월별 가능 시간 저장에는 제출 상태 정보가 함께 필요합니다."
+      );
+    }
 
     if (actorRole === "consultant") {
       if (requestedConsultantId !== uid) {
@@ -4155,6 +4465,7 @@ exports.syncConsultantScheduling = onCall(
       authEmail,
       authDisplayName,
       monthlyAvailability: monthlyAvailabilityProvided ? payload.monthlyAvailability : undefined,
+      monthlyAvailabilityMeta: monthlyAvailabilityMetaProvided ? payload.monthlyAvailabilityMeta : undefined,
       agendaIds: agendaIdsProvided ? payload.agendaIds : undefined,
       status: statusProvided ? payload.status : undefined,
     });

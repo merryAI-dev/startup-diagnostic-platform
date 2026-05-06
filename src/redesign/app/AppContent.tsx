@@ -101,6 +101,8 @@ import {
   approvePendingUserViaFunction,
   cancelApplicationViaFunction,
   runApplicationMaintenanceViaFunction,
+  sendStageSlackChannelAvailabilityTestViaFunction,
+  sendStageSlackDmTestViaFunction,
   sendStageTestEmailViaFunction,
   syncConsultantSchedulingViaFunction,
   syncIrregularCalendarSessionsViaFunction,
@@ -719,6 +721,37 @@ function omitId<T extends { id: string }>(item: T): Omit<T, "id"> {
   return Object.fromEntries(
     Object.entries(rest).filter(([, value]) => value !== undefined),
   ) as Omit<T, "id">
+}
+
+function normalizeMonthlyAvailabilityMeta(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {}
+  }
+
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([monthKey, meta]) => {
+        if (!regularOfficeHourPolicy.isMonthKey(monthKey)) return false
+        if (!meta || typeof meta !== "object" || Array.isArray(meta)) return false
+        return String((meta as { status?: unknown }).status ?? "") === "submitted"
+      })
+      .map(([monthKey, meta]) => {
+        const item = meta as {
+          submittedAt?: unknown
+          submittedByUid?: unknown
+        }
+        return [
+          monthKey,
+          {
+            status: "submitted" as const,
+            ...(item.submittedAt ? { submittedAt: normalizeDateValue(item.submittedAt) } : {}),
+            ...(typeof item.submittedByUid === "string" && item.submittedByUid.trim()
+              ? { submittedByUid: item.submittedByUid.trim() }
+              : {}),
+          },
+        ]
+      }),
+  )
 }
 
 function buildPlaceholderUser(role: UserRole): User {
@@ -1668,6 +1701,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
         agendaIds: doc.agendaIds ?? [],
         availability: doc.availability ?? [],
         monthlyAvailability: normalizeMonthlyAvailabilityMap(doc.monthlyAvailability),
+        monthlyAvailabilityMeta: normalizeMonthlyAvailabilityMeta(doc.monthlyAvailabilityMeta),
         status: doc.status ?? "active",
       })),
     )
@@ -3774,6 +3808,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       ...currentConsultant,
       id: consultantId,
       name,
+      scope: values.scope === "external" ? "external" : "internal",
       title: currentConsultant?.title ?? "컨설턴트",
       email,
       phone: values.phone.trim(),
@@ -3788,6 +3823,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
         (currentConsultant?.agendaIds?.length ?? 0) > 0 ? currentConsultant?.agendaIds : undefined,
       availability: currentConsultant?.availability ?? [],
       monthlyAvailability: currentConsultant?.monthlyAvailability ?? {},
+      monthlyAvailabilityMeta: currentConsultant?.monthlyAvailabilityMeta ?? {},
     }
 
     if (isFirebaseConfigured) {
@@ -3797,12 +3833,29 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
         toast.error("로그인 정보를 확인한 뒤 다시 시도해주세요")
         return
       }
-      const payload = omitId(nextConsultant)
+      const payload = {
+        name: nextConsultant.name,
+        scope: nextConsultant.scope,
+        title: nextConsultant.title,
+        email: nextConsultant.email,
+        phone: nextConsultant.phone,
+        organization: nextConsultant.organization,
+        secondaryEmail: nextConsultant.secondaryEmail,
+        secondaryPhone: nextConsultant.secondaryPhone,
+        fixedMeetingLink: nextConsultant.fixedMeetingLink,
+        expertise: nextConsultant.expertise,
+        bio: nextConsultant.bio,
+        status: nextConsultant.status,
+        availability: nextConsultant.availability,
+        ...(nextConsultant.joinedDate !== undefined
+          ? { joinedDate: nextConsultant.joinedDate }
+          : {}),
+      }
       const updated = await consultantCrud.update(authUid, payload)
       if (!updated) {
         const authEmailKey = toNormalizedEmail(authEmail)
         const primaryEmailKey = toNormalizedEmail(payload.email)
-        const createPayload: Omit<Consultant, "id"> = {
+        const createPayload = {
           ...payload,
           email: authEmail,
           ...(primaryEmailKey && primaryEmailKey !== authEmailKey
@@ -3914,6 +3967,14 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       ...currentMonthlyAvailability,
       [monthKey]: availability,
     }
+    const nextMonthlyAvailabilityMeta = {
+      ...(currentConsultant?.monthlyAvailabilityMeta ?? {}),
+      [monthKey]: {
+        status: "submitted" as const,
+        submittedAt: new Date().toISOString(),
+        submittedByUid: firebaseUser?.uid ?? consultantId,
+      },
+    }
     const nextConsultant: Consultant = {
       ...currentConsultant,
       id: consultantId,
@@ -3932,6 +3993,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
         (currentConsultant?.agendaIds?.length ?? 0) > 0 ? currentConsultant?.agendaIds : undefined,
       availability: currentConsultant?.availability ?? [],
       monthlyAvailability: nextMonthlyAvailability,
+      monthlyAvailabilityMeta: nextMonthlyAvailabilityMeta,
     }
 
     if (isFirebaseConfigured) {
@@ -3939,6 +4001,11 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       try {
         await syncConsultantSchedulingViaFunction({
           monthlyAvailability: nextMonthlyAvailability,
+          monthlyAvailabilityMeta: {
+            [monthKey]: {
+              status: "submitted",
+            },
+          },
         })
       } catch (error) {
         toast.error(getFunctionErrorMessage(error, "스케줄 저장에 실패했습니다"))
@@ -3974,9 +4041,10 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       data.status === undefined &&
       data.agendaIds === undefined &&
       data.monthlyAvailability === undefined &&
+      data.monthlyAvailabilityMeta === undefined &&
       Object.keys(data).length === 1
     const schedulingData: Partial<
-      Pick<Consultant, "status" | "agendaIds" | "monthlyAvailability">
+      Pick<Consultant, "status" | "agendaIds" | "monthlyAvailability" | "monthlyAvailabilityMeta">
     > = {}
     if (data.status !== undefined) {
       schedulingData.status = data.status
@@ -3987,10 +4055,14 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     if (data.monthlyAvailability !== undefined) {
       schedulingData.monthlyAvailability = data.monthlyAvailability
     }
+    if (data.monthlyAvailabilityMeta !== undefined) {
+      schedulingData.monthlyAvailabilityMeta = data.monthlyAvailabilityMeta
+    }
     const nonSchedulingData: Partial<Consultant> = { ...data }
     delete nonSchedulingData.status
     delete nonSchedulingData.agendaIds
     delete nonSchedulingData.monthlyAvailability
+    delete nonSchedulingData.monthlyAvailabilityMeta
     const hasSchedulingUpdate = Object.keys(schedulingData).length > 0
 
     if (isFirebaseConfigured) {
@@ -4004,6 +4076,9 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
               : {}),
             ...(schedulingData.monthlyAvailability !== undefined
               ? { monthlyAvailability: schedulingData.monthlyAvailability }
+              : {}),
+            ...(schedulingData.monthlyAvailabilityMeta !== undefined
+              ? { monthlyAvailabilityMeta: schedulingData.monthlyAvailabilityMeta }
               : {}),
           })
         } catch (error) {
@@ -4415,6 +4490,20 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     html?: string
   }) => {
     return sendStageTestEmailViaFunction(payload)
+  }
+
+  const handleSendStageSlackDmTest = async (payload: {
+    userId: string
+    text: string
+  }) => {
+    return sendStageSlackDmTestViaFunction(payload)
+  }
+
+  const handleSendStageSlackChannelAvailabilityTest = async (payload: {
+    channelId: string
+    monthKey: string
+  }) => {
+    return sendStageSlackChannelAvailabilityTestViaFunction(payload)
   }
 
   const selectedOfficeHour = visibleRegularOfficeHourList.find(
@@ -5061,6 +5150,8 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
                 onDeleteTemplate={handleDeleteTemplate}
                 onSendBulkMessage={handleSendBulkMessage}
                 onSendStageTestEmail={handleSendStageTestEmail}
+                onSendStageSlackDmTest={handleSendStageSlackDmTest}
+                onSendStageSlackChannelAvailabilityTest={handleSendStageSlackChannelAvailabilityTest}
               />
             </ProtectedRoute>
           )}

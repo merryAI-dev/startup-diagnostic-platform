@@ -251,6 +251,11 @@ export function AdminConsultants({
         ...(selectedConsultant.monthlyAvailability ?? {}),
         [selectedScheduleMonthKey]: scheduleAvailability,
       },
+      monthlyAvailabilityMeta: {
+        [selectedScheduleMonthKey]: {
+          status: "submitted",
+        },
+      },
     })
     setIsScheduleDialogOpen(false)
     setDraftScheduleAvailability(null)

@@ -312,6 +312,7 @@ export interface Consultant {
   agendaIds?: string[]; // 관리자가 매칭한 아젠다 ID 목록
   availability: ConsultantAvailability[];
   monthlyAvailability?: ConsultantMonthlyAvailability;
+  monthlyAvailabilityMeta?: ConsultantMonthlyAvailabilityMeta;
 }
 
 export interface ConsultantAvailability {
@@ -324,6 +325,15 @@ export interface ConsultantAvailability {
 }
 
 export type ConsultantMonthlyAvailability = Record<string, ConsultantAvailability[]>;
+
+export type ConsultantMonthlyAvailabilityMeta = Record<
+  string,
+  {
+    status: "submitted";
+    submittedAt?: Date | string;
+    submittedByUid?: string;
+  }
+>;
 
 export interface UserWithPermissions {
   id: string;

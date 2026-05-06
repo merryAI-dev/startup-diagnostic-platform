@@ -5,6 +5,7 @@ import type {
   ApplicationStatus,
   ConsultantAvailability,
   ConsultantMonthlyAvailability,
+  ConsultantMonthlyAvailabilityMeta,
   ProgramKpiDefinition,
   ProgramWeekday,
   SessionFormat,
@@ -121,6 +122,7 @@ type SaveManagedCompanyInfoResult = {
 export type SyncConsultantSchedulingPayload = {
   consultantId?: string;
   monthlyAvailability?: ConsultantMonthlyAvailability;
+  monthlyAvailabilityMeta?: ConsultantMonthlyAvailabilityMeta;
   agendaIds?: string[];
   status?: "active" | "inactive";
 };
@@ -235,6 +237,36 @@ export type SendStageTestEmailResult = {
     to: string;
     id: string | null;
   }>;
+};
+
+export type SendStageSlackDmTestPayload = {
+  userId: string;
+  text: string;
+};
+
+export type SendStageSlackDmTestResult = {
+  ok: boolean;
+  channel: string | null;
+  ts: string | null;
+};
+
+export type SendStageSlackChannelAvailabilityTestPayload = {
+  channelId: string;
+  monthKey: string;
+};
+
+export type SendStageSlackChannelAvailabilityTestResult = {
+  ok: boolean;
+  channel: string | null;
+  ts: string | null;
+  monthKey: string;
+  missingCount: number;
+  missingConsultants: Array<{
+    id: string;
+    name: string;
+    email: string;
+  }>;
+  skippedMissingScopeCount: number;
 };
 
 export async function submitRegularApplicationViaFunction(
@@ -448,6 +480,38 @@ export async function sendStageTestEmailViaFunction(
     SendStageTestEmailPayload,
     SendStageTestEmailResult
   >(functions, "sendStageTestEmail")
+
+  const result = await callable(payload)
+  return result.data
+}
+
+export async function sendStageSlackDmTestViaFunction(
+  payload: SendStageSlackDmTestPayload
+) {
+  if (!isFirebaseConfigured || !functions) {
+    throw new Error("Firebase Functions is not configured");
+  }
+
+  const callable = httpsCallable<
+    SendStageSlackDmTestPayload,
+    SendStageSlackDmTestResult
+  >(functions, "sendStageSlackDmTest")
+
+  const result = await callable(payload)
+  return result.data
+}
+
+export async function sendStageSlackChannelAvailabilityTestViaFunction(
+  payload: SendStageSlackChannelAvailabilityTestPayload
+) {
+  if (!isFirebaseConfigured || !functions) {
+    throw new Error("Firebase Functions is not configured");
+  }
+
+  const callable = httpsCallable<
+    SendStageSlackChannelAvailabilityTestPayload,
+    SendStageSlackChannelAvailabilityTestResult
+  >(functions, "sendStageSlackChannelAvailabilityTest")
 
   const result = await callable(payload)
   return result.data

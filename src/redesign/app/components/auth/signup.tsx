@@ -4,6 +4,13 @@ import { Label } from "@/redesign/app/components/ui/label";
 import { Input } from "@/redesign/app/components/ui/input";
 import { Button } from "@/redesign/app/components/ui/button";
 import { Textarea } from "@/redesign/app/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/redesign/app/components/ui/select";
 import type { CompanyInfoForm } from "@/redesign/types/company";
 import { DEFAULT_FORM } from "@/redesign/types/company";
 
@@ -17,6 +24,7 @@ type SignupStep = "info" | "account";
 
 type ConsultantSignupInfo = {
   name: string;
+  scope: "internal" | "external" | "";
   organization: string;
   email: string;
   phone: string;
@@ -44,6 +52,7 @@ type SignupPayload =
 
 const defaultConsultantInfo: ConsultantSignupInfo = {
   name: "",
+  scope: "",
   organization: "",
   email: "",
   phone: "",
@@ -90,6 +99,7 @@ export function Signup({ onSignup, onNavigateToLogin }: SignupProps) {
     && companyInfo.ceoEmail.trim().length > 0;
   const consultantInfoValid =
     consultantInfo.name.trim().length > 0
+    && (consultantInfo.scope === "internal" || consultantInfo.scope === "external")
     && consultantInfo.email.trim().length > 0
     && consultantInfo.bio.trim().length > 0;
   const canProceedInfo = role === "company" ? companyInfoValid : consultantInfoValid;
@@ -275,6 +285,26 @@ export function Signup({ onSignup, onNavigateToLogin }: SignupProps) {
                       setConsultantInfo((prev) => ({ ...prev, organization: e.target.value }))
                     }
                   />
+                </div>
+                <div>
+                  <Label htmlFor="consultant-scope">
+                    구분 <span className="text-rose-600">*</span>
+                  </Label>
+                  <Select
+                    value={consultantInfo.scope}
+                    onValueChange={(value) => {
+                      if (value !== "internal" && value !== "external") return
+                      setConsultantInfo((prev) => ({ ...prev, scope: value }))
+                    }}
+                  >
+                    <SelectTrigger id="consultant-scope">
+                      <SelectValue placeholder="내부/외부 선택" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="internal">내부</SelectItem>
+                      <SelectItem value="external">외부</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div>
                   <Label htmlFor="consultant-email">이메일</Label>

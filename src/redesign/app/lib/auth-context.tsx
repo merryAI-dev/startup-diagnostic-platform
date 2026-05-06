@@ -38,6 +38,7 @@ type SignupPayload =
 
 type ConsultantSignupInfo = {
   name: string;
+  scope: "internal" | "external";
   organization: string;
   email: string;
   phone: string;
@@ -323,6 +324,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } else {
         const consultantName = payload.consultantInfo.name.trim();
         const consultantEmail = payload.consultantInfo.email.trim();
+        const consultantScope = payload.consultantInfo.scope;
         const organization = payload.consultantInfo.organization.trim();
         newUser = {
           email: payload.email,
@@ -356,6 +358,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               .map((value) => value.trim())
               .filter(Boolean),
             bio: payload.consultantInfo.bio.trim() || `${consultantName} 컨설턴트`,
+            scope: consultantScope,
             status: "active",
             availability: buildDefaultAvailability(),
             monthlyAvailability: {},

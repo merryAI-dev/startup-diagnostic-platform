@@ -336,6 +336,7 @@ function ConsultantSignupInfo({
 
   async function handleSubmit(values: {
     name: string
+    scope: "internal" | "external" | ""
     organization: string
     email: string
     phone: string
@@ -346,6 +347,10 @@ function ConsultantSignupInfo({
     bio: string
   }) {
     if (!db) return
+    if (values.scope !== "internal" && values.scope !== "external") {
+      toast.error("컨설턴트 구분을 선택해주세요.")
+      return
+    }
     if (submitLockRef.current) return
     submitLockRef.current = true
     setSubmitting(true)
@@ -359,7 +364,12 @@ function ConsultantSignupInfo({
         "company",
         requestedRole,
         authUser.email ?? userEmail,
-        { consultantInfo: values }
+        {
+          consultantInfo: {
+            ...values,
+            scope: values.scope,
+          },
+        }
       )
       await onComplete()
     } catch (error) {

@@ -13,6 +13,7 @@ const collectionName = "profiles"
 
 export type ConsultantSignupInfo = {
   name: string
+  scope: "internal" | "external"
   organization: string
   email: string
   phone: string
@@ -244,6 +245,7 @@ export async function createSignupRequest(
     signupRequestData.consultantInfo = {
       ...options.consultantInfo,
       name: options.consultantInfo.name.trim(),
+      scope: options.consultantInfo.scope,
       organization: options.consultantInfo.organization.trim(),
       email: options.consultantInfo.email.trim(),
       phone: options.consultantInfo.phone.trim(),
