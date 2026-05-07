@@ -100,7 +100,9 @@ import {
 import {
   approvePendingUserViaFunction,
   cancelApplicationViaFunction,
+  queryBiztalkAlimtalkResultsViaFunction,
   runApplicationMaintenanceViaFunction,
+  sendBiztalkTestAlimtalkViaFunction,
   sendStageSlackChannelAvailabilityTestViaFunction,
   sendStageSlackDmTestViaFunction,
   sendStageTestEmailViaFunction,
@@ -118,7 +120,7 @@ import {
   hasApplicantConflictAt,
   isApplicationTargetingConsultant,
 } from "@/redesign/app/lib/application-availability"
-import { DEFAULT_STAGE_EMAIL_TEMPLATES } from "@/redesign/app/lib/stage-email-templates"
+import { DEFAULT_STAGE_EMAIL_TEMPLATES, normalizeStageTemplates } from "@/redesign/app/lib/stage-email-templates"
 import {
   buildDefaultConsultantAvailability,
   getConsultantAvailabilityForDate,
@@ -1125,6 +1127,10 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
   const [aiRecommendations, setAIRecommendations] = useState<AIRecommendation[]>([])
   const [goals, setGoals] = useState<Goal[]>([])
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([])
+
+  useEffect(() => {
+    setTemplates((prev) => normalizeStageTemplates(prev))
+  }, [])
 
   const { data: consultantDocs, loading: consultantDocsLoading } =
     useFirestoreCollection<Consultant>(COLLECTIONS.CONSULTANTS, {
@@ -4492,6 +4498,25 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     return sendStageTestEmailViaFunction(payload)
   }
 
+  const handleSendBiztalkTestAlimtalk = async (payload: {
+    recipient: string
+    message: string
+    tmpltCode?: string
+    senderKey?: string
+    dryRun?: boolean
+  }) => {
+    return sendBiztalkTestAlimtalkViaFunction(payload)
+  }
+
+  const handleQueryBiztalkAlimtalkResults = async (payload: {
+    dryRun?: boolean
+    method?: "GET" | "POST"
+    payload?: Record<string, unknown>
+    query?: Record<string, string>
+  }) => {
+    return queryBiztalkAlimtalkResultsViaFunction(payload)
+  }
+
   const handleSendStageSlackDmTest = async (payload: {
     userId: string
     text: string
@@ -5150,6 +5175,8 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
                 onDeleteTemplate={handleDeleteTemplate}
                 onSendBulkMessage={handleSendBulkMessage}
                 onSendStageTestEmail={handleSendStageTestEmail}
+                onSendBiztalkTestAlimtalk={handleSendBiztalkTestAlimtalk}
+                onQueryBiztalkAlimtalkResults={handleQueryBiztalkAlimtalkResults}
                 onSendStageSlackDmTest={handleSendStageSlackDmTest}
                 onSendStageSlackChannelAvailabilityTest={handleSendStageSlackChannelAvailabilityTest}
               />

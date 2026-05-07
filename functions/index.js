@@ -1872,6 +1872,129 @@ exports.runBiztalkStageCheck = onCall(
   }
 );
 
+exports.sendBiztalkTestAlimtalk = onCall(
+  {
+    region: REGION,
+    timeoutSeconds: 60,
+    memory: "256MiB",
+    secrets: [BIZTALK_DISPATCH_URL, BIZTALK_DISPATCH_TOKEN],
+  },
+  async (request) => {
+    if (!request.auth?.uid) {
+      throw new HttpsError("unauthenticated", "로그인이 필요합니다.");
+    }
+    if (!isStageProject() && !isLiveProject()) {
+      throw new HttpsError("failed-precondition", "BizTalk 테스트 발송은 stage 또는 live 프로젝트에서만 실행할 수 있습니다.");
+    }
+
+    const uid = request.auth.uid;
+    const profileSnap = await db.collection("profiles").doc(uid).get();
+    const role = normalizeString(profileSnap.data()?.role);
+    if (!["admin", "staff"].includes(role)) {
+      throw new HttpsError("permission-denied", "BizTalk 테스트 발송 권한이 없습니다.");
+    }
+
+    const recipient = normalizePhoneNumber(request.data?.recipient);
+    const message = typeof request.data?.message === "string" ? request.data.message.trim() : "";
+    const msgIdx = normalizeString(request.data?.msgIdx);
+    const title = normalizeString(request.data?.title);
+    const tmpltCode = normalizeString(request.data?.tmpltCode);
+    const senderKey = normalizeString(request.data?.senderKey);
+    const attach =
+      request.data?.attach && typeof request.data.attach === "object" ? request.data.attach : undefined;
+    const dryRun = request.data?.dryRun !== false;
+
+    if (!recipient) {
+      throw new HttpsError("invalid-argument", "recipient is required.");
+    }
+    if (!message) {
+      throw new HttpsError("invalid-argument", "message is required.");
+    }
+
+    try {
+      return await callBiztalkDispatch("/dispatch/alimtalk", {
+        callerProjectId: FIREBASE_PROJECT_ID,
+        dryRun,
+        recipient,
+        message,
+        ...(msgIdx ? { msgIdx } : {}),
+        ...(title ? { title } : {}),
+        ...(tmpltCode ? { tmpltCode } : {}),
+        ...(senderKey ? { senderKey } : {}),
+        ...(attach ? { attach } : {}),
+      });
+    } catch (error) {
+      console.error("sendBiztalkTestAlimtalk failed", {
+        uid,
+        dryRun,
+        recipient,
+        hasMsgIdx: Boolean(msgIdx),
+        hasTitle: Boolean(title),
+        hasSenderKey: Boolean(senderKey),
+        hasTemplateCode: Boolean(tmpltCode),
+        hasAttach: Boolean(attach),
+        errorMessage: error instanceof Error ? error.message : String(error),
+        errorStack: error instanceof Error ? error.stack : null,
+      });
+      if (error instanceof HttpsError) {
+        throw error;
+      }
+      throw new HttpsError("internal", "BizTalk 테스트 발송에 실패했습니다.");
+    }
+  }
+);
+
+exports.queryBiztalkAlimtalkResults = onCall(
+  {
+    region: REGION,
+    timeoutSeconds: 60,
+    memory: "256MiB",
+    secrets: [BIZTALK_DISPATCH_URL, BIZTALK_DISPATCH_TOKEN],
+  },
+  async (request) => {
+    if (!request.auth?.uid) {
+      throw new HttpsError("unauthenticated", "로그인이 필요합니다.");
+    }
+    if (!isStageProject() && !isLiveProject()) {
+      throw new HttpsError("failed-precondition", "BizTalk 결과 조회는 stage 또는 live 프로젝트에서만 실행할 수 있습니다.");
+    }
+
+    const uid = request.auth.uid;
+    const profileSnap = await db.collection("profiles").doc(uid).get();
+    const role = normalizeString(profileSnap.data()?.role);
+    if (!["admin", "staff"].includes(role)) {
+      throw new HttpsError("permission-denied", "BizTalk 결과 조회 권한이 없습니다.");
+    }
+
+    const dryRun = request.data?.dryRun === true;
+    const method = normalizeString(request.data?.method || "POST").toUpperCase();
+    const payload = isPlainObject(request.data?.payload) ? request.data.payload : {};
+    const query = normalizeStringRecord(request.data?.query);
+
+    try {
+      return await callBiztalkDispatch("/results/alimtalk", {
+        callerProjectId: FIREBASE_PROJECT_ID,
+        dryRun,
+        method,
+        payload,
+        query,
+      });
+    } catch (error) {
+      console.error("queryBiztalkAlimtalkResults failed", {
+        uid,
+        dryRun,
+        method,
+        errorMessage: error instanceof Error ? error.message : String(error),
+        errorStack: error instanceof Error ? error.stack : null,
+      });
+      if (error instanceof HttpsError) {
+        throw error;
+      }
+      throw new HttpsError("internal", "BizTalk 결과 조회에 실패했습니다.");
+    }
+  }
+);
+
 exports.sendStageTestEmail = onCall(
   {
     region: REGION,

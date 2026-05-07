@@ -221,6 +221,39 @@ export type RunBiztalkStageCheckResult = {
   [key: string]: unknown;
 };
 
+export type SendBiztalkTestAlimtalkPayload = {
+  recipient: string;
+  message: string;
+  msgIdx?: string;
+  title?: string;
+  tmpltCode?: string;
+  senderKey?: string;
+  attach?: {
+    button: Array<{
+      name: string;
+      type: string;
+    }>;
+  };
+  dryRun?: boolean;
+};
+
+export type SendBiztalkTestAlimtalkResult = {
+  ok: boolean;
+  [key: string]: unknown;
+};
+
+export type QueryBiztalkAlimtalkResultsPayload = {
+  dryRun?: boolean;
+  method?: "GET" | "POST";
+  payload?: Record<string, unknown>;
+  query?: Record<string, string>;
+};
+
+export type QueryBiztalkAlimtalkResultsResult = {
+  ok: boolean;
+  [key: string]: unknown;
+};
+
 export type SendStageTestEmailPayload = {
   fromEmail: string;
   replyTo?: string | null;
@@ -464,6 +497,38 @@ export async function runBiztalkStageCheckViaFunction(
     RunBiztalkStageCheckPayload,
     RunBiztalkStageCheckResult
   >(functions, "runBiztalkStageCheck")
+
+  const result = await callable(payload)
+  return result.data
+}
+
+export async function sendBiztalkTestAlimtalkViaFunction(
+  payload: SendBiztalkTestAlimtalkPayload
+) {
+  if (!isFirebaseConfigured || !functions) {
+    throw new Error("Firebase Functions is not configured");
+  }
+
+  const callable = httpsCallable<
+    SendBiztalkTestAlimtalkPayload,
+    SendBiztalkTestAlimtalkResult
+  >(functions, "sendBiztalkTestAlimtalk")
+
+  const result = await callable(payload)
+  return result.data
+}
+
+export async function queryBiztalkAlimtalkResultsViaFunction(
+  payload: QueryBiztalkAlimtalkResultsPayload = {}
+) {
+  if (!isFirebaseConfigured || !functions) {
+    throw new Error("Firebase Functions is not configured");
+  }
+
+  const callable = httpsCallable<
+    QueryBiztalkAlimtalkResultsPayload,
+    QueryBiztalkAlimtalkResultsResult
+  >(functions, "queryBiztalkAlimtalkResults")
 
   const result = await callable(payload)
   return result.data

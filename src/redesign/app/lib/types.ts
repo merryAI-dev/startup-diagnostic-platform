@@ -360,9 +360,12 @@ export interface MessageTemplate {
   id: string;
   title: string;
   category: string;
+  channel?: "email" | "biztalk";
+  templateCase?: string;
   subject: string;
   content: string;
   variables: string[];
+  biztalkTemplateCode?: string;
   createdAt: Date;
   updatedAt: Date;
 }

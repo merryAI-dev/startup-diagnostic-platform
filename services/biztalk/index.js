@@ -12,6 +12,7 @@ const BIZTALK_BS_ID = normalizeString(process.env.BIZTALK_BS_ID);
 const BIZTALK_BS_PW = normalizeString(process.env.BIZTALK_BS_PW);
 const BIZTALK_SENDER_KEY = normalizeString(process.env.BIZTALK_SENDER_KEY);
 const BIZTALK_DEFAULT_TMPLT_CODE = normalizeString(process.env.BIZTALK_DEFAULT_TMPLT_CODE);
+const BIZTALK_ALIMTALK_RESULT_PATH = "/v2/kko/getResultAll";
 const OUTBOUND_IP_ECHO_URL =
   normalizeString(process.env.OUTBOUND_IP_ECHO_URL) || "https://api.ipify.org?format=json";
 const UPSTREAM_TIMEOUT_MS = Number(process.env.BIZTALK_UPSTREAM_TIMEOUT_MS || 100000);
@@ -105,6 +106,10 @@ function normalizePhoneNumber(value) {
 }
 
 function normalizeMessageText(value) {
+  return typeof value === "string" ? value.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim() : "";
+}
+
+function normalizeTitleText(value) {
   return typeof value === "string" ? value.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim() : "";
 }
 
@@ -314,6 +319,17 @@ function buildTargetUrl(baseUrl, query) {
   return url.toString();
 }
 
+function buildBiztalkAlimtalkResultUrl() {
+  if (!BIZTALK_MESSAGE_URL) {
+    return "";
+  }
+
+  const url = new URL(BIZTALK_MESSAGE_URL);
+  url.pathname = BIZTALK_ALIMTALK_RESULT_PATH;
+  url.search = "";
+  return url.toString();
+}
+
 function parseBiztalkExpireDate(value) {
   const raw = normalizeString(value);
   if (!/^\d{14}$/.test(raw)) {
@@ -417,6 +433,7 @@ async function getBiztalkToken(forceRefresh = false) {
 function buildBiztalkMessagePayload(body) {
   const recipient = normalizePhoneNumber(body?.recipient || body?.recipients?.[0]);
   const message = normalizeMessageText(body?.message);
+  const title = normalizeTitleText(body?.title);
   const senderKey = normalizeString(body?.senderKey) || BIZTALK_SENDER_KEY;
   const tmpltCode = normalizeString(body?.tmpltCode) || BIZTALK_DEFAULT_TMPLT_CODE;
   const msgIdx = normalizeString(body?.msgIdx) || `msg-${Date.now()}`;
@@ -445,6 +462,7 @@ function buildBiztalkMessagePayload(body) {
     tmpltCode,
     message,
     recipient,
+    ...(title ? { title } : {}),
     ...(attach ? { attach } : {}),
   };
 }
@@ -684,6 +702,95 @@ async function handleAlimtalkDispatch(request, response) {
   });
 }
 
+async function handleAlimtalkResultQuery(request, response) {
+  const resultUrl = buildBiztalkAlimtalkResultUrl();
+  if (!resultUrl) {
+    json(response, 503, {
+      ok: false,
+      error: "BIZTALK_MESSAGE_URL is not configured.",
+    });
+    return;
+  }
+
+  const body = await readRequestBody(request);
+  const dryRun = body?.dryRun === true;
+  const upstreamMethod = normalizeString(body?.method || "POST").toUpperCase();
+  const payload = isPlainObject(body?.payload) ? body.payload : {};
+  const query = sanitizeStringRecord(body?.query);
+
+  if (!["GET", "POST"].includes(upstreamMethod)) {
+    json(response, 400, {
+      ok: false,
+      error: "Only GET and POST upstream methods are supported.",
+    });
+    return;
+  }
+
+  const targetUrl = buildTargetUrl(resultUrl, query);
+  if (dryRun) {
+    json(response, 200, {
+      ok: true,
+      dryRun: true,
+      method: upstreamMethod,
+      targetUrl,
+      headers: redactHeaders({
+        "content-type": "application/json; charset=utf-8",
+        "bt-token": "TOKEN_WILL_BE_REQUESTED_FROM_BIZTALK",
+        ...STATIC_HEADERS,
+      }),
+      payload,
+    });
+    return;
+  }
+
+  let tokenInfo = await getBiztalkToken(false);
+  let upstream = await fetch(targetUrl, {
+    method: upstreamMethod,
+    headers: {
+      "content-type": "application/json; charset=utf-8",
+      "bt-token": tokenInfo.token,
+      ...STATIC_HEADERS,
+    },
+    ...(upstreamMethod === "POST" ? { body: JSON.stringify(payload) } : {}),
+    signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+  });
+  let upstreamBody = await parseUpstreamResponse(upstream);
+
+  if (!upstream.ok && String(JSON.stringify(upstreamBody || {})).toLowerCase().includes("token")) {
+    tokenInfo = await getBiztalkToken(true);
+    upstream = await fetch(targetUrl, {
+      method: upstreamMethod,
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+        "bt-token": tokenInfo.token,
+        ...STATIC_HEADERS,
+      },
+      ...(upstreamMethod === "POST" ? { body: JSON.stringify(payload) } : {}),
+      signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS),
+    });
+    upstreamBody = await parseUpstreamResponse(upstream);
+  }
+
+  if (!upstream.ok) {
+    json(response, 502, {
+      ok: false,
+      targetUrl,
+      upstreamStatus: upstream.status,
+      upstreamBody,
+      tokenExpireDate: tokenInfo.expireDate || null,
+    });
+    return;
+  }
+
+  json(response, 200, {
+    ok: true,
+    targetUrl,
+    upstreamStatus: upstream.status,
+    upstreamBody,
+    tokenExpireDate: tokenInfo.expireDate || null,
+  });
+}
+
 async function handleRequest(request, response) {
   try {
     const url = new URL(request.url || "/", `http://${request.headers.host || "localhost"}`);
@@ -731,6 +838,11 @@ async function handleRequest(request, response) {
 
     if (url.pathname === "/dispatch/alimtalk") {
       await handleAlimtalkDispatch(request, response);
+      return;
+    }
+
+    if (url.pathname === "/results/alimtalk") {
+      await handleAlimtalkResultQuery(request, response);
       return;
     }
 
