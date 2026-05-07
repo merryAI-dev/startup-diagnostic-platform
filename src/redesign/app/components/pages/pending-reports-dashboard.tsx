@@ -36,7 +36,7 @@ import {
   CommandItem,
   CommandList,
 } from "@/redesign/app/components/ui/command";
-import { AlertCircle, Check, ChevronsUpDown, Clock, Download, Eye, FileText, Loader2, Mail, X } from "lucide-react";
+import { AlertCircle, Check, ChevronsUpDown, Clock, Download, Eye, FileText, Loader2, Mail, RotateCw, X } from "lucide-react";
 import { addDays, format, differenceInDays } from "date-fns";
 import { ko } from "date-fns/locale";
 import type { DateRange } from "react-day-picker";
@@ -245,6 +245,19 @@ const getManualApplicationAgenda = (type: OfficeHourType, topic?: string) => {
   return type === "mentoring" ? "멘토링" : "비정기 오피스아워";
 };
 
+const resolveDisplayedDurationHours = (
+  application: Pick<Application, "duration">,
+  report?: Pick<OfficeHourReport, "duration"> | null,
+) => {
+  if (typeof report?.duration === "number" && Number.isFinite(report.duration)) {
+    return report.duration;
+  }
+  if (typeof application.duration === "number" && Number.isFinite(application.duration)) {
+    return application.duration;
+  }
+  return null;
+};
+
 interface PendingReportsDashboardProps {
   applications: Application[];
   reports: OfficeHourReport[];
@@ -308,6 +321,7 @@ export function PendingReportsDashboard({
   currentConsultantName,
   refreshingSources = false,
   onCreateReport,
+  onEditReport,
   onRefreshSources,
 }: PendingReportsDashboardProps) {
   const PAGE_SIZE = 10;
@@ -1041,7 +1055,7 @@ export function PendingReportsDashboard({
                     {refreshingSources ? (
                       <Loader2 className="h-4 w-4 animate-spin" />
                     ) : (
-                      <Clock className="h-4 w-4" />
+                      <RotateCw className="h-4 w-4" />
                     )}
                     목록 새로고침
                   </Button>
@@ -1294,9 +1308,7 @@ export function PendingReportsDashboard({
                           )}
                         </TableCell>
                         <TableCell className="text-sm text-muted-foreground">
-                          {typeof row.report?.duration === "number" && Number.isFinite(row.report.duration)
-                            ? row.report.duration
-                            : "-"}
+                          {resolveDisplayedDurationHours(row.application, row.report) ?? "-"}
                         </TableCell>
                         <TableCell className="text-sm text-muted-foreground">
                           {row.report
@@ -1365,6 +1377,34 @@ export function PendingReportsDashboard({
                                 title={row.report ? "이미 작성된 일지입니다" : "리마인드 메일 전송"}
                               >
                                 <Mail className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          ) : isConsultantUser && row.type === "submitted" ? (
+                            <div className="flex justify-end gap-2">
+                              <Button
+                                size="icon"
+                                variant="outline"
+                                className="h-8 w-8"
+                                onClick={() =>
+                                  setSelectedReportItem({
+                                    report: row.report!,
+                                    application: row.application,
+                                    programName: row.programName,
+                                    programColor: row.programColor,
+                                    programId: row.programId,
+                                  })
+                                }
+                                aria-label="상세 보기"
+                                title="상세 보기"
+                              >
+                                <Eye className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => onEditReport(row.report!)}
+                              >
+                                수정
                               </Button>
                             </div>
                           ) : row.type === "submitted" ? (
@@ -1464,12 +1504,14 @@ export function PendingReportsDashboard({
                   <div className="space-y-1.5">
                     <div className="text-xs font-medium text-slate-500">소요시간</div>
                     <div className="text-sm text-slate-900">
-                      {typeof selectedReportItem.report?.duration === "number"
-                      && Number.isFinite(selectedReportItem.report.duration)
-                        ? `${selectedReportItem.report.duration}시간`
-                        : typeof selectedReportItem.application.duration === "number"
-                          && Number.isFinite(selectedReportItem.application.duration)
-                          ? `${selectedReportItem.application.duration}시간`
+                      {resolveDisplayedDurationHours(
+                        selectedReportItem.application,
+                        selectedReportItem.report,
+                      ) !== null
+                        ? `${resolveDisplayedDurationHours(
+                            selectedReportItem.application,
+                            selectedReportItem.report,
+                          )}시간`
                         : "-"}
                     </div>
                   </div>
