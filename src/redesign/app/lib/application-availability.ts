@@ -51,6 +51,20 @@ export function getPendingConsultantIds(application: Application): string[] {
   return Array.from(new Set(explicitPendingIds))
 }
 
+export type ConsultantAssignmentBlockReason =
+  | "inactive"
+  | "not_linked_to_agenda"
+  | "not_available_at_time"
+  | "occupied_by_existing_application"
+  | "filtered_by_slot_consultant"
+
+export type ConsultantAssignmentEvaluation = {
+  consultant: Consultant
+  eligible: boolean
+  reason: ConsultantAssignmentBlockReason | null
+  blockingApplication: Application | null
+}
+
 export function isApplicationTargetingConsultant(
   application: Application,
   consultantId?: string | null,
@@ -60,30 +74,18 @@ export function isApplicationTargetingConsultant(
   return getPendingConsultantIds(application).includes(consultantId)
 }
 
-export function getAssignableConsultantsAt(params: {
-  consultants: Consultant[]
+export function findBlockingApplicationForConsultantAt(params: {
   applications: Application[]
+  consultant: Consultant
   agendaId: string
   dateKey: string
   time: string
-  slotConsultantId?: string
-}): Consultant[] {
-  const { consultants, applications, agendaId, dateKey, time, slotConsultantId } = params
+}): Application | null {
+  const { applications, consultant, dateKey, time } = params
   const normalizedTime = normalizeTimeKey(time)
-  const linkedConsultants = consultants.filter(
-    (consultant) =>
-      consultant.status === "active" && (consultant.agendaIds ?? []).includes(agendaId),
-  )
 
-  return linkedConsultants.filter((consultant) => {
-    if (slotConsultantId && consultant.id !== slotConsultantId) {
-      return false
-    }
-    if (!isConsultantAvailableAt(consultant, dateKey, normalizedTime)) {
-      return false
-    }
-
-    return !applications.some((application) => {
+  return (
+    applications.find((application) => {
       const normalizedStatus = normalizeApplicationStatus(application.status)
       if (
         normalizedStatus !== "pending" &&
@@ -101,8 +103,121 @@ export function getAssignableConsultantsAt(params: {
         return pendingConsultantIds.includes(consultant.id)
       }
       return application.consultantId === consultant.id
-    })
+    }) ?? null
+  )
+}
+
+export function evaluateConsultantAssignmentsAt(params: {
+  consultants: Consultant[]
+  applications: Application[]
+  agendaId: string
+  dateKey: string
+  time: string
+  slotConsultantId?: string
+  priorityConsultantIds?: string[]
+}): ConsultantAssignmentEvaluation[] {
+  const {
+    consultants,
+    applications,
+    agendaId,
+    dateKey,
+    time,
+    slotConsultantId,
+    priorityConsultantIds = [],
+  } = params
+
+  const candidateIds = new Set<string>()
+  consultants.forEach((consultant) => {
+    if ((consultant.agendaIds ?? []).includes(agendaId)) {
+      candidateIds.add(consultant.id)
+    }
   })
+  priorityConsultantIds.forEach((consultantId) => {
+    const normalizedId = consultantId.trim()
+    if (normalizedId) candidateIds.add(normalizedId)
+  })
+
+  return consultants
+    .filter((consultant) => candidateIds.has(consultant.id))
+    .map((consultant) => {
+      const isLinkedToAgenda = (consultant.agendaIds ?? []).includes(agendaId)
+      if (slotConsultantId && consultant.id !== slotConsultantId) {
+        return {
+          consultant,
+          eligible: false,
+          reason: "filtered_by_slot_consultant",
+          blockingApplication: null,
+        }
+      }
+      if (consultant.status !== "active") {
+        return {
+          consultant,
+          eligible: false,
+          reason: "inactive",
+          blockingApplication: null,
+        }
+      }
+      if (!isLinkedToAgenda) {
+        return {
+          consultant,
+          eligible: false,
+          reason: "not_linked_to_agenda",
+          blockingApplication: null,
+        }
+      }
+      if (!isConsultantAvailableAt(consultant, dateKey, time)) {
+        return {
+          consultant,
+          eligible: false,
+          reason: "not_available_at_time",
+          blockingApplication: null,
+        }
+      }
+
+      const blockingApplication = findBlockingApplicationForConsultantAt({
+        applications,
+        consultant,
+        agendaId,
+        dateKey,
+        time,
+      })
+      if (blockingApplication) {
+        return {
+          consultant,
+          eligible: false,
+          reason: "occupied_by_existing_application",
+          blockingApplication,
+        }
+      }
+
+      return {
+        consultant,
+        eligible: true,
+        reason: null,
+        blockingApplication: null,
+      }
+    })
+}
+
+export function getAssignableConsultantsAt(params: {
+  consultants: Consultant[]
+  applications: Application[]
+  agendaId: string
+  dateKey: string
+  time: string
+  slotConsultantId?: string
+}): Consultant[] {
+  const { consultants, applications, agendaId, dateKey, time, slotConsultantId } = params
+  return evaluateConsultantAssignmentsAt({
+    consultants,
+    applications,
+    agendaId,
+    dateKey,
+    time,
+    slotConsultantId,
+  })
+    .filter((evaluation) => evaluation.eligible)
+    .map((evaluation) => evaluation.consultant)
 }
 
 export function hasScheduledConsultantForPendingApplication(params: {

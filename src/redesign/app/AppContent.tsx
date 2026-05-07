@@ -855,9 +855,9 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     isPage(["admin-agendas", "admin-consultants", "admin-programs", "admin-program-list"])
   const needsConsultants =
     resolvedRole === "consultant" ||
+    needsRegularOfficeHours ||
     isPage([
       "consultants",
-      "regular-wizard",
       "application",
       "dashboard",
       "admin-consultants",
@@ -1486,9 +1486,12 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     needsApplications &&
     (officeHourApplicationDocsLoading ||
       (currentPage === "application" && !!selectedApplicationId && selectedApplicationDocLoading))
+  const isRegularApplicationFlowActive =
+    currentPage === "regular-wizard" ||
+    (currentPage === "regular" && isRegularApplicationSheetOpen && Boolean(selectedOfficeHourId))
   const regularWizardRealtimeLoading =
     isFirebaseConfigured &&
-    currentPage === "regular-wizard" &&
+    isRegularApplicationFlowActive &&
     (officeHourApplicationDocsLoading || consultantDocsLoading || agendaDocsLoading)
   const pendingWithoutAssignableConsultantIds = useMemo(() => {
     const ids = new Set<string>()
