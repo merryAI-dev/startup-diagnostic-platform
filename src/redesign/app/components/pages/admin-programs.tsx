@@ -247,6 +247,7 @@ export function AdminPrograms({
   const [programKpiDrafts, setProgramKpiDrafts] = useState<Record<string, ProgramKpiDraft[]>>({})
   const [page, setPage] = useState(1)
   const [programDetailSaving, setProgramDetailSaving] = useState(false)
+  const [managerAssignmentSaving, setManagerAssignmentSaving] = useState(false)
 
   const applicationsByProgram = useMemo(() => {
     const grouped = new Map<string, Application[]>()
@@ -746,6 +747,21 @@ export function AdminPrograms({
     }
   }
 
+  async function handleSaveManagerAssignment() {
+    if (!editingProgram) return
+
+    setManagerAssignmentSaving(true)
+    try {
+      await Promise.resolve(
+        onUpdateProgram(editingProgram.id, {
+          managerUid: detailForm.managerUid.trim() || null,
+        }),
+      )
+    } finally {
+      setManagerAssignmentSaving(false)
+    }
+  }
+
   function openEditDialog(programId: string) {
     setEditingProgramId(programId)
     setIsEditDialogOpen(true)
@@ -809,6 +825,9 @@ export function AdminPrograms({
     if (!program.managerUid) return "미배정"
     return adminOptionById.get(program.managerUid)?.email ?? "알 수 없는 관리자"
   }
+  const isManagerAssignmentDirty = editingProgram
+    ? (editingProgram.managerUid ?? "") !== detailForm.managerUid.trim()
+    : false
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-slate-50">
@@ -1460,7 +1479,63 @@ export function AdminPrograms({
           }}
         >
           <DialogHeader className="shrink-0 border-b px-8 py-6 pr-14">
-            <DialogTitle>사업 상세보기 / 수정</DialogTitle>
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+              <div>
+                <DialogTitle>
+                  {editingProgram ? `${editingProgram.name} 사업 상세보기 / 수정` : "사업 상세보기 / 수정"}
+                </DialogTitle>
+                {editingProgram ? (
+                  <p className="mt-1 text-sm text-slate-500">
+                    사업 기본 정보와 운영 설정을 수정할 수 있습니다.
+                  </p>
+                ) : null}
+              </div>
+
+              {editingProgram ? (
+                <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-center sm:justify-end lg:max-w-[420px]">
+                  <div className="min-w-0 flex-1 sm:max-w-[260px]">
+                    <Select
+                      value={detailForm.managerUid || "unassigned"}
+                      onValueChange={(value) =>
+                        setDetailForm((prev) => ({
+                          ...prev,
+                          managerUid: value === "unassigned" ? "" : value,
+                        }))
+                      }
+                      disabled={programDetailSaving || managerAssignmentSaving}
+                    >
+                      <SelectTrigger className="h-9 bg-white">
+                        <SelectValue placeholder="관리자를 선택하세요" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="unassigned">미배정</SelectItem>
+                        {adminOptions.map((admin) => (
+                          <SelectItem key={admin.id} value={admin.id}>
+                            {admin.email}
+                          </SelectItem>
+                        ))}
+                        {editingProgram.managerUid && !editingManagerOption ? (
+                          <SelectItem value={editingProgram.managerUid}>
+                            알 수 없는 관리자
+                          </SelectItem>
+                        ) : null}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={() => void handleSaveManagerAssignment()}
+                    disabled={!isManagerAssignmentDirty || programDetailSaving || managerAssignmentSaving}
+                  >
+                    {managerAssignmentSaving ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : null}
+                    저장
+                  </Button>
+                </div>
+              ) : null}
+            </div>
           </DialogHeader>
 
           {editingProgram ? (
@@ -1469,9 +1544,11 @@ export function AdminPrograms({
                 <div className="space-y-6">
                   <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
                     <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
-                      <div className="text-[11px] font-medium text-slate-500">사업명</div>
+                      <div className="text-[11px] font-medium text-slate-500">담당 관리자</div>
                       <div className="mt-1 truncate text-sm font-semibold text-slate-900">
-                        {editingProgram.name}
+                        {detailForm.managerUid
+                          ? adminOptionById.get(detailForm.managerUid)?.email ?? "알 수 없는 관리자"
+                          : "미배정"}
                       </div>
                     </div>
                     <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
@@ -1534,40 +1611,6 @@ export function AdminPrograms({
                           />
                         </div>
                       </div>
-
-                      <div className="rounded-xl border border-slate-200 bg-slate-50/80 px-4 py-4">
-                        <div className="space-y-2">
-                          <Label>관리자 배정</Label>
-                          <Select
-                            value={detailForm.managerUid || "unassigned"}
-                            onValueChange={(value) =>
-                              setDetailForm((prev) => ({
-                                ...prev,
-                                managerUid: value === "unassigned" ? "" : value,
-                              }))
-                            }
-                            disabled={programDetailSaving}
-                          >
-                            <SelectTrigger>
-                              <SelectValue placeholder="관리자를 선택하세요" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="unassigned">미배정</SelectItem>
-                              {adminOptions.map((admin) => (
-                                <SelectItem key={admin.id} value={admin.id}>
-                                  {admin.email}
-                                </SelectItem>
-                              ))}
-                              {editingProgram.managerUid && !editingManagerOption ? (
-                                <SelectItem value={editingProgram.managerUid}>
-                                  알 수 없는 관리자
-                                </SelectItem>
-                              ) : null}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      </div>
-
                       <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
                         <div className="space-y-2">
                           <Label>기간 시작</Label>
