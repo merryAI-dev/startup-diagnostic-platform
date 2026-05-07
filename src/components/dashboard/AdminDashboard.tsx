@@ -2391,39 +2391,50 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
         ),
       )
 
-      const metricsSheet = createSheet("실적", [
-        12,
-        ...metricChartFields.map((field) => Math.max(14, field.label.length + 6)),
-      ])
+      const statusAnalysisSheet = createSheet("현황분석", [18, 18, 44, 14, 14, 56])
       rowIndex = writeSheetTitle(
-        metricsSheet,
-        "실적 관리",
-        hasMetricsDocument
-          ? `최근 업데이트 ${metricsUpdatedLabel ?? "기록 없음"}`
-          : "월별 실적 문서 없음",
+        statusAnalysisSheet,
+        "현황 분석",
+        `${selectedCompanyName} 관리자 작성 내용`,
       )
-      if (!hasMetricsDocument) {
-        rowIndex = writeSectionTitle(metricsSheet, rowIndex, "안내")
-        rowIndex = writeKeyValueRows(metricsSheet, rowIndex, [
-          ["상태", "월별 실적 문서는 아직 입력되지 않았습니다."],
-        ])
-        rowIndex += 1
-      }
-      writeTable(
-        metricsSheet,
+      rowIndex = writeSectionTitle(statusAnalysisSheet, rowIndex, "기본 정보")
+      rowIndex = writeKeyValueRows(statusAnalysisSheet, rowIndex, [
+        ["기업명", reportForm.companyName || selectedCompanyName],
+        ["작성자", statusAnalysisAuthor || "-"],
+        ["총점", `${formatScore(statusAnalysisSummary.totalScore)}/100`],
+      ])
+      rowIndex += 1
+      rowIndex = writeSectionTitle(statusAnalysisSheet, rowIndex, "점수 요약")
+      rowIndex = writeTable(
+        statusAnalysisSheet,
         rowIndex,
-        ["월", ...metricChartFields.map((field) => field.label)],
-        (hasMetricsDocument
-          ? recentMetricsRows
-          : emptyMetricsMonthSlots.map(({ year, month }) => createEmptyMonth(year, month))
-        ).map((row) => [
-          `${row.year}-${String(row.month).padStart(2, "0")}`,
-          ...metricChartFields.map((field) =>
-            hasMetricsDocument
-              ? formatMetricValue(getMetricCellValue(row, field.key), field.format)
-              : "-",
-          ),
+        ["대분류", "점수", "총점"],
+        statusAnalysisSummary.grouped.map((section) => [
+          section.sectionTitle,
+          formatScore(section.sectionScore),
+          formatScore(section.sectionTotal),
         ]),
+      )
+      rowIndex = writeSectionTitle(statusAnalysisSheet, rowIndex, "상세")
+      writeTable(
+        statusAnalysisSheet,
+        rowIndex,
+        ["대분류", "중분류", "문항", "기업 응답", "관리자 응답", "관리자 코멘트"],
+        statusAnalysisSummary.grouped.flatMap((section) =>
+          section.questions.map((item) => [
+            item.sectionTitle,
+            item.subsectionTitle,
+            item.questionText,
+            item.companyAnswerLabel,
+            item.answerLabel,
+            getStatusAnalysisReason(
+              statusAnalysisSections,
+              item.sectionKey,
+              item.subsectionKey,
+              item.questionKey,
+            ) || "-",
+          ]),
+        ),
       )
 
       const reportSheet = createSheet("분석보고서", [24, 70])
@@ -2478,6 +2489,41 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
         reportSheet,
         rowIndex,
         COMPANY_ANALYSIS_MILESTONE_FIELDS.map(({ key, label }) => [label, reportForm[key] || "-"]),
+      )
+
+      const metricsSheet = createSheet("실적", [
+        12,
+        ...metricChartFields.map((field) => Math.max(14, field.label.length + 6)),
+      ])
+      rowIndex = writeSheetTitle(
+        metricsSheet,
+        "실적 관리",
+        hasMetricsDocument
+          ? `최근 업데이트 ${metricsUpdatedLabel ?? "기록 없음"}`
+          : "월별 실적 문서 없음",
+      )
+      if (!hasMetricsDocument) {
+        rowIndex = writeSectionTitle(metricsSheet, rowIndex, "안내")
+        rowIndex = writeKeyValueRows(metricsSheet, rowIndex, [
+          ["상태", "월별 실적 문서는 아직 입력되지 않았습니다."],
+        ])
+        rowIndex += 1
+      }
+      writeTable(
+        metricsSheet,
+        rowIndex,
+        ["월", ...metricChartFields.map((field) => field.label)],
+        (hasMetricsDocument
+          ? recentMetricsRows
+          : emptyMetricsMonthSlots.map(({ year, month }) => createEmptyMonth(year, month))
+        ).map((row) => [
+          `${row.year}-${String(row.month).padStart(2, "0")}`,
+          ...metricChartFields.map((field) =>
+            hasMetricsDocument
+              ? formatMetricValue(getMetricCellValue(row, field.key), field.format)
+              : "-",
+          ),
+        ]),
       )
 
       const buffer = await workbook.xlsx.writeBuffer()
