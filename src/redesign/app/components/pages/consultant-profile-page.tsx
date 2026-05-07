@@ -604,11 +604,9 @@ export function ConsultantProfilePage({
                 </Select>
               </div>
             </div>
-            {!isScheduleEditable && (
+            {!isScheduleEditable && selectedScheduleMonthKey === scheduleTargetMonthKey && (
               <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-                {selectedScheduleMonthKey === scheduleTargetMonthKey
-                  ? "컨설턴트 가능 시간은 매월 3주차에 다음 달 일정만 수정할 수 있습니다."
-                  : "선택한 월 스케줄은 조회 전용입니다."}
+                컨설턴트 가능 시간은 매월 3주차에 다음 달 일정만 수정할 수 있습니다.
               </div>
             )}
             <div className="mb-4 flex flex-wrap items-center justify-end gap-2">
@@ -655,9 +653,24 @@ export function ConsultantProfilePage({
               {draftAvailability.map((day) => {
                 const dayInfo = scheduleDays.find((item) => item.value === day.dayOfWeek);
                 return (
-                  <div key={day.dayOfWeek} className="rounded-lg border p-3">
-                    <div className="mb-2 text-xs font-semibold text-slate-600">
-                      {dayInfo?.label || "-"}요일
+                  <div
+                    key={day.dayOfWeek}
+                    className={cn(
+                      "rounded-lg border p-3",
+                      isScheduleEditable
+                        ? "border-slate-200 bg-white"
+                        : "border-slate-200 bg-slate-50",
+                    )}
+                  >
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                      <div className="text-xs font-semibold text-slate-600">
+                        {dayInfo?.label || "-"}요일
+                      </div>
+                      {!isScheduleEditable ? (
+                        <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-medium text-slate-500">
+                          읽기 전용
+                        </span>
+                      ) : null}
                     </div>
                     <div className="grid grid-cols-4 gap-1.5 md:grid-cols-6">
                       {day.slots.map((slot) => (
@@ -665,14 +678,28 @@ export function ConsultantProfilePage({
                           key={`${day.dayOfWeek}-${slot.start}`}
                           type="button"
                           aria-pressed={slot.available}
-                          title={slot.available ? "가능 일정" : "불가 일정"}
+                          title={
+                            !isScheduleEditable
+                              ? slot.available
+                                ? "가능 일정 (조회 전용)"
+                                : "불가 일정 (조회 전용)"
+                              : slot.available
+                                ? "가능 일정"
+                                : "불가 일정"
+                          }
                           onClick={() => toggleSlot(day.dayOfWeek, slot.start)}
                           disabled={!isScheduleEditable}
                           className={cn(
                             "rounded-md border px-2 py-1 text-[11px] transition",
-                            slot.available
+                            !isScheduleEditable &&
+                              "cursor-not-allowed border-slate-200 text-slate-400 shadow-none",
+                            isScheduleEditable && slot.available
                               ? "border-slate-900 bg-slate-900 text-white"
-                              : "border-slate-300 bg-white text-slate-500 hover:bg-slate-50"
+                              : isScheduleEditable
+                                ? "border-slate-300 bg-white text-slate-500 hover:bg-slate-50"
+                                : slot.available
+                                  ? "bg-slate-300/80"
+                                  : "bg-slate-100"
                           )}
                         >
                           {slot.start}
@@ -692,6 +719,12 @@ export function ConsultantProfilePage({
                 <span className="h-3.5 w-3.5 rounded border border-slate-300 bg-white" />
                 불가 일정
               </span>
+              {!isScheduleEditable ? (
+                <span className="inline-flex items-center gap-2 text-slate-500">
+                  <span className="h-3.5 w-3.5 rounded border border-slate-200 bg-slate-100" />
+                  조회 전용
+                </span>
+              ) : null}
             </div>
           </CardContent>
         </Card>
