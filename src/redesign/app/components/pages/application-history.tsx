@@ -3,6 +3,7 @@ import { Button } from "@/redesign/app/components/ui/button";
 import { Card, CardContent } from "@/redesign/app/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/redesign/app/components/ui/tabs";
 import { StatusChip } from "@/redesign/app/components/status-chip";
+import { ApplicationChangeWindowBadge } from "@/redesign/app/components/application-change-window-badge";
 import { Application, ApplicationStatus } from "@/redesign/app/lib/types";
 import { format } from "date-fns";
 import { ko } from "date-fns/locale";
@@ -47,6 +48,7 @@ export function ApplicationHistory({
                 <div className="flex-1 space-y-2">
                   <div className="flex items-center gap-2">
                     <StatusChip status={app.status} />
+                    <ApplicationChangeWindowBadge application={app} />
                     <span className="px-2 py-0.5 bg-muted rounded text-xs">
                       {app.type === "regular" ? "정기" : "비정기"}
                     </span>
@@ -129,17 +131,11 @@ export function ApplicationHistory({
           <TabsTrigger value="all">
             전체 ({applications.length})
           </TabsTrigger>
-          <TabsTrigger value="pending">
-            신청중 ({filterByStatus("pending").length})
-          </TabsTrigger>
-          <TabsTrigger value="review">
-            진행중 ({filterByStatus("review").length})
-          </TabsTrigger>
           <TabsTrigger value="confirmed">
             확정 ({filterByStatus("confirmed").length})
           </TabsTrigger>
-          <TabsTrigger value="rejected">
-            거절됨 ({filterByStatus("rejected").length})
+          <TabsTrigger value="cancelled">
+            취소 ({filterByStatus("cancelled").length})
           </TabsTrigger>
           <TabsTrigger value="completed">
             완료 ({filterByStatus("completed").length})
@@ -150,20 +146,12 @@ export function ApplicationHistory({
           <ApplicationList apps={applications} />
         </TabsContent>
 
-        <TabsContent value="pending" className="space-y-4">
-          <ApplicationList apps={filterByStatus("pending")} />
-        </TabsContent>
-
-        <TabsContent value="review" className="space-y-4">
-          <ApplicationList apps={filterByStatus("review")} />
-        </TabsContent>
-
         <TabsContent value="confirmed" className="space-y-4">
           <ApplicationList apps={filterByStatus("confirmed")} />
         </TabsContent>
 
-        <TabsContent value="rejected" className="space-y-4">
-          <ApplicationList apps={filterByStatus("rejected")} />
+        <TabsContent value="cancelled" className="space-y-4">
+          <ApplicationList apps={filterByStatus("cancelled")} />
         </TabsContent>
 
         <TabsContent value="completed" className="space-y-4">

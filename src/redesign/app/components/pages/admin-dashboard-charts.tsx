@@ -16,6 +16,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/redesign/app/compone
 import { Input } from "@/redesign/app/components/ui/input"
 import { PaginationControls } from "@/redesign/app/components/ui/pagination-controls"
 import { Progress } from "@/redesign/app/components/ui/progress"
+import { Switch } from "@/redesign/app/components/ui/switch"
 import { cn } from "@/redesign/app/components/ui/utils"
 
 interface AdminDashboardChartsProps {
@@ -83,18 +84,44 @@ export function AdminDashboardCharts({
   const [searchQuery, setSearchQuery] = useState("")
   const [page, setPage] = useState(1)
   const [selectedProgramId, setSelectedProgramId] = useState<string | null>(null)
+  const [showManagedProgramsOnly, setShowManagedProgramsOnly] = useState(false)
   const normalizedQuery = searchQuery.trim().toLowerCase()
   const isAdminUser = currentUser.role === "admin"
+  const managedProgramIds = useMemo(
+    () =>
+      new Set(
+        programs
+          .filter((program) => program.managerUid === currentUser.id)
+          .map((program) => program.id),
+      ),
+    [currentUser.id, programs],
+  )
+  const visiblePrograms = useMemo(() => {
+    if (!isAdminUser || !showManagedProgramsOnly) return programs
+    return programs.filter((program) => managedProgramIds.has(program.id))
+  }, [isAdminUser, managedProgramIds, programs, showManagedProgramsOnly])
+  const visibleProgramIds = useMemo(
+    () => new Set(visiblePrograms.map((program) => program.id)),
+    [visiblePrograms],
+  )
+  const visibleApplications = useMemo(() => {
+    if (!isAdminUser || !showManagedProgramsOnly) return applications
+    return applications.filter((app) => app.programId && visibleProgramIds.has(app.programId))
+  }, [applications, isAdminUser, showManagedProgramsOnly, visibleProgramIds])
+  const visibleReports = useMemo(() => {
+    if (!isAdminUser || !showManagedProgramsOnly) return reports
+    return reports.filter((report) => report.programId && visibleProgramIds.has(report.programId))
+  }, [isAdminUser, reports, showManagedProgramsOnly, visibleProgramIds])
 
   const completedHoursByProgram = useMemo(
-    () => getCompletedHoursByProgram(reports),
-    [reports],
+    () => getCompletedHoursByProgram(visibleReports),
+    [visibleReports],
   )
 
   const programStats = useMemo<ProgramDashboardItem[]>(() => {
-    return programs
+    return visiblePrograms
       .map((program) => {
-        const programApplications = applications.filter((app) => app.programId === program.id)
+        const programApplications = visibleApplications.filter((app) => app.programId === program.id)
         const completedHours = completedHoursByProgram.get(program.id) ?? 0
         const waitingCount = programApplications.filter(
           (app) => app.status === "pending" || app.status === "review",
@@ -129,7 +156,7 @@ export function AdminDashboardCharts({
         }
         return a.program.name.localeCompare(b.program.name)
       })
-  }, [applications, completedHoursByProgram, programs])
+  }, [completedHoursByProgram, visibleApplications, visiblePrograms])
 
   const filteredProgramStats = useMemo(() => {
     if (!normalizedQuery) return programStats
@@ -202,13 +229,25 @@ export function AdminDashboardCharts({
     <div className="flex h-full min-h-0 flex-col overflow-hidden bg-slate-50">
       <div className="shrink-0 border-b border-slate-200 bg-white px-6 py-5">
         <div className="mx-auto flex w-full max-w-[1600px] flex-col gap-3">
-          <div>
-            <h1 className="text-2xl font-semibold text-slate-900">관리자 대시보드</h1>
-            <p className="mt-1 text-sm text-slate-500">
-              {isAdminUser
-                ? "사업 전체 현황을 한 화면에 모으고, 사업을 선택하면 상세 지표를 바로 확인할 수 있도록 정리했습니다."
-                : "담당 사업의 핵심 지표를 빠르게 확인합니다."}
-            </p>
+          <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+            <div>
+              <h1 className="text-2xl font-semibold text-slate-900">관리자 대시보드</h1>
+              <p className="mt-1 text-sm text-slate-500">
+                {isAdminUser
+                  ? "사업 전체 현황을 한 화면에 모으고, 사업을 선택하면 상세 지표를 바로 확인할 수 있도록 정리했습니다."
+                  : "담당 사업의 핵심 지표를 빠르게 확인합니다."}
+              </p>
+            </div>
+            {isAdminUser ? (
+              <label className="inline-flex items-center gap-3 text-sm text-slate-700">
+                <Switch
+                  checked={showManagedProgramsOnly}
+                  onCheckedChange={setShowManagedProgramsOnly}
+                  aria-label="내 사업만 보기"
+                />
+                <span className="font-medium">내 사업만 보기</span>
+              </label>
+            ) : null}
           </div>
         </div>
       </div>

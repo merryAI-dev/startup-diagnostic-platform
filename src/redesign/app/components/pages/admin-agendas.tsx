@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react"
-import { Plus, Tags } from "lucide-react"
+import { ArrowDown, ArrowUp, Plus, Tags } from "lucide-react"
 import { Agenda, Consultant } from "@/redesign/app/lib/types"
 import { Badge } from "@/redesign/app/components/ui/badge"
 import { Button } from "@/redesign/app/components/ui/button"
@@ -36,18 +36,6 @@ function scopeBadgeClassName(scope: Agenda["scope"]) {
     : "border-rose-200 bg-rose-50 text-rose-800"
 }
 
-function formatConsultantSummary(names: string[]) {
-  if (names.length === 0) {
-    return "미지정"
-  }
-
-  if (names.length <= 2) {
-    return names.join(", ")
-  }
-
-  return `${names.slice(0, 2).join(", ")} 외 ${names.length - 2}명`
-}
-
 const PAGE_SIZE = 10
 
 export function AdminAgendas({
@@ -67,6 +55,7 @@ export function AdminAgendas({
   const [detailName, setDetailName] = useState("")
   const [detailScope, setDetailScope] = useState<Agenda["scope"]>("internal")
   const [detailDescription, setDetailDescription] = useState("")
+  const [draftPriorityConsultantIds, setDraftPriorityConsultantIds] = useState<string[] | null>(null)
   const [scopeFilter, setScopeFilter] = useState<"all" | Agenda["scope"]>("all")
   const [page, setPage] = useState(1)
 
@@ -91,36 +80,46 @@ export function AdminAgendas({
     () => agendas.find((agenda) => agenda.id === selectedAgendaId) ?? null,
     [agendas, selectedAgendaId],
   )
-  const consultantNamesByAgendaId = useMemo(() => {
-    const next = new Map<string, string[]>()
+  const consultantById = useMemo(
+    () => new Map(consultants.map((consultant) => [consultant.id, consultant])),
+    [consultants],
+  )
+  const consultantsByAgendaId = useMemo(() => {
+    return new Map(
+      agendas.map((agenda) => {
+        const linkedConsultants = Array.from(new Set(agenda.priorityConsultantIds ?? []))
+          .map((consultantId) => consultantById.get(consultantId))
+          .filter((consultant): consultant is Consultant => Boolean(consultant))
 
-    consultants.forEach((consultant) => {
-      const name = consultant.name.trim()
-      if (!name) return
-
-      Array.from(new Set(consultant.agendaIds ?? [])).forEach((agendaId) => {
-        const current = next.get(agendaId) ?? []
-        current.push(name)
-        next.set(agendaId, current)
-      })
-    })
-
-    next.forEach((names, agendaId) => {
-      next.set(
-        agendaId,
-        Array.from(new Set(names)).sort((left, right) => left.localeCompare(right, "ko")),
-      )
-    })
-
-    return next
-  }, [consultants])
-  const selectedAgendaConsultantNames = useMemo(() => {
-    if (!selectedAgenda) {
-      return []
-    }
-
-    return consultantNamesByAgendaId.get(selectedAgenda.id) ?? []
-  }, [consultantNamesByAgendaId, selectedAgenda])
+        return [agenda.id, linkedConsultants] as const
+      }),
+    )
+  }, [agendas, consultantById])
+  const consultantNamesByAgendaId = useMemo(
+    () =>
+      new Map(
+        Array.from(consultantsByAgendaId.entries()).map(([agendaId, linkedConsultants]) => [
+          agendaId,
+          linkedConsultants.map((consultant) => consultant.name.trim()).filter(Boolean),
+        ]),
+      ),
+    [consultantsByAgendaId],
+  )
+  const selectedAgendaLinkedConsultants = useMemo(() => {
+    if (!selectedAgenda) return []
+    return consultantsByAgendaId.get(selectedAgenda.id) ?? []
+  }, [consultantsByAgendaId, selectedAgenda])
+  const priorityConsultantIdsForDialog = useMemo(() => {
+    if (draftPriorityConsultantIds) return draftPriorityConsultantIds
+    return selectedAgendaLinkedConsultants.map((consultant) => consultant.id)
+  }, [draftPriorityConsultantIds, selectedAgendaLinkedConsultants])
+  const selectedAgendaPriorityConsultants = useMemo(
+    () =>
+      priorityConsultantIdsForDialog
+        .map((consultantId) => consultantById.get(consultantId))
+        .filter((consultant): consultant is Consultant => Boolean(consultant)),
+    [consultantById, priorityConsultantIdsForDialog],
+  )
 
   useEffect(() => {
     if (!selectedAgenda) {
@@ -130,6 +129,7 @@ export function AdminAgendas({
     setDetailName(selectedAgenda.name)
     setDetailScope(selectedAgenda.scope)
     setDetailDescription(selectedAgenda.description ?? "")
+    setDraftPriorityConsultantIds(null)
   }, [selectedAgenda])
 
   function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
@@ -142,6 +142,7 @@ export function AdminAgendas({
       scope,
       description: description.trim(),
       active: true,
+      priorityConsultantIds: [],
       category: scopeLabel(scope),
     })
 
@@ -160,7 +161,25 @@ export function AdminAgendas({
       name: trimmedName,
       scope: detailScope,
       description: detailDescription.trim(),
+      priorityConsultantIds: priorityConsultantIdsForDialog,
       category: scopeLabel(detailScope),
+    })
+  }
+
+  function movePriorityConsultant(consultantId: string, direction: "up" | "down") {
+    setDraftPriorityConsultantIds((prev) => {
+      const base = prev ?? selectedAgendaLinkedConsultants.map((consultant) => consultant.id)
+      const currentIndex = base.indexOf(consultantId)
+      if (currentIndex < 0) return base
+
+      const targetIndex = direction === "up" ? currentIndex - 1 : currentIndex + 1
+      if (targetIndex < 0 || targetIndex >= base.length) return base
+
+      const next = [...base]
+      const [moved] = next.splice(currentIndex, 1)
+      if (!moved) return base
+      next.splice(targetIndex, 0, moved)
+      return next
     })
   }
 
@@ -280,6 +299,7 @@ export function AdminAgendas({
                   <TableRow className="hover:bg-white">
                     <TableHead className="w-28 bg-white">구분</TableHead>
                     <TableHead className="bg-white">아젠다 명</TableHead>
+                    <TableHead className="bg-white">설명</TableHead>
                     <TableHead className="w-64 bg-white">담당 컨설턴트</TableHead>
                     <TableHead className="w-28 bg-white">상태</TableHead>
                     <TableHead className="w-44 bg-white text-right">관리</TableHead>
@@ -288,7 +308,7 @@ export function AdminAgendas({
                 <TableBody>
                   {sortedAgendas.length === 0 && (
                     <TableRow>
-                      <TableCell colSpan={5} className="h-24 text-center text-sm text-muted-foreground">
+                      <TableCell colSpan={6} className="h-24 text-center text-sm text-muted-foreground">
                         등록된 아젠다가 없습니다.
                       </TableCell>
                     </TableRow>
@@ -296,7 +316,8 @@ export function AdminAgendas({
                   {paginatedAgendas.map((agenda) => {
                     const active = agenda.active !== false
                     const assignedConsultantNames = consultantNamesByAgendaId.get(agenda.id) ?? []
-                    const assignedConsultantSummary = formatConsultantSummary(assignedConsultantNames)
+                    const topPriorityNames = assignedConsultantNames.slice(0, 3)
+                    const remainingPriorityCount = Math.max(0, assignedConsultantNames.length - 3)
                     return (
                       <TableRow key={agenda.id}>
                         <TableCell>
@@ -307,10 +328,30 @@ export function AdminAgendas({
                         <TableCell className="font-medium">{agenda.name}</TableCell>
                         <TableCell>
                           <div
-                            className="max-w-[240px] truncate text-sm text-slate-600"
-                            title={assignedConsultantNames.join(", ")}
+                            className="max-w-[260px] truncate text-sm text-slate-600"
+                            title={agenda.description ?? ""}
                           >
-                            {assignedConsultantSummary}
+                            {agenda.description?.trim() || "-"}
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <div className="space-y-1">
+                            <p className="text-sm font-semibold text-slate-800">
+                              {assignedConsultantNames.length > 0
+                                ? `${assignedConsultantNames.length}명`
+                                : "미지정"}
+                            </p>
+                            {topPriorityNames.length > 0 ? (
+                              <p
+                                className="max-w-[320px] truncate text-xs text-slate-500"
+                                title={assignedConsultantNames.join(", ")}
+                              >
+                                {topPriorityNames
+                                  .map((name, index) => `${index + 1}순위 ${name}`)
+                                  .join(" / ")}
+                                {remainingPriorityCount > 0 ? ` 외 ${remainingPriorityCount}명` : ""}
+                              </p>
+                            ) : null}
                           </div>
                         </TableCell>
                         <TableCell>
@@ -367,7 +408,7 @@ export function AdminAgendas({
           }
         }}
       >
-        <DialogContent className="max-w-lg">
+        <DialogContent className="w-[min(96vw,980px)] max-w-none">
           <DialogHeader>
             <DialogTitle>아젠다 상세</DialogTitle>
             <DialogDescription>아젠다 세부 정보와 활성 상태를 확인합니다.</DialogDescription>
@@ -409,18 +450,49 @@ export function AdminAgendas({
                 </div>
                 <div>
                   <Label className="mb-2 block">담당 컨설턴트</Label>
-                  <div className="rounded-md border bg-slate-50 px-3 py-2">
-                    {selectedAgendaConsultantNames.length > 0 ? (
-                      <div className="flex flex-wrap gap-2">
-                        {selectedAgendaConsultantNames.map((consultantName) => (
-                          <Badge
-                            key={consultantName}
-                            variant="outline"
-                            className="border-slate-200 bg-white text-slate-700"
+                  <div className="rounded-md border bg-slate-50 px-3 py-3">
+                    {selectedAgendaPriorityConsultants.length > 0 ? (
+                      <div className="max-h-[184px] space-y-2 overflow-y-auto pr-1">
+                        {selectedAgendaPriorityConsultants.map((consultant, index) => (
+                          <div
+                            key={consultant.id}
+                            className="flex items-center justify-between gap-3 rounded-md border border-slate-200 bg-white px-3 py-2"
                           >
-                            {consultantName}
-                          </Badge>
+                            <div className="flex min-w-0 items-center gap-2">
+                              <span className="inline-flex h-6 min-w-6 items-center justify-center rounded-full bg-slate-100 px-2 text-[11px] font-semibold text-slate-700">
+                                {index + 1}
+                              </span>
+                              <span className="truncate text-sm font-medium text-slate-800">
+                                {consultant.name}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <Button
+                                type="button"
+                                size="icon"
+                                variant="outline"
+                                className="h-7 w-7"
+                                disabled={index === 0}
+                                onClick={() => movePriorityConsultant(consultant.id, "up")}
+                              >
+                                <ArrowUp className="h-3.5 w-3.5" />
+                              </Button>
+                              <Button
+                                type="button"
+                                size="icon"
+                                variant="outline"
+                                className="h-7 w-7"
+                                disabled={index === selectedAgendaPriorityConsultants.length - 1}
+                                onClick={() => movePriorityConsultant(consultant.id, "down")}
+                              >
+                                <ArrowDown className="h-3.5 w-3.5" />
+                              </Button>
+                            </div>
+                          </div>
                         ))}
+                        <p className="text-xs text-slate-500">
+                          컨설턴트 추가/제거는 컨설턴트 관리에서 하고, 여기서는 순서만 조정합니다.
+                        </p>
                       </div>
                     ) : (
                       <p className="text-sm font-medium text-slate-700">미지정</p>

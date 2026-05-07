@@ -3,6 +3,7 @@ import { Check, Clock3, Mail, Pencil, Phone, UserCog } from "lucide-react"
 import { Agenda, Consultant, ConsultantAvailability } from "@/redesign/app/lib/types"
 import { Badge } from "@/redesign/app/components/ui/badge"
 import { Button } from "@/redesign/app/components/ui/button"
+import { Checkbox } from "@/redesign/app/components/ui/checkbox"
 import { Card, CardContent } from "@/redesign/app/components/ui/card"
 import {
   Dialog,
@@ -13,6 +14,7 @@ import {
   DialogTrigger,
 } from "@/redesign/app/components/ui/dialog"
 import { Input } from "@/redesign/app/components/ui/input"
+import { Label } from "@/redesign/app/components/ui/label"
 import { PaginationControls } from "@/redesign/app/components/ui/pagination-controls"
 import {
   Select,
@@ -29,7 +31,14 @@ import {
   TableHeader,
   TableRow,
 } from "@/redesign/app/components/ui/table"
+import { ToggleGroup, ToggleGroupItem } from "@/redesign/app/components/ui/toggle-group"
 import { cn } from "@/redesign/app/components/ui/utils"
+import {
+  buildDefaultConsultantAvailability,
+  getConsultantScheduleDayNumbers,
+  getMonthlyAvailabilityForMonth,
+} from "@/redesign/app/lib/consultant-monthly-availability"
+import * as regularOfficeHourPolicy from "@/redesign/app/lib/regular-office-hour-policy"
 
 interface AdminConsultantsProps {
   consultants: Consultant[]
@@ -37,51 +46,11 @@ interface AdminConsultantsProps {
   onUpdateConsultant: (id: string, data: Partial<Consultant>) => Promise<void> | void
 }
 
-const SCHEDULE_DAYS = [
-  { value: 2, label: "화" },
-  { value: 4, label: "목" },
-] as const
-
-const TIME_SLOTS = Array.from({ length: 9 }, (_, index) => {
-  const startHour = 9 + index
-  const endHour = startHour + 1
-  return {
-    start: `${String(startHour).padStart(2, "0")}:00`,
-    end: `${String(endHour).padStart(2, "0")}:00`,
-  }
-})
-
 const PAGE_SIZE = 8
 
-function buildDefaultAvailability(): ConsultantAvailability[] {
-  return SCHEDULE_DAYS.map((day) => ({
-    dayOfWeek: day.value,
-    slots: TIME_SLOTS.map((slot) => ({
-      start: slot.start,
-      end: slot.end,
-      available: false,
-    })),
-  }))
-}
-
-function normalizeAvailability(
-  input: ConsultantAvailability[] | undefined,
-): ConsultantAvailability[] {
-  const base = buildDefaultAvailability()
-  if (!input || input.length === 0) return base
-  return base.map((baseDay) => {
-    const found = input.find((item) => item.dayOfWeek === baseDay.dayOfWeek)
-    if (!found) return baseDay
-    return {
-      ...baseDay,
-      slots: baseDay.slots.map((baseSlot) => {
-        const existing = found.slots.find(
-          (slot) => slot.start === baseSlot.start && slot.end === baseSlot.end,
-        )
-        return existing ?? baseSlot
-      }),
-    }
-  })
+function formatMonthLabel(monthKey: string): string {
+  const [year, month] = monthKey.split("-")
+  return `${year}년 ${Number(month)}월`
 }
 
 export function AdminConsultants({
@@ -95,6 +64,9 @@ export function AdminConsultants({
   const [isScheduleDialogOpen, setIsScheduleDialogOpen] = useState(false)
   const [isAgendaMapDialogOpen, setIsAgendaMapDialogOpen] = useState(false)
   const [draftAgendaIds, setDraftAgendaIds] = useState<string[] | null>(null)
+  const [agendaSearch, setAgendaSearch] = useState("")
+  const [selectedAvailableAgendaIds, setSelectedAvailableAgendaIds] = useState<string[]>([])
+  const [selectedAssignedAgendaIds, setSelectedAssignedAgendaIds] = useState<string[]>([])
   const [draftScheduleAvailability, setDraftScheduleAvailability] = useState<
     ConsultantAvailability[] | null
   >(null)
@@ -104,6 +76,7 @@ export function AdminConsultants({
   const [meetingLinkDrafts, setMeetingLinkDrafts] = useState<Record<string, string>>({})
   const [editingMeetingLinkIds, setEditingMeetingLinkIds] = useState<string[]>([])
   const [savingMeetingLinkIds, setSavingMeetingLinkIds] = useState<string[]>([])
+  const [selectedScheduleMonthKey, setSelectedScheduleMonthKey] = useState("")
 
   const selectedConsultant = useMemo(
     () => consultants.find((consultant) => consultant.id === selectedConsultantId) ?? null,
@@ -122,7 +95,10 @@ export function AdminConsultants({
     const normalizedQuery = searchQuery.trim().toLowerCase()
     return consultants.filter((consultant) => {
       const matchesQuery =
-        !normalizedQuery || consultant.name.toLowerCase().includes(normalizedQuery)
+        !normalizedQuery ||
+        consultant.name.toLowerCase().includes(normalizedQuery) ||
+        consultant.email.toLowerCase().includes(normalizedQuery) ||
+        (consultant.organization ?? "").toLowerCase().includes(normalizedQuery)
       const matchesAgenda =
         agendaFilter === "all" || (consultant.agendaIds ?? []).includes(agendaFilter)
       return matchesQuery && matchesAgenda
@@ -132,22 +108,101 @@ export function AdminConsultants({
     const startIndex = (page - 1) * PAGE_SIZE
     return filteredConsultants.slice(startIndex, startIndex + PAGE_SIZE)
   }, [filteredConsultants, page])
+  const scheduleTargetMonthKey = useMemo(
+    () => regularOfficeHourPolicy.getNextMonthKey(new Date()),
+    [],
+  )
+  const scheduleMonthOptions = useMemo(() => {
+    const keys = new Set<string>([
+      ...(selectedConsultant ? Object.keys(selectedConsultant.monthlyAvailability ?? {}) : []),
+      scheduleTargetMonthKey,
+    ].filter(Boolean))
+    return Array.from(keys).sort((a, b) => b.localeCompare(a))
+  }, [scheduleTargetMonthKey, selectedConsultant])
+  const isScheduleEditable = useMemo(
+    () =>
+      Boolean(
+        selectedScheduleMonthKey &&
+          selectedScheduleMonthKey === scheduleTargetMonthKey &&
+          regularOfficeHourPolicy.canConsultantEditMonthlyAvailability(
+            selectedScheduleMonthKey,
+            new Date(),
+          ),
+      ),
+    [scheduleTargetMonthKey, selectedScheduleMonthKey],
+  )
+  const selectedScheduleDayNumbers = useMemo(
+    () =>
+      getConsultantScheduleDayNumbers({
+        agendaIds: selectedConsultant?.agendaIds,
+        agendas,
+        scope: selectedConsultant?.scope,
+      }),
+    [agendas, selectedConsultant?.agendaIds, selectedConsultant?.scope],
+  )
+  const scheduleDays = useMemo(
+    () =>
+      selectedScheduleDayNumbers.map((value) => ({
+        value,
+        label: value === 2 ? "화" : value === 3 ? "수" : "목",
+      })),
+    [selectedScheduleDayNumbers],
+  )
 
   const normalizedSelectedAvailability = useMemo(
-    () => normalizeAvailability(selectedConsultant?.availability),
-    [selectedConsultant?.availability],
+    () =>
+      selectedScheduleMonthKey
+        ? getMonthlyAvailabilityForMonth(
+            selectedConsultant?.monthlyAvailability,
+            selectedScheduleMonthKey,
+            selectedScheduleDayNumbers,
+          )
+        : buildDefaultConsultantAvailability(selectedScheduleDayNumbers),
+    [selectedScheduleMonthKey, selectedConsultant?.monthlyAvailability, selectedScheduleDayNumbers],
   )
   const normalizedSelectedAgendaIds = useMemo(
     () => Array.from(new Set(selectedConsultant?.agendaIds ?? [])).sort(),
     [selectedConsultant?.agendaIds],
   )
   const agendaIdsForDialog = draftAgendaIds ?? normalizedSelectedAgendaIds
+  const sortedAgendas = useMemo(
+    () => [...agendas].sort((a, b) => a.name.localeCompare(b.name, "ko-KR")),
+    [agendas],
+  )
+  const agendaSearchQuery = agendaSearch.trim().toLowerCase()
+  const availableAgendas = useMemo(() => {
+    const selectedIds = new Set(agendaIdsForDialog)
+    return sortedAgendas.filter((agenda) => {
+      if (selectedIds.has(agenda.id)) return false
+      if (!agendaSearchQuery) return true
+      return agenda.name.toLowerCase().includes(agendaSearchQuery)
+    })
+  }, [agendaIdsForDialog, agendaSearchQuery, sortedAgendas])
+  const assignedAgendas = useMemo(
+    () =>
+      agendaIdsForDialog
+        .map((agendaId) => agendas.find((agenda) => agenda.id === agendaId))
+        .filter((agenda): agenda is Agenda => Boolean(agenda)),
+    [agendaIdsForDialog, agendas],
+  )
+  const isAllAvailableAgendasSelected =
+    availableAgendas.length > 0 && selectedAvailableAgendaIds.length === availableAgendas.length
+  const isSomeAvailableAgendasSelected =
+    selectedAvailableAgendaIds.length > 0 && selectedAvailableAgendaIds.length < availableAgendas.length
+  const isAllAssignedAgendasSelected =
+    assignedAgendas.length > 0 && selectedAssignedAgendaIds.length === assignedAgendas.length
+  const isSomeAssignedAgendasSelected =
+    selectedAssignedAgendaIds.length > 0 && selectedAssignedAgendaIds.length < assignedAgendas.length
   const isAgendaDirty =
     JSON.stringify(Array.from(new Set(agendaIdsForDialog)).sort()) !==
     JSON.stringify(normalizedSelectedAgendaIds)
   const scheduleAvailability = draftScheduleAvailability ?? normalizedSelectedAvailability
   const isScheduleDirty =
     JSON.stringify(scheduleAvailability) !== JSON.stringify(normalizedSelectedAvailability)
+
+  useEffect(() => {
+    setDraftScheduleAvailability(normalizedSelectedAvailability)
+  }, [normalizedSelectedAvailability, selectedConsultant?.id, selectedScheduleMonthKey])
 
   useEffect(() => {
     setPage(1)
@@ -172,6 +227,12 @@ export function AdminConsultants({
     })
   }, [consultants, editingMeetingLinkIds])
 
+  useEffect(() => {
+    if (!scheduleMonthOptions.includes(selectedScheduleMonthKey)) {
+      setSelectedScheduleMonthKey(scheduleMonthOptions[0] ?? scheduleTargetMonthKey)
+    }
+  }, [scheduleMonthOptions, scheduleTargetMonthKey, selectedScheduleMonthKey])
+
   function toggleSlot(dayOfWeek: number, slotStart: string) {
     setDraftScheduleAvailability((prev) => {
       const base = prev ?? normalizedSelectedAvailability
@@ -188,9 +249,17 @@ export function AdminConsultants({
   }
 
   function handleSaveSchedule() {
-    if (!selectedConsultant) return
+    if (!selectedConsultant || !selectedScheduleMonthKey) return
     onUpdateConsultant(selectedConsultant.id, {
-      availability: scheduleAvailability,
+      monthlyAvailability: {
+        ...(selectedConsultant.monthlyAvailability ?? {}),
+        [selectedScheduleMonthKey]: scheduleAvailability,
+      },
+      monthlyAvailabilityMeta: {
+        [selectedScheduleMonthKey]: {
+          status: "submitted",
+        },
+      },
     })
     setIsScheduleDialogOpen(false)
     setDraftScheduleAvailability(null)
@@ -210,6 +279,25 @@ export function AdminConsultants({
     })
     setIsAgendaMapDialogOpen(false)
     setDraftAgendaIds(null)
+  }
+
+  function addSelectedAgendas() {
+    if (selectedAvailableAgendaIds.length === 0) return
+    setDraftAgendaIds((prev) => {
+      const base = prev ?? normalizedSelectedAgendaIds
+      return [...base, ...selectedAvailableAgendaIds.filter((agendaId) => !base.includes(agendaId))]
+    })
+    setSelectedAvailableAgendaIds([])
+  }
+
+  function removeSelectedAgendas() {
+    if (selectedAssignedAgendaIds.length === 0) return
+    setDraftAgendaIds((prev) => {
+      const base = prev ?? normalizedSelectedAgendaIds
+      const removalSet = new Set(selectedAssignedAgendaIds)
+      return base.filter((agendaId) => !removalSet.has(agendaId))
+    })
+    setSelectedAssignedAgendaIds([])
   }
 
   async function commitMeetingLink(consultant: Consultant) {
@@ -250,7 +338,7 @@ export function AdminConsultants({
         <div className="mx-auto w-full max-w-[1600px]">
           <h1 className={pageTitleClassName}>컨설턴트 관리</h1>
           <p className={pageDescriptionClassName}>
-            컨설턴트 프로필과 정기 오피스아워(화/목, 09:00~18:00) 가능 시간을 관리합니다
+            컨설턴트 프로필과 다음 달 정기 오피스아워 가능 시간을 관리합니다
           </p>
         </div>
       </div>
@@ -264,7 +352,7 @@ export function AdminConsultants({
                   <Input
                     value={searchQuery}
                     onChange={(event) => setSearchQuery(event.target.value)}
-                    placeholder="컨설턴트 이름 검색"
+                    placeholder="이름, 이메일, 소속 검색"
                     className="w-full md:w-64"
                   />
                   <Select value={agendaFilter} onValueChange={setAgendaFilter}>
@@ -320,12 +408,13 @@ export function AdminConsultants({
           <Card className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
             <CardContent className="min-h-0 flex-1 p-0">
               <div className="min-h-0 h-full overflow-auto">
-                <Table className="min-w-[1120px]">
+                <Table className="min-w-[1240px]">
                   <TableHeader className="[&_tr]:sticky [&_tr]:top-0 [&_tr]:z-10 [&_tr]:bg-white">
                     <TableRow className="hover:bg-white">
                       <TableHead className="bg-white">컨설턴트</TableHead>
                       <TableHead className="bg-white">연락처</TableHead>
                       <TableHead className="bg-white">화상링크</TableHead>
+                      <TableHead className="w-[148px] bg-white">구분</TableHead>
                       <TableHead className="bg-white">상태</TableHead>
                       <TableHead className="bg-white">아젠다</TableHead>
                       <TableHead className="bg-white text-right">관리</TableHead>
@@ -335,7 +424,7 @@ export function AdminConsultants({
                     {filteredConsultants.length === 0 && (
                       <TableRow>
                         <TableCell
-                          colSpan={6}
+                          colSpan={7}
                           className="h-24 text-center text-sm text-muted-foreground"
                         >
                           검색 결과가 없습니다.
@@ -429,6 +518,36 @@ export function AdminConsultants({
                             </div>
                           </TableCell>
                           <TableCell>
+                            <ToggleGroup
+                              type="single"
+                              value={consultant.scope}
+                              variant="default"
+                              size="sm"
+                              className="grid w-[124px] grid-cols-2 overflow-hidden rounded-full border border-slate-200 bg-white p-0.5 shadow-none"
+                              onValueChange={(value) => {
+                                if (value !== "internal" && value !== "external") return
+                                void Promise.resolve(
+                                  onUpdateConsultant(consultant.id, {
+                                    scope: value,
+                                  }),
+                                )
+                              }}
+                            >
+                              <ToggleGroupItem
+                                value="internal"
+                                className="h-7 min-w-0 rounded-full border-0 px-0 text-[12px] font-medium text-slate-500 shadow-none first:rounded-full last:rounded-full hover:bg-slate-50 data-[state=on]:bg-amber-50 data-[state=on]:text-amber-700"
+                              >
+                                내부
+                              </ToggleGroupItem>
+                              <ToggleGroupItem
+                                value="external"
+                                className="h-7 min-w-0 rounded-full border-0 px-0 text-[12px] font-medium text-slate-500 shadow-none first:rounded-full last:rounded-full hover:bg-slate-50 data-[state=on]:bg-sky-50 data-[state=on]:text-sky-700"
+                              >
+                                외부
+                              </ToggleGroupItem>
+                            </ToggleGroup>
+                          </TableCell>
+                          <TableCell>
                             <Badge
                               variant="secondary"
                               className={
@@ -482,8 +601,14 @@ export function AdminConsultants({
                                     setDraftAgendaIds(
                                       Array.from(new Set(consultant.agendaIds ?? [])).sort(),
                                     )
+                                    setAgendaSearch("")
+                                    setSelectedAvailableAgendaIds([])
+                                    setSelectedAssignedAgendaIds([])
                                   } else {
                                     setDraftAgendaIds(null)
+                                    setAgendaSearch("")
+                                    setSelectedAvailableAgendaIds([])
+                                    setSelectedAssignedAgendaIds([])
                                   }
                                 }}
                               >
@@ -496,73 +621,223 @@ export function AdminConsultants({
                                       setDraftAgendaIds(
                                         Array.from(new Set(consultant.agendaIds ?? [])).sort(),
                                       )
+                                      setAgendaSearch("")
+                                      setSelectedAvailableAgendaIds([])
+                                      setSelectedAssignedAgendaIds([])
                                     }}
                                   >
                                     아젠다 매칭
                                   </Button>
                                 </DialogTrigger>
-                                <DialogContent className="max-w-2xl">
+                                <DialogContent className="max-h-[90vh] w-[94vw] overflow-hidden sm:max-w-[980px]">
                                   <DialogHeader>
                                     <DialogTitle>{consultant.name} 아젠다 매칭</DialogTitle>
                                     <DialogDescription>
-                                      이 컨설턴트가 담당 가능한 아젠다를 선택하세요. 선택 결과는
-                                      사업 관리 화면의 컨설턴트 선택에 반영됩니다.
+                                      이 컨설턴트가 담당 가능한 아젠다를 검색해서 추가하거나 제거합니다.
                                     </DialogDescription>
                                   </DialogHeader>
 
-                                  <div className="max-h-[320px] space-y-2 overflow-y-auto pr-1">
-                                    {agendas.length === 0 ? (
-                                      <p className="text-sm text-muted-foreground">
-                                        등록된 아젠다가 없습니다. 상단에서 먼저 아젠다를
-                                        추가해주세요.
-                                      </p>
-                                    ) : (
-                                      agendas.map((agenda) => {
-                                        const checked = agendaIdsForDialog.includes(agenda.id)
-                                        return (
-                                          <button
-                                            key={agenda.id}
-                                            type="button"
-                                            aria-pressed={checked}
-                                            onClick={() =>
-                                              toggleConsultantAgenda(agenda.id, !checked)
-                                            }
-                                            className={cn(
-                                              "w-full rounded-lg border px-3 py-2 text-left text-sm transition",
-                                              checked
-                                                ? "border-emerald-300 bg-emerald-50 text-emerald-900"
-                                                : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50",
-                                            )}
-                                          >
-                                            <div className="flex items-center justify-between gap-3">
-                                              <span className="inline-flex min-w-0 items-center gap-2">
-                                                <span
-                                                  className={cn(
-                                                    "inline-flex h-4 w-4 flex-shrink-0 items-center justify-center rounded-[4px] border",
-                                                    checked
-                                                      ? "border-emerald-500 bg-emerald-500"
-                                                      : "border-slate-300 bg-white",
-                                                  )}
-                                                >
-                                                  <Check
-                                                    className={cn(
-                                                      "h-3 w-3 transition-opacity",
-                                                      checked
-                                                        ? "opacity-100 text-white"
-                                                        : "opacity-0 text-transparent",
-                                                    )}
-                                                  />
-                                                </span>
-                                                <span className="truncate">{agenda.name}</span>
-                                              </span>
-                                              <span className="text-xs opacity-90">
-                                                {agenda.scope === "internal" ? "내부" : "외부"}
-                                              </span>
+                                  <div className="space-y-4">
+                                    <div className="space-y-2">
+                                      <Input
+                                        value={agendaSearch}
+                                        onChange={(event) => setAgendaSearch(event.target.value)}
+                                        placeholder="아젠다명을 입력하세요"
+                                      />
+                                    </div>
+
+                                    <div className="grid justify-center grid-cols-[minmax(0,420px)_72px_minmax(0,420px)] gap-4">
+                                      <div className="min-h-0 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50/60">
+                                        <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
+                                          <div className="text-sm font-semibold text-slate-900">
+                                            선택 가능 아젠다
+                                          </div>
+                                          <div className="flex items-center gap-2">
+                                            <label className="flex items-center gap-2 whitespace-nowrap rounded-md px-2 py-1 text-xs text-slate-600">
+                                              <Checkbox
+                                                checked={
+                                                  isAllAvailableAgendasSelected
+                                                    ? true
+                                                    : isSomeAvailableAgendasSelected
+                                                      ? "indeterminate"
+                                                      : false
+                                                }
+                                                onCheckedChange={(checked) => {
+                                                  if (checked) {
+                                                    setSelectedAvailableAgendaIds(
+                                                      availableAgendas.map((agenda) => agenda.id),
+                                                    )
+                                                    return
+                                                  }
+                                                  setSelectedAvailableAgendaIds([])
+                                                }}
+                                                disabled={availableAgendas.length === 0}
+                                                className="border-slate-300 data-[state=checked]:border-slate-700 data-[state=checked]:bg-slate-700"
+                                              />
+                                              전체 선택
+                                            </label>
+                                            <Badge
+                                              variant="outline"
+                                              className="border-slate-200 bg-white text-slate-600"
+                                            >
+                                              {availableAgendas.length}개
+                                            </Badge>
+                                          </div>
+                                        </div>
+                                        <div className="h-[320px] overflow-y-auto bg-white">
+                                          {availableAgendas.length === 0 ? (
+                                            <div className="flex h-full items-center justify-center p-4 text-center text-sm text-slate-500">
+                                              추가 가능한 아젠다가 없습니다.
                                             </div>
-                                          </button>
-                                        )
-                                      })
-                                    )}
+                                          ) : (
+                                            availableAgendas.map((agenda) => {
+                                              const checked = selectedAvailableAgendaIds.includes(agenda.id)
+                                              return (
+                                                <label
+                                                  key={agenda.id}
+                                                  className="flex cursor-pointer items-center gap-3 border-b border-slate-200/70 px-4 py-2.5 hover:bg-slate-50/80"
+                                                >
+                                                  <Checkbox
+                                                    checked={checked}
+                                                    onCheckedChange={(nextChecked) => {
+                                                      setSelectedAvailableAgendaIds((prev) => {
+                                                        if (nextChecked) {
+                                                          return [...prev, agenda.id]
+                                                        }
+                                                        return prev.filter((id) => id !== agenda.id)
+                                                      })
+                                                    }}
+                                                    className="rounded-[4px] border-slate-300 data-[state=checked]:border-slate-700 data-[state=checked]:bg-slate-700 focus-visible:ring-slate-200"
+                                                  />
+                                                  <div className="flex min-w-0 flex-1 items-center gap-2">
+                                                    <span className="truncate text-sm font-medium text-slate-700">
+                                                      {agenda.name}
+                                                    </span>
+                                                    <Badge
+                                                      variant="outline"
+                                                      className={
+                                                        agenda.scope === "internal"
+                                                          ? "h-5 shrink-0 border-amber-200 bg-amber-50 px-1.5 text-[11px] text-amber-700"
+                                                          : "h-5 shrink-0 border-rose-200 bg-rose-50 px-1.5 text-[11px] text-rose-700"
+                                                      }
+                                                    >
+                                                      {agenda.scope === "internal" ? "내부" : "외부"}
+                                                    </Badge>
+                                                  </div>
+                                                </label>
+                                              )
+                                            })
+                                          )}
+                                        </div>
+                                      </div>
+
+                                      <div className="flex flex-row items-center justify-center gap-2 md:flex-col">
+                                        <Button
+                                          type="button"
+                                          size="sm"
+                                          variant="outline"
+                                          className="h-10 min-w-12 rounded-full border-slate-200 bg-white px-4 text-slate-700 hover:bg-slate-50"
+                                          disabled={selectedAvailableAgendaIds.length === 0}
+                                          onClick={addSelectedAgendas}
+                                        >
+                                          →
+                                        </Button>
+                                        <Button
+                                          type="button"
+                                          size="sm"
+                                          variant="outline"
+                                          className="h-10 min-w-12 rounded-full border-slate-200 bg-white px-4 text-slate-700 hover:bg-slate-50"
+                                          disabled={selectedAssignedAgendaIds.length === 0}
+                                          onClick={removeSelectedAgendas}
+                                        >
+                                          ←
+                                        </Button>
+                                      </div>
+
+                                      <div className="min-h-0 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50/60">
+                                        <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
+                                          <div className="text-sm font-semibold text-slate-900">
+                                            선택된 아젠다
+                                          </div>
+                                          <div className="flex items-center gap-2">
+                                            <label className="flex items-center gap-2 whitespace-nowrap rounded-md px-2 py-1 text-xs text-slate-600">
+                                              <Checkbox
+                                                checked={
+                                                  isAllAssignedAgendasSelected
+                                                    ? true
+                                                    : isSomeAssignedAgendasSelected
+                                                      ? "indeterminate"
+                                                      : false
+                                                }
+                                                onCheckedChange={(checked) => {
+                                                  if (checked) {
+                                                    setSelectedAssignedAgendaIds(
+                                                      assignedAgendas.map((agenda) => agenda.id),
+                                                    )
+                                                    return
+                                                  }
+                                                  setSelectedAssignedAgendaIds([])
+                                                }}
+                                                disabled={assignedAgendas.length === 0}
+                                                className="border-slate-300 data-[state=checked]:border-slate-700 data-[state=checked]:bg-slate-700"
+                                              />
+                                              전체 선택
+                                            </label>
+                                            <Badge
+                                              variant="outline"
+                                              className="border-slate-200 bg-white text-slate-600"
+                                            >
+                                              {assignedAgendas.length}개
+                                            </Badge>
+                                          </div>
+                                        </div>
+                                        <div className="h-[320px] overflow-y-auto bg-white">
+                                          {assignedAgendas.length === 0 ? (
+                                            <div className="flex h-full items-center justify-center p-4 text-center text-sm text-slate-500">
+                                              선택된 아젠다가 없습니다.
+                                            </div>
+                                          ) : (
+                                            assignedAgendas.map((agenda) => {
+                                              const checked = selectedAssignedAgendaIds.includes(agenda.id)
+                                              return (
+                                                <label
+                                                  key={agenda.id}
+                                                  className="flex cursor-pointer items-center gap-3 border-b border-slate-200/70 px-4 py-2.5 hover:bg-slate-50/80"
+                                                >
+                                                  <Checkbox
+                                                    checked={checked}
+                                                    onCheckedChange={(nextChecked) => {
+                                                      setSelectedAssignedAgendaIds((prev) => {
+                                                        if (nextChecked) {
+                                                          return [...prev, agenda.id]
+                                                        }
+                                                        return prev.filter((id) => id !== agenda.id)
+                                                      })
+                                                    }}
+                                                    className="rounded-[4px] border-slate-300 data-[state=checked]:border-slate-700 data-[state=checked]:bg-slate-700 focus-visible:ring-slate-200"
+                                                  />
+                                                  <div className="flex min-w-0 flex-1 items-center gap-2">
+                                                    <span className="truncate text-sm font-medium text-slate-700">
+                                                      {agenda.name}
+                                                    </span>
+                                                    <Badge
+                                                      variant="outline"
+                                                      className={
+                                                        agenda.scope === "internal"
+                                                          ? "h-5 shrink-0 border-amber-200 bg-amber-50 px-1.5 text-[11px] text-amber-700"
+                                                          : "h-5 shrink-0 border-rose-200 bg-rose-50 px-1.5 text-[11px] text-rose-700"
+                                                      }
+                                                    >
+                                                      {agenda.scope === "internal" ? "내부" : "외부"}
+                                                    </Badge>
+                                                  </div>
+                                                </label>
+                                              )
+                                            })
+                                          )}
+                                        </div>
+                                      </div>
+                                    </div>
                                   </div>
                                   <div className="mt-4 flex justify-end gap-2">
                                     <Button
@@ -571,6 +846,9 @@ export function AdminConsultants({
                                       onClick={() => {
                                         setIsAgendaMapDialogOpen(false)
                                         setDraftAgendaIds(null)
+                                        setAgendaSearch("")
+                                        setSelectedAvailableAgendaIds([])
+                                        setSelectedAssignedAgendaIds([])
                                       }}
                                     >
                                       취소
@@ -594,8 +872,17 @@ export function AdminConsultants({
                                   setIsScheduleDialogOpen(open)
                                   if (open) {
                                     setSelectedConsultantId(consultant.id)
+                                    setSelectedScheduleMonthKey(scheduleTargetMonthKey)
                                     setDraftScheduleAvailability(
-                                      normalizeAvailability(consultant.availability),
+                                      getMonthlyAvailabilityForMonth(
+                                        consultant.monthlyAvailability,
+                                        scheduleTargetMonthKey,
+                                        getConsultantScheduleDayNumbers({
+                                          agendaIds: consultant.agendaIds,
+                                          agendas,
+                                          scope: consultant.scope,
+                                        }),
+                                      ),
                                     )
                                   } else {
                                     setDraftScheduleAvailability(null)
@@ -608,8 +895,17 @@ export function AdminConsultants({
                                     size="sm"
                                     onClick={() => {
                                       setSelectedConsultantId(consultant.id)
+                                      setSelectedScheduleMonthKey(scheduleTargetMonthKey)
                                       setDraftScheduleAvailability(
-                                        normalizeAvailability(consultant.availability),
+                                        getMonthlyAvailabilityForMonth(
+                                          consultant.monthlyAvailability,
+                                          scheduleTargetMonthKey,
+                                          getConsultantScheduleDayNumbers({
+                                            agendaIds: consultant.agendaIds,
+                                            agendas,
+                                            scope: consultant.scope,
+                                          }),
+                                        ),
                                       )
                                     }}
                                   >
@@ -624,36 +920,88 @@ export function AdminConsultants({
                                       {consultant.name} 컨설턴트 가능 시간
                                     </DialogTitle>
                                     <DialogDescription>
-                                      요일은 화/목 고정이며 09:00부터 18:00까지 1시간 단위로
-                                      설정합니다.
+                                      {scheduleTargetMonthKey} 정기 오피스아워 가능 시간을 설정합니다.
                                     </DialogDescription>
                                   </DialogHeader>
 
                                   <div className="space-y-4 max-h-[65vh] overflow-y-auto pr-1">
+                                    <div className="w-full max-w-[220px]">
+                                      <Label className="mb-2 block">조회 월</Label>
+                                      <Select
+                                        value={selectedScheduleMonthKey}
+                                        onValueChange={setSelectedScheduleMonthKey}
+                                      >
+                                        <SelectTrigger>
+                                          <SelectValue placeholder="월 선택" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                          {scheduleMonthOptions.map((monthKey) => (
+                                            <SelectItem key={monthKey} value={monthKey}>
+                                              {formatMonthLabel(monthKey)}
+                                            </SelectItem>
+                                          ))}
+                                        </SelectContent>
+                                      </Select>
+                                    </div>
+                                    {!isScheduleEditable && selectedScheduleMonthKey === scheduleTargetMonthKey && (
+                                      <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                                        컨설턴트 가능 시간은 매월 3주차에 다음 달 일정만 수정할 수 있습니다.
+                                      </div>
+                                    )}
                                     {scheduleAvailability.map((day) => {
-                                      const dayInfo = SCHEDULE_DAYS.find(
+                                      const dayInfo = scheduleDays.find(
                                         (item) => item.value === day.dayOfWeek,
                                       )
                                       return (
-                                        <div key={day.dayOfWeek} className="border rounded-lg p-4">
-                                          <div className="text-sm font-semibold mb-3">
-                                            {dayInfo?.label || "-"}요일
+                                        <div
+                                          key={day.dayOfWeek}
+                                          className={cn(
+                                            "rounded-lg border p-4",
+                                            isScheduleEditable
+                                              ? "border-slate-200 bg-white"
+                                              : "border-slate-200 bg-slate-50",
+                                          )}
+                                        >
+                                          <div className="mb-3 flex items-center justify-between gap-2">
+                                            <div className="text-sm font-semibold">
+                                              {dayInfo?.label || "-"}요일
+                                            </div>
+                                            {!isScheduleEditable ? (
+                                              <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-medium text-slate-500">
+                                                읽기 전용
+                                              </span>
+                                            ) : null}
                                           </div>
-                                          <div className="grid grid-cols-3 md:grid-cols-5 gap-2">
+                                          <div className="grid grid-cols-3 gap-2 md:grid-cols-5">
                                             {day.slots.map((slot) => (
                                               <button
                                                 key={`${day.dayOfWeek}-${slot.start}`}
                                                 type="button"
                                                 aria-pressed={slot.available}
-                                                title={slot.available ? "가능 일정" : "불가 일정"}
+                                                title={
+                                                  !isScheduleEditable
+                                                    ? slot.available
+                                                      ? "가능 일정 (조회 전용)"
+                                                      : "불가 일정 (조회 전용)"
+                                                    : slot.available
+                                                      ? "가능 일정"
+                                                      : "불가 일정"
+                                                }
                                                 onClick={() =>
                                                   toggleSlot(day.dayOfWeek, slot.start)
                                                 }
+                                                disabled={!isScheduleEditable}
                                                 className={cn(
                                                   "rounded-lg border px-2 py-2 text-xs transition",
-                                                  slot.available
+                                                  !isScheduleEditable &&
+                                                    "cursor-not-allowed border-slate-200 text-slate-400 shadow-none",
+                                                  isScheduleEditable && slot.available
                                                     ? "border-slate-900 bg-slate-900 text-white"
-                                                    : "border-slate-300 bg-white text-slate-500 hover:bg-slate-50",
+                                                    : isScheduleEditable
+                                                      ? "border-slate-300 bg-white text-slate-500 hover:bg-slate-50"
+                                                      : slot.available
+                                                        ? "bg-slate-300/80"
+                                                        : "bg-slate-100",
                                                 )}
                                               >
                                                 {slot.start}
@@ -672,6 +1020,12 @@ export function AdminConsultants({
                                         <span className="h-3.5 w-3.5 rounded border border-slate-300 bg-white" />
                                         불가 일정
                                       </span>
+                                      {!isScheduleEditable ? (
+                                        <span className="inline-flex items-center gap-2 text-slate-500">
+                                          <span className="h-3.5 w-3.5 rounded border border-slate-200 bg-slate-100" />
+                                          조회 전용
+                                        </span>
+                                      ) : null}
                                     </div>
                                   </div>
                                   <div className="mt-4 flex justify-end gap-2">
@@ -688,7 +1042,7 @@ export function AdminConsultants({
                                     <Button
                                       type="button"
                                       onClick={handleSaveSchedule}
-                                      disabled={!isScheduleDirty}
+                                      disabled={!isScheduleEditable || !isScheduleDirty}
                                     >
                                       저장
                                     </Button>

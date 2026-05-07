@@ -68,10 +68,7 @@ export function ApplicationHistoryCalendar({ applications, onNavigate }: Applica
 
   const statusOptions = [
     { value: "all", label: "전체" },
-    { value: "pending", label: "대기중" },
-    { value: "review", label: "진행중" },
     { value: "confirmed", label: "확정" },
-    { value: "rejected", label: "거절됨" },
     { value: "completed", label: "완료" },
     { value: "cancelled", label: "취소" },
   ];

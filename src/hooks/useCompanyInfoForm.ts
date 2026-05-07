@@ -63,7 +63,20 @@ const MIN_LENGTH_RULES: Partial<Record<keyof CompanyInfoForm, number>> = {
   representativeSolution: 20,
 }
 
-type SaveType = "draft" | "final"
+export type SaveType = "draft" | "final"
+
+export type CompanyInfoPersistPayload = {
+  companyId: string
+  companyInfo: CompanyInfoRecord
+  saveType: SaveType
+  companyProgramIds: string[]
+  savedCompanyProgramIds: string[]
+}
+
+export type UseCompanyInfoFormOptions = {
+  allowProgramEditing?: boolean
+  persistCompanyInfo?: (payload: CompanyInfoPersistPayload) => Promise<void>
+}
 
 const FIELD_LABELS: Record<keyof CompanyInfoForm, string> = {
   companyType: "기업 형태",
@@ -289,7 +302,11 @@ function normalizeProgramIds(values: string[]) {
   ).sort()
 }
 
-export function useCompanyInfoForm(companyId: string) {
+export function useCompanyInfoForm(
+  companyId: string,
+  options: UseCompanyInfoFormOptions = {},
+) {
+  const allowProgramEditing = options.allowProgramEditing ?? true
   const [form, setForm] = useState<CompanyInfoForm>(DEFAULT_FORM)
   const [savedForm, setSavedForm] = useState<CompanyInfoForm>(DEFAULT_FORM)
   const [companyProgramIds, setCompanyProgramIds] = useState<string[]>([])
@@ -603,7 +620,11 @@ export function useCompanyInfoForm(companyId: string) {
     )
   }
 
-  function buildCompanyInfo(saveType: SaveType): CompanyInfoRecord {
+  function buildCompanyInfo(
+    saveType: SaveType,
+    buildOptions: { includeServerTimestamps?: boolean } = {},
+  ): CompanyInfoRecord {
+    const includeServerTimestamps = buildOptions.includeServerTimestamps ?? true
     const hasCoRepresentative = form.hasCoRepresentative === "예"
     const isCorporate = form.companyType !== "예비창업"
     const companyInfo: CompanyInfoRecord = {
@@ -682,7 +703,7 @@ export function useCompanyInfoForm(companyId: string) {
         preValue: toDecimalNumber(form.desiredPreValue),
       },
       metadata: {
-        updatedAt: serverTimestamp(),
+        ...(includeServerTimestamps ? { updatedAt: serverTimestamp() } : {}),
         saveType,
       },
     }
@@ -692,41 +713,56 @@ export function useCompanyInfoForm(companyId: string) {
   async function saveCompanyInfoByType(saveType: SaveType) {
     setSaveStatus(null)
     setSaving(true)
-    const companyInfo = buildCompanyInfo(saveType)
+    const companyInfo = buildCompanyInfo(saveType, {
+      includeServerTimestamps: !options.persistCompanyInfo,
+    })
     try {
-      const ref = doc(db, "companies", companyId, "companyInfo", "info")
-      await setDoc(
-        ref,
-        {
-          ...companyInfo,
-          metadata: {
-            ...companyInfo.metadata,
-            createdAt: serverTimestamp(),
-          },
-        },
-        { merge: true }
-      )
-      const normalizedCurrentProgramIds = normalizeProgramIds(companyProgramIds)
-      const normalizedSavedProgramIds = normalizeProgramIds(savedCompanyProgramIds)
-      const programsChanged =
-        normalizedCurrentProgramIds.length !== normalizedSavedProgramIds.length ||
-        normalizedCurrentProgramIds.some((value, index) => value !== normalizedSavedProgramIds[index])
-
-      if (programsChanged) {
-        await updateCompanyProgramsViaFunction({
+      if (options.persistCompanyInfo) {
+        await options.persistCompanyInfo({
           companyId,
-          programIds: companyProgramIds,
-          companyName: companyInfo.basic.companyInfo || null,
+          companyInfo,
+          saveType,
+          companyProgramIds: [...companyProgramIds],
+          savedCompanyProgramIds: [...savedCompanyProgramIds],
         })
       } else {
+        const ref = doc(db, "companies", companyId, "companyInfo", "info")
         await setDoc(
-          doc(db, "companies", companyId),
+          ref,
           {
-            name: companyInfo.basic.companyInfo || null,
-            updatedAt: serverTimestamp(),
+            ...companyInfo,
+            metadata: {
+              ...companyInfo.metadata,
+              createdAt: serverTimestamp(),
+            },
           },
           { merge: true }
         )
+        const normalizedCurrentProgramIds = normalizeProgramIds(companyProgramIds)
+        const normalizedSavedProgramIds = normalizeProgramIds(savedCompanyProgramIds)
+        const programsChanged =
+          allowProgramEditing &&
+          (normalizedCurrentProgramIds.length !== normalizedSavedProgramIds.length ||
+            normalizedCurrentProgramIds.some(
+              (value, index) => value !== normalizedSavedProgramIds[index],
+            ))
+
+        if (programsChanged) {
+          await updateCompanyProgramsViaFunction({
+            companyId,
+            programIds: companyProgramIds,
+            companyName: companyInfo.basic.companyInfo || null,
+          })
+        } else {
+          await setDoc(
+            doc(db, "companies", companyId),
+            {
+              name: companyInfo.basic.companyInfo || null,
+              updatedAt: serverTimestamp(),
+            },
+            { merge: true }
+          )
+        }
       }
       setSavedForm(form)
       setSavedCompanyProgramIds(companyProgramIds)

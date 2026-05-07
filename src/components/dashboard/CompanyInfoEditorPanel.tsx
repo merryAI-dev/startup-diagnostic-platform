@@ -7,7 +7,7 @@ import {
   type ReactNode,
   type SetStateAction,
 } from "react"
-import { Check, ChevronDown, Trash2 } from "lucide-react"
+import { Check, ChevronDown, Loader2, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 import type { CompanyInfoForm, InvestmentInput } from "@/types/company"
 import { InputSuffix } from "@/components/ui/InputSuffix"
@@ -46,6 +46,7 @@ export type CompanyInfoEditorPanelProps = {
   readOnly?: boolean
   optional?: boolean
   saving?: boolean
+  savingAction?: "draft" | "final" | null
   canSubmit?: boolean
   showSaveActions?: boolean
   showPrograms?: boolean
@@ -210,6 +211,7 @@ export function CompanyInfoEditorPanel({
   readOnly = false,
   optional = false,
   saving = false,
+  savingAction = null,
   canSubmit = true,
   showSaveActions = false,
   showPrograms = true,
@@ -588,7 +590,7 @@ export function CompanyInfoEditorPanel({
   }
 
   return (
-    <div className="min-h-0 flex flex-1 bg-[#f8fafc]">
+    <div className="min-h-0 flex flex-1 flex-col bg-[#f8fafc] lg:flex-row">
       <aside className="hidden h-full w-72 shrink-0 border-r border-slate-200 bg-white lg:flex lg:flex-col">
         <div className="border-b border-slate-100 px-6 py-5">
           <div className="text-sm font-semibold text-slate-900">기업 정보 입력</div>
@@ -665,14 +667,28 @@ export function CompanyInfoEditorPanel({
                 onClick={onSaveDraft}
                 disabled={saving}
               >
-                임시저장
+                {saving && savingAction === "draft" ? (
+                  <>
+                    <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+                    임시저장 중...
+                  </>
+                ) : (
+                  "임시저장"
+                )}
               </button>
               <button
                 className="inline-flex rounded-lg bg-emerald-500 px-3 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-emerald-600 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-100"
                 onClick={onSave}
                 disabled={saving || !canSubmit}
               >
-                저장
+                {saving && savingAction === "final" ? (
+                  <>
+                    <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+                    저장 중...
+                  </>
+                ) : (
+                  "저장"
+                )}
               </button>
             </div>
           </div>
@@ -1840,6 +1856,40 @@ export function CompanyInfoEditorPanel({
           </section>
         </div>
       </div>
+      {showSaveActions ? (
+        <div className="border-t border-slate-200 bg-white px-4 py-3 lg:hidden">
+          <div className="flex justify-end gap-2">
+            <button
+              className="inline-flex rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+              onClick={onSaveDraft}
+              disabled={saving}
+            >
+              {saving && savingAction === "draft" ? (
+                <>
+                  <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+                  임시저장 중...
+                </>
+              ) : (
+                "임시저장"
+              )}
+            </button>
+            <button
+              className="inline-flex rounded-lg bg-emerald-500 px-3 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-emerald-600 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-slate-100"
+              onClick={onSave}
+              disabled={saving || !canSubmit}
+            >
+              {saving && savingAction === "final" ? (
+                <>
+                  <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+                  저장 중...
+                </>
+              ) : (
+                "저장"
+              )}
+            </button>
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 }

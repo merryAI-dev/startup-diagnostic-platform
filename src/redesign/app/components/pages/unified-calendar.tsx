@@ -4,7 +4,7 @@ import {
   Agenda,
   Application,
   ApplicationStatus,
-  ConsultantAvailability,
+  ConsultantMonthlyAvailability,
   OfficeHourReport,
   Program,
   User,
@@ -39,6 +39,8 @@ import { toast } from "sonner";
 import type { DayContentProps } from "react-day-picker";
 import { endOfLocalDateKey, parseLocalDateTimeKey } from "@/redesign/app/lib/date-keys";
 import { getPendingConsultantIds, isApplicationTargetingConsultant } from "@/redesign/app/lib/application-availability";
+import { getMonthlyAvailabilityForMonth } from "@/redesign/app/lib/consultant-monthly-availability";
+import * as regularOfficeHourPolicy from "@/redesign/app/lib/regular-office-hour-policy";
 
 interface UnifiedCalendarProps {
   currentUser: User;
@@ -47,7 +49,7 @@ interface UnifiedCalendarProps {
   reports?: OfficeHourReport[];
   agendas?: Agenda[];
   currentConsultantAgendaIds?: string[];
-  currentConsultantAvailability?: ConsultantAvailability[];
+  currentConsultantMonthlyAvailability?: ConsultantMonthlyAvailability;
   allowManualEventCreate?: boolean;
   onNavigateToApplication?: (id: string) => void;
   onCreateReport?: (applicationId: string) => void;
@@ -123,7 +125,7 @@ export function UnifiedCalendar({
   reports = [],
   agendas = [],
   currentConsultantAgendaIds = [],
-  currentConsultantAvailability = [],
+  currentConsultantMonthlyAvailability = {},
   allowManualEventCreate = true,
   onNavigateToApplication,
   onCreateReport,
@@ -294,9 +296,13 @@ export function UnifiedCalendar({
     if (!app.scheduledDate || !app.scheduledTime) return true;
     const parsedDate = parseLocalDateKey(app.scheduledDate);
     if (!parsedDate) return false;
-    const dayAvailability = currentConsultantAvailability.find(
-      (availability) => availability.dayOfWeek === parsedDate.getDay()
-    );
+    const monthKey = regularOfficeHourPolicy.getMonthKeyFromDateKey(app.scheduledDate);
+    if (!monthKey) return false;
+    const dayAvailability = getMonthlyAvailabilityForMonth(
+      currentConsultantMonthlyAvailability,
+      monthKey,
+      regularOfficeHourPolicy.ALL_DAY_NUMBERS,
+    ).find((availability) => availability.dayOfWeek === parsedDate.getDay());
     if (!dayAvailability) return false;
     const targetTime = normalizeTimeKey(app.scheduledTime);
     return dayAvailability.slots.some(
@@ -376,7 +382,7 @@ export function UnifiedCalendar({
         const dateB = new Date(b.createdAt).getTime();
         return dateB - dateA;
       });
-  }, [applications, isConsultant, matchesConsultantAgenda, currentConsultantAvailability]);
+  }, [applications, isConsultant, matchesConsultantAgenda, currentConsultantMonthlyAvailability]);
 
   const pendingOfficeHourReports = useMemo(() => {
     if (!isConsultant) return [];
@@ -1151,7 +1157,7 @@ export function UnifiedCalendar({
 
               {/* 선택된 날짜의 일정 */}
               <div className="flex min-w-0 flex-col gap-4 md:col-span-1">
-                {isConsultant && (
+                {isConsultant && pendingRequests.length > 0 && (
                   renderPendingRequestsCard()
                 )}
 
@@ -1160,10 +1166,15 @@ export function UnifiedCalendar({
           ) : (
             /* 리스트 뷰 */
             <div className="space-y-6">
-              {isConsultant && (
+              {isConsultant && pendingRequests.length > 0 && (
                 <div className="grid gap-4 xl:grid-cols-2">
                   {renderPendingOfficeHourReportsCard()}
                   {renderPendingRequestsCard()}
+                </div>
+              )}
+              {isConsultant && pendingRequests.length === 0 && (
+                <div className="grid gap-4 xl:grid-cols-1">
+                  {renderPendingOfficeHourReportsCard()}
                 </div>
               )}
 

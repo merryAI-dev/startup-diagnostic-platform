@@ -1,0 +1,10 @@
+{
+  "name": "startup-diagnostic-platform-biztalk-service",
+  "private": true,
+  "engines": {
+    "node": "22"
+  },
+  "scripts": {
+    "start": "node index.js"
+  }
+}
