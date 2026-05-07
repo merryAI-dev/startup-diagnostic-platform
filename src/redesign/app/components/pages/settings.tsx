@@ -44,6 +44,43 @@ function ConsentStatus({
   );
 }
 
+function ConsentItem({
+  title,
+  description,
+  enabled,
+  saving,
+  onToggle,
+  bordered = true,
+}: {
+  title: string;
+  description: string;
+  enabled?: boolean;
+  saving?: boolean;
+  onToggle?: (checked: boolean) => Promise<void> | void;
+  bordered?: boolean;
+}) {
+  return (
+    <div className={bordered ? "border-t border-slate-200 px-6 py-5" : "px-6 py-5"}>
+      <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+        <div className="space-y-1.5">
+          <p className="text-sm font-semibold text-slate-900">{title}</p>
+          <p className="text-sm leading-6 text-slate-600">{description}</p>
+        </div>
+        <div className="flex shrink-0 items-center gap-3">
+          <ConsentStatus enabled={enabled} saving={saving} />
+          <Switch
+            checked={Boolean(enabled)}
+            disabled={saving}
+            onCheckedChange={(checked) => {
+              void onToggle?.(checked);
+            }}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function Settings({
   user,
   serviceNotificationConsentEnabled,
@@ -63,8 +100,8 @@ export function Settings({
       </div>
 
       <div className="max-w-2xl">
-        <Card>
-          <CardHeader>
+        <Card className="overflow-hidden border-slate-200">
+          <CardHeader className="border-b border-slate-200 bg-slate-50/80 pb-5">
             <CardTitle className="flex items-center gap-2">
               <Shield className="w-5 h-5" />
               동의 관리
@@ -73,49 +110,22 @@ export function Settings({
               {user.companyName} 계정의 알림 및 마케팅 수신 여부를 변경할 수 있습니다
             </CardDescription>
           </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="flex items-center justify-between gap-4 rounded-lg border border-slate-200 bg-white px-4 py-3">
-              <div className="space-y-1">
-                <p className="text-sm font-medium text-slate-900">소식 알림 수신 동의</p>
-                <p className="text-xs text-slate-500">
-                  오피스아워 신청 현황 등 홈페이지 이용에 필요한 안내 사항을 메일 및 카카오톡 알림으로 보내드립니다.
-                </p>
-              </div>
-              <div className="flex shrink-0 items-center gap-3">
-                <ConsentStatus
-                  enabled={serviceNotificationConsentEnabled}
-                  saving={serviceNotificationConsentSaving}
-                />
-                <Switch
-                  checked={Boolean(serviceNotificationConsentEnabled)}
-                  disabled={serviceNotificationConsentSaving}
-                  onCheckedChange={(checked) => {
-                    void onToggleServiceNotificationConsent?.(checked);
-                  }}
-                />
-              </div>
-            </div>
-            <div className="flex items-center justify-between gap-4 rounded-lg border border-slate-200 bg-white px-4 py-3">
-              <div className="space-y-1">
-                <p className="text-sm font-medium text-slate-900">마케팅 정보 수신 동의</p>
-                <p className="text-xs text-slate-500">
-                  프로그램 안내, 이벤트, 뉴스레터 등 운영/마케팅 안내 수신 여부
-                </p>
-              </div>
-              <div className="flex shrink-0 items-center gap-3">
-                <ConsentStatus
-                  enabled={marketingConsentEnabled}
-                  saving={marketingConsentSaving}
-                />
-                <Switch
-                  checked={Boolean(marketingConsentEnabled)}
-                  disabled={marketingConsentSaving}
-                  onCheckedChange={(checked) => {
-                    void onToggleMarketingConsent?.(checked);
-                  }}
-                />
-              </div>
-            </div>
+          <CardContent className="p-0">
+            <ConsentItem
+              title="소식 알림 수신 동의"
+              description="오피스아워 신청 안내, 일정 확정, 일정 리마인드 등 운영에 필요한 안내를 메일 및 카카오톡으로 보내드립니다."
+              enabled={serviceNotificationConsentEnabled}
+              saving={serviceNotificationConsentSaving}
+              onToggle={onToggleServiceNotificationConsent}
+              bordered={false}
+            />
+            <ConsentItem
+              title="마케팅 정보 수신 동의"
+              description="프로그램 안내, 이벤트, 뉴스레터 등 운영/마케팅 안내 수신 여부를 관리합니다."
+              enabled={marketingConsentEnabled}
+              saving={marketingConsentSaving}
+              onToggle={onToggleMarketingConsent}
+            />
           </CardContent>
         </Card>
       </div>
