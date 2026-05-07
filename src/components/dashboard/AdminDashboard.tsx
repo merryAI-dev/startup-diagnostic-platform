@@ -1665,6 +1665,12 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
     [voucherFilterOptions, voucherFilterTags],
   )
 
+  const selectedVoucherFilterValue = useMemo(() => {
+    if (voucherFilterTags.includes("export")) return "export"
+    if (voucherFilterTags.includes("innovation")) return "innovation"
+    return "all"
+  }, [voucherFilterTags])
+
   const toggleVoucherFilterTag = (tag: VoucherFilterTag) => {
     setVoucherFilterTags((prev) =>
       prev.includes(tag) ? prev.filter((value) => value !== tag) : [...prev, tag],
@@ -2552,138 +2558,67 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
   return (
     <div className="bg-transparent h-full">
       <div className="flex h-full flex-col">
-        <div className="shrink-0 border-b border-slate-200 bg-white px-6 py-5">
-          <div className="mx-auto w-full max-w-[1600px]">
-            <h1 className="text-2xl font-semibold text-slate-900">기업 관리</h1>
-            <p className="mt-1 text-sm text-slate-500">
-              기업 기본 정보, 자가진단표, 실적, 업로드 자료와 티켓 현황을 관리합니다.
-            </p>
-          </div>
-        </div>
-        <div className="mx-auto w-full max-w-[1600px] px-6 pt-5">
-          <div className="rounded-2xl border border-slate-200 bg-white px-4 py-4">
-            <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-              <div className="flex min-w-0 flex-col gap-4 lg:flex-1 lg:flex-row lg:items-end">
-                <label className="min-w-0 text-xs font-medium text-slate-500 lg:w-[280px] lg:flex-none">
-                  회사명
-                  <input
-                    className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm font-normal text-slate-700 focus:border-slate-400 focus:outline-none"
-                    placeholder="회사명 검색"
-                    value={companyQuery}
-                    onChange={(e) => setCompanyQuery(e.target.value)}
-                  />
-                </label>
-                <label className="w-full min-w-0 text-xs font-medium text-slate-500 lg:w-[320px] lg:flex-none">
-                  사업
-                  <Select value={selectedProgramFilterId} onValueChange={setSelectedProgramFilterId}>
-                    <SelectTrigger className="mt-1 h-10 border border-slate-200 bg-white text-sm text-slate-700 shadow-none">
-                      <SelectValue placeholder="전체 사업" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">전체 사업</SelectItem>
-                      {programFilterOptions.map((program) => (
-                        <SelectItem key={program.id} value={program.id}>
-                          {program.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </label>
-                <label className="w-full min-w-0 text-xs font-medium text-slate-500 lg:w-[280px] lg:flex-none">
-                  바우처 보유여부
-                  <Popover open={voucherFilterOpen} onOpenChange={setVoucherFilterOpen}>
-                    <PopoverTrigger asChild>
-                      <div
-                        role="combobox"
-                        aria-expanded={voucherFilterOpen}
-                        tabIndex={0}
-                        className="mt-1 flex h-10 w-full cursor-pointer items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1 text-sm outline-none transition-[color,box-shadow] focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
-                      >
-                        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
-                          {selectedVoucherFilterOptions.length > 0 ? (
-                            selectedVoucherFilterOptions.map((option) => (
-                              <Badge
-                                key={option.id}
-                                variant="secondary"
-                                className="bg-slate-100 px-1.5 py-0 text-[11px] text-slate-700"
-                              >
-                                {option.label}
-                              </Badge>
-                            ))
-                          ) : (
-                            <span className="px-1 text-[12px] text-slate-500">전체</span>
-                          )}
-                        </div>
-                        {voucherFilterTags.length > 0 ? (
-                          <button
-                            type="button"
-                            className="rounded-sm p-0.5 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-                            onClick={(event) => {
-                              event.preventDefault()
-                              event.stopPropagation()
-                              setVoucherFilterTags([])
-                            }}
-                            aria-label="바우처 필터 전체 해제"
-                          >
-                            <X className="h-3 w-3" />
-                          </button>
-                        ) : null}
-                        <ChevronsUpDown className="h-3.5 w-3.5 shrink-0 text-slate-400" />
-                      </div>
-                    </PopoverTrigger>
-                    <PopoverContent align="start" className="w-[280px] p-0">
-                      <Command>
-                        <CommandList>
-                          <CommandGroup>
-                            {voucherFilterOptions.map((option) => {
-                              const isSelected = voucherFilterTags.includes(option.id)
-                              return (
-                                <CommandItem
-                                  key={option.id}
-                                  value={option.id}
-                                  onSelect={() => toggleVoucherFilterTag(option.id)}
-                                  className="min-h-8 cursor-pointer px-2 py-1 text-sm"
-                                >
-                                  <Check
-                                    className={
-                                      isSelected
-                                        ? "h-3.5 w-3.5 text-slate-700 opacity-100"
-                                        : "h-3.5 w-3.5 opacity-0"
-                                    }
-                                  />
-                                  <span className="min-w-0 flex-1">{option.label}</span>
-                                </CommandItem>
-                              )
-                            })}
-                          </CommandGroup>
-                        </CommandList>
-                      </Command>
-                      <div className="flex items-center justify-between border-t px-3 py-2">
-                        <div className="min-h-[16px] text-xs text-slate-500">
-                          {voucherFilterTags.length > 0
-                            ? `${voucherFilterTags.length}개 조건 선택됨`
-                            : "\u00A0"}
-                        </div>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          className={cn(
-                            "h-7 px-2",
-                            voucherFilterTags.length > 0 ? "" : "pointer-events-none opacity-0",
-                          )}
-                          onClick={() => setVoucherFilterTags([])}
-                          disabled={voucherFilterTags.length === 0}
-                        >
-                          전체 해제
-                        </Button>
-                      </div>
-                    </PopoverContent>
-                  </Popover>
-                </label>
-              </div>
-              <div className="flex justify-end lg:flex-none">
-                <div className="inline-flex h-10 items-center gap-2">
+        <div className="shrink-0 border-b border-slate-200 bg-white px-6 py-4">
+          <div className="mx-auto flex w-full max-w-[1600px] flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+            <div className="min-w-0">
+              <h1 className="text-2xl font-semibold text-slate-900">기업 관리</h1>
+              <p className="mt-1 text-sm text-slate-500">
+                기업 기본 정보, 자가진단표, 실적, 업로드 자료와 티켓 현황을 관리합니다.
+              </p>
+            </div>
+            <div className="grid min-w-0 grid-cols-1 gap-3 rounded-2xl border border-slate-200 bg-slate-50/70 px-3 py-3 sm:grid-cols-2 lg:grid-cols-[minmax(180px,0.9fr)_minmax(220px,1.1fr)_minmax(180px,0.9fr)_auto] lg:items-end xl:max-w-[1180px] xl:flex-1">
+              <label className="min-w-0 text-xs font-medium text-slate-500">
+                회사명
+                <input
+                  className="mt-1 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm font-normal text-slate-700 focus:border-slate-400 focus:outline-none"
+                  placeholder="회사명 검색"
+                  value={companyQuery}
+                  onChange={(e) => setCompanyQuery(e.target.value)}
+                />
+              </label>
+              <label className="min-w-0 text-xs font-medium text-slate-500">
+                사업
+                <Select value={selectedProgramFilterId} onValueChange={setSelectedProgramFilterId}>
+                  <SelectTrigger className="mt-1 h-10 w-full min-w-0 border border-slate-200 bg-white text-sm text-slate-700 shadow-none">
+                    <SelectValue placeholder="전체 사업" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">전체 사업</SelectItem>
+                    {programFilterOptions.map((program) => (
+                      <SelectItem key={program.id} value={program.id}>
+                        {program.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </label>
+              <label className="min-w-0 text-xs font-medium text-slate-500">
+                바우처 보유여부
+                <Select
+                  value={selectedVoucherFilterValue}
+                  onValueChange={(value) => {
+                    if (value === "all") {
+                      setVoucherFilterTags([])
+                      return
+                    }
+                    setVoucherFilterTags([value as VoucherFilterTag])
+                  }}
+                >
+                  <SelectTrigger className="mt-1 h-10 w-full min-w-0 border border-slate-200 bg-white text-sm text-slate-700 shadow-none">
+                    <SelectValue placeholder="전체" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">전체</SelectItem>
+                    {voucherFilterOptions.map((option) => (
+                      <SelectItem key={option.id} value={option.id}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </label>
+              <div className="flex items-center justify-start sm:col-span-2 lg:col-span-1 lg:justify-end lg:pb-1">
+                <div className="inline-flex h-9 items-center gap-2 rounded-full border border-slate-200 bg-white px-3">
                   <span className="text-[12px] font-semibold text-slate-700">내 사업만 보기</span>
                   <Switch
                     checked={showManagedCompaniesOnly}
@@ -2695,8 +2630,8 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
             </div>
           </div>
         </div>
-        <div className="mx-auto grid h-full w-full max-w-[1600px] flex-1 min-h-0 gap-5 px-6 py-5 lg:grid-cols-[260px_minmax(0,1fr)] xl:grid-cols-[280px_minmax(0,1fr)]">
-          <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white lg:sticky lg:top-5 lg:max-h-[calc(100vh-12rem)]">
+        <div className="mx-auto grid h-full w-full max-w-[1600px] flex-1 min-h-0 gap-5 px-6 py-4 lg:grid-cols-[260px_minmax(0,1fr)] xl:grid-cols-[280px_minmax(0,1fr)]">
+          <div className="flex h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white lg:sticky lg:top-4 lg:max-h-[calc(100vh-8.5rem)]">
             <div className="shrink-0 border-b border-slate-100 px-4 py-3.5">
               <div className="flex items-center justify-between gap-2">
                 <div className="text-sm font-semibold text-slate-700">회사 목록</div>
