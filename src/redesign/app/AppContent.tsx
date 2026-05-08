@@ -852,7 +852,13 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
   const needsAgendas =
     needsApplications ||
     needsRegularOfficeHours ||
-    isPage(["admin-agendas", "admin-consultants", "admin-programs", "admin-program-list"])
+    isPage([
+      "admin-agendas",
+      "admin-consultants",
+      "admin-programs",
+      "admin-program-list",
+      "consultant-profile",
+    ])
   const needsConsultants =
     resolvedRole === "consultant" ||
     needsRegularOfficeHours ||
@@ -860,13 +866,14 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       "consultants",
       "application",
       "dashboard",
+      "admin-agendas",
       "admin-consultants",
       "admin-users",
       "pending-reports",
     ])
   const needsCompanyLookup = resolvedRole === "admin" && needsApplications
   const needsCompanyDirectory =
-    resolvedRole === "admin" && isPage(["admin-programs", "admin-program-list"])
+    resolvedRole === "admin" && isPage(["admin-programs", "admin-program-list", "pending-reports"])
   const { data: companyDocs } = useFirestoreCollection<{
     id: string
     name?: string | null
