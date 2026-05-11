@@ -89,6 +89,15 @@ export function SignupInfoPage() {
     [location.search, pendingSignup?.role, profile?.requestedRole]
   )
 
+  function handleCancel() {
+    sessionStorage.removeItem(PENDING_SIGNUP_KEY)
+    void signOutUser()
+      .catch(() => null)
+      .finally(() => {
+        window.location.replace("/login")
+      })
+  }
+
   useEffect(() => {
     if (creatingAccount) return
     if (loading) return
@@ -292,7 +301,7 @@ export function SignupInfoPage() {
         ensureAuthUser={ensureAuthUser}
         guardExistingProfile={guardExistingProfile}
         onComplete={handleComplete}
-        onCancel={() => navigate("/login")}
+        onCancel={handleCancel}
       />
     )
   }
@@ -304,7 +313,7 @@ export function SignupInfoPage() {
       ensureAuthUser={ensureAuthUser}
       guardExistingProfile={guardExistingProfile}
       onComplete={handleComplete}
-      onCancel={() => navigate("/login")}
+      onCancel={handleCancel}
     />
   )
 }
