@@ -89,6 +89,11 @@ export function SignupInfoPage() {
     [location.search, pendingSignup?.role, profile?.requestedRole]
   )
 
+  function redirectToPending(role: Role) {
+    sessionStorage.setItem(PENDING_REQUEST_FLAG, "1")
+    window.location.replace(`/pending?role=${role}`)
+  }
+
   function handleCancel() {
     sessionStorage.removeItem(PENDING_SIGNUP_KEY)
     void signOutUser()
@@ -132,9 +137,9 @@ export function SignupInfoPage() {
   }
 
   const handleComplete = async () => {
-    sessionStorage.setItem(PENDING_REQUEST_FLAG, "1")
+    sessionStorage.removeItem(PENDING_SIGNUP_KEY)
     await signOutUser()
-    navigate(`/pending?role=${requestedRole}`)
+    redirectToPending(requestedRole)
   }
 
   async function guardExistingProfile(
@@ -181,8 +186,9 @@ export function SignupInfoPage() {
     } else {
       toast.error(`이미 ${existingRoleLabel} 역할로 승인 대기 중입니다. 승인 후 이용해주세요.`)
     }
+    sessionStorage.removeItem(PENDING_SIGNUP_KEY)
     await signOutUser()
-    navigate(`/pending?role=${existingRequestedRole}`)
+    redirectToPending(existingRequestedRole)
     return false
   }
 
