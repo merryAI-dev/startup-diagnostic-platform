@@ -123,11 +123,16 @@ export function ApplicationDetail({
   const isPendingLike =
     application.status === "pending" || application.status === "review";
   const isWithinChangeWindow = isApplicationChangeWindowOpen(application.createdAt);
-  const canCancel =
+  const canShowCancelAction =
     (isCompanyUser || isConsultantUser)
     && application.status === "confirmed"
-    && isWithinChangeWindow
     && !isSessionEnded;
+  const isCancelDisabledByExpiredWindow =
+    canShowCancelAction
+    && !isWithinChangeWindow;
+  const canCancel =
+    canShowCancelAction
+    && isWithinChangeWindow;
   const shouldShowConsultant = (consultant?: string) =>
     Boolean(consultant && consultant !== "담당자 배정 중");
   const isAssignedToCurrentConsultant = () => {
@@ -311,10 +316,14 @@ export function ApplicationDetail({
                 거절 사유 수정
               </Button>
             )}
-            {canCancel && (
+            {canShowCancelAction && (
               <Button
                 variant="outline"
-                onClick={() => setShowCancelDialog(true)}
+                onClick={() => {
+                  if (isCancelDisabledByExpiredWindow) return;
+                  setShowCancelDialog(true);
+                }}
+                disabled={isCancelDisabledByExpiredWindow}
               >
                 <XCircle className="w-4 h-4 mr-2" />
                 신청 취소
@@ -322,6 +331,11 @@ export function ApplicationDetail({
             )}
           </div>
         </div>
+        {isCancelDisabledByExpiredWindow ? (
+          <p className="mt-2 text-sm text-muted-foreground">
+            신청 후 72시간 이후에는 취소가 불가능합니다.
+          </p>
+        ) : null}
       </div>
 
       {showNoAssignableConsultantNotice && isCompanyUser && isPendingLike ? (

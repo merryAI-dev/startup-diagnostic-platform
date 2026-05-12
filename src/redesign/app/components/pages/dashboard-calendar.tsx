@@ -319,6 +319,19 @@ export function DashboardCalendar({
     && selectedApplication.status === "confirmed"
     && !hasSessionEnded(selectedApplication)
     && isApplicationChangeWindowOpen(selectedApplication.createdAt);
+  const canShowDeleteApplicationAction =
+    Boolean(
+      selectedApplication
+      && selectedApplication.status === "confirmed"
+      && !hasSessionEnded(selectedApplication)
+    );
+  const isDeleteApplicationDisabledByExpiredWindow =
+    Boolean(
+      selectedApplication
+      && selectedApplication.status === "confirmed"
+      && !hasSessionEnded(selectedApplication)
+      && !isApplicationChangeWindowOpen(selectedApplication.createdAt)
+    );
   const canEditApplication =
     Boolean(
       selectedApplication
@@ -791,17 +804,26 @@ export function DashboardCalendar({
                         {isEditingApplication ? "편집 취소" : "수정하기"}
                       </Button>
                     ) : null}
-                    {canDeleteApplication ? (
+                    {canShowDeleteApplicationAction ? (
+                      <div className="flex flex-col items-end gap-1">
                       <Button
                         size="sm"
                         className="bg-rose-600 text-white hover:bg-rose-700"
                         onClick={() => {
+                          if (isDeleteApplicationDisabledByExpiredWindow) return;
                           setCancelTarget(selectedApplication);
                         }}
+                        disabled={isDeleteApplicationDisabledByExpiredWindow}
                       >
                         <Trash2 className="mr-2 h-4 w-4" />
                         신청 취소
                       </Button>
+                        {isDeleteApplicationDisabledByExpiredWindow ? (
+                          <p className="text-xs text-slate-500">
+                            신청 후 72시간 이후에는 취소가 불가능합니다.
+                          </p>
+                        ) : null}
+                      </div>
                     ) : null}
                   </div>
                 </div>
