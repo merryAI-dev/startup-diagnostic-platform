@@ -294,6 +294,7 @@ export interface Consultant {
   organization?: string;
   secondaryEmail?: string;
   secondaryPhone?: string;
+  slackUserId?: string;
   fixedMeetingLink?: string;
   expertise: string[];
   bio: string;

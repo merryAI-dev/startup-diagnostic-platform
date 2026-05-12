@@ -217,6 +217,13 @@ export async function createSignupRequest(
     consents?: ConsentSnapshot
   }
 ) {
+  if (requestedRole === "consultant") {
+    const scope = options?.consultantInfo?.scope
+    if (scope !== "internal" && scope !== "external") {
+      throw new Error("Consultant signup request requires a valid scope.")
+    }
+  }
+
   const companyId =
     requestedRole === "company"
       ? (options?.companyId ?? uid)

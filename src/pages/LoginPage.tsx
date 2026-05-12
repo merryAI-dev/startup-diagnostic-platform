@@ -15,6 +15,11 @@ export function LoginPage() {
   const { refreshProfile } = useAuth()
   const isBusy = loadingEmail
 
+  function redirectToPending(role: Role) {
+    sessionStorage.setItem(PENDING_REQUEST_FLAG, "1")
+    window.location.replace(`/pending?role=${role}`)
+  }
+
   async function routeAfterLogin(uid: string): Promise<boolean> {
     let profile = null
     let signupRequest = null
@@ -43,10 +48,17 @@ export function LoginPage() {
 
     if (profile?.active === false || signupRequest) {
       await signOutUser()
+      const pendingRole =
+        signupRequest?.requestedRole ??
+        signupRequest?.role ??
+        profile?.requestedRole ??
+        profile?.role
+      if (pendingRole) {
+        redirectToPending(pendingRole)
+        return true
+      }
       sessionStorage.setItem(PENDING_REQUEST_FLAG, "1")
-      navigate(
-        `/pending?role=${signupRequest?.requestedRole ?? signupRequest?.role ?? profile?.requestedRole ?? profile?.role}`,
-      )
+      navigate("/pending")
       return true
     }
 

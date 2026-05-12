@@ -13,10 +13,14 @@ import { Toaster } from "sonner"
 function PublicLayout() {
   const location = useLocation()
   const isSignupInfo = location.pathname === "/signup-info"
+  const outletKey = `${location.pathname}${location.search}`
 
   return (
     <div className="flex h-screen w-full flex-col overflow-hidden">
-      <div className={`flex-1 ${isSignupInfo ? "overflow-hidden" : "overflow-y-auto"}`}>
+      <div
+        key={outletKey}
+        className={`flex-1 ${isSignupInfo ? "overflow-hidden" : "overflow-y-auto"}`}
+      >
         <Outlet />
       </div>
       <Toaster position="top-center" />

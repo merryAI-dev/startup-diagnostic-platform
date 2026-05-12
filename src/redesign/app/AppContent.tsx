@@ -3831,6 +3831,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       organization: values.organization.trim(),
       secondaryEmail: accessSafeSecondaryEmail,
       secondaryPhone: values.secondaryPhone.trim(),
+      slackUserId: currentConsultant?.slackUserId?.trim(),
       fixedMeetingLink: values.fixedMeetingLink.trim(),
       expertise: parseExpertiseInput(values.expertise),
       bio: values.bio.trim(),
@@ -4001,6 +4002,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       organization: currentConsultant?.organization,
       secondaryEmail: currentConsultant?.secondaryEmail,
       secondaryPhone: currentConsultant?.secondaryPhone,
+      slackUserId: currentConsultant?.slackUserId,
       fixedMeetingLink: currentConsultant?.fixedMeetingLink,
       expertise: currentConsultant?.expertise ?? [],
       bio: currentConsultant?.bio ?? `${fallbackName} 컨설턴트`,
@@ -4054,6 +4056,13 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     const nextConsultantStatus = data.status
     const isMeetingLinkOnlyUpdate =
       data.fixedMeetingLink !== undefined &&
+      data.status === undefined &&
+      data.agendaIds === undefined &&
+      data.monthlyAvailability === undefined &&
+      data.monthlyAvailabilityMeta === undefined &&
+      Object.keys(data).length === 1
+    const isSlackUserIdOnlyUpdate =
+      data.slackUserId !== undefined &&
       data.status === undefined &&
       data.agendaIds === undefined &&
       data.monthlyAvailability === undefined &&
@@ -4169,7 +4178,11 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     }
 
     toast.success(
-      isMeetingLinkOnlyUpdate ? "화상링크가 저장되었습니다" : "컨설턴트 정보가 업데이트되었습니다",
+      isMeetingLinkOnlyUpdate
+        ? "화상링크가 저장되었습니다"
+        : isSlackUserIdOnlyUpdate
+          ? "Slack ID가 저장되었습니다"
+          : "컨설턴트 정보가 업데이트되었습니다",
     )
   }
 

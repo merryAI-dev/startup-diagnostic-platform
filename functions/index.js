@@ -34,6 +34,7 @@ const ACTIVE_APPLICATION_STATUSES = new Set(["confirmed", "completed"]);
 const RESERVED_APPLICATION_STATUSES = new Set(["confirmed"]);
 const AUTO_UNASSIGNABLE_REASON = "해당 시간대에 배정 가능한 컨설턴트가 없어 자동 거절되었습니다.";
 const APPROVAL_ROLE_VALUES = new Set(["admin", "company", "consultant"]);
+const CONSULTANT_SCOPE_VALUES = new Set(["internal", "external"]);
 const APPLICATION_CHANGE_WINDOW_MS = 72 * 60 * 60 * 1000;
 const GOOGLE_OAUTH_TOKEN_URL = "https://oauth2.googleapis.com/token";
 const GOOGLE_CALENDAR_API_BASE_URL = "https://www.googleapis.com/calendar/v3";
@@ -43,6 +44,177 @@ const IRREGULAR_CALENDAR_SESSION_COLLECTION = "officeHourCalendarSessions";
 const IRREGULAR_CALENDAR_TITLE_PREFIX = "[비정기]";
 const IRREGULAR_CALENDAR_SYNC_LOOKBACK_DAYS = 120;
 const IRREGULAR_CALENDAR_SYNC_LOOKAHEAD_DAYS = 180;
+const DEFAULT_NOTIFICATION_DETAIL_BASE_URL = "https://startup-diagnostic-platform.vercel.app";
+const DEFAULT_NOTIFICATION_EMAIL_FROM_ADDRESS = "no-reply@test.mysc.co.kr";
+const INTERNAL_CONSULTANT_NOTICE_SLACK_CHANNEL_ID = "C0B1WE3PVFC";
+const OFFICE_HOUR_CONFIRMED_BIZTALK_TEMPLATE_CODE = "officehour_001";
+const OFFICE_HOUR_CONFIRMED_BIZTALK_ATTACH = {
+  button: [{ name: "채널 추가", type: "AC" }],
+};
+const OFFICE_HOUR_CONFIRMED_BIZTALK_TITLE_TEMPLATE = "{{agendaName}} 일정 확정";
+const OFFICE_HOUR_CONFIRMED_BIZTALK_MESSAGE_TEMPLATE = [
+  "안녕하세요. MYSC입니다.",
+  "",
+  "- 기업 : {{companyName}}",
+  "- 사업 : {{programName}}",
+  "- 주제 : {{agendaName}}",
+  "- 일시 : {{scheduledDateTimeLabel}}",
+  "- 장소 : {{locationTypeLabel}}",
+  "- 링크 : {{detailLink}}",
+  "",
+  "신청하신 오피스아워의 일정이 확정되었습니다. 변경 및 취소가 필요하실 경우, 홈페이지를 통해 문의 부탁드립니다.",
+].join("\n");
+const OFFICE_HOUR_CONFIRMED_CONSULTANT_EMAIL_SUBJECT = "[MYSC] 오피스아워 일정 확정";
+const OFFICE_HOUR_CONFIRMED_CONSULTANT_EMAIL_TEMPLATE = [
+  "안녕하세요. {{consultantName}}님.",
+  "MYSC 오피스아워 일정이 확정되었습니다.",
+  "",
+  "기업 : {{companyName}}",
+  "사업 : {{programName}}",
+  "주제 : {{agendaName}}",
+  "일시 : {{scheduledDateTimeLabel}}",
+  "장소 : {{locationTypeLabel}}",
+  "구분 : {{officeHourTypeLabel}}",
+  "",
+  "자세한 내용은 링크: {{detailLink}} 를 확인해주시고, 확정시간을 기준으로 72시간 내에만 거절이 가능합니다.",
+  "일정 변동은 가급적 삼가 주시기를 부탁드리며 그 외의 변경은 홈페이지에서 직접 기업과 소통하실 수 있습니다.",
+].join("\n");
+const OFFICE_HOUR_CONFIRMED_INTERNAL_SLACK_TEMPLATE = [
+  "[MYSC] 오피스아워 일정 확정",
+  "",
+  "컨설턴트 : {{consultantName}}",
+  "기업 : {{companyName}}",
+  "사업 : {{programName}}",
+  "주제 : {{agendaName}}",
+  "일시 : {{scheduledDateTimeLabel}}",
+  "장소 : {{locationTypeLabel}}",
+  "구분 : {{officeHourTypeLabel}}",
+  "링크 : {{detailLink}}",
+].join("\n");
+const OFFICE_HOUR_CONFIRMED_COMPANY_EMAIL_SUBJECT = "[MYSC] 오피스아워 일정 확정 안내";
+const OFFICE_HOUR_CONFIRMED_COMPANY_EMAIL_TEMPLATE = [
+  "안녕하세요. {{companyName}} 님.",
+  "",
+  "MYSC 오피스아워 일정이 확정되었습니다.",
+  "단, 컨설턴트가 상세 내용을 검토하고 별도의 제안을 드릴 수 있습니다.",
+  "불가피하게 변경이 필요한 경우, 참여하고 계신 액셀러레이팅 프로그램의 사업관리 담당 매니저에게 별도 연락을 부탁드립니다.",
+  "",
+  "구분 : {{officeHourTypeLabel}}",
+  "사업 : {{programName}}",
+  "주제 : {{agendaName}}",
+  "일시 : {{scheduledDateTimeLabel}}",
+  "장소 : {{locationTypeLabel}}",
+  "",
+  "자세한 내용은 링크: {{detailLink}} 참고 부탁드립니다.",
+  "당일 변경은 불가하며, 예정시간 이후에는 취소가 불가합니다.",
+].join("\n");
+const OFFICE_HOUR_REMINDER_BIZTALK_TEMPLATE_CODE = "officehour_002";
+const OFFICE_HOUR_REMINDER_BIZTALK_ATTACH = {
+  button: [{ name: "채널 추가", type: "AC" }],
+};
+const OFFICE_HOUR_REMINDER_BIZTALK_TITLE_TEMPLATE = "{{agendaName}} 일정 리마인드";
+const OFFICE_HOUR_REMINDER_BIZTALK_MESSAGE_TEMPLATE = [
+  "안녕하세요. MYSC 입니다. ",
+  "",
+  "- 기업 : {{companyName}}",
+  "- 사업 : {{programName}}",
+  "- 주제 : {{agendaName}}",
+  "- 일시 : {{scheduledDateTimeLabel}}",
+  "- 장소 : {{locationTypeLabel}}",
+  "- 링크 : {{detailLink}}",
+  "",
+  "오피스아워 일정 리마인드 드립니다. 현 시점에서 변경 및 취소는 불가능하오니, 반드시 참석 부탁드립니다. 감사합니다.",
+].join("\n");
+const OFFICE_HOUR_REMINDER_CONSULTANT_EMAIL_SUBJECT = "[MYSC] 오피스아워 일정 리마인드";
+const OFFICE_HOUR_REMINDER_CONSULTANT_EMAIL_TEMPLATE = [
+  "안녕하세요. {{consultantName}}님.",
+  "",
+  "예정된 MYSC 오피스아워 일정 리마인드 안내드립니다.",
+  "",
+  "기업 : {{companyName}}",
+  "사업 : {{programName}}",
+  "주제 : {{agendaName}}",
+  "일시 : {{scheduledDateTimeLabel}}",
+  "장소 : {{locationTypeLabel}}",
+  "링크 : {{detailLink}}",
+  "",
+  "당일 일정 변동은 불가능하오니 꼭 참석 부탁드립니다.",
+].join("\n");
+const OFFICE_HOUR_REMINDER_INTERNAL_SLACK_TEMPLATE = [
+  "[MYSC] 오피스아워 일정 리마인드",
+  "",
+  "컨설턴트 : {{consultantName}}",
+  "기업 : {{companyName}}",
+  "사업 : {{programName}}",
+  "주제 : {{agendaName}}",
+  "일시 : {{scheduledDateTimeLabel}}",
+  "장소 : {{locationTypeLabel}}",
+  "링크 : {{detailLink}}",
+].join("\n");
+const OFFICE_HOUR_REMINDER_COMPANY_EMAIL_SUBJECT = "[MYSC] 오피스아워 일정 리마인드";
+const OFFICE_HOUR_REMINDER_COMPANY_EMAIL_TEMPLATE = [
+  "안녕하세요. {{companyName}}님.",
+  "",
+  "예정된 MYSC 오피스아워 일정 리마인드 안내드립니다.",
+  "",
+  "사업 : {{programName}}",
+  "주제 : {{agendaName}}",
+  "일시 : {{scheduledDateTimeLabel}}",
+  "장소 : {{locationTypeLabel}}",
+  "접속링크 : {{meetingLink}}",
+  "",
+  "자세한 내용은 신청 링크 참고 부탁드리며,",
+  "당일 일정 변동은 불가능하오니 꼭 참석 부탁드립니다.",
+].join("\n");
+const OFFICE_HOUR_SCHEDULE_REGISTRATION_CONSULTANT_EMAIL_SUBJECT =
+  "[MYSC] 오피스아워 일정 등록 안내";
+const OFFICE_HOUR_SCHEDULE_REGISTRATION_CONSULTANT_EMAIL_TEMPLATE = [
+  "안녕하세요. {{consultantName}}님.",
+  "",
+  "MYSC 오피스아워 일정 등록 안내드립니다.",
+  "",
+  "대상 월 : {{targetMonthLabel}}",
+  "입력 기간 : {{registrationWindowLabel}}",
+  "입력 링크 : {{inputLink}}",
+  "",
+  "※ 입력 기간 내에만 등록/수정이 가능하오니, 반드시 일정을 지켜주세요.",
+].join("\n");
+const OFFICE_HOUR_APPLICATION_ALERT_COMPANY_EMAIL_SUBJECT =
+  "[MYSC] 오피스아워 신청 안내";
+const OFFICE_HOUR_APPLICATION_ALERT_COMPANY_EMAIL_TEMPLATE = [
+  "안녕하세요. {{companyName}}님.",
+  "",
+  "MYSC 오피스아워 신청 안내드립니다.",
+  "",
+  "신청 일정 : {{applicationScheduleLabel}}",
+  "신청 링크 : {{applicationLink}}",
+  "",
+  "신청은 정해진 기간 내에만 가능하며, 원하시는 일정이 있다면 빠르게 신청해주시기 바랍니다.",
+  "문의사항이 있을 경우 담당 사업팀에 말씀해주세요.",
+].join("\n");
+const OFFICE_HOUR_REPORT_REMINDER_CONSULTANT_EMAIL_SUBJECT =
+  "[MYSC] 오피스아워 보고서 작성 리마인드";
+const OFFICE_HOUR_REPORT_REMINDER_CONSULTANT_EMAIL_TEMPLATE = [
+  "안녕하세요. {{consultantName}}님.",
+  "",
+  "진행하신 오피스아워의 보고서가 아직 등록되지 않아 안내드립니다.",
+  "",
+  "기업 : {{companyName}}",
+  "사업 : {{programName}}",
+  "주제 : {{agendaName}}",
+  "일시 : {{scheduledDateTimeLabel}}",
+  "보고서 등록 링크 : {{reportLink}}",
+].join("\n");
+const OFFICE_HOUR_REPORT_REMINDER_INTERNAL_SLACK_TEMPLATE = [
+  "[MYSC] 오피스아워 보고서 작성 리마인드",
+  "",
+  "컨설턴트 : {{consultantName}}",
+  "기업 : {{companyName}}",
+  "사업 : {{programName}}",
+  "주제 : {{agendaName}}",
+  "일시 : {{scheduledDateTimeLabel}}",
+  "보고서 등록 링크 : {{reportLink}}",
+].join("\n");
 const DEFAULT_COMPANY_FORM = {
   companyType: "법인",
   companyInfo: "",
@@ -100,6 +272,11 @@ function normalizeApplicationStatus(value) {
 function normalizeApprovalRole(value, fallback = "company") {
   const normalized = normalizeString(value);
   return APPROVAL_ROLE_VALUES.has(normalized) ? normalized : fallback;
+}
+
+function normalizeConsultantScope(value) {
+  const normalized = normalizeString(value);
+  return CONSULTANT_SCOPE_VALUES.has(normalized) ? normalized : "";
 }
 
 function getApprovalRoleLabel(value) {
@@ -458,7 +635,7 @@ async function writeGoogleCalendarSyncState(applicationId, patch) {
   await db.collection("officeHourApplications").doc(applicationId).update(payload);
 }
 
-async function loadRegularApplicationCalendarContext(applicationId) {
+async function loadOfficeHourApplicationContext(applicationId) {
   const applicationSnap = await db.collection("officeHourApplications").doc(applicationId).get();
   if (!applicationSnap.exists) {
     return null;
@@ -468,9 +645,6 @@ async function loadRegularApplicationCalendarContext(applicationId) {
     id: applicationSnap.id,
     ...(applicationSnap.data() || {}),
   };
-  if (normalizeString(application.type) !== "regular") {
-    return null;
-  }
 
   const programId = normalizeString(application.programId);
   const agendaId = normalizeString(application.agendaId);
@@ -524,6 +698,19 @@ async function loadRegularApplicationCalendarContext(applicationId) {
     companyEmail: normalizeEmail(companyProfile?.email),
     consultantEmail: normalizeEmail(consultantProfile?.email),
   };
+}
+
+async function loadRegularApplicationCalendarContext(applicationId) {
+  const context = await loadOfficeHourApplicationContext(applicationId);
+  if (!context) {
+    return null;
+  }
+
+  if (normalizeString(context.application?.type) !== "regular") {
+    return null;
+  }
+
+  return context;
 }
 
 function validateRegularApplicationCalendarParticipants(context) {
@@ -1254,6 +1441,14 @@ function normalizeSlackMemberId(value) {
   return normalized;
 }
 
+function normalizeSlackDmTarget(value) {
+  const normalized = normalizeString(value).toUpperCase();
+  if (!/^[DUW][A-Z0-9]{8,}$/u.test(normalized)) {
+    return "";
+  }
+  return normalized;
+}
+
 function normalizeSlackChannelId(value) {
   const normalized = normalizeString(value).toUpperCase();
   if (!/^[CG][A-Z0-9]{8,}$/u.test(normalized)) {
@@ -1357,12 +1552,13 @@ async function sendSlackChannelMessage({ token, channelId, text }) {
   });
 }
 
-function buildStageSlackAvailabilityAlertText({
+function buildInternalConsultantAvailabilityAlertText({
   monthKey,
   missingConsultants,
   skippedMissingScopeCount,
+  labelPrefix = "",
 }) {
-  const header = `[stage] ${monthKey} 가능시간 미제출 내부 컨설턴트 ${missingConsultants.length}명`;
+  const header = `${labelPrefix}${monthKey} 가능시간 미제출 내부 컨설턴트 ${missingConsultants.length}명`;
   const lines =
     missingConsultants.length > 0
       ? missingConsultants.map((consultant) => {
@@ -1379,6 +1575,101 @@ function buildStageSlackAvailabilityAlertText({
   }
 
   return [header, ...lines].join("\n");
+}
+
+function buildStageSlackAvailabilityAlertText({
+  monthKey,
+  missingConsultants,
+  skippedMissingScopeCount,
+}) {
+  return buildInternalConsultantAvailabilityAlertText({
+    monthKey,
+    missingConsultants,
+    skippedMissingScopeCount,
+    labelPrefix: "[stage] ",
+  });
+}
+
+function formatSeoulDateLabel(date) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) {
+    return "";
+  }
+
+  return new Intl.DateTimeFormat("ko-KR", {
+    timeZone: "Asia/Seoul",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    weekday: "short",
+  }).format(date);
+}
+
+function buildSeoulWeekRangeLabel(startDate, endDate) {
+  const startLabel = formatSeoulDateLabel(startDate);
+  const endLabel = formatSeoulDateLabel(endDate);
+  if (!startLabel || !endLabel) {
+    return "";
+  }
+  return `${startLabel} ~ ${endLabel}`;
+}
+
+function addDaysToDate(date, amount) {
+  const next = new Date(date.getTime());
+  next.setDate(next.getDate() + amount);
+  return next;
+}
+
+function buildConsultantTargetMonthLabel(monthKey) {
+  if (!regularOfficeHourPolicy.isMonthKey(monthKey)) {
+    return monthKey || "대상 월 미지정";
+  }
+  const [yearRaw, monthRaw] = monthKey.split("-");
+  return `${Number(yearRaw)}년 ${Number(monthRaw)}월`;
+}
+
+function resolveConsultantSlackDmTarget(consultantDoc) {
+  return normalizeSlackDmTarget(consultantDoc?.slackUserId);
+}
+
+function buildCompanyRegularApplicationLink() {
+  return `${DEFAULT_NOTIFICATION_DETAIL_BASE_URL}/company/regular`;
+}
+
+function buildConsultantScheduleInputLink() {
+  return `${DEFAULT_NOTIFICATION_DETAIL_BASE_URL}/admin/consultant-calendar`;
+}
+
+function buildConsultantReportLink() {
+  return `${DEFAULT_NOTIFICATION_DETAIL_BASE_URL}/admin/pending-reports`;
+}
+
+async function claimNotificationBatchRun(batchKey, runValue, fieldName = "lastDateKey") {
+  const normalizedBatchKey = normalizeString(batchKey);
+  const normalizedRunValue = normalizeString(runValue);
+  const normalizedFieldName = normalizeString(fieldName);
+
+  if (!normalizedBatchKey || !normalizedRunValue || !normalizedFieldName) {
+    throw new Error("claimNotificationBatchRun requires batchKey, runValue, and fieldName");
+  }
+
+  return db.runTransaction(async (transaction) => {
+    const ref = db.collection("notificationSchedulerRuns").doc(normalizedBatchKey);
+    const snap = await transaction.get(ref);
+    const currentValue = normalizeString(snap.data()?.[normalizedFieldName]);
+    if (currentValue === normalizedRunValue) {
+      return false;
+    }
+
+    transaction.set(
+      ref,
+      {
+        [normalizedFieldName]: normalizedRunValue,
+        updatedAt: FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
+    return true;
+  });
 }
 
 function buildHtmlFallbackFromText(value) {
@@ -1442,6 +1733,1524 @@ async function sendResendEmail({ apiKey, fromEmail, replyTo, to, subject, text, 
   }
 
   return body;
+}
+
+function renderTemplateString(template, variables) {
+  if (typeof template !== "string") {
+    return "";
+  }
+
+  return template.replace(/\{\{\s*([a-zA-Z0-9]+)\s*\}\}/g, (_match, key) => {
+    const replacement = variables?.[key];
+    return typeof replacement === "string" ? replacement : "";
+  });
+}
+
+function buildNotificationDetailLink(application) {
+  const officeHourId = normalizeString(application?.officeHourId);
+  if (normalizeString(application?.type) === "irregular" && officeHourId) {
+    return `${DEFAULT_NOTIFICATION_DETAIL_BASE_URL}/system/company/irregular-officehour/${officeHourId}/arranged-schedule/${application.id}`;
+  }
+  return `${DEFAULT_NOTIFICATION_DETAIL_BASE_URL}/system/company/application?id=${application.id}`;
+}
+
+function buildNotificationMeetingLink(application) {
+  if (normalizeString(application?.sessionFormat) === "offline") {
+    return "해당 없음";
+  }
+
+  return "온라인 접속 링크 미연결";
+}
+
+function buildNotificationScheduledDateTimeLabel(application) {
+  const dateKey = normalizeString(application?.scheduledDate);
+  const timeKey = normalizeTimeKey(application?.scheduledTime);
+
+  if (!isDateKey(dateKey)) {
+    return [dateKey, timeKey].filter(Boolean).join(" ").trim();
+  }
+
+  const isoDateTime = `${dateKey}T${timeKey || "00:00"}:00+09:00`;
+  const parsed = new Date(isoDateTime);
+  if (Number.isNaN(parsed.getTime())) {
+    return [dateKey, timeKey].filter(Boolean).join(" ").trim();
+  }
+
+  const formatter = new Intl.DateTimeFormat("ko-KR", {
+    timeZone: "Asia/Seoul",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    weekday: "short",
+    ...(timeKey
+      ? {
+          hour: "2-digit",
+          minute: "2-digit",
+          hourCycle: "h23",
+        }
+      : {}),
+  });
+
+  return formatter.format(parsed);
+}
+
+function buildOfficeHourTypeLabel(application) {
+  return normalizeString(application?.type) === "irregular"
+    ? "비정기 오피스아워"
+    : "정기 오피스아워";
+}
+
+function buildBiztalkMessageIndex(prefix, identifier) {
+  const normalizedPrefix = normalizeString(prefix).toLowerCase() || "msg";
+  const normalizedIdentifier = normalizeString(identifier).replace(/[^a-zA-Z0-9]/g, "");
+  const compactIdentifier = normalizedIdentifier.slice(-12) || "unknown";
+  const compactTimestamp = Date.now().toString(36);
+  return `${normalizedPrefix}-${compactIdentifier}-${compactTimestamp}`.slice(0, 39);
+}
+
+async function loadRegularApplicationNotificationContext(applicationId) {
+  const context = await loadOfficeHourApplicationContext(applicationId);
+  if (!context) {
+    return null;
+  }
+
+  const companyId = normalizeString(context.application?.companyId || context.companyDoc?.id);
+  const companyInfoSnap = companyId
+    ? await db.collection("companies").doc(companyId).collection("companyInfo").doc("info").get()
+    : null;
+
+  return {
+    ...context,
+    companyInfoDoc: companyInfoSnap?.exists ? companyInfoSnap.data() || {} : {},
+  };
+}
+
+function buildRegularApplicationNotificationVariables(context) {
+  const application = context.application || {};
+  return {
+    companyName:
+      normalizeString(application.companyName) ||
+      normalizeString(application.applicantName) ||
+      normalizeString(context.companyDoc?.name) ||
+      "기업 미지정",
+    consultantName:
+      normalizeString(application.consultant) ||
+      normalizeString(context.consultantDoc?.name) ||
+      "컨설턴트 미지정",
+    officeHourTypeLabel: buildOfficeHourTypeLabel(application),
+    officeHourTitle: normalizeString(application.officeHourTitle) || "오피스아워명 미지정",
+    programName: normalizeString(context.programDoc?.name) || "사업 미지정",
+    agendaName:
+      normalizeString(application.agenda) ||
+      normalizeString(context.agendaDoc?.name) ||
+      "아젠다 미지정",
+    scheduledDateTimeLabel: buildNotificationScheduledDateTimeLabel(application),
+    locationTypeLabel: normalizeString(application.sessionFormat) === "offline" ? "오프라인" : "온라인",
+    detailLink: buildNotificationDetailLink(application),
+    meetingLink: buildNotificationMeetingLink(application),
+  };
+}
+
+function buildConsultantScheduleRegistrationVariables({ consultant, monthKey, registrationWindowLabel }) {
+  return {
+    consultantName: normalizeString(consultant?.name) || "컨설턴트",
+    targetMonthLabel: buildConsultantTargetMonthLabel(monthKey),
+    registrationWindowLabel: registrationWindowLabel || "입력 기간 미지정",
+    inputLink: buildConsultantScheduleInputLink(),
+  };
+}
+
+function buildCompanyApplicationAlertVariables({ companyName, applicationScheduleLabel }) {
+  return {
+    companyName: companyName || "기업",
+    applicationScheduleLabel: applicationScheduleLabel || "신청 기간 미지정",
+    applicationLink: buildCompanyRegularApplicationLink(),
+  };
+}
+
+function buildReportReminderVariables(context) {
+  return {
+    ...buildRegularApplicationNotificationVariables(context),
+    reportLink: buildConsultantReportLink(),
+  };
+}
+
+async function loadOfficeHourApplicationNotificationContext(applicationId) {
+  const context = await loadOfficeHourApplicationContext(applicationId);
+  if (!context) {
+    return null;
+  }
+
+  const companyId = normalizeString(context.application?.companyId || context.companyDoc?.id);
+  const companyInfoSnap = companyId
+    ? await db.collection("companies").doc(companyId).collection("companyInfo").doc("info").get()
+    : null;
+
+  return {
+    ...context,
+    companyInfoDoc: companyInfoSnap?.exists ? companyInfoSnap.data() || {} : {},
+  };
+}
+
+async function writeOfficeHourSameDayReminderState(applicationId, patch) {
+  const payload = {
+    notificationState: {
+      sameDayReminder: {
+        updatedAt: FieldValue.serverTimestamp(),
+        ...(Object.prototype.hasOwnProperty.call(patch, "status") ? { status: patch.status } : {}),
+        ...(Object.prototype.hasOwnProperty.call(patch, "dispatchDateKey")
+          ? { dispatchDateKey: patch.dispatchDateKey }
+          : {}),
+        ...(Object.prototype.hasOwnProperty.call(patch, "sentDateKey")
+          ? { sentDateKey: patch.sentDateKey }
+          : {}),
+        ...(Object.prototype.hasOwnProperty.call(patch, "channels")
+          ? { channels: patch.channels }
+          : {}),
+        ...(Object.prototype.hasOwnProperty.call(patch, "message")
+          ? { lastError: patch.message || FieldValue.delete() }
+          : {}),
+        ...(Object.prototype.hasOwnProperty.call(patch, "schedulerTriggeredAt")
+          ? { schedulerTriggeredAt: patch.schedulerTriggeredAt }
+          : {}),
+        ...(Object.prototype.hasOwnProperty.call(patch, "dispatchRequestedAt")
+          ? { dispatchRequestedAt: patch.dispatchRequestedAt }
+          : {}),
+        ...(Object.prototype.hasOwnProperty.call(patch, "sentAt")
+          ? { sentAt: patch.sentAt }
+          : {}),
+      },
+    },
+  };
+
+  await db.collection("officeHourApplications").doc(applicationId).set(payload, { merge: true });
+}
+
+async function writeOfficeHourReportReminderState(applicationId, patch) {
+  const payload = {
+    notificationState: {
+      reportReminder: {
+        updatedAt: FieldValue.serverTimestamp(),
+        ...(Object.prototype.hasOwnProperty.call(patch, "status") ? { status: patch.status } : {}),
+        ...(Object.prototype.hasOwnProperty.call(patch, "dispatchDateKey")
+          ? { dispatchDateKey: patch.dispatchDateKey }
+          : {}),
+        ...(Object.prototype.hasOwnProperty.call(patch, "sentDateKey")
+          ? { sentDateKey: patch.sentDateKey }
+          : {}),
+        ...(Object.prototype.hasOwnProperty.call(patch, "channels")
+          ? { channels: patch.channels }
+          : {}),
+        ...(Object.prototype.hasOwnProperty.call(patch, "message")
+          ? { lastError: patch.message || FieldValue.delete() }
+          : {}),
+        ...(Object.prototype.hasOwnProperty.call(patch, "dispatchRequestedAt")
+          ? { dispatchRequestedAt: patch.dispatchRequestedAt }
+          : {}),
+        ...(Object.prototype.hasOwnProperty.call(patch, "sentAt")
+          ? { sentAt: patch.sentAt }
+          : {}),
+      },
+    },
+  };
+
+  await db.collection("officeHourApplications").doc(applicationId).set(payload, { merge: true });
+}
+
+async function claimOfficeHourSameDayReminderDispatch(applicationId, todayDateKey) {
+  return db.runTransaction(async (transaction) => {
+    const applicationRef = db.collection("officeHourApplications").doc(applicationId);
+    const applicationSnap = await transaction.get(applicationRef);
+    if (!applicationSnap.exists) {
+      return { ok: false, reason: "application-not-found" };
+    }
+
+    const application = applicationSnap.data() || {};
+    if (normalizeString(application.scheduledDate) !== todayDateKey) {
+      return { ok: false, reason: "scheduled-date-mismatch" };
+    }
+    if (normalizeApplicationStatus(application.status) !== "confirmed") {
+      return { ok: false, reason: "application-not-confirmed" };
+    }
+
+    const reminderState = application.notificationState?.sameDayReminder || {};
+    const sentDateKey = normalizeString(reminderState.sentDateKey);
+    const dispatchDateKey = normalizeString(reminderState.dispatchDateKey);
+    if (sentDateKey === todayDateKey || dispatchDateKey === todayDateKey) {
+      return { ok: false, reason: "already-dispatched-today" };
+    }
+
+    transaction.set(
+      applicationRef,
+      {
+        notificationState: {
+          sameDayReminder: {
+            status: "dispatching",
+            dispatchDateKey: todayDateKey,
+            dispatchRequestedAt: FieldValue.serverTimestamp(),
+            updatedAt: FieldValue.serverTimestamp(),
+            lastError: FieldValue.delete(),
+          },
+        },
+      },
+      { merge: true }
+    );
+
+    return { ok: true };
+  });
+}
+
+async function dispatchOfficeHourSameDayReminderNotifications(applicationId) {
+  try {
+    const context = await loadOfficeHourApplicationNotificationContext(applicationId);
+    if (!context) {
+      return {
+        ok: false,
+        status: "skipped",
+        reason: "application-not-found",
+      };
+    }
+
+    const consultantScope = normalizeString(context.consultantDoc?.scope);
+    const consultantEmail =
+      normalizeEmail(context.consultantDoc?.email) ||
+      normalizeEmail(context.consultantDoc?.secondaryEmail) ||
+      normalizeEmail(context.consultantEmail);
+    const consultantSlackTarget = resolveConsultantSlackDmTarget(context.consultantDoc);
+    const companyEmail = normalizeEmail(context.companyEmail);
+    const companyPhone = normalizePhoneNumber(context.companyInfoDoc?.basic?.ceo?.phone);
+    const variables = buildRegularApplicationNotificationVariables(context);
+    const companyBiztalkMsgIdx = buildBiztalkMessageIndex("ohr", applicationId);
+
+    const channels = {
+      consultantEmail: {
+        status: "skipped",
+        reason:
+          consultantScope === "external" || consultantScope === "internal"
+            ? "not-attempted"
+            : "consultant-scope-not-supported",
+      },
+      consultantSlackDm: {
+        status: "skipped",
+        reason: consultantScope === "internal" ? "not-attempted" : "consultant-scope-not-internal",
+      },
+      companyEmail: {
+        status: "skipped",
+        reason: "not-attempted",
+      },
+      companyBiztalk: {
+        status: "skipped",
+        reason: "not-attempted",
+      },
+    };
+
+    const tasks = [];
+
+    if (consultantScope === "external" || consultantScope === "internal") {
+      tasks.push((async () => {
+        if (!consultantEmail) {
+          channels.consultantEmail = {
+            status: "skipped",
+            reason: "consultant-email-missing",
+          };
+          return;
+        }
+
+        const apiKey = normalizeString(RESEND_API_KEY.value());
+        if (!apiKey) {
+          channels.consultantEmail = {
+            status: "skipped",
+            reason: "resend-not-configured",
+          };
+          return;
+        }
+
+        const responseBody = await sendResendEmail({
+          apiKey,
+          fromEmail: DEFAULT_NOTIFICATION_EMAIL_FROM_ADDRESS,
+          to: consultantEmail,
+          subject: OFFICE_HOUR_REMINDER_CONSULTANT_EMAIL_SUBJECT,
+          text: renderTemplateString(
+            OFFICE_HOUR_REMINDER_CONSULTANT_EMAIL_TEMPLATE,
+            variables
+          ),
+        });
+
+        channels.consultantEmail = {
+          status: "sent",
+          recipient: consultantEmail,
+          deliveryId: normalizeString(responseBody?.id) || null,
+        };
+      })().catch((error) => {
+        channels.consultantEmail = {
+          status: "error",
+          recipient: consultantEmail || null,
+          message: error instanceof Error ? error.message : String(error),
+        };
+      }));
+    }
+
+    if (consultantScope === "internal") {
+      tasks.push((async () => {
+        const token = normalizeString(SLACK_BOT_TOKEN.value());
+        if (!token || !consultantSlackTarget) {
+          channels.consultantSlackDm = {
+            status: "skipped",
+            reason: !token ? "slack-token-missing" : "consultant-slack-user-id-missing",
+          };
+          return;
+        }
+
+        const text = renderTemplateString(OFFICE_HOUR_REMINDER_INTERNAL_SLACK_TEMPLATE, variables);
+        const result = consultantSlackTarget.startsWith("D")
+          ? await sendSlackChannelMessage({
+              token,
+              channelId: consultantSlackTarget,
+              text,
+            })
+          : await sendSlackDirectMessage({
+              token,
+              userId: consultantSlackTarget,
+              text,
+            });
+
+        channels.consultantSlackDm = {
+          status: "sent",
+          userId: consultantSlackTarget,
+          channel: normalizeString(result.channel) || null,
+          ts: normalizeString(result.ts) || null,
+        };
+      })().catch((error) => {
+        channels.consultantSlackDm = {
+          status: "error",
+          userId: consultantSlackTarget || null,
+          message: error instanceof Error ? error.message : String(error),
+        };
+      }));
+    }
+
+    tasks.push((async () => {
+      if (!companyEmail) {
+        channels.companyEmail = {
+          status: "skipped",
+          reason: "company-email-missing",
+        };
+        return;
+      }
+
+      const apiKey = normalizeString(RESEND_API_KEY.value());
+      if (!apiKey) {
+        channels.companyEmail = {
+          status: "skipped",
+          reason: "resend-not-configured",
+        };
+        return;
+      }
+
+      const responseBody = await sendResendEmail({
+        apiKey,
+        fromEmail: DEFAULT_NOTIFICATION_EMAIL_FROM_ADDRESS,
+        to: companyEmail,
+        subject: OFFICE_HOUR_REMINDER_COMPANY_EMAIL_SUBJECT,
+        text: renderTemplateString(
+          OFFICE_HOUR_REMINDER_COMPANY_EMAIL_TEMPLATE,
+          variables
+        ),
+      });
+
+      channels.companyEmail = {
+        status: "sent",
+        recipient: companyEmail,
+        deliveryId: normalizeString(responseBody?.id) || null,
+      };
+    })().catch((error) => {
+      channels.companyEmail = {
+        status: "error",
+        recipient: companyEmail || null,
+        message: error instanceof Error ? error.message : String(error),
+      };
+    }));
+
+    tasks.push((async () => {
+      if (!companyPhone) {
+        channels.companyBiztalk = {
+          status: "skipped",
+          reason: "company-phone-missing",
+          msgIdx: companyBiztalkMsgIdx,
+        };
+        return;
+      }
+
+      if (!getBiztalkDispatchConfig()) {
+        channels.companyBiztalk = {
+          status: "skipped",
+          reason: "biztalk-not-configured",
+          msgIdx: companyBiztalkMsgIdx,
+        };
+        return;
+      }
+
+      const title = renderTemplateString(
+        OFFICE_HOUR_REMINDER_BIZTALK_TITLE_TEMPLATE,
+        variables
+      );
+      const message = renderTemplateString(
+        OFFICE_HOUR_REMINDER_BIZTALK_MESSAGE_TEMPLATE,
+        variables
+      );
+      const result = await callBiztalkDispatch("/dispatch/alimtalk", {
+        callerProjectId: FIREBASE_PROJECT_ID,
+        dryRun: false,
+        recipient: companyPhone,
+        message,
+        msgIdx: companyBiztalkMsgIdx,
+        title,
+        tmpltCode: OFFICE_HOUR_REMINDER_BIZTALK_TEMPLATE_CODE,
+        attach: OFFICE_HOUR_REMINDER_BIZTALK_ATTACH,
+      });
+
+      channels.companyBiztalk = {
+        status: "sent",
+        recipient: companyPhone,
+        msgIdx: companyBiztalkMsgIdx,
+        templateCode: OFFICE_HOUR_REMINDER_BIZTALK_TEMPLATE_CODE,
+        title,
+        message,
+        targetUrl: normalizeString(result?.targetUrl) || null,
+        dispatchOk: typeof result?.ok === "boolean" ? result.ok : null,
+        upstreamStatus: Number.isFinite(result?.upstreamStatus) ? result.upstreamStatus : null,
+        responseCode:
+          normalizeString(
+            result?.upstreamBody?.responseCode || result?.code || result?.responseCode
+          ) || null,
+        upstreamResponseCount: Array.isArray(result?.upstreamBody?.response)
+          ? result.upstreamBody.response.length
+          : null,
+        upstreamBody: isPlainObject(result?.upstreamBody) ? result.upstreamBody : result?.upstreamBody || null,
+      };
+    })().catch((error) => {
+      channels.companyBiztalk = {
+        status: "error",
+        recipient: companyPhone || null,
+        msgIdx: companyBiztalkMsgIdx,
+        templateCode: OFFICE_HOUR_REMINDER_BIZTALK_TEMPLATE_CODE,
+        message: error instanceof Error ? error.message : String(error),
+      };
+    }));
+
+    await Promise.all(tasks);
+
+    return {
+      ok: true,
+      status: "completed",
+      consultantScope: consultantScope || null,
+      channels,
+    };
+  } catch (error) {
+    console.error("dispatchOfficeHourSameDayReminderNotifications failed", {
+      applicationId,
+      errorMessage: error instanceof Error ? error.message : String(error),
+      errorStack: error instanceof Error ? error.stack : null,
+    });
+    return {
+      ok: false,
+      status: "error",
+      message: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+async function runOfficeHourSameDayReminderDispatchCore(now = new Date()) {
+  const { dateKey } = getCurrentSeoulDateTimeKeys(now);
+  const applicationsSnap = await db
+    .collection("officeHourApplications")
+    .where("scheduledDate", "==", dateKey)
+    .get();
+
+  let sentCount = 0;
+  let skippedCount = 0;
+  let errorCount = 0;
+  const results = [];
+
+  for (const applicationSnap of applicationsSnap.docs) {
+    const applicationId = applicationSnap.id;
+    const application = applicationSnap.data() || {};
+
+    if (normalizeApplicationStatus(application.status) !== "confirmed") {
+      skippedCount += 1;
+      results.push({ applicationId, status: "skipped", reason: "application-not-confirmed" });
+      continue;
+    }
+
+    const claim = await claimOfficeHourSameDayReminderDispatch(applicationId, dateKey);
+    if (!claim.ok) {
+      skippedCount += 1;
+      results.push({ applicationId, status: "skipped", reason: claim.reason });
+      continue;
+    }
+
+    const dispatchResult = await dispatchOfficeHourSameDayReminderNotifications(applicationId);
+    if (dispatchResult.ok) {
+      sentCount += 1;
+      await writeOfficeHourSameDayReminderState(applicationId, {
+        status: "completed",
+        dispatchDateKey: dateKey,
+        sentDateKey: dateKey,
+        channels: dispatchResult.channels,
+        message: "",
+        schedulerTriggeredAt: now.toISOString(),
+        sentAt: FieldValue.serverTimestamp(),
+      });
+      results.push({ applicationId, status: "completed" });
+      continue;
+    }
+
+    errorCount += 1;
+    await writeOfficeHourSameDayReminderState(applicationId, {
+      status: "error",
+      dispatchDateKey: dateKey,
+      channels: dispatchResult.channels || null,
+      message: dispatchResult.message || "unknown-error",
+      schedulerTriggeredAt: now.toISOString(),
+    });
+    results.push({
+      applicationId,
+      status: "error",
+      message: dispatchResult.message || "unknown-error",
+    });
+  }
+
+  console.info(
+    "sendOfficeHourSameDayReminders summary",
+    JSON.stringify({
+      dateKey,
+      sentCount,
+      skippedCount,
+      errorCount,
+      results,
+    })
+  );
+
+  return {
+    dateKey,
+    sentCount,
+    skippedCount,
+    errorCount,
+    results,
+  };
+}
+
+async function dispatchConsultantScheduleRegistrationAlerts(now = new Date()) {
+  const weekInfo = regularOfficeHourPolicy.getOfficeHourWeekInfo(now);
+  const { dateKey } = getCurrentSeoulDateTimeKeys(now);
+
+  if (!weekInfo || weekInfo.weekOfMonth !== 3) {
+    return {
+      status: "skipped",
+      reason: "outside-registration-week",
+      dateKey,
+    };
+  }
+
+  const claimed = await claimNotificationBatchRun(
+    "consultant-schedule-registration-alerts",
+    dateKey
+  );
+  if (!claimed) {
+    return {
+      status: "skipped",
+      reason: "already-sent-today",
+      dateKey,
+    };
+  }
+
+  const targetMonthKey = regularOfficeHourPolicy.getNextMonthKey(now);
+  const registrationWindowLabel = buildSeoulWeekRangeLabel(
+    weekInfo.weekStart,
+    addDaysToDate(weekInfo.weekStart, 6)
+  );
+  const consultantsSnap = await db.collection("consultants").where("status", "==", "active").get();
+  const consultants = consultantsSnap.docs
+    .map((doc) => normalizeConsultantDoc(doc))
+    .filter((consultant) => normalizeString(consultant.scope) === "external");
+
+  const apiKey = normalizeString(RESEND_API_KEY.value());
+  let sentCount = 0;
+  let skippedCount = 0;
+  let errorCount = 0;
+  const results = [];
+
+  for (const consultant of consultants) {
+    const email =
+      normalizeEmail(consultant.email) || normalizeEmail(consultant.secondaryEmail);
+    if (!email) {
+      skippedCount += 1;
+      results.push({ consultantId: consultant.id, status: "skipped", reason: "consultant-email-missing" });
+      continue;
+    }
+    if (!apiKey) {
+      skippedCount += 1;
+      results.push({ consultantId: consultant.id, status: "skipped", reason: "resend-not-configured" });
+      continue;
+    }
+
+    const variables = buildConsultantScheduleRegistrationVariables({
+      consultant,
+      monthKey: targetMonthKey,
+      registrationWindowLabel,
+    });
+
+    try {
+      const responseBody = await sendResendEmail({
+        apiKey,
+        fromEmail: DEFAULT_NOTIFICATION_EMAIL_FROM_ADDRESS,
+        to: email,
+        subject: OFFICE_HOUR_SCHEDULE_REGISTRATION_CONSULTANT_EMAIL_SUBJECT,
+        text: renderTemplateString(
+          OFFICE_HOUR_SCHEDULE_REGISTRATION_CONSULTANT_EMAIL_TEMPLATE,
+          variables
+        ),
+      });
+      sentCount += 1;
+      results.push({
+        consultantId: consultant.id,
+        status: "sent",
+        recipient: email,
+        deliveryId: normalizeString(responseBody?.id) || null,
+      });
+    } catch (error) {
+      errorCount += 1;
+      results.push({
+        consultantId: consultant.id,
+        status: "error",
+        recipient: email,
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  console.info(
+    "dispatchConsultantScheduleRegistrationAlerts summary",
+    JSON.stringify({
+      dateKey,
+      targetMonthKey,
+      registrationWindowLabel,
+      sentCount,
+      skippedCount,
+      errorCount,
+      results,
+    })
+  );
+
+  return {
+    status: "completed",
+    dateKey,
+    targetMonthKey,
+    sentCount,
+    skippedCount,
+    errorCount,
+    results,
+  };
+}
+
+async function dispatchInternalConsultantAvailabilityReminders(now = new Date()) {
+  const weekInfo = regularOfficeHourPolicy.getOfficeHourWeekInfo(now);
+  const { dateKey } = getCurrentSeoulDateTimeKeys(now);
+
+  if (!weekInfo || weekInfo.weekOfMonth !== 3) {
+    return {
+      status: "skipped",
+      reason: "outside-registration-week",
+      dateKey,
+    };
+  }
+
+  const claimed = await claimNotificationBatchRun(
+    "internal-consultant-availability-reminders",
+    dateKey
+  );
+  if (!claimed) {
+    return {
+      status: "skipped",
+      reason: "already-sent-today",
+      dateKey,
+    };
+  }
+
+  const token = normalizeString(SLACK_BOT_TOKEN.value());
+  if (!token) {
+    return {
+      status: "skipped",
+      reason: "slack-token-missing",
+      dateKey,
+    };
+  }
+
+  const channelId = normalizeSlackChannelId(INTERNAL_CONSULTANT_NOTICE_SLACK_CHANNEL_ID);
+  if (!channelId) {
+    return {
+      status: "skipped",
+      reason: "invalid-slack-channel-id",
+      dateKey,
+    };
+  }
+
+  const monthKey = regularOfficeHourPolicy.getNextMonthKey(now);
+  const consultantsSnap = await db.collection("consultants").where("status", "==", "active").get();
+  const normalizedConsultants = consultantsSnap.docs.map((doc) => normalizeConsultantDoc(doc));
+  const skippedMissingScopeCount = normalizedConsultants.filter(
+    (consultant) => !normalizeString(consultant.scope)
+  ).length;
+  const missingConsultants = normalizedConsultants
+    .filter((consultant) => normalizeString(consultant.scope) === "internal")
+    .filter((consultant) => !consultant.monthlyAvailabilityMeta?.[monthKey])
+    .map((consultant) => ({
+      id: consultant.id,
+      name: normalizeString(consultant.name) || "이름 미입력",
+      email: normalizeString(consultant.email),
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name, "ko"));
+
+  if (missingConsultants.length === 0) {
+    return {
+      status: "skipped",
+      reason: "all-submitted",
+      dateKey,
+      monthKey,
+      skippedMissingScopeCount,
+    };
+  }
+
+  const text = buildInternalConsultantAvailabilityAlertText({
+    monthKey,
+    missingConsultants,
+    skippedMissingScopeCount,
+  });
+  const result = await sendSlackChannelMessage({
+    token,
+    channelId,
+    text,
+  });
+
+  const summary = {
+    status: "completed",
+    dateKey,
+    monthKey,
+    missingCount: missingConsultants.length,
+    skippedMissingScopeCount,
+    channel: normalizeString(result.channel) || null,
+    ts: normalizeString(result.ts) || null,
+  };
+  console.info(
+    "dispatchInternalConsultantAvailabilityReminders summary",
+    JSON.stringify(summary)
+  );
+  return summary;
+}
+
+async function dispatchInternalConsultantAvailabilitySubmittedNotification({
+  consultant,
+  monthKey,
+}) {
+  const token = normalizeString(SLACK_BOT_TOKEN.value());
+  const channelId = normalizeSlackChannelId(INTERNAL_CONSULTANT_NOTICE_SLACK_CHANNEL_ID);
+  if (!token || !channelId) {
+    return {
+      status: "skipped",
+      reason: !token ? "slack-token-missing" : "invalid-slack-channel-id",
+    };
+  }
+
+  const consultantName = normalizeString(consultant?.name) || normalizeString(consultant?.id) || "컨설턴트";
+  const consultantEmail = normalizeEmail(consultant?.email) || "이메일 미입력";
+  const text = [
+    `${buildConsultantTargetMonthLabel(monthKey)} 일정 등록 완료`,
+    `- ${consultantName} <${consultantEmail}>`,
+  ].join("\n");
+
+  const result = await sendSlackChannelMessage({
+    token,
+    channelId,
+    text,
+  });
+
+  return {
+    status: "sent",
+    channel: normalizeString(result.channel) || null,
+    ts: normalizeString(result.ts) || null,
+  };
+}
+
+async function dispatchCompanyOfficeHourApplicationAlerts(now = new Date()) {
+  const weekInfo = regularOfficeHourPolicy.getOfficeHourWeekInfo(now);
+  const { dateKey } = getCurrentSeoulDateTimeKeys(now);
+
+  if (!weekInfo || weekInfo.weekOfMonth !== 4) {
+    return {
+      status: "skipped",
+      reason: "outside-application-week",
+      dateKey,
+    };
+  }
+
+  const claimed = await claimNotificationBatchRun(
+    "company-office-hour-application-alerts",
+    dateKey
+  );
+  if (!claimed) {
+    return {
+      status: "skipped",
+      reason: "already-sent-today",
+      dateKey,
+    };
+  }
+
+  const apiKey = normalizeString(RESEND_API_KEY.value());
+  if (!apiKey) {
+    return {
+      status: "skipped",
+      reason: "resend-not-configured",
+      dateKey,
+    };
+  }
+
+  const applicationScheduleLabel = buildSeoulWeekRangeLabel(
+    weekInfo.weekStart,
+    addDaysToDate(weekInfo.weekStart, 6)
+  );
+  const companiesSnap = await db.collection("companies").get();
+
+  let sentCount = 0;
+  let skippedCount = 0;
+  let errorCount = 0;
+  const results = [];
+
+  for (const companySnap of companiesSnap.docs) {
+    const company = companySnap.data() || {};
+    const companyId = companySnap.id;
+    if (company.active === false) {
+      skippedCount += 1;
+      results.push({ companyId, status: "skipped", reason: "company-inactive" });
+      continue;
+    }
+    const programIds = normalizeStringArray(company.programs);
+    if (programIds.length === 0) {
+      skippedCount += 1;
+      results.push({ companyId, status: "skipped", reason: "company-programs-empty" });
+      continue;
+    }
+
+    const ownerUid = normalizeString(company.ownerUid);
+    if (!ownerUid) {
+      skippedCount += 1;
+      results.push({ companyId, status: "skipped", reason: "company-owner-missing" });
+      continue;
+    }
+
+    const profileSnap = await db.collection("profiles").doc(ownerUid).get();
+    const profile = profileSnap.data() || {};
+    if (profile.active === false || normalizeString(profile.role) !== "company") {
+      skippedCount += 1;
+      results.push({ companyId, status: "skipped", reason: "company-profile-inactive" });
+      continue;
+    }
+    const email = normalizeEmail(profile.email);
+    if (!email) {
+      skippedCount += 1;
+      results.push({ companyId, status: "skipped", reason: "company-email-missing" });
+      continue;
+    }
+
+    const variables = buildCompanyApplicationAlertVariables({
+      companyName: normalizeString(company.name) || "기업",
+      applicationScheduleLabel,
+    });
+
+    try {
+      const responseBody = await sendResendEmail({
+        apiKey,
+        fromEmail: DEFAULT_NOTIFICATION_EMAIL_FROM_ADDRESS,
+        to: email,
+        subject: OFFICE_HOUR_APPLICATION_ALERT_COMPANY_EMAIL_SUBJECT,
+        text: renderTemplateString(
+          OFFICE_HOUR_APPLICATION_ALERT_COMPANY_EMAIL_TEMPLATE,
+          variables
+        ),
+      });
+      sentCount += 1;
+      results.push({
+        companyId,
+        status: "sent",
+        recipient: email,
+        deliveryId: normalizeString(responseBody?.id) || null,
+      });
+    } catch (error) {
+      errorCount += 1;
+      results.push({
+        companyId,
+        status: "error",
+        recipient: email,
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  console.info(
+    "dispatchCompanyOfficeHourApplicationAlerts summary",
+    JSON.stringify({
+      dateKey,
+      applicationScheduleLabel,
+      sentCount,
+      skippedCount,
+      errorCount,
+      results,
+    })
+  );
+
+  return {
+    status: "completed",
+    dateKey,
+    applicationScheduleLabel,
+    sentCount,
+    skippedCount,
+    errorCount,
+    results,
+  };
+}
+
+async function claimOfficeHourReportReminderDispatch(applicationId, todayDateKey) {
+  return db.runTransaction(async (transaction) => {
+    const applicationRef = db.collection("officeHourApplications").doc(applicationId);
+    const applicationSnap = await transaction.get(applicationRef);
+    if (!applicationSnap.exists) {
+      return { ok: false, reason: "application-not-found" };
+    }
+
+    const application = applicationSnap.data() || {};
+    const reminderState = application.notificationState?.reportReminder || {};
+    if (normalizeString(reminderState.sentDateKey)) {
+      return { ok: false, reason: "already-sent" };
+    }
+    if (normalizeString(reminderState.dispatchDateKey) === todayDateKey) {
+      return { ok: false, reason: "already-dispatching-today" };
+    }
+
+    transaction.set(
+      applicationRef,
+      {
+        notificationState: {
+          reportReminder: {
+            status: "dispatching",
+            dispatchDateKey: todayDateKey,
+            dispatchRequestedAt: FieldValue.serverTimestamp(),
+            updatedAt: FieldValue.serverTimestamp(),
+            lastError: FieldValue.delete(),
+          },
+        },
+      },
+      { merge: true }
+    );
+
+    return { ok: true };
+  });
+}
+
+async function dispatchOfficeHourReportReminderNotifications(applicationId) {
+  try {
+    const context = await loadOfficeHourApplicationNotificationContext(applicationId);
+    if (!context) {
+      return {
+        ok: false,
+        status: "skipped",
+        reason: "application-not-found",
+      };
+    }
+
+    const consultantScope = normalizeString(context.consultantDoc?.scope);
+    const consultantEmail =
+      normalizeEmail(context.consultantDoc?.email) ||
+      normalizeEmail(context.consultantDoc?.secondaryEmail) ||
+      normalizeEmail(context.consultantEmail);
+    const consultantSlackTarget = resolveConsultantSlackDmTarget(context.consultantDoc);
+    const variables = buildReportReminderVariables(context);
+    const channels = {
+      consultantEmail: {
+        status: "skipped",
+        reason: consultantScope === "external" ? "not-attempted" : "consultant-scope-not-external",
+      },
+      consultantSlackDm: {
+        status: "skipped",
+        reason: consultantScope === "internal" ? "not-attempted" : "consultant-scope-not-internal",
+      },
+    };
+    const tasks = [];
+
+    if (consultantScope === "external") {
+      tasks.push((async () => {
+        if (!consultantEmail) {
+          channels.consultantEmail = {
+            status: "skipped",
+            reason: "consultant-email-missing",
+          };
+          return;
+        }
+        const apiKey = normalizeString(RESEND_API_KEY.value());
+        if (!apiKey) {
+          channels.consultantEmail = {
+            status: "skipped",
+            reason: "resend-not-configured",
+          };
+          return;
+        }
+
+        const responseBody = await sendResendEmail({
+          apiKey,
+          fromEmail: DEFAULT_NOTIFICATION_EMAIL_FROM_ADDRESS,
+          to: consultantEmail,
+          subject: OFFICE_HOUR_REPORT_REMINDER_CONSULTANT_EMAIL_SUBJECT,
+          text: renderTemplateString(
+            OFFICE_HOUR_REPORT_REMINDER_CONSULTANT_EMAIL_TEMPLATE,
+            variables
+          ),
+        });
+
+        channels.consultantEmail = {
+          status: "sent",
+          recipient: consultantEmail,
+          deliveryId: normalizeString(responseBody?.id) || null,
+        };
+      })().catch((error) => {
+        channels.consultantEmail = {
+          status: "error",
+          recipient: consultantEmail || null,
+          message: error instanceof Error ? error.message : String(error),
+        };
+      }));
+    }
+
+    if (consultantScope === "internal") {
+      tasks.push((async () => {
+        const token = normalizeString(SLACK_BOT_TOKEN.value());
+        if (!token || !consultantSlackTarget) {
+          channels.consultantSlackDm = {
+            status: "skipped",
+            reason: !token ? "slack-token-missing" : "consultant-slack-user-id-missing",
+          };
+          return;
+        }
+
+        const text = renderTemplateString(OFFICE_HOUR_REPORT_REMINDER_INTERNAL_SLACK_TEMPLATE, variables);
+        const result = consultantSlackTarget.startsWith("D")
+          ? await sendSlackChannelMessage({
+              token,
+              channelId: consultantSlackTarget,
+              text,
+            })
+          : await sendSlackDirectMessage({
+              token,
+              userId: consultantSlackTarget,
+              text,
+            });
+
+        channels.consultantSlackDm = {
+          status: "sent",
+          userId: consultantSlackTarget,
+          channel: normalizeString(result.channel) || null,
+          ts: normalizeString(result.ts) || null,
+        };
+      })().catch((error) => {
+        channels.consultantSlackDm = {
+          status: "error",
+          userId: consultantSlackTarget || null,
+          message: error instanceof Error ? error.message : String(error),
+        };
+      }));
+    }
+
+    await Promise.all(tasks);
+
+    return {
+      ok: true,
+      status: "completed",
+      consultantScope: consultantScope || null,
+      channels,
+    };
+  } catch (error) {
+    console.error("dispatchOfficeHourReportReminderNotifications failed", {
+      applicationId,
+      errorMessage: error instanceof Error ? error.message : String(error),
+      errorStack: error instanceof Error ? error.stack : null,
+    });
+    return {
+      ok: false,
+      status: "error",
+      message: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+async function runOfficeHourReportReminderDispatchCore(now = new Date()) {
+  const { dateKey } = getCurrentSeoulDateTimeKeys(now);
+  const claimed = await claimNotificationBatchRun("office-hour-report-reminders", dateKey);
+  if (!claimed) {
+    return {
+      dateKey,
+      status: "skipped",
+      reason: "already-ran-today",
+    };
+  }
+
+  const thresholdDate = parseDateKey(dateKey);
+  if (!thresholdDate) {
+    throw new Error(`Invalid Seoul date key: ${dateKey}`);
+  }
+  const reminderThresholdDate = addDaysToDate(thresholdDate, -7);
+  const reminderThresholdDateKey = regularOfficeHourPolicy.formatDateKey(reminderThresholdDate);
+
+  const [applicationsSnap, reportsSnap] = await Promise.all([
+    db.collection("officeHourApplications").where("scheduledDate", "<=", reminderThresholdDateKey).get(),
+    db.collection("reports").get(),
+  ]);
+  const reportedApplicationIds = new Set(
+    reportsSnap.docs.map((doc) => normalizeString(doc.data()?.applicationId)).filter(Boolean)
+  );
+
+  let sentCount = 0;
+  let skippedCount = 0;
+  let errorCount = 0;
+  const results = [];
+
+  for (const applicationSnap of applicationsSnap.docs) {
+    const applicationId = applicationSnap.id;
+    const application = applicationSnap.data() || {};
+
+    if (!ACTIVE_APPLICATION_STATUSES.has(normalizeApplicationStatus(application.status))) {
+      skippedCount += 1;
+      results.push({ applicationId, status: "skipped", reason: "application-not-active" });
+      continue;
+    }
+    if (reportedApplicationIds.has(applicationId)) {
+      skippedCount += 1;
+      results.push({ applicationId, status: "skipped", reason: "report-already-submitted" });
+      continue;
+    }
+
+    const claim = await claimOfficeHourReportReminderDispatch(applicationId, dateKey);
+    if (!claim.ok) {
+      skippedCount += 1;
+      results.push({ applicationId, status: "skipped", reason: claim.reason });
+      continue;
+    }
+
+    const dispatchResult = await dispatchOfficeHourReportReminderNotifications(applicationId);
+    if (dispatchResult.ok) {
+      sentCount += 1;
+      await writeOfficeHourReportReminderState(applicationId, {
+        status: "completed",
+        dispatchDateKey: dateKey,
+        sentDateKey: dateKey,
+        channels: dispatchResult.channels,
+        message: "",
+        sentAt: FieldValue.serverTimestamp(),
+      });
+      results.push({ applicationId, status: "completed" });
+      continue;
+    }
+
+    errorCount += 1;
+    await writeOfficeHourReportReminderState(applicationId, {
+      status: "error",
+      dispatchDateKey: dateKey,
+      channels: dispatchResult.channels || null,
+      message: dispatchResult.message || "unknown-error",
+    });
+    results.push({
+      applicationId,
+      status: "error",
+      message: dispatchResult.message || "unknown-error",
+    });
+  }
+
+  console.info(
+    "runOfficeHourReportReminderDispatchCore summary",
+    JSON.stringify({
+      dateKey,
+      reminderThresholdDateKey,
+      sentCount,
+      skippedCount,
+      errorCount,
+      results,
+    })
+  );
+
+  return {
+    dateKey,
+    reminderThresholdDateKey,
+    sentCount,
+    skippedCount,
+    errorCount,
+    results,
+  };
+}
+
+async function dispatchRegularApplicationImmediateConfirmationNotifications(applicationId) {
+  try {
+    const context = await loadRegularApplicationNotificationContext(applicationId);
+    if (!context) {
+      return {
+        ok: false,
+        status: "skipped",
+        reason: "application-not-found",
+      };
+    }
+
+    const consultantScope = normalizeString(context.consultantDoc?.scope);
+    const consultantEmail =
+      normalizeEmail(context.consultantDoc?.email) ||
+      normalizeEmail(context.consultantDoc?.secondaryEmail) ||
+      normalizeEmail(context.consultantEmail);
+    const consultantSlackTarget = resolveConsultantSlackDmTarget(context.consultantDoc);
+    const companyEmail = normalizeEmail(context.companyEmail);
+    const companyPhone = normalizePhoneNumber(context.companyInfoDoc?.basic?.ceo?.phone);
+    const variables = buildRegularApplicationNotificationVariables(context);
+    const companyBiztalkMsgIdx = buildBiztalkMessageIndex("ohc", applicationId);
+
+    const channels = {
+      consultantEmail: {
+        status: "skipped",
+        reason:
+          consultantScope === "external" || consultantScope === "internal"
+            ? "not-attempted"
+            : "consultant-scope-not-supported",
+      },
+      consultantSlackDm: {
+        status: "skipped",
+        reason: consultantScope === "internal" ? "not-attempted" : "consultant-scope-not-internal",
+      },
+      companyEmail: {
+        status: "skipped",
+        reason: "not-attempted",
+      },
+      companyBiztalk: {
+        status: "skipped",
+        reason: "not-attempted",
+      },
+    };
+
+    const tasks = [];
+
+    if (consultantScope === "external" || consultantScope === "internal") {
+      tasks.push((async () => {
+        if (!consultantEmail) {
+          channels.consultantEmail = {
+            status: "skipped",
+            reason: "consultant-email-missing",
+          };
+          return;
+        }
+
+        const apiKey = normalizeString(RESEND_API_KEY.value());
+        if (!apiKey) {
+          channels.consultantEmail = {
+            status: "skipped",
+            reason: "resend-not-configured",
+          };
+          return;
+        }
+
+        const responseBody = await sendResendEmail({
+          apiKey,
+          fromEmail: DEFAULT_NOTIFICATION_EMAIL_FROM_ADDRESS,
+          to: consultantEmail,
+          subject: OFFICE_HOUR_CONFIRMED_CONSULTANT_EMAIL_SUBJECT,
+          text: renderTemplateString(
+            OFFICE_HOUR_CONFIRMED_CONSULTANT_EMAIL_TEMPLATE,
+            variables
+          ),
+        });
+
+        channels.consultantEmail = {
+          status: "sent",
+          recipient: consultantEmail,
+          deliveryId: normalizeString(responseBody?.id) || null,
+        };
+      })().catch((error) => {
+        channels.consultantEmail = {
+          status: "error",
+          recipient: consultantEmail || null,
+          message: error instanceof Error ? error.message : String(error),
+        };
+      }));
+    }
+
+    if (consultantScope === "internal") {
+      tasks.push((async () => {
+        const token = normalizeString(SLACK_BOT_TOKEN.value());
+        if (!token || !consultantSlackTarget) {
+          channels.consultantSlackDm = {
+            status: "skipped",
+            reason: !token ? "slack-token-missing" : "consultant-slack-user-id-missing",
+          };
+          return;
+        }
+
+        const text = renderTemplateString(OFFICE_HOUR_CONFIRMED_INTERNAL_SLACK_TEMPLATE, variables);
+        const result = consultantSlackTarget.startsWith("D")
+          ? await sendSlackChannelMessage({
+              token,
+              channelId: consultantSlackTarget,
+              text,
+            })
+          : await sendSlackDirectMessage({
+              token,
+              userId: consultantSlackTarget,
+              text,
+            });
+
+        channels.consultantSlackDm = {
+          status: "sent",
+          userId: consultantSlackTarget,
+          channel: normalizeString(result.channel) || null,
+          ts: normalizeString(result.ts) || null,
+        };
+      })().catch((error) => {
+        channels.consultantSlackDm = {
+          status: "error",
+          userId: consultantSlackTarget || null,
+          message: error instanceof Error ? error.message : String(error),
+        };
+      }));
+    }
+
+    tasks.push((async () => {
+      if (!companyEmail) {
+        channels.companyEmail = {
+          status: "skipped",
+          reason: "company-email-missing",
+        };
+        return;
+      }
+
+      const apiKey = normalizeString(RESEND_API_KEY.value());
+      if (!apiKey) {
+        channels.companyEmail = {
+          status: "skipped",
+          reason: "resend-not-configured",
+        };
+        return;
+      }
+
+      const responseBody = await sendResendEmail({
+        apiKey,
+        fromEmail: DEFAULT_NOTIFICATION_EMAIL_FROM_ADDRESS,
+        to: companyEmail,
+        subject: OFFICE_HOUR_CONFIRMED_COMPANY_EMAIL_SUBJECT,
+        text: renderTemplateString(
+          OFFICE_HOUR_CONFIRMED_COMPANY_EMAIL_TEMPLATE,
+          variables
+        ),
+      });
+
+      channels.companyEmail = {
+        status: "sent",
+        recipient: companyEmail,
+        deliveryId: normalizeString(responseBody?.id) || null,
+      };
+    })().catch((error) => {
+      channels.companyEmail = {
+        status: "error",
+        recipient: companyEmail || null,
+        message: error instanceof Error ? error.message : String(error),
+      };
+    }));
+
+    tasks.push((async () => {
+      if (!companyPhone) {
+        channels.companyBiztalk = {
+          status: "skipped",
+          reason: "company-phone-missing",
+          msgIdx: companyBiztalkMsgIdx,
+        };
+        return;
+      }
+
+      if (!getBiztalkDispatchConfig()) {
+        channels.companyBiztalk = {
+          status: "skipped",
+          reason: "biztalk-not-configured",
+          msgIdx: companyBiztalkMsgIdx,
+        };
+        return;
+      }
+
+      const title = renderTemplateString(
+        OFFICE_HOUR_CONFIRMED_BIZTALK_TITLE_TEMPLATE,
+        variables
+      );
+      const message = renderTemplateString(
+        OFFICE_HOUR_CONFIRMED_BIZTALK_MESSAGE_TEMPLATE,
+        variables
+      );
+      const result = await callBiztalkDispatch("/dispatch/alimtalk", {
+        callerProjectId: FIREBASE_PROJECT_ID,
+        dryRun: false,
+        recipient: companyPhone,
+        message,
+        msgIdx: companyBiztalkMsgIdx,
+        title,
+        tmpltCode: OFFICE_HOUR_CONFIRMED_BIZTALK_TEMPLATE_CODE,
+        attach: OFFICE_HOUR_CONFIRMED_BIZTALK_ATTACH,
+      });
+
+      channels.companyBiztalk = {
+        status: "sent",
+        recipient: companyPhone,
+        msgIdx: companyBiztalkMsgIdx,
+        templateCode: OFFICE_HOUR_CONFIRMED_BIZTALK_TEMPLATE_CODE,
+        title,
+        message,
+        targetUrl: normalizeString(result?.targetUrl) || null,
+        dispatchOk: typeof result?.ok === "boolean" ? result.ok : null,
+        upstreamStatus: Number.isFinite(result?.upstreamStatus) ? result.upstreamStatus : null,
+        responseCode:
+          normalizeString(
+            result?.upstreamBody?.responseCode || result?.code || result?.responseCode
+          ) || null,
+        upstreamResponseCount: Array.isArray(result?.upstreamBody?.response)
+          ? result.upstreamBody.response.length
+          : null,
+        upstreamBody: isPlainObject(result?.upstreamBody) ? result.upstreamBody : result?.upstreamBody || null,
+      };
+    })().catch((error) => {
+      channels.companyBiztalk = {
+        status: "error",
+        recipient: companyPhone || null,
+        msgIdx: companyBiztalkMsgIdx,
+        templateCode: OFFICE_HOUR_CONFIRMED_BIZTALK_TEMPLATE_CODE,
+        message: error instanceof Error ? error.message : String(error),
+      };
+    }));
+
+    await Promise.all(tasks);
+
+    return {
+      ok: true,
+      status: "completed",
+      consultantScope: consultantScope || null,
+      channels,
+    };
+  } catch (error) {
+    console.error("dispatchRegularApplicationImmediateConfirmationNotifications failed", {
+      applicationId,
+      errorMessage: error instanceof Error ? error.message : String(error),
+      errorStack: error instanceof Error ? error.stack : null,
+    });
+    return {
+      ok: false,
+      status: "error",
+      message: error instanceof Error ? error.message : String(error),
+    };
+  }
 }
 
 function sanitizeConsentRecord(value) {
@@ -2976,6 +4785,12 @@ async function syncConsultantSchedulingCore(params) {
     const nextValue = JSON.stringify(nextMonthlyAvailability[monthKey] ?? []);
     return currentValue !== nextValue;
   });
+  const newlySubmittedMonthKeys =
+    providedMonthlyAvailabilityMeta === undefined
+      ? []
+      : Object.keys(providedMonthlyAvailabilityMeta).filter(
+          (monthKey) => !currentMonthlyAvailabilityMeta[monthKey]
+        );
 
   if (changedMonthlyAvailabilityKeys.length > 0) {
     const invalidMonthKey = changedMonthlyAvailabilityKeys.find(
@@ -3075,6 +4890,29 @@ async function syncConsultantSchedulingCore(params) {
       batch.set(operation.ref, operation.data, { merge: operation.merge === true });
     });
     await batch.commit();
+  }
+
+  if (
+    actorRole === "consultant" &&
+    actorUid === consultantId &&
+    normalizeString(currentConsultant.scope) === "internal" &&
+    newlySubmittedMonthKeys.length > 0
+  ) {
+    for (const monthKey of newlySubmittedMonthKeys) {
+      try {
+        await dispatchInternalConsultantAvailabilitySubmittedNotification({
+          consultant: currentConsultant,
+          monthKey,
+        });
+      } catch (error) {
+        console.error("dispatchInternalConsultantAvailabilitySubmittedNotification failed", {
+          consultantId,
+          monthKey,
+          errorMessage: error instanceof Error ? error.message : String(error),
+          errorStack: error instanceof Error ? error.stack : null,
+        });
+      }
+    }
   }
 
   return {
@@ -3538,13 +5376,17 @@ async function runApplicationMaintenanceCore() {
 exports.submitRegularApplication = onCall(
   {
     region: REGION,
-    timeoutSeconds: 30,
+    timeoutSeconds: 60,
     memory: "256MiB",
     secrets: [
       GOOGLE_CALENDAR_CLIENT_ID,
       GOOGLE_CALENDAR_CLIENT_SECRET,
       GOOGLE_CALENDAR_REFRESH_TOKEN,
       GOOGLE_CALENDAR_TARGET_CALENDAR_ID,
+      RESEND_API_KEY,
+      SLACK_BOT_TOKEN,
+      BIZTALK_DISPATCH_URL,
+      BIZTALK_DISPATCH_TOKEN,
     ],
   },
   async (request) => {
@@ -3824,11 +5666,21 @@ exports.submitRegularApplication = onCall(
     });
 
     const calendarSync = await upsertRegularApplicationGoogleCalendarEvent(result.applicationId);
+    const notificationDispatch =
+      await dispatchRegularApplicationImmediateConfirmationNotifications(result.applicationId);
+    console.info(
+      "submitRegularApplication notificationDispatch",
+      JSON.stringify({
+        applicationId: result.applicationId,
+        notificationDispatch,
+      })
+    );
 
     return {
       ...result,
       calendarSyncStatus: calendarSync.status,
       ...(calendarSync.error ? { calendarSyncError: calendarSync.error } : {}),
+      notificationDispatch,
     };
   }
 );
@@ -4250,11 +6102,18 @@ exports.approvePendingUser = onCall(
             {};
 
           const phone = normalizeString(source.phone);
-          const scope = normalizeString(source.scope);
+          const scope = normalizeConsultantScope(source.scope);
           const organization = normalizeString(source.organization);
           const secondaryEmail = normalizeString(source.secondaryEmail);
           const secondaryPhone = normalizeString(source.secondaryPhone);
+          const slackUserId = normalizeSlackDmTarget(source.slackUserId || existingConsultant.slackUserId);
           const fixedMeetingLink = normalizeString(source.fixedMeetingLink);
+          if (!scope) {
+            throw new HttpsError(
+              "failed-precondition",
+              "컨설턴트 구분(내부/외부)이 없어 승인할 수 없습니다. 가입 정보를 다시 확인해주세요."
+            );
+          }
           const consultantName =
             normalizeString(source.name) ||
             (fallbackEmail ? fallbackEmail.split("@")[0] : "") ||
@@ -4285,11 +6144,12 @@ exports.approvePendingUser = onCall(
               monthlyAvailabilityMeta: sanitizeConsultantMonthlyAvailabilityMeta(
                 existingConsultant.monthlyAvailabilityMeta
               ),
-              ...((scope === "internal" || scope === "external") ? { scope } : {}),
+              scope,
               ...(phone ? { phone } : {}),
               ...(organization ? { organization } : {}),
               ...(secondaryEmail ? { secondaryEmail } : {}),
               ...(secondaryPhone ? { secondaryPhone } : {}),
+              ...(slackUserId ? { slackUserId } : {}),
               ...(fixedMeetingLink ? { fixedMeetingLink } : {}),
               updatedAt: FieldValue.serverTimestamp(),
             },
@@ -4683,6 +6543,81 @@ exports.scheduledApplicationMaintenance = onSchedule(
   },
   async () => {
     return runApplicationMaintenanceCore();
+  }
+);
+
+exports.sendOfficeHourSameDayReminders = onSchedule(
+  {
+    region: REGION,
+    schedule: "0 9 * * *",
+    timeZone: "Asia/Seoul",
+    timeoutSeconds: 300,
+    memory: "256MiB",
+    secrets: [
+      RESEND_API_KEY,
+      SLACK_BOT_TOKEN,
+      BIZTALK_DISPATCH_URL,
+      BIZTALK_DISPATCH_TOKEN,
+    ],
+  },
+  async () => {
+    return runOfficeHourSameDayReminderDispatchCore();
+  }
+);
+
+exports.sendConsultantScheduleRegistrationAlerts = onSchedule(
+  {
+    region: REGION,
+    schedule: "0 9 * * 1",
+    timeZone: "Asia/Seoul",
+    timeoutSeconds: 300,
+    memory: "256MiB",
+    secrets: [RESEND_API_KEY],
+  },
+  async () => {
+    return dispatchConsultantScheduleRegistrationAlerts();
+  }
+);
+
+exports.sendInternalConsultantAvailabilityReminders = onSchedule(
+  {
+    region: REGION,
+    schedule: "0 9 * * *",
+    timeZone: "Asia/Seoul",
+    timeoutSeconds: 300,
+    memory: "256MiB",
+    secrets: [SLACK_BOT_TOKEN],
+  },
+  async () => {
+    return dispatchInternalConsultantAvailabilityReminders();
+  }
+);
+
+exports.sendCompanyOfficeHourApplicationAlerts = onSchedule(
+  {
+    region: REGION,
+    schedule: "0 9 * * 1",
+    timeZone: "Asia/Seoul",
+    timeoutSeconds: 300,
+    memory: "256MiB",
+    secrets: [RESEND_API_KEY],
+  },
+  async () => {
+    return dispatchCompanyOfficeHourApplicationAlerts();
+  }
+);
+
+exports.sendOfficeHourReportReminders = onSchedule(
+  {
+    region: REGION,
+    schedule: "0 9 * * *",
+    timeZone: "Asia/Seoul",
+    timeoutSeconds: 300,
+    memory: "256MiB",
+    secrets: [RESEND_API_KEY, SLACK_BOT_TOKEN],
+  },
+  async () => {
+    return runOfficeHourReportReminderDispatchCore();
   }
 );
 
