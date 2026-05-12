@@ -3,7 +3,7 @@ import { ko } from "date-fns/locale"
 import { parseLocalDateKey } from "@/redesign/app/lib/date-keys"
 import type { Application, MessageTemplate } from "@/redesign/app/lib/types"
 
-const DEFAULT_DETAIL_BASE_URL = "https://reserve.ema.kr"
+const DEFAULT_DETAIL_BASE_URL = "https://startup-diagnostic-platform.vercel.app"
 
 export type StageEmailTemplateVariables = {
   companyName: string
@@ -121,14 +121,10 @@ const EMAIL_COMPANY_APPLICATION_REQUEST_CONTENT = [
   "",
   "MYSC 오피스아워 신청 안내드립니다.",
   "",
-  "사업명 : {{programName}}",
-  "오피스아워명 : {{officeHourTitle}}",
   "신청 일정 : {{applicationScheduleLabel}}",
   "신청 링크 : {{applicationLink}}",
   "",
-  "신청은 정해진 기간 내에만 가능하며, 특히 원하시는 시간에 예약하시려면 빠르게 신청해주시기 바랍니다. 늦을 경우 예약이 어려울 수 있습니다.",
-  "",
-  "자세한 내용은 신청 링크 참고 부탁드리며,",
+  "신청은 정해진 기간 내에만 가능하며, 원하시는 일정이 있다면 빠르게 신청해주시기 바랍니다.",
   "문의사항이 있을 경우 담당 사업팀에 말씀해주세요.",
 ].join("\n")
 
@@ -137,7 +133,6 @@ const EMAIL_CONSULTANT_SCHEDULE_REGISTRATION_CONTENT = [
   "",
   "MYSC 오피스아워 일정 등록 안내드립니다.",
   "",
-  "오피스아워명 : {{officeHourTitle}}",
   "입력 일정 : {{registrationWindowLabel}}",
   "입력 링크 : {{inputLink}}",
   "",
@@ -445,7 +440,7 @@ function buildDetailLink(application: Application) {
 }
 
 function buildApplicationLink(application: Application) {
-  return buildDetailLink(application)
+  return `${DEFAULT_DETAIL_BASE_URL}/company/regular`
 }
 
 function buildApplicationScheduleLabel() {
@@ -457,7 +452,7 @@ function buildRegistrationWindowLabel() {
 }
 
 function buildInputLink() {
-  return "입력 링크 미연결"
+  return `${DEFAULT_DETAIL_BASE_URL}/admin/consultant-calendar`
 }
 
 function buildMeetingLink(application: Application) {
@@ -469,7 +464,7 @@ function buildMeetingLink(application: Application) {
 }
 
 function buildReportLink(application: Application) {
-  return buildDetailLink(application)
+  return `${DEFAULT_DETAIL_BASE_URL}/admin/pending-reports`
 }
 
 export function buildStageEmailVariables(

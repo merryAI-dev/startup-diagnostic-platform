@@ -76,6 +76,9 @@ export function AdminConsultants({
   const [meetingLinkDrafts, setMeetingLinkDrafts] = useState<Record<string, string>>({})
   const [editingMeetingLinkIds, setEditingMeetingLinkIds] = useState<string[]>([])
   const [savingMeetingLinkIds, setSavingMeetingLinkIds] = useState<string[]>([])
+  const [slackUserIdDrafts, setSlackUserIdDrafts] = useState<Record<string, string>>({})
+  const [editingSlackUserIdIds, setEditingSlackUserIdIds] = useState<string[]>([])
+  const [savingSlackUserIdIds, setSavingSlackUserIdIds] = useState<string[]>([])
   const [selectedScheduleMonthKey, setSelectedScheduleMonthKey] = useState("")
 
   const selectedConsultant = useMemo(
@@ -228,6 +231,18 @@ export function AdminConsultants({
   }, [consultants, editingMeetingLinkIds])
 
   useEffect(() => {
+    setSlackUserIdDrafts((prev) => {
+      const next: Record<string, string> = {}
+      consultants.forEach((consultant) => {
+        next[consultant.id] = editingSlackUserIdIds.includes(consultant.id)
+          ? prev[consultant.id] ?? consultant.slackUserId ?? ""
+          : consultant.slackUserId ?? ""
+      })
+      return next
+    })
+  }, [consultants, editingSlackUserIdIds])
+
+  useEffect(() => {
     if (!scheduleMonthOptions.includes(selectedScheduleMonthKey)) {
       setSelectedScheduleMonthKey(scheduleMonthOptions[0] ?? scheduleTargetMonthKey)
     }
@@ -317,6 +332,23 @@ export function AdminConsultants({
     }
   }
 
+  async function commitSlackUserId(consultant: Consultant) {
+    const nextValue = (slackUserIdDrafts[consultant.id] ?? "").trim().toUpperCase()
+    const currentValue = consultant.slackUserId?.trim().toUpperCase() ?? ""
+    if (nextValue === currentValue) return
+
+    setSavingSlackUserIdIds((prev) => [...prev, consultant.id])
+    try {
+      await Promise.resolve(
+        onUpdateConsultant(consultant.id, {
+          slackUserId: nextValue,
+        }),
+      )
+    } finally {
+      setSavingSlackUserIdIds((prev) => prev.filter((id) => id !== consultant.id))
+    }
+  }
+
   function startMeetingLinkEdit(consultant: Consultant) {
     setMeetingLinkDrafts((prev) => ({
       ...prev,
@@ -330,6 +362,21 @@ export function AdminConsultants({
   async function finishMeetingLinkEdit(consultant: Consultant) {
     await commitMeetingLink(consultant)
     setEditingMeetingLinkIds((prev) => prev.filter((id) => id !== consultant.id))
+  }
+
+  function startSlackUserIdEdit(consultant: Consultant) {
+    setSlackUserIdDrafts((prev) => ({
+      ...prev,
+      [consultant.id]: consultant.slackUserId ?? "",
+    }))
+    setEditingSlackUserIdIds((prev) =>
+      prev.includes(consultant.id) ? prev : [...prev, consultant.id],
+    )
+  }
+
+  async function finishSlackUserIdEdit(consultant: Consultant) {
+    await commitSlackUserId(consultant)
+    setEditingSlackUserIdIds((prev) => prev.filter((id) => id !== consultant.id))
   }
 
   return (
@@ -408,11 +455,12 @@ export function AdminConsultants({
           <Card className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
             <CardContent className="min-h-0 flex-1 p-0">
               <div className="min-h-0 h-full overflow-auto">
-                <Table className="min-w-[1240px]">
+                <Table className="min-w-[1460px]">
                   <TableHeader className="[&_tr]:sticky [&_tr]:top-0 [&_tr]:z-10 [&_tr]:bg-white">
                     <TableRow className="hover:bg-white">
                       <TableHead className="bg-white">컨설턴트</TableHead>
                       <TableHead className="bg-white">연락처</TableHead>
+                      <TableHead className="bg-white">Slack ID</TableHead>
                       <TableHead className="bg-white">화상링크</TableHead>
                       <TableHead className="w-[148px] bg-white">구분</TableHead>
                       <TableHead className="bg-white">상태</TableHead>
@@ -424,7 +472,7 @@ export function AdminConsultants({
                     {filteredConsultants.length === 0 && (
                       <TableRow>
                         <TableCell
-                          colSpan={7}
+                          colSpan={8}
                           className="h-24 text-center text-sm text-muted-foreground"
                         >
                           검색 결과가 없습니다.
@@ -434,6 +482,8 @@ export function AdminConsultants({
                     {paginatedConsultants.map((consultant) => {
                       const isEditingMeetingLink = editingMeetingLinkIds.includes(consultant.id)
                       const isSavingMeetingLink = savingMeetingLinkIds.includes(consultant.id)
+                      const isEditingSlackUserId = editingSlackUserIdIds.includes(consultant.id)
+                      const isSavingSlackUserId = savingSlackUserIdIds.includes(consultant.id)
                       const agendaLabels = (consultant.agendaIds ?? [])
                         .map((agendaId) => agendas.find((item) => item.id === agendaId)?.name)
                         .filter(Boolean) as string[]
@@ -458,6 +508,59 @@ export function AdminConsultants({
                             <div className="flex items-center gap-2">
                               <Phone className="w-3.5 h-3.5" />
                               <span>{consultant.phone || "-"}</span>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex min-w-[220px] items-center gap-2">
+                              {isEditingSlackUserId ? (
+                                <Input
+                                  value={slackUserIdDrafts[consultant.id] ?? consultant.slackUserId ?? ""}
+                                  onChange={(event) =>
+                                    setSlackUserIdDrafts((prev) => ({
+                                      ...prev,
+                                      [consultant.id]: event.target.value.toUpperCase(),
+                                    }))
+                                  }
+                                  onKeyDown={(event) => {
+                                    if (event.key === "Enter") {
+                                      event.preventDefault()
+                                      void finishSlackUserIdEdit(consultant)
+                                    }
+                                  }}
+                                  placeholder="U0123456789"
+                                  disabled={isSavingSlackUserId}
+                                  className="h-9"
+                                />
+                              ) : (
+                                <span
+                                  className="flex-1 truncate px-1 text-sm text-slate-600"
+                                  title={consultant.slackUserId || "미입력"}
+                                >
+                                  {consultant.slackUserId || "미입력"}
+                                </span>
+                              )}
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="icon"
+                                className="h-9 w-9 shrink-0"
+                                disabled={isSavingSlackUserId}
+                                loading={isSavingSlackUserId}
+                                onClick={() => {
+                                  if (isEditingSlackUserId) {
+                                    void finishSlackUserIdEdit(consultant)
+                                    return
+                                  }
+                                  startSlackUserIdEdit(consultant)
+                                }}
+                                aria-label={isEditingSlackUserId ? "Slack ID 저장" : "Slack ID 편집"}
+                              >
+                                {isEditingSlackUserId ? (
+                                  <Check className="h-4 w-4" />
+                                ) : (
+                                  <Pencil className="h-4 w-4" />
+                                )}
+                              </Button>
                             </div>
                           </TableCell>
                           <TableCell>
