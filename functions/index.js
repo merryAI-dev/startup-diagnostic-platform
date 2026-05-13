@@ -108,6 +108,35 @@ const OFFICE_HOUR_CONFIRMED_COMPANY_EMAIL_TEMPLATE = [
   "자세한 내용은 링크: {{detailLink}} 참고 부탁드립니다.",
   "당일 변경은 불가하며, 예정시간 이후에는 취소가 불가합니다.",
 ].join("\n");
+const IRREGULAR_OFFICE_HOUR_CONFIRMED_CONSULTANT_EMAIL_SUBJECT =
+  "[MYSC] 비정기 오피스아워 일정 안내";
+const IRREGULAR_OFFICE_HOUR_CONFIRMED_CONSULTANT_EMAIL_TEMPLATE = [
+  "안녕하세요. {{consultantName}}님.",
+  "",
+  "MYSC 비정기 오피스아워 일정이 등록되어 안내드립니다.",
+  "",
+  "기업 : {{companyName}}",
+  "사업 : {{programName}}",
+  "주제 : {{agendaName}}",
+  "일시 : {{scheduledDateTimeLabel}}",
+  "장소 : {{locationTypeLabel}}",
+  "",
+  "구글 캘린더 초대와 함께 세부 일정을 확인 부탁드립니다.",
+].join("\n");
+const IRREGULAR_OFFICE_HOUR_CONFIRMED_COMPANY_EMAIL_SUBJECT =
+  "[MYSC] 비정기 오피스아워 일정 안내";
+const IRREGULAR_OFFICE_HOUR_CONFIRMED_COMPANY_EMAIL_TEMPLATE = [
+  "안녕하세요. {{companyName}}님.",
+  "",
+  "MYSC 비정기 오피스아워 일정이 등록되어 안내드립니다.",
+  "",
+  "사업 : {{programName}}",
+  "주제 : {{agendaName}}",
+  "일시 : {{scheduledDateTimeLabel}}",
+  "장소 : {{locationTypeLabel}}",
+  "",
+  "구글 캘린더 초대와 함께 세부 일정을 확인 부탁드립니다.",
+].join("\n");
 const OFFICE_HOUR_REMINDER_BIZTALK_TEMPLATE_CODE = "officehour_002";
 const OFFICE_HOUR_REMINDER_BIZTALK_ATTACH = {
   button: [{ name: "채널 추가", type: "AC" }],
@@ -1427,6 +1456,27 @@ async function syncIrregularCalendarSessionsCore(now = new Date()) {
           { merge: true }
         );
 
+      if (nextDoc.sourceStatus !== "cancelled") {
+        const claim = await claimIrregularCalendarSessionConfirmationDispatch(eventId);
+        if (claim.ok) {
+          const dispatchResult = await dispatchIrregularCalendarSessionConfirmationEmails(eventId);
+          if (dispatchResult.ok) {
+            await writeIrregularCalendarSessionConfirmationState(eventId, {
+              status: "completed",
+              channels: dispatchResult.channels,
+              message: "",
+              sentAt: FieldValue.serverTimestamp(),
+            });
+          } else {
+            await writeIrregularCalendarSessionConfirmationState(eventId, {
+              status: dispatchResult.status || "error",
+              channels: dispatchResult.channels || null,
+              message: dispatchResult.message || dispatchResult.reason || "unknown-error",
+            });
+          }
+        }
+      }
+
       if (nextDoc.sourceStatus === "cancelled") {
         cancelledCount += 1;
       } else {
@@ -1900,6 +1950,33 @@ function buildReportReminderVariables(context) {
   };
 }
 
+function buildIrregularCalendarNotificationVariables({ sessionDoc, programDoc }) {
+  const application = {
+    id: normalizeString(sessionDoc?.id),
+    type: "irregular",
+    officeHourTitle: normalizeString(sessionDoc?.rawTitle) || "비정기 오피스아워",
+    companyName: normalizeString(sessionDoc?.companyName) || "기업 미지정",
+    consultant: normalizeString(sessionDoc?.consultantName) || "컨설턴트 미지정",
+    sessionFormat: normalizeString(sessionDoc?.sessionFormat) === "offline" ? "offline" : "online",
+    agenda: normalizeString(sessionDoc?.agendaName) || "아젠다 미지정",
+    scheduledDate: normalizeString(sessionDoc?.scheduledDate),
+    scheduledTime: normalizeTimeKey(sessionDoc?.scheduledTime),
+  };
+
+  return {
+    companyName: application.companyName,
+    consultantName: application.consultant,
+    officeHourTypeLabel: buildOfficeHourTypeLabel(application),
+    officeHourTitle: application.officeHourTitle,
+    programName:
+      normalizeString(sessionDoc?.programName) || normalizeString(programDoc?.name) || "사업 미지정",
+    agendaName: application.agenda,
+    scheduledDateTimeLabel: buildNotificationScheduledDateTimeLabel(application),
+    locationTypeLabel: application.sessionFormat === "offline" ? "오프라인" : "온라인",
+    meetingLink: buildNotificationMeetingLink(application),
+  };
+}
+
 async function loadOfficeHourApplicationNotificationContext(applicationId) {
   const context = await loadOfficeHourApplicationContext(applicationId);
   if (!context) {
@@ -1915,6 +1992,225 @@ async function loadOfficeHourApplicationNotificationContext(applicationId) {
     ...context,
     companyInfoDoc: companyInfoSnap?.exists ? companyInfoSnap.data() || {} : {},
   };
+}
+
+async function loadIrregularCalendarSessionNotificationContext(sessionId) {
+  const sessionSnap = await db.collection(IRREGULAR_CALENDAR_SESSION_COLLECTION).doc(sessionId).get();
+  if (!sessionSnap.exists) {
+    return null;
+  }
+
+  const sessionDoc = { id: sessionSnap.id, ...(sessionSnap.data() || {}) };
+  const programId = normalizeString(sessionDoc.programId);
+  const companyProfileUid = normalizeString(sessionDoc.companyProfileUid);
+
+  const [programSnap, companyProfileSnap] = await Promise.all([
+    programId ? db.collection("programs").doc(programId).get() : null,
+    companyProfileUid ? db.collection("profiles").doc(companyProfileUid).get() : null,
+  ]);
+
+  return {
+    sessionDoc,
+    programDoc: programSnap?.exists ? { id: programSnap.id, ...(programSnap.data() || {}) } : null,
+    companyProfileDoc: companyProfileSnap?.exists ? companyProfileSnap.data() || {} : null,
+  };
+}
+
+async function claimIrregularCalendarSessionConfirmationDispatch(sessionId) {
+  return db.runTransaction(async (transaction) => {
+    const sessionRef = db.collection(IRREGULAR_CALENDAR_SESSION_COLLECTION).doc(sessionId);
+    const sessionSnap = await transaction.get(sessionRef);
+    if (!sessionSnap.exists) {
+      return { ok: false, reason: "session-not-found" };
+    }
+
+    const session = sessionSnap.data() || {};
+    if (normalizeString(session.sourceStatus) === "cancelled") {
+      return { ok: false, reason: "session-cancelled" };
+    }
+
+    const confirmationState = session.notificationState?.confirmation || {};
+    if (confirmationState.sentAt || normalizeString(confirmationState.status) === "completed") {
+      return { ok: false, reason: "already-sent" };
+    }
+    if (normalizeString(confirmationState.status) === "dispatching") {
+      return { ok: false, reason: "already-dispatching" };
+    }
+
+    transaction.set(
+      sessionRef,
+      {
+        notificationState: {
+          confirmation: {
+            status: "dispatching",
+            dispatchRequestedAt: FieldValue.serverTimestamp(),
+            updatedAt: FieldValue.serverTimestamp(),
+            lastError: FieldValue.delete(),
+          },
+        },
+      },
+      { merge: true }
+    );
+
+    return { ok: true };
+  });
+}
+
+async function writeIrregularCalendarSessionConfirmationState(sessionId, patch) {
+  const payload = {};
+
+  if (Object.prototype.hasOwnProperty.call(patch, "status")) {
+    payload["notificationState.confirmation.status"] = patch.status || FieldValue.delete();
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, "channels")) {
+    payload["notificationState.confirmation.channels"] = isPlainObject(patch.channels)
+      ? patch.channels
+      : FieldValue.delete();
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, "message")) {
+    payload["notificationState.confirmation.lastError"] = patch.message || FieldValue.delete();
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, "sentAt")) {
+    payload["notificationState.confirmation.sentAt"] = patch.sentAt || FieldValue.delete();
+  }
+  payload["notificationState.confirmation.updatedAt"] = FieldValue.serverTimestamp();
+
+  await db.collection(IRREGULAR_CALENDAR_SESSION_COLLECTION).doc(sessionId).set(payload, { merge: true });
+}
+
+async function dispatchIrregularCalendarSessionConfirmationEmails(sessionId) {
+  try {
+    const context = await loadIrregularCalendarSessionNotificationContext(sessionId);
+    if (!context) {
+      return {
+        ok: false,
+        status: "skipped",
+        reason: "session-not-found",
+      };
+    }
+
+    const sessionDoc = context.sessionDoc || {};
+    const consultantEmail = normalizeEmail(sessionDoc.consultantEmail);
+    const companyEmail = normalizeEmail(context.companyProfileDoc?.email);
+    const variables = buildIrregularCalendarNotificationVariables(context);
+    const channels = {
+      consultantEmail: {
+        status: "skipped",
+        reason: "not-attempted",
+      },
+      companyEmail: {
+        status: "skipped",
+        reason: "not-attempted",
+      },
+    };
+
+    const apiKey = normalizeString(RESEND_API_KEY.value());
+    if (!apiKey) {
+      return {
+        ok: false,
+        status: "skipped",
+        reason: "resend-not-configured",
+      };
+    }
+
+    const tasks = [];
+
+    tasks.push((async () => {
+      if (!consultantEmail) {
+        channels.consultantEmail = {
+          status: "skipped",
+          reason: "consultant-email-missing",
+        };
+        return;
+      }
+
+      const responseBody = await sendResendEmail({
+        apiKey,
+        fromEmail: DEFAULT_NOTIFICATION_EMAIL_FROM_ADDRESS,
+        to: consultantEmail,
+        subject: IRREGULAR_OFFICE_HOUR_CONFIRMED_CONSULTANT_EMAIL_SUBJECT,
+        text: renderTemplateString(
+          IRREGULAR_OFFICE_HOUR_CONFIRMED_CONSULTANT_EMAIL_TEMPLATE,
+          variables
+        ),
+      });
+
+      channels.consultantEmail = {
+        status: "sent",
+        recipient: consultantEmail,
+        deliveryId: normalizeString(responseBody?.id) || null,
+      };
+    })().catch((error) => {
+      channels.consultantEmail = {
+        status: "error",
+        recipient: consultantEmail || null,
+        message: error instanceof Error ? error.message : String(error),
+      };
+    }));
+
+    tasks.push((async () => {
+      if (!companyEmail) {
+        channels.companyEmail = {
+          status: "skipped",
+          reason: "company-email-missing",
+        };
+        return;
+      }
+
+      const responseBody = await sendResendEmail({
+        apiKey,
+        fromEmail: DEFAULT_NOTIFICATION_EMAIL_FROM_ADDRESS,
+        to: companyEmail,
+        subject: IRREGULAR_OFFICE_HOUR_CONFIRMED_COMPANY_EMAIL_SUBJECT,
+        text: renderTemplateString(
+          IRREGULAR_OFFICE_HOUR_CONFIRMED_COMPANY_EMAIL_TEMPLATE,
+          variables
+        ),
+      });
+
+      channels.companyEmail = {
+        status: "sent",
+        recipient: companyEmail,
+        deliveryId: normalizeString(responseBody?.id) || null,
+      };
+    })().catch((error) => {
+      channels.companyEmail = {
+        status: "error",
+        recipient: companyEmail || null,
+        message: error instanceof Error ? error.message : String(error),
+      };
+    }));
+
+    await Promise.all(tasks);
+
+    const channelResults = Object.values(channels);
+    const hasSentChannel = channelResults.some((channel) => channel?.status === "sent");
+    if (!hasSentChannel) {
+      return {
+        ok: false,
+        status: "skipped",
+        reason: "no-deliverable-irregular-email-targets",
+        channels,
+      };
+    }
+
+    return {
+      ok: true,
+      status: "completed",
+      channels,
+    };
+  } catch (error) {
+    console.error("dispatchIrregularCalendarSessionConfirmationEmails failed", {
+      sessionId,
+      errorMessage: error instanceof Error ? error.message : String(error),
+      errorStack: error instanceof Error ? error.stack : null,
+    });
+    return {
+      ok: false,
+      status: "error",
+      message: error instanceof Error ? error.message : String(error),
+    };
+  }
 }
 
 async function writeOfficeHourSameDayReminderState(applicationId, patch) {
@@ -6656,6 +6952,7 @@ exports.syncIrregularCalendarSessions = onCall(
       GOOGLE_CALENDAR_CLIENT_SECRET,
       GOOGLE_CALENDAR_REFRESH_TOKEN,
       GOOGLE_CALENDAR_TARGET_CALENDAR_ID,
+      RESEND_API_KEY,
     ],
   },
   async (request) => {
