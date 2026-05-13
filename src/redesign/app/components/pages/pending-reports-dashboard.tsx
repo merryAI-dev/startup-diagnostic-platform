@@ -42,7 +42,10 @@ import { ko } from "date-fns/locale";
 import type { DateRange } from "react-day-picker";
 import { storage as firebaseStorage } from "@/redesign/app/lib/firebase";
 import { toast } from "sonner";
-import { parseLocalDateTimeKey } from "@/redesign/app/lib/date-keys";
+import {
+  canWriteApplicationReport,
+  getApplicationSessionTransitionTime,
+} from "@/redesign/app/lib/application-report-eligibility";
 
 const EXCEL_CELL_SAFE_TEXT_LIMIT = 30000;
 
@@ -297,6 +300,7 @@ interface PendingReportItem {
   isOverdue: boolean;
   daysLeft: number;
   overdueDays: number;
+  canWrite: boolean;
   programName: string;
   programColor: string;
 }
@@ -313,6 +317,8 @@ type ReportRow = {
   report: OfficeHourReport | null;
   dueLabel: string;
   dueOverdue: boolean;
+  canCreateReport: boolean;
+  createDisabledReason?: string;
 };
 
 type EmailDraft = {
@@ -697,41 +703,26 @@ export function PendingReportsDashboard({
     return false;
   };
 
-  const getSessionStatusTransitionTime = (app: Application) => {
-    if (app.scheduledDate && app.scheduledTime) {
-      return parseLocalDateTimeKey(app.scheduledDate, app.scheduledTime);
-    }
-
-    if (app.scheduledDate) {
-      const fallback = (() => {
-        const date = parseLocalDate(app.scheduledDate);
-        return date ? new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59) : null;
-      })();
-      if (fallback && !Number.isNaN(fallback.getTime())) {
-        return fallback;
-      }
-    }
-
-    return null;
-  };
-
   // 미작성 보고서 목록 계산
   const pendingReports = useMemo(() => {
+    const now = new Date();
     const eligibleApps = applications.filter(
       (app) =>
-        (app.status === "completed" || (app.type === "irregular" && app.status !== "cancelled"))
-        && app.scheduledDate
+        app.scheduledDate
+        && (
+          app.status === "completed"
+          || (app.type === "irregular" && app.status !== "cancelled")
+        ),
     );
-
     const reportedAppIds = new Set(reports.map((r) => r.applicationId));
-    const now = new Date();
 
     const pending: PendingReportItem[] = eligibleApps
       .filter((app) => !reportedAppIds.has(app.id))
       .filter((app) => isForCurrentConsultant(app, null))
       .map((app) => {
-        const transitionTime = getSessionStatusTransitionTime(app);
+        const transitionTime = getApplicationSessionTransitionTime(app);
         const effectiveTime = transitionTime ?? parseLocalDate(app.scheduledDate!) ?? new Date();
+        const canWrite = canWriteApplicationReport(app, now);
         const daysSince = differenceInDays(now, effectiveTime);
         const deadline = addDays(effectiveTime, 3);
         const daysLeft = Math.max(0, differenceInDays(deadline, now));
@@ -742,9 +733,10 @@ export function PendingReportsDashboard({
         return {
           application: app,
           daysSinceSession: daysSince,
-          isOverdue: now > deadline,
+          isOverdue: canWrite && now > deadline,
           daysLeft,
           overdueDays,
+          canWrite,
           programName: program?.name || "알 수 없음",
           programColor: program?.color || "#gray-500",
         };
@@ -835,8 +827,14 @@ export function PendingReportsDashboard({
       consultantEmail: resolveConsultantEmail(item.application, null),
       statusLabel: "미작성",
       report: null,
-      dueLabel: item.isOverdue ? `${item.overdueDays}일 초과` : `D-${item.daysLeft}`,
+      dueLabel: item.canWrite
+        ? (item.isOverdue ? `${item.overdueDays}일 초과` : `D-${item.daysLeft}`)
+        : "진행 전",
       dueOverdue: item.isOverdue,
+      canCreateReport: item.canWrite,
+      createDisabledReason: item.canWrite
+        ? undefined
+        : "오피스아워 진행 시간이 지난 뒤에 일지를 작성할 수 있습니다.",
     }));
     submittedReports.forEach((item) => {
       rows.push({
@@ -851,6 +849,7 @@ export function PendingReportsDashboard({
         report: item.report,
         dueLabel: "작성됨",
         dueOverdue: false,
+        canCreateReport: false,
       });
     });
 
@@ -1471,6 +1470,8 @@ export function PendingReportsDashboard({
                           ) : (
                             <Button
                               size="sm"
+                              disabled={!row.canCreateReport}
+                              title={row.createDisabledReason}
                               onClick={() => onCreateReport(row.application.id)}
                             >
                               작성

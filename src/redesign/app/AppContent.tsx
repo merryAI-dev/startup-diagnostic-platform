@@ -127,9 +127,13 @@ import {
   getConsultantScheduleDayNumbers,
   normalizeMonthlyAvailabilityMap,
 } from "@/redesign/app/lib/consultant-monthly-availability"
+import {
+  canWriteApplicationReport,
+  getApplicationSessionTransitionTime,
+  hasApplicationSessionStarted,
+} from "@/redesign/app/lib/application-report-eligibility"
 import { isApplicationChangeWindowOpen } from "@/redesign/app/lib/application-change-window"
 import {
-  endOfLocalDateKey,
   formatLocalDateKey as formatSafeLocalDateKey,
   parseLocalDateKey as parseSafeLocalDateKey,
   parseLocalDateTimeKey,
@@ -350,6 +354,24 @@ function normalizeConsultantDisplayName(value?: string | null): string {
     .replace(/\s*컨설턴트\s*$/u, "")
     .trim()
     .toLowerCase()
+}
+
+function buildReportParticipantLabels(session: OfficeHourCalendarSession): string[] {
+  const consultantName = session.consultantName?.trim() ?? ""
+  const consultantEmail = toNormalizedEmail(session.consultantEmail)
+  const seen = new Set<string>()
+
+  return (session.attendeeLabels ?? []).filter((label) => {
+    const normalizedLabel = label.trim()
+    if (!normalizedLabel) return false
+    if (consultantName && consultantEmail && toNormalizedEmail(normalizedLabel) === consultantEmail) {
+      return false
+    }
+    const dedupeKey = normalizedLabel.toLowerCase()
+    if (seen.has(dedupeKey)) return false
+    seen.add(dedupeKey)
+    return true
+  })
 }
 
 function buildAvailabilitySlotKey(dayOfWeek: number, timeKey: string): string {
@@ -1409,6 +1431,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
           : hasStarted
             ? "completed"
             : "confirmed"
+      const reportParticipants = buildReportParticipantLabels(session)
 
       return {
         id: buildCalendarSessionApplicationId(session.id),
@@ -1433,7 +1456,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
         reportPrefill: {
           topic: session.agendaName || session.parsedAgendaName || session.rawTitle,
           managerName: session.managerName || "",
-          participants: session.attendeeLabels,
+          participants: reportParticipants,
           location:
             session.rawLocation ||
             (session.sessionFormat === "offline" ? "오프라인" : "온라인 (Zoom/Google Meet)"),
@@ -1442,7 +1465,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
           type: "google-calendar" as const,
           sessionId: session.id,
           rawTitle: session.rawTitle,
-          attendeeLabels: session.attendeeLabels,
+          attendeeLabels: reportParticipants,
           location: session.rawLocation ?? null,
           matchWarnings: session.matchWarnings ?? [],
         },
@@ -1939,28 +1962,8 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     resolvedRole,
   ])
 
-  const getSessionStatusTransitionTime = (app: Application) => {
-    if (app.scheduledDate && app.scheduledTime) {
-      return parseLocalDateTimeKey(app.scheduledDate, app.scheduledTime)
-    }
-
-    if (app.scheduledDate) {
-      const fallback = endOfLocalDateKey(app.scheduledDate)
-      if (fallback) {
-        return fallback
-      }
-    }
-
-    return null
-  }
-
-  const hasSessionStarted = (app: Application, now = new Date()) => {
-    const transitionTime = getSessionStatusTransitionTime(app)
-    return Boolean(transitionTime && now >= transitionTime)
-  }
-
   const getReportDeadlineInfo = (app: Application) => {
-    const transitionTime = getSessionStatusTransitionTime(app)
+    const transitionTime = getApplicationSessionTransitionTime(app)
     if (!transitionTime) return null
     const deadline = addDays(transitionTime, 3)
     const now = new Date()
@@ -1992,7 +1995,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
         const now = new Date()
         const completedCandidates = applications
           .filter((app) => app.status === "confirmed")
-          .map((app) => ({ app, transitionTime: getSessionStatusTransitionTime(app) }))
+          .map((app) => ({ app, transitionTime: getApplicationSessionTransitionTime(app) }))
           .filter((item) => item.transitionTime && now >= item.transitionTime)
 
         if (completedCandidates.length === 0) return
@@ -2097,7 +2100,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
         if (!dismissedUntil) return true
         return Date.now() > dismissedUntil
       })
-      .map((app) => ({ app, transitionTime: getSessionStatusTransitionTime(app) }))
+      .map((app) => ({ app, transitionTime: getApplicationSessionTransitionTime(app) }))
       .filter((item) => item.transitionTime)
       .sort((a, b) => b.transitionTime!.getTime() - a.transitionTime!.getTime())
 
@@ -2429,6 +2432,14 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
 
     const app = reportDashboardApplications.find((value) => value.id === applicationId)
     if (!app) return
+    if (!canWriteApplicationReport(app)) {
+      toast.error(
+        app.status === "cancelled"
+          ? "취소된 오피스아워는 일지를 작성할 수 없습니다."
+          : "오피스아워 진행 시간이 지난 뒤에 일지를 작성할 수 있습니다.",
+      )
+      return
+    }
 
     setReportFormApplication(app)
     setReportFormOpen(true)
@@ -2915,7 +2926,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       toast.error("확정된 신청만 취소할 수 있습니다")
       return
     }
-    if (hasSessionStarted(targetApplication)) {
+    if (hasApplicationSessionStarted(targetApplication)) {
       toast.error("진행 시간이 지난 신청은 취소할 수 없습니다")
       return
     }
@@ -2979,7 +2990,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       return
     }
     const now = new Date()
-    const expired = hasSessionStarted(targetApplication, now)
+    const expired = hasApplicationSessionStarted(targetApplication, now)
 
     if (expired && status !== "completed") {
       toast.error("진행 시간이 지난 신청은 완료 외 상태로 변경할 수 없습니다")
@@ -3075,7 +3086,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
         }
         return
       }
-      if (hasSessionStarted(targetApplication)) {
+      if (hasApplicationSessionStarted(targetApplication)) {
         toast.error("진행 시간이 지나 수락할 수 없습니다")
         return
       }
@@ -3275,7 +3286,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
         }
         return
       }
-      if (hasSessionStarted(targetApplication)) {
+      if (hasApplicationSessionStarted(targetApplication)) {
         toast.error("진행 시간이 지나 확정할 수 없습니다")
         return
       }
@@ -3509,7 +3520,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     }
 
     const normalizedTargetStatus = normalizeApplicationStatus(targetApplication.status)
-    if (normalizedTargetStatus !== "confirmed" || hasSessionStarted(targetApplication)) {
+    if (normalizedTargetStatus !== "confirmed" || hasApplicationSessionStarted(targetApplication)) {
       toast.error("진행 시간이 지난 신청 또는 확정 전 신청은 수정할 수 없습니다")
       return false
     }
