@@ -459,7 +459,7 @@ function getGoogleCalendarConfig() {
 }
 
 function getGoogleCalendarSendUpdatesMode() {
-  return FIREBASE_PROJECT_ID === STAGE_FIREBASE_PROJECT_ID ? "none" : "all";
+  return "all";
 }
 
 async function getGoogleCalendarAccessToken(config) {
@@ -521,6 +521,11 @@ async function googleCalendarRequest(config, params) {
 
 function buildCalendarParticipantLabel(preferredName, email) {
   return normalizeString(preferredName) || normalizeEmail(email) || "";
+}
+
+function isValidCalendarAttendeeEmail(value) {
+  const normalized = normalizeEmail(value);
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(normalized);
 }
 
 function buildRegularGoogleCalendarTitle(context) {
@@ -622,6 +627,11 @@ async function writeGoogleCalendarSyncState(applicationId, patch) {
       ? patch.attendeeEmails
       : FieldValue.delete();
   }
+  if (Object.prototype.hasOwnProperty.call(patch, "warningMessages")) {
+    payload["googleCalendar.warningMessages"] = Array.isArray(patch.warningMessages)
+      ? patch.warningMessages
+      : FieldValue.delete();
+  }
   if (Object.prototype.hasOwnProperty.call(patch, "lastError")) {
     payload["googleCalendar.lastError"] = patch.lastError || FieldValue.delete();
   }
@@ -695,8 +705,11 @@ async function loadOfficeHourApplicationContext(applicationId) {
     pmProfile,
     pmUid,
     pmEmail: normalizeEmail(pmProfile?.email),
-    companyEmail: normalizeEmail(companyProfile?.email),
-    consultantEmail: normalizeEmail(consultantProfile?.email),
+    companyEmail: normalizeEmail(companyProfile?.email) || normalizeEmail(application.applicantEmail),
+    consultantEmail:
+      normalizeEmail(consultantProfile?.email) ||
+      normalizeEmail(consultantDoc?.email) ||
+      normalizeEmail(consultantDoc?.secondaryEmail),
   };
 }
 
@@ -713,28 +726,30 @@ async function loadRegularApplicationCalendarContext(applicationId) {
   return context;
 }
 
-function validateRegularApplicationCalendarParticipants(context) {
+function collectRegularApplicationCalendarWarnings(context) {
+  const warnings = [];
   if (!context.programDoc) {
-    throw new Error("Google Calendar sync failed: program document is missing");
+    warnings.push("program-document-missing");
   }
   if (!context.agendaDoc) {
-    throw new Error("Google Calendar sync failed: agenda document is missing");
+    warnings.push("agenda-document-missing");
   }
   if (!context.companyDoc) {
-    throw new Error("Google Calendar sync failed: company document is missing");
+    warnings.push("company-document-missing");
   }
   if (!context.pmUid) {
-    throw new Error("Google Calendar sync failed: program manager is not assigned");
+    warnings.push("program-manager-unassigned");
   }
-  if (!context.pmEmail) {
-    throw new Error("Google Calendar sync failed: program manager email is missing");
+  if (context.pmUid && !context.pmEmail) {
+    warnings.push("program-manager-email-missing");
   }
   if (!context.companyEmail) {
-    throw new Error("Google Calendar sync failed: company profile email is missing");
+    warnings.push("company-email-missing");
   }
   if (!context.consultantEmail) {
-    throw new Error("Google Calendar sync failed: consultant profile email is missing");
+    warnings.push("consultant-email-missing");
   }
+  return warnings;
 }
 
 async function upsertRegularApplicationGoogleCalendarEvent(applicationId) {
@@ -758,14 +773,20 @@ async function upsertRegularApplicationGoogleCalendarEvent(applicationId) {
   }
 
   try {
-    validateRegularApplicationCalendarParticipants(context);
+    const warningMessages = collectRegularApplicationCalendarWarnings(context);
+    if (warningMessages.length > 0) {
+      console.warn("upsertRegularApplicationGoogleCalendarEvent warnings", {
+        applicationId,
+        warningMessages,
+      });
+    }
     const { start, end } = getRegularApplicationCalendarEventDateRange(context.application);
     const title = buildRegularGoogleCalendarTitle(context);
     const attendeeEmails = [
       context.pmEmail,
       context.companyEmail,
       context.consultantEmail,
-    ].filter(Boolean);
+    ].filter((email) => isValidCalendarAttendeeEmail(email));
     const uniqueAttendeeEmails = Array.from(new Set(attendeeEmails));
     const existingEventId = normalizeString(context.application.googleCalendar?.eventId);
 
@@ -780,7 +801,9 @@ async function upsertRegularApplicationGoogleCalendarEvent(applicationId) {
         dateTime: end,
         timeZone: "Asia/Seoul",
       },
-      attendees: uniqueAttendeeEmails.map((email) => ({ email })),
+      ...(uniqueAttendeeEmails.length > 0
+        ? { attendees: uniqueAttendeeEmails.map((email) => ({ email })) }
+        : {}),
       location: normalizeString(context.application.sessionFormat) === "offline" ? "오프라인" : "온라인",
       extendedProperties: {
         private: {
@@ -815,6 +838,7 @@ async function upsertRegularApplicationGoogleCalendarEvent(applicationId) {
       eventId,
       title,
       attendeeEmails: uniqueAttendeeEmails,
+      warningMessages,
       lastError: "",
       syncedAt: FieldValue.serverTimestamp(),
       deletedAt: FieldValue.delete(),
@@ -892,6 +916,7 @@ async function deleteRegularApplicationGoogleCalendarEvent(applicationId) {
     status: "deleted",
     eventId: "",
     attendeeEmails: null,
+    warningMessages: null,
     lastError: "",
     deletedAt: FieldValue.serverTimestamp(),
   });
@@ -6649,6 +6674,46 @@ exports.syncIrregularCalendarSessions = onCall(
     }
 
     return syncIrregularCalendarSessionsCore(new Date());
+  }
+);
+
+exports.syncRegularApplicationCalendar = onCall(
+  {
+    region: REGION,
+    timeoutSeconds: 120,
+    memory: "256MiB",
+    secrets: [
+      GOOGLE_CALENDAR_CLIENT_ID,
+      GOOGLE_CALENDAR_CLIENT_SECRET,
+      GOOGLE_CALENDAR_REFRESH_TOKEN,
+      GOOGLE_CALENDAR_TARGET_CALENDAR_ID,
+    ],
+  },
+  async (request) => {
+    if (!request.auth?.uid) {
+      throw new HttpsError("unauthenticated", "로그인이 필요합니다.");
+    }
+
+    const applicationId = normalizeString(request.data?.applicationId);
+    if (!applicationId) {
+      throw new HttpsError("invalid-argument", "신청 식별자가 필요합니다.");
+    }
+
+    const profileSnap = await db.collection("profiles").doc(request.auth.uid).get();
+    if (!profileSnap.exists) {
+      throw new HttpsError("failed-precondition", "프로필 정보를 찾을 수 없습니다.");
+    }
+
+    const role = normalizeString(profileSnap.data()?.role);
+    if (!["admin", "staff"].includes(role)) {
+      throw new HttpsError("permission-denied", "정기 캘린더 재동기화 권한이 없습니다.");
+    }
+
+    const result = await upsertRegularApplicationGoogleCalendarEvent(applicationId);
+    return {
+      applicationId,
+      ...result,
+    };
   }
 );
 
