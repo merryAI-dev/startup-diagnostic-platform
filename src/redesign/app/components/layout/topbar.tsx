@@ -42,7 +42,7 @@ export function Topbar({
   const resolvedDisplayName = displayName || user.companyName;
 
   return (
-    <div className="h-16 border-b bg-white flex items-center justify-between px-6">
+    <div className="h-16 border-b bg-white flex items-center justify-between pl-2 pr-6">
       <div className="flex items-center gap-3">
         <img
           src={emaStationLogoUrl}
