@@ -753,19 +753,22 @@ export function RegularApplicationWizard({
   }, [fixedDateOfficeHours, selectedOfficeHourId])
 
   useEffect(() => {
+    if (isSubmitting) return;
     if (!selectedAgendaId) return;
     if (activeAgendas.some((agenda) => agenda.id === selectedAgendaId)) return;
     setSelectedAgendaId("");
     setSelectedDate(undefined);
     setSelectedTime("");
     setHoveredTime("");
-  }, [activeAgendas, selectedAgendaId]);
+  }, [activeAgendas, isSubmitting, selectedAgendaId]);
 
   useEffect(() => {
+    if (isSubmitting) return;
     setShowCompactReview(false)
-  }, [selectedOfficeHourId, selectedAgendaId, selectedDate, selectedTime, sessionFormat, requestContent, files.length])
+  }, [files.length, isSubmitting, requestContent, selectedAgendaId, selectedDate, selectedOfficeHourId, selectedTime, sessionFormat])
 
   useEffect(() => {
+    if (isSubmitting) return;
     if (!selectedDate) return;
     const selectedDateKey = formatLocalDateKey(selectedDate);
     if (preselectedDateKey && selectedDateKey === preselectedDateKey) {
@@ -780,7 +783,7 @@ export function RegularApplicationWizard({
     setSelectedDate(undefined);
     setSelectedTime("");
     setHoveredTime("");
-  }, [availableDateKeys, preselectedDateKey, selectedDate, timeSlots]);
+  }, [availableDateKeys, isSubmitting, preselectedDateKey, selectedDate, timeSlots]);
 
   const canSubmitCompact =
     Boolean(selectedAgendaId) &&
@@ -1141,7 +1144,12 @@ export function RegularApplicationWizard({
           <div className="flex gap-3">
             {showCompactReview ? (
               <>
-                <Button variant="outline" className="flex-1" onClick={() => setShowCompactReview(false)}>
+                <Button
+                  variant="outline"
+                  className="flex-1"
+                  onClick={() => setShowCompactReview(false)}
+                  disabled={isSubmitting}
+                >
                   수정하기
                 </Button>
                 <Button
@@ -1603,7 +1611,7 @@ export function RegularApplicationWizard({
               data-testid="regular-wizard-back"
               variant="outline"
               onClick={handleBack}
-              disabled={currentStep === 1}
+              disabled={currentStep === 1 || isSubmitting}
             >
               이전
             </Button>

@@ -25,6 +25,9 @@ export function ApplicationHistory({
 
   const filterByStatus = (status?: ApplicationStatus) => {
     if (!status) return applications;
+    if (status === "cancelled") {
+      return applications.filter((app) => app.status === "rejected");
+    }
     return applications.filter((app) => app.status === status);
   };
 
@@ -135,7 +138,7 @@ export function ApplicationHistory({
             확정 ({filterByStatus("confirmed").length})
           </TabsTrigger>
           <TabsTrigger value="cancelled">
-            취소 ({filterByStatus("cancelled").length})
+            거절 ({filterByStatus("cancelled").length})
           </TabsTrigger>
           <TabsTrigger value="completed">
             완료 ({filterByStatus("completed").length})

@@ -15,7 +15,10 @@ import { AdminApplicationDetailModal } from "@/redesign/app/components/pages/adm
 import type { DateRange } from "react-day-picker";
 import { parseLocalDateKey } from "@/redesign/app/lib/date-keys";
 import { getPendingConsultantIds, isApplicationTargetingConsultant } from "@/redesign/app/lib/application-availability";
-import { getMonthlyAvailabilityForMonth } from "@/redesign/app/lib/consultant-monthly-availability";
+import {
+  findConsultantAvailabilityEntryForDate,
+  getMonthlyAvailabilityForMonth,
+} from "@/redesign/app/lib/consultant-monthly-availability";
 import * as regularOfficeHourPolicy from "@/redesign/app/lib/regular-office-hour-policy";
 
 interface AdminApplicationsProps {
@@ -156,20 +159,21 @@ export function AdminApplications({
   const isCurrentConsultantAvailableAt = (app: Application) => {
     if (!isConsultantUser) return true;
     if (!app.scheduledDate || !app.scheduledTime) return true;
-    const parsedDate = parseLocalDateKey(app.scheduledDate);
-    if (!parsedDate) return false;
     const monthKey = regularOfficeHourPolicy.getMonthKeyFromDateKey(app.scheduledDate);
     if (!monthKey) return false;
     const dayAvailability = getMonthlyAvailabilityForMonth(
       currentConsultantMonthlyAvailability,
       monthKey,
       regularOfficeHourPolicy.ALL_DAY_NUMBERS,
-    ).find((availability) => availability.dayOfWeek === parsedDate.getDay());
+    );
+    const matchedAvailability = findConsultantAvailabilityEntryForDate(dayAvailability, app.scheduledDate);
     if (!dayAvailability) return false;
     const targetTime = normalizeTimeKey(app.scheduledTime);
-    return dayAvailability.slots.some(
-      (slot) => normalizeTimeKey(slot.start) === targetTime && slot.available
-    );
+    return matchedAvailability
+      ? matchedAvailability.slots.some(
+          (slot) => normalizeTimeKey(slot.start) === targetTime && slot.available
+        )
+      : false;
   };
 
   const hasCurrentConsultantConflict = (targetApp: Application) => {
@@ -346,6 +350,7 @@ export function AdminApplications({
                 <SelectContent>
                   <SelectItem value="all">전체 상태</SelectItem>
                   <SelectItem value="confirmed">확정</SelectItem>
+                  <SelectItem value="rejected">거절</SelectItem>
                   <SelectItem value="cancelled">취소</SelectItem>
                   <SelectItem value="completed">완료</SelectItem>
                 </SelectContent>

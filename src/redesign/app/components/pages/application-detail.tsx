@@ -36,7 +36,7 @@ interface ApplicationDetailProps {
   messages: Message[];
   onBack: () => void;
   onSendMessage: (content: string, files: FileItem[]) => void;
-  onCancelApplication: () => Promise<void> | void;
+  onCancelApplication: (reason: string) => Promise<void> | void;
   onRejectApplication?: (reason: string) => void;
   onUpdateRejectionReason?: (reason: string) => void;
   onUpdateCompanyApplication?: (payload: {
@@ -76,6 +76,7 @@ export function ApplicationDetail({
   const [messageFiles, setMessageFiles] = useState<FileItem[]>([]);
   const [showCancelDialog, setShowCancelDialog] = useState(false);
   const [cancelingApplication, setCancelingApplication] = useState(false);
+  const [cancelReason, setCancelReason] = useState("");
   const [showRejectDialog, setShowRejectDialog] = useState(false);
   const [rejectReason, setRejectReason] = useState("");
   const [showEditRejectDialog, setShowEditRejectDialog] = useState(false);
@@ -124,9 +125,9 @@ export function ApplicationDetail({
     application.status === "pending" || application.status === "review";
   const isWithinChangeWindow = isApplicationChangeWindowOpen(application.createdAt);
   const canShowCancelAction =
-    (isCompanyUser || isConsultantUser)
-    && application.status === "confirmed"
-    && !isSessionEnded;
+    isCompanyUser &&
+    application.status === "confirmed" &&
+    !isSessionEnded;
   const isCancelDisabledByExpiredWindow =
     canShowCancelAction
     && !isWithinChangeWindow;
@@ -151,9 +152,9 @@ export function ApplicationDetail({
     && (!application.consultant || application.consultant === "담당자 배정 중");
   const canReject =
     isConsultantUser
-    && isPendingLike
-    && (isUnassigned || isAssignedToCurrentConsultant())
-    && Boolean(onRejectApplication);
+    && Boolean(onRejectApplication)
+    && ((isPendingLike && (isUnassigned || isAssignedToCurrentConsultant()))
+      || (application.status === "confirmed" && isAssignedToCurrentConsultant()));
   const canEditRejectReason =
     isConsultantUser
     && application.status === "rejected"
@@ -244,10 +245,13 @@ export function ApplicationDetail({
 
   const handleCancelApplicationConfirm = async () => {
     if (cancelingApplication) return;
+    const reason = cancelReason.trim();
+    if (!reason) return;
     setCancelingApplication(true);
     try {
-      await Promise.resolve(onCancelApplication());
+      await Promise.resolve(onCancelApplication(reason));
       setShowCancelDialog(false);
+      setCancelReason("");
     } finally {
       setCancelingApplication(false);
     }
@@ -775,6 +779,9 @@ export function ApplicationDetail({
         onOpenChange={(open) => {
           if (cancelingApplication) return;
           setShowCancelDialog(open);
+          if (!open) {
+            setCancelReason("");
+          }
         }}
       >
         <AlertDialogContent>
@@ -783,13 +790,23 @@ export function ApplicationDetail({
             <AlertDialogDescription>
               신청을 취소하면 상태가 취소로 변경되며, 신청 이력은 유지됩니다.
             </AlertDialogDescription>
+            <div className="space-y-2 mt-2">
+              <Label htmlFor="cancel-reason">취소 사유</Label>
+              <Textarea
+                id="cancel-reason"
+                value={cancelReason}
+                onChange={(e) => setCancelReason(e.target.value)}
+                placeholder="취소 사유를 입력해주세요"
+                className="min-h-[90px]"
+              />
+            </div>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={cancelingApplication}>취소</AlertDialogCancel>
             <Button
               type="button"
               onClick={handleCancelApplicationConfirm}
-              disabled={cancelingApplication}
+              disabled={cancelingApplication || cancelReason.trim().length === 0}
               loading={cancelingApplication}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >

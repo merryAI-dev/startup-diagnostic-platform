@@ -1,6 +1,7 @@
 import { useState } from "react"
 import type { Role } from "@/types/auth"
 import { RoleSelector } from "@/components/auth/RoleSelector"
+import { getSignupRoleEmailError } from "@/lib/signup-role-email"
 
 type AuthCardProps = {
   title: string
@@ -81,20 +82,26 @@ export function AuthCard({
   const [password, setPassword] = useState("")
   const [showPassword, setShowPassword] = useState(false)
   const [touched, setTouched] = useState({ email: false, password: false })
+  const [submitted, setSubmitted] = useState(false)
 
   const emailError = getEmailError(email)
   const passwordError = showPasswordField ? getPasswordError(password) : null
-  const showEmailError = touched.email && emailError
+  const selectedRole = role ?? "company"
+  const roleEmailError =
+    swapLabel === "로그인" ? getSignupRoleEmailError(selectedRole, email) : null
+  const resolvedEmailError = emailError ?? roleEmailError
+  const showEmailError =
+    (touched.email && emailError) || (submitted && resolvedEmailError)
   const showPasswordError = showPasswordField && touched.password && passwordError
   const isBusy = loadingEmail
-  const selectedRole = role ?? "company"
   const shouldShowRoleSelector = showRoleSelector && !!role && !!setRole
   const resolvedSwapPrompt =
     swapPrompt ?? (swapLabel === "회원가입" ? "아직 계정이 없으신가요?" : "이미 계정이 있으신가요?")
 
   function handleSubmit() {
     if (!showEmailForm) return
-    if (emailError || passwordError) {
+    setSubmitted(true)
+    if (emailError || roleEmailError || passwordError) {
       setTouched({ email: true, password: true })
       return
     }
@@ -135,7 +142,7 @@ export function AuthCard({
                 onBlur={() => setTouched((prev) => ({ ...prev, email: true }))}
                 disabled={isBusy}
               />
-              {showEmailError ? <p className="mt-1 text-xs text-rose-600">{emailError}</p> : null}
+              {showEmailError ? <p className="mt-1 text-xs text-rose-600">{resolvedEmailError}</p> : null}
             </label>
           ) : null}
 

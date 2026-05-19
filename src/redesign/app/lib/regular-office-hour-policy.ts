@@ -123,6 +123,12 @@ function getWeekStartMonday(date: Date): Date {
   return addDays(date, diff)
 }
 
+function getFirstThursdayOfMonth(monthStart: Date): Date {
+  const currentDay = monthStart.getDay()
+  const daysUntilThursday = (4 - currentDay + 7) % 7
+  return addDays(monthStart, daysUntilThursday)
+}
+
 export function getOfficeHourWeekInfo(
   value: string | Date,
 ): {
@@ -148,8 +154,7 @@ export function getOfficeHourWeekInfo(
     return null
   }
 
-  const firstWeekStart = getWeekStartMonday(monthStart)
-  const firstWeekThursday = addDays(firstWeekStart, 3)
+  const firstWeekThursday = getFirstThursdayOfMonth(monthStart)
   const weekOfMonth =
     Math.floor((weekThursday.getTime() - firstWeekThursday.getTime()) / (7 * 24 * 60 * 60 * 1000)) + 1
 
@@ -224,6 +229,21 @@ export function getRegularOfficeHourDateKeysForMonth(
   }
 
   return dates
+}
+
+export function getRegularOfficeHourDateKeysForDayNumbers(
+  monthKey: string,
+  dayNumbers: number[],
+): string[] {
+  const allowedDayNumbers = Array.from(new Set(dayNumbers)).sort((a, b) => a - b)
+  if (allowedDayNumbers.length === 0) {
+    return []
+  }
+
+  return getRegularOfficeHourDateKeysForMonth(monthKey).filter((dateKey) => {
+    const parsed = parseDateKey(dateKey)
+    return Boolean(parsed && allowedDayNumbers.includes(parsed.getDay()))
+  })
 }
 
 export function getNextMonthKey(value: Date): string {

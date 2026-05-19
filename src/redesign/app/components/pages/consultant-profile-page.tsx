@@ -95,6 +95,29 @@ function formatMonthLabel(monthKey: string): string {
   return `${year}년 ${Number(month)}월`
 }
 
+function formatRegularOfficeHourWeekLabel(): string {
+  return regularOfficeHourPolicy.REGULAR_OFFICE_HOUR_WEEK_NUMBERS
+    .slice()
+    .sort((a, b) => a - b)
+    .map((weekOfMonth) => `${weekOfMonth}주차`)
+    .join("와 ")
+}
+
+function formatAvailabilitySectionLabel(day: ConsultantAvailability): string {
+  const weekdayLabel = day.dayOfWeek === 2 ? "화" : day.dayOfWeek === 3 ? "수" : day.dayOfWeek === 4 ? "목" : `${day.dayOfWeek}`
+  if (!day.dateKey) {
+    return `${weekdayLabel}요일`
+  }
+
+  const parsedDate = regularOfficeHourPolicy.parseDateKey(day.dateKey)
+  const weekInfo = regularOfficeHourPolicy.getOfficeHourWeekInfo(day.dateKey)
+  if (!parsedDate || !weekInfo) {
+    return `${weekdayLabel}요일`
+  }
+
+  return `${weekInfo.weekOfMonth}주차 ${weekdayLabel}요일 · ${parsedDate.getMonth() + 1}/${parsedDate.getDate()}`
+}
+
 export function ConsultantProfilePage({
   consultant,
   agendas = [],
@@ -160,15 +183,6 @@ export function ConsultantProfilePage({
       }),
     [agendas, consultant?.agendaIds, consultant?.scope]
   );
-  const scheduleDays = useMemo(
-    () =>
-      scheduleDayNumbers.map((value) => ({
-        value,
-        label: value === 2 ? "화" : value === 3 ? "수" : "목",
-      })),
-    [scheduleDayNumbers]
-  );
-
   const normalizedAvailability = useMemo(
     () => {
       if (!scheduleTargetMonthKey) {
@@ -213,10 +227,11 @@ export function ConsultantProfilePage({
   const isScheduleDirty =
     JSON.stringify(draftAvailability) !== JSON.stringify(normalizedAvailability);
 
-  const toggleSlot = (dayOfWeek: number, slotStart: string) => {
+  const toggleSlot = (dayKey: string, slotStart: string) => {
     setDraftAvailability((prev) =>
       prev.map((day) => {
-        if (day.dayOfWeek !== dayOfWeek) return day;
+        const currentDayKey = day.dateKey ?? String(day.dayOfWeek)
+        if (currentDayKey !== dayKey) return day;
         return {
           ...day,
           slots: day.slots.map((slot) =>
@@ -579,7 +594,7 @@ export function ConsultantProfilePage({
             </CardTitle>
             <CardDescription className="text-sm text-slate-500">
               {selectedScheduleMonthKey
-                ? `${formatMonthLabel(selectedScheduleMonthKey)} 정기 오피스아워 가능 시간을 조회합니다. 내부는 화/수, 외부는 목 기준입니다.`
+                ? `${formatMonthLabel(selectedScheduleMonthKey)} 정기 오피스아워 가능 시간을 조회합니다. ${formatRegularOfficeHourWeekLabel()} 일정을 각각 다르게 설정할 수 있습니다.`
                 : "월별 정기 오피스아워 가능 시간을 조회합니다."}
             </CardDescription>
           </CardHeader>
@@ -606,8 +621,8 @@ export function ConsultantProfilePage({
             </div>
             {!isScheduleEditable && selectedScheduleMonthKey === scheduleTargetMonthKey && (
               <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-                컨설턴트 가능 시간은 매월 3주차에 다음 달 일정만 수정할 수 있습니다.
-              </div>
+                {`컨설턴트 가능 시간은 매월 ${regularOfficeHourPolicy.CONSULTANT_SCHEDULE_OPEN_WEEK_NUMBER}주차에 다음 달 일정만 수정할 수 있습니다.`}
+            </div>
             )}
             <div className="mb-4 flex flex-wrap items-center justify-end gap-2">
               <Button
@@ -651,10 +666,9 @@ export function ConsultantProfilePage({
             </div>
             <div className="grid gap-3">
               {draftAvailability.map((day) => {
-                const dayInfo = scheduleDays.find((item) => item.value === day.dayOfWeek);
                 return (
                   <div
-                    key={day.dayOfWeek}
+                    key={day.dateKey ?? day.dayOfWeek}
                     className={cn(
                       "rounded-lg border p-3",
                       isScheduleEditable
@@ -664,7 +678,7 @@ export function ConsultantProfilePage({
                   >
                     <div className="mb-2 flex items-center justify-between gap-2">
                       <div className="text-xs font-semibold text-slate-600">
-                        {dayInfo?.label || "-"}요일
+                        {formatAvailabilitySectionLabel(day)}
                       </div>
                       {!isScheduleEditable ? (
                         <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-medium text-slate-500">
@@ -675,7 +689,7 @@ export function ConsultantProfilePage({
                     <div className="grid grid-cols-4 gap-1.5 md:grid-cols-6">
                       {day.slots.map((slot) => (
                         <button
-                          key={`${day.dayOfWeek}-${slot.start}`}
+                          key={`${day.dateKey ?? day.dayOfWeek}-${slot.start}`}
                           type="button"
                           aria-pressed={slot.available}
                           title={
@@ -687,7 +701,7 @@ export function ConsultantProfilePage({
                                 ? "가능 일정"
                                 : "불가 일정"
                           }
-                          onClick={() => toggleSlot(day.dayOfWeek, slot.start)}
+                          onClick={() => toggleSlot(day.dateKey ?? String(day.dayOfWeek), slot.start)}
                           disabled={!isScheduleEditable}
                           className={cn(
                             "rounded-md border px-2 py-1 text-[11px] transition",

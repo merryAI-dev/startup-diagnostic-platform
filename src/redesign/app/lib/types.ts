@@ -197,6 +197,7 @@ export interface Application {
   agenda: string;
   requestContent: string;
   rejectionReason?: string;
+  cancellationReason?: string;
   attachments?: string[];
   attachmentUrls?: string[];
   applicantName?: string;
@@ -318,6 +319,7 @@ export interface Consultant {
 
 export interface ConsultantAvailability {
   dayOfWeek: number; // 0 = Sunday, 1 = Monday, etc.
+  dateKey?: string; // YYYY-MM-DD, canonical per-date monthly schedule entry
   slots: {
     start: string; // "09:00"
     end: string;   // "10:00"

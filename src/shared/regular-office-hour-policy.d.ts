@@ -31,6 +31,10 @@ export function getRegularOfficeHourDateKeysForMonth(
   monthKey: string,
   scope?: "internal" | "external",
 ): string[]
+export function getRegularOfficeHourDateKeysForDayNumbers(
+  monthKey: string,
+  dayNumbers: number[],
+): string[]
 export function getNextMonthKey(value: Date): string
 export function canConsultantEditMonthlyAvailability(targetMonthKey: string, now: Date): boolean
 export function canCompanyManageRegularApplication(targetMonthKey: string, now: Date): boolean

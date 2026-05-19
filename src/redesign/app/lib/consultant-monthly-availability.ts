@@ -19,6 +19,15 @@ function uniqueNumbers(values: number[]): number[] {
   return Array.from(new Set(values)).sort((a, b) => a - b)
 }
 
+function normalizeTimeKey(value?: string): string {
+  if (!value) return ""
+  const [hourRaw, minuteRaw] = value.trim().split(":")
+  const hour = Number(hourRaw)
+  const minute = Number(minuteRaw)
+  if (Number.isNaN(hour) || Number.isNaN(minute)) return value.trim()
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`
+}
+
 export function getConsultantScheduleDayNumbers(params: {
   agendaIds?: string[]
   agendas?: Agenda[]
@@ -45,7 +54,26 @@ export function getConsultantScheduleDayNumbers(params: {
   return [...regularOfficeHourPolicy.ALL_DAY_NUMBERS]
 }
 
-export function buildDefaultConsultantAvailability(dayNumbers: number[]): ConsultantAvailability[] {
+export function buildDefaultConsultantAvailability(
+  dayNumbers: number[],
+  dateKeys?: string[],
+): ConsultantAvailability[] {
+  const normalizedDateKeys = Array.from(new Set(dateKeys ?? [])).sort((a, b) => a.localeCompare(b))
+  if (normalizedDateKeys.length > 0) {
+    return normalizedDateKeys.map((dateKey) => {
+      const parsed = regularOfficeHourPolicy.parseDateKey(dateKey)
+      return {
+        dayOfWeek: parsed?.getDay() ?? 0,
+        dateKey,
+        slots: TIME_SLOTS.map((slot) => ({
+          start: slot.start,
+          end: slot.end,
+          available: false,
+        })),
+      }
+    })
+  }
+
   return uniqueNumbers(dayNumbers).map((dayOfWeek) => ({
     dayOfWeek,
     slots: TIME_SLOTS.map((slot) => ({
@@ -56,26 +84,47 @@ export function buildDefaultConsultantAvailability(dayNumbers: number[]): Consul
   }))
 }
 
+function normalizeConsultantAvailabilityWithDefaults(
+  input: ConsultantAvailability[] | undefined,
+  defaults: ConsultantAvailability[],
+  useDateKeyMatching: boolean,
+): ConsultantAvailability[] {
+  if (!input || input.length === 0) return defaults
+
+  return defaults.map((defaultDay) => {
+    const found = input.find((item) => {
+      if (useDateKeyMatching && defaultDay.dateKey) {
+        return item.dateKey === defaultDay.dateKey
+      }
+      return item.dayOfWeek === defaultDay.dayOfWeek
+    })
+    if (!found) return defaultDay
+
+    return {
+      ...defaultDay,
+      slots: defaultDay.slots.map((baseSlot) => {
+        const existing = found.slots.find(
+          (slot) =>
+            normalizeTimeKey(slot.start) === baseSlot.start &&
+            normalizeTimeKey(slot.end) === baseSlot.end,
+        )
+        return existing
+          ? {
+              ...baseSlot,
+              available: existing.available === true,
+            }
+          : baseSlot
+      }),
+    }
+  })
+}
+
 export function normalizeConsultantAvailabilityForDays(
   input: ConsultantAvailability[] | undefined,
   dayNumbers: number[],
 ): ConsultantAvailability[] {
   const base = buildDefaultConsultantAvailability(dayNumbers)
-  if (!input || input.length === 0) return base
-
-  return base.map((baseDay) => {
-    const found = input.find((item) => item.dayOfWeek === baseDay.dayOfWeek)
-    if (!found) return baseDay
-    return {
-      ...baseDay,
-      slots: baseDay.slots.map((baseSlot) => {
-        const existing = found.slots.find(
-          (slot) => slot.start === baseSlot.start && slot.end === baseSlot.end,
-        )
-        return existing ?? baseSlot
-      }),
-    }
-  })
+  return normalizeConsultantAvailabilityWithDefaults(input, base, false)
 }
 
 export function normalizeMonthlyAvailabilityMap(
@@ -96,7 +145,22 @@ export function getMonthlyAvailabilityForMonth(
   dayNumbers: number[],
 ): ConsultantAvailability[] {
   const normalizedMap = normalizeMonthlyAvailabilityMap(monthlyAvailability)
-  return normalizeConsultantAvailabilityForDays(normalizedMap[monthKey], dayNumbers)
+  const regularDateKeys = regularOfficeHourPolicy.getRegularOfficeHourDateKeysForDayNumbers(
+    monthKey,
+    dayNumbers,
+  )
+  const defaults = buildDefaultConsultantAvailability(dayNumbers, regularDateKeys)
+  const monthAvailability = normalizedMap[monthKey]
+
+  if (defaults.length === 0) {
+    return normalizeConsultantAvailabilityForDays(monthAvailability, dayNumbers)
+  }
+
+  return normalizeConsultantAvailabilityWithDefaults(
+    monthAvailability,
+    defaults,
+    true,
+  )
 }
 
 export function getConsultantAvailabilityForDate(
@@ -109,6 +173,17 @@ export function getConsultantAvailabilityForDate(
     return buildDefaultConsultantAvailability(dayNumbers)
   }
   return getMonthlyAvailabilityForMonth(consultant.monthlyAvailability, monthKey, dayNumbers)
+}
+
+export function findConsultantAvailabilityEntryForDate(
+  availability: ConsultantAvailability[],
+  dateKey: string,
+): ConsultantAvailability | null {
+  const exactMatch = availability.find((item) => item.dateKey === dateKey)
+  if (exactMatch) {
+    return exactMatch
+  }
+  return null
 }
 
 export function countAvailableSlots(availability: ConsultantAvailability[]): number {

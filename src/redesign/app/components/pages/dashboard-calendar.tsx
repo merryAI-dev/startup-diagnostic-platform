@@ -37,6 +37,7 @@ import {
 } from "@/redesign/app/components/ui/dialog";
 import { Textarea } from "@/redesign/app/components/ui/textarea";
 import { Input } from "@/redesign/app/components/ui/input";
+import { Label } from "@/redesign/app/components/ui/label";
 import {
   format,
   startOfMonth,
@@ -63,7 +64,7 @@ interface DashboardCalendarProps {
   applicationsWithoutAssignableConsultantIds?: string[];
   user: User;
   onNavigate: (page: string, id?: string) => void;
-  onCancelApplication: (id: string) => Promise<void> | void;
+  onCancelApplication: (id: string, reason: string) => Promise<void> | void;
   onUpdateCompanyApplication?: (
     id: string,
     payload: {
@@ -169,9 +170,10 @@ export function DashboardCalendar({
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState<Date | null>(new Date());
   const [cancelTarget, setCancelTarget] = useState<Application | null>(null);
+  const [cancelReason, setCancelReason] = useState("");
   const [cancelingApplication, setCancelingApplication] = useState(false);
   const [selectedApplicationId, setSelectedApplicationId] = useState<string | null>(null);
-  const [applicationListTab, setApplicationListTab] = useState<"confirmed" | "cancelled">("confirmed");
+  const [applicationListTab, setApplicationListTab] = useState<"confirmed" | "closed">("confirmed");
   const [isEditingApplication, setIsEditingApplication] = useState(false);
   const [editingRequestSections, setEditingRequestSections] = useState<RequestSections>(
     createEmptyRequestSections()
@@ -224,7 +226,9 @@ export function DashboardCalendar({
       app.status === "confirmed"
       && !hasSessionEnded(app)
   );
-  const cancelledApplications = userApplications.filter((app) => app.status === "cancelled");
+  const closedApplications = userApplications.filter(
+    (app) => app.status === "rejected" || app.status === "cancelled",
+  );
 
   // 캘린더 날짜 생성
   const monthStart = startOfMonth(currentMonth);
@@ -285,7 +289,7 @@ export function DashboardCalendar({
   };
 
   const currentListApplications =
-    applicationListTab === "confirmed" ? confirmedApplications : cancelledApplications;
+    applicationListTab === "confirmed" ? confirmedApplications : closedApplications;
 
   const openApplicationModal = (application: Application) => {
     setSelectedApplicationId(application.id);
@@ -375,7 +379,7 @@ export function DashboardCalendar({
     [selectedApplication?.requestContent]
   );
 
-  const listTabButtonClass = (tab: "confirmed" | "cancelled") =>
+  const listTabButtonClass = (tab: "confirmed" | "closed") =>
     `group relative flex flex-1 items-center justify-center gap-2 border-b-2 px-2 py-3 text-sm font-semibold whitespace-nowrap transition ${
       applicationListTab === tab
         ? "border-slate-900 text-slate-900"
@@ -482,18 +486,18 @@ export function DashboardCalendar({
                 </button>
                 <button
                   type="button"
-                  className={listTabButtonClass("cancelled")}
-                  onClick={() => setApplicationListTab("cancelled")}
+                  className={listTabButtonClass("closed")}
+                  onClick={() => setApplicationListTab("closed")}
                 >
-                  <span>취소</span>
+                  <span>취소/거절</span>
                   <span
                     className={`rounded-full px-1.5 py-0.5 text-[11px] leading-none transition ${
-                      applicationListTab === "cancelled"
+                      applicationListTab === "closed"
                         ? "bg-slate-900 text-white"
                         : "bg-slate-100 text-slate-500 group-hover:bg-slate-200"
                     }`}
                   >
-                    {cancelledApplications.length}
+                    {closedApplications.length}
                   </span>
                 </button>
                 </div>
@@ -535,10 +539,20 @@ export function DashboardCalendar({
                           현재 수락 가능한 컨설턴트가 없습니다. 일정조정과 관련하여 관리자에게 문의해주세요.
                         </p>
                       ) : null}
-                      {applicationListTab === "cancelled" ? (
-                        <p className="mt-1 line-clamp-2 text-[11px] text-slate-500">
-                          취소된 신청입니다.
-                        </p>
+                      {applicationListTab === "closed" ? (
+                        app.status === "rejected" && app.rejectionReason ? (
+                          <p className="mt-1 line-clamp-2 text-[11px] text-rose-600">
+                            거절 사유: {app.rejectionReason}
+                          </p>
+                        ) : app.status === "rejected" ? (
+                          <p className="mt-1 line-clamp-2 text-[11px] text-rose-600">
+                            거절된 신청입니다.
+                          </p>
+                        ) : (
+                          <p className="mt-1 line-clamp-2 text-[11px] text-slate-500">
+                            취소된 신청입니다.
+                          </p>
+                        )
                       ) : (
                         <div className="mt-2 flex justify-end">
                           <button
@@ -561,7 +575,7 @@ export function DashboardCalendar({
               <div className="flex min-h-0 flex-1 items-center justify-center rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-center text-xs text-slate-500">
                 {applicationListTab === "confirmed"
                   ? "확정된 신청이 없습니다."
-                  : "취소된 신청이 없습니다."}
+                  : "취소/거절된 신청이 없습니다."}
               </div>
             )}
           </div>
@@ -1051,7 +1065,10 @@ export function DashboardCalendar({
         open={Boolean(cancelTarget)}
         onOpenChange={(open) => {
           if (cancelingApplication) return;
-          if (!open) setCancelTarget(null);
+          if (!open) {
+            setCancelTarget(null);
+            setCancelReason("");
+          }
         }}
       >
         <AlertDialogContent>
@@ -1061,22 +1078,36 @@ export function DashboardCalendar({
               신청을 취소하면 상태가 취소로 변경되며, 신청 이력은 유지됩니다.
             </AlertDialogDescription>
           </AlertDialogHeader>
+          <div className="space-y-2 px-1">
+            <Label htmlFor={`cancel-reason-${cancelTarget?.id ?? "application"}`}>
+              취소 사유
+            </Label>
+            <Textarea
+              id={`cancel-reason-${cancelTarget?.id ?? "application"}`}
+              value={cancelReason}
+              onChange={(event) => setCancelReason(event.target.value)}
+              placeholder="취소 사유를 입력해주세요"
+              className="min-h-[90px]"
+            />
+          </div>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={cancelingApplication}>취소</AlertDialogCancel>
             <Button
               type="button"
-              disabled={cancelingApplication}
+              disabled={cancelingApplication || cancelReason.trim().length === 0}
               loading={cancelingApplication}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
               onClick={async () => {
                 if (!cancelTarget || cancelingApplication) return;
+                if (cancelReason.trim().length === 0) return;
                 setCancelingApplication(true);
                 try {
-                  await Promise.resolve(onCancelApplication(cancelTarget.id));
+                  await Promise.resolve(onCancelApplication(cancelTarget.id, cancelReason.trim()));
                   if (selectedApplication?.id === cancelTarget.id) {
                     setSelectedApplicationId(null);
                   }
                   setCancelTarget(null);
+                  setCancelReason("");
                 } finally {
                   setCancelingApplication(false);
                 }
