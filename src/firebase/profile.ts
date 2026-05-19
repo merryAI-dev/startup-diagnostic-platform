@@ -13,6 +13,7 @@ const collectionName = "profiles"
 
 export type ConsultantSignupInfo = {
   name: string
+  scope: "internal" | "external"
   organization: string
   email: string
   phone: string
@@ -45,11 +46,13 @@ function normalizeConsentSnapshot(consents?: ConsentSnapshot) {
   const terms = normalizeConsentRecord(consents.terms)
   const privacy = normalizeConsentRecord(consents.privacy)
   const marketing = normalizeConsentRecord(consents.marketing)
+  const serviceNotifications = normalizeConsentRecord(consents.serviceNotifications)
 
   return {
     ...(terms ? { terms } : {}),
     ...(privacy ? { privacy } : {}),
     ...(marketing ? { marketing } : {}),
+    ...(serviceNotifications ? { serviceNotifications } : {}),
   }
 }
 
@@ -214,6 +217,13 @@ export async function createSignupRequest(
     consents?: ConsentSnapshot
   }
 ) {
+  if (requestedRole === "consultant") {
+    const scope = options?.consultantInfo?.scope
+    if (scope !== "internal" && scope !== "external") {
+      throw new Error("Consultant signup request requires a valid scope.")
+    }
+  }
+
   const companyId =
     requestedRole === "company"
       ? (options?.companyId ?? uid)
@@ -242,6 +252,7 @@ export async function createSignupRequest(
     signupRequestData.consultantInfo = {
       ...options.consultantInfo,
       name: options.consultantInfo.name.trim(),
+      scope: options.consultantInfo.scope,
       organization: options.consultantInfo.organization.trim(),
       email: options.consultantInfo.email.trim(),
       phone: options.consultantInfo.phone.trim(),

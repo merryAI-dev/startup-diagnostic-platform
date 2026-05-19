@@ -1,6 +1,6 @@
 export type Role = "admin" | "company" | "consultant"
 
-export type ConsentType = "terms" | "privacy" | "marketing"
+export type ConsentType = "terms" | "privacy" | "marketing" | "serviceNotifications"
 
 export type ConsentRecord = {
   consented: boolean
@@ -14,6 +14,7 @@ export type ConsentSnapshot = {
   terms?: ConsentRecord
   privacy?: ConsentRecord
   marketing?: ConsentRecord
+  serviceNotifications?: ConsentRecord
 }
 
 export type UserProfile = {

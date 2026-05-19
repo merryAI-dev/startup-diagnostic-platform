@@ -9,6 +9,7 @@ import {
   FileText,
   KanbanSquare,
   LayoutDashboard,
+  Mail,
   MessageSquare,
   Newspaper,
   Settings,
@@ -40,6 +41,7 @@ type NavItem = {
 const adminNavItems: NavItem[] = [
   { id: "admin-dashboard", label: "관리자 대시보드", icon: Shield },
   { id: "admin-applications", label: "신청 관리", icon: ClipboardList },
+  { id: "admin-communication", label: "커뮤니케이션", icon: Mail },
   { id: "admin-program-list", label: "사업 관리", icon: FileText },
   { id: "startup-diagnostic", label: "기업 관리", icon: FileText },
   { id: "admin-agendas", label: "아젠다 관리", icon: FileText },
@@ -102,7 +104,7 @@ export function SidebarNav({
     : isConsultantUser
       ? consultantNavItems
       : userNavItems;
-  const visibleNavItems = navItems.filter((item) => item.id !== "admin-communication");
+  const visibleNavItems = navItems;
   const companyCoreNavItems = userNavItems.filter((item) =>
     companyCoreNavIds.has(item.id)
   );

@@ -1,8 +1,11 @@
 import { httpsCallable } from "firebase/functions";
 import { functions, isFirebaseConfigured } from "@/redesign/app/lib/firebase";
+import type { CompanyInfoRecord } from "@/types/company";
 import type {
   ApplicationStatus,
   ConsultantAvailability,
+  ConsultantMonthlyAvailability,
+  ConsultantMonthlyAvailabilityMeta,
   ProgramKpiDefinition,
   ProgramWeekday,
   SessionFormat,
@@ -24,6 +27,9 @@ export type SubmitRegularApplicationPayload = {
 type SubmitRegularApplicationResult = {
   applicationId: string;
   pendingConsultantIds: string[];
+  consultantId?: string;
+  calendarSyncStatus?: "synced" | "error" | "deleted" | "skipped";
+  calendarSyncError?: string;
 };
 
 export type TransitionApplicationAction = "claim" | "confirm" | "reject" | "reopen";
@@ -40,12 +46,21 @@ type TransitionApplicationResult = {
   consultant?: string;
   consultantId?: string;
   rejectionReason?: string;
+  calendarSyncStatus?: "synced" | "error" | "deleted" | "skipped";
+  calendarSyncError?: string;
+};
+
+export type CancelApplicationPayload = {
+  applicationId: string;
+  cancellationReason?: string | null;
 };
 
 type CancelApplicationResult = {
   applicationId: string;
-  outcome: "deleted" | "rejected";
+  outcome: "cancelled";
   status?: ApplicationStatus;
+  calendarSyncStatus?: "synced" | "error" | "deleted" | "skipped";
+  calendarSyncError?: string;
 };
 
 export type UpdateCompanyApplicationPayload = {
@@ -61,12 +76,24 @@ type UpdateCompanyApplicationResult = {
   applicationId: string;
   status: ApplicationStatus;
   scheduleChanged: boolean;
+  calendarSyncStatus?: "synced" | "error" | "deleted" | "skipped";
+  calendarSyncError?: string;
 };
 
 type RunApplicationMaintenanceResult = {
   rejectedCount: number;
   completedCount: number;
   slotCount: number;
+};
+
+type SyncIrregularCalendarSessionsResult = {
+  syncedCount: number;
+  cancelledCount: number;
+  skippedCount: number;
+  errorCount: number;
+  calendarId: string;
+  timeMin: string;
+  timeMax: string;
 };
 
 type ApprovePendingUserResult = {
@@ -86,9 +113,21 @@ type UpdateCompanyProgramsResult = {
   programIds: string[];
 };
 
+export type SaveManagedCompanyInfoPayload = {
+  companyId: string;
+  companyInfo: CompanyInfoRecord;
+  saveType: "draft" | "final";
+};
+
+type SaveManagedCompanyInfoResult = {
+  companyId: string;
+  saveType: "draft" | "final";
+};
+
 export type SyncConsultantSchedulingPayload = {
   consultantId?: string;
-  availability?: ConsultantAvailability[];
+  monthlyAvailability?: ConsultantMonthlyAvailability;
+  monthlyAvailabilityMeta?: ConsultantMonthlyAvailabilityMeta;
   agendaIds?: string[];
   status?: "active" | "inactive";
 };
@@ -113,6 +152,8 @@ export type SyncProgramDefinitionPayload = {
   internalTicketLimit?: number;
   externalTicketLimit?: number;
   companyLimit?: number;
+  allowedAgendaIds?: string[];
+  managerUid?: string | null;
   periodStart?: string;
   periodEnd?: string;
   weekdays?: ProgramWeekday[];
@@ -169,6 +210,103 @@ type GenerateCompanyAnalysisReportResult = {
   };
 };
 
+export type BiztalkStageCheckMode = "health" | "outbound-ip" | "auth-token" | "dispatch-raw";
+
+export type RunBiztalkStageCheckPayload = {
+  mode?: BiztalkStageCheckMode;
+  dryRun?: boolean;
+  payload?: Record<string, unknown>;
+  headers?: Record<string, string>;
+  query?: Record<string, string>;
+  recipients?: string[];
+};
+
+export type RunBiztalkStageCheckResult = {
+  ok: boolean;
+  [key: string]: unknown;
+};
+
+export type SendBiztalkTestAlimtalkPayload = {
+  recipient: string;
+  message: string;
+  msgIdx?: string;
+  title?: string;
+  tmpltCode?: string;
+  senderKey?: string;
+  attach?: {
+    button: Array<{
+      name: string;
+      type: string;
+    }>;
+  };
+  dryRun?: boolean;
+};
+
+export type SendBiztalkTestAlimtalkResult = {
+  ok: boolean;
+  [key: string]: unknown;
+};
+
+export type QueryBiztalkAlimtalkResultsPayload = {
+  dryRun?: boolean;
+  method?: "GET" | "POST";
+  payload?: Record<string, unknown>;
+  query?: Record<string, string>;
+};
+
+export type QueryBiztalkAlimtalkResultsResult = {
+  ok: boolean;
+  [key: string]: unknown;
+};
+
+export type SendStageTestEmailPayload = {
+  fromEmail: string;
+  replyTo?: string | null;
+  recipients: string[];
+  subject: string;
+  text: string;
+  html?: string;
+};
+
+export type SendStageTestEmailResult = {
+  ok: boolean;
+  sentCount: number;
+  deliveries: Array<{
+    to: string;
+    id: string | null;
+  }>;
+};
+
+export type SendStageSlackDmTestPayload = {
+  userId: string;
+  text: string;
+};
+
+export type SendStageSlackDmTestResult = {
+  ok: boolean;
+  channel: string | null;
+  ts: string | null;
+};
+
+export type SendStageSlackChannelAvailabilityTestPayload = {
+  channelId: string;
+  monthKey: string;
+};
+
+export type SendStageSlackChannelAvailabilityTestResult = {
+  ok: boolean;
+  channel: string | null;
+  ts: string | null;
+  monthKey: string;
+  missingCount: number;
+  missingConsultants: Array<{
+    id: string;
+    name: string;
+    email: string;
+  }>;
+  skippedMissingScopeCount: number;
+};
+
 export async function submitRegularApplicationViaFunction(
   payload: SubmitRegularApplicationPayload
 ) {
@@ -201,17 +339,17 @@ export async function transitionApplicationStatusViaFunction(
   return result.data;
 }
 
-export async function cancelApplicationViaFunction(applicationId: string) {
+export async function cancelApplicationViaFunction(payload: CancelApplicationPayload) {
   if (!isFirebaseConfigured || !functions) {
     throw new Error("Firebase Functions is not configured");
   }
 
-  const callable = httpsCallable<{ applicationId: string }, CancelApplicationResult>(
+  const callable = httpsCallable<CancelApplicationPayload, CancelApplicationResult>(
     functions,
     "cancelApplication"
   );
 
-  const result = await callable({ applicationId });
+  const result = await callable(payload);
   return result.data;
 }
 
@@ -245,6 +383,20 @@ export async function runApplicationMaintenanceViaFunction() {
   return result.data;
 }
 
+export async function syncIrregularCalendarSessionsViaFunction() {
+  if (!isFirebaseConfigured || !functions) {
+    throw new Error("Firebase Functions is not configured");
+  }
+
+  const callable = httpsCallable<Record<string, never>, SyncIrregularCalendarSessionsResult>(
+    functions,
+    "syncIrregularCalendarSessions"
+  );
+
+  const result = await callable({});
+  return result.data;
+}
+
 export async function approvePendingUserViaFunction(userId: string) {
   if (!isFirebaseConfigured || !functions) {
     throw new Error("Firebase Functions is not configured");
@@ -270,6 +422,22 @@ export async function updateCompanyProgramsViaFunction(
     UpdateCompanyProgramsPayload,
     UpdateCompanyProgramsResult
   >(functions, "updateCompanyPrograms");
+
+  const result = await callable(payload);
+  return result.data;
+}
+
+export async function saveManagedCompanyInfoViaFunction(
+  payload: SaveManagedCompanyInfoPayload
+) {
+  if (!isFirebaseConfigured || !functions) {
+    throw new Error("Firebase Functions is not configured");
+  }
+
+  const callable = httpsCallable<
+    SaveManagedCompanyInfoPayload,
+    SaveManagedCompanyInfoResult
+  >(functions, "saveManagedCompanyInfo");
 
   const result = await callable(payload);
   return result.data;
@@ -321,4 +489,100 @@ export async function generateCompanyAnalysisReportViaFunction(
 
   const result = await callable(payload);
   return result.data;
+}
+
+export async function runBiztalkStageCheckViaFunction(
+  payload: RunBiztalkStageCheckPayload = {}
+) {
+  if (!isFirebaseConfigured || !functions) {
+    throw new Error("Firebase Functions is not configured");
+  }
+
+  const callable = httpsCallable<
+    RunBiztalkStageCheckPayload,
+    RunBiztalkStageCheckResult
+  >(functions, "runBiztalkStageCheck")
+
+  const result = await callable(payload)
+  return result.data
+}
+
+export async function sendBiztalkTestAlimtalkViaFunction(
+  payload: SendBiztalkTestAlimtalkPayload
+) {
+  if (!isFirebaseConfigured || !functions) {
+    throw new Error("Firebase Functions is not configured");
+  }
+
+  const callable = httpsCallable<
+    SendBiztalkTestAlimtalkPayload,
+    SendBiztalkTestAlimtalkResult
+  >(functions, "sendBiztalkTestAlimtalk")
+
+  const result = await callable(payload)
+  return result.data
+}
+
+export async function queryBiztalkAlimtalkResultsViaFunction(
+  payload: QueryBiztalkAlimtalkResultsPayload = {}
+) {
+  if (!isFirebaseConfigured || !functions) {
+    throw new Error("Firebase Functions is not configured");
+  }
+
+  const callable = httpsCallable<
+    QueryBiztalkAlimtalkResultsPayload,
+    QueryBiztalkAlimtalkResultsResult
+  >(functions, "queryBiztalkAlimtalkResults")
+
+  const result = await callable(payload)
+  return result.data
+}
+
+export async function sendStageTestEmailViaFunction(
+  payload: SendStageTestEmailPayload
+) {
+  if (!isFirebaseConfigured || !functions) {
+    throw new Error("Firebase Functions is not configured");
+  }
+
+  const callable = httpsCallable<
+    SendStageTestEmailPayload,
+    SendStageTestEmailResult
+  >(functions, "sendStageTestEmail")
+
+  const result = await callable(payload)
+  return result.data
+}
+
+export async function sendStageSlackDmTestViaFunction(
+  payload: SendStageSlackDmTestPayload
+) {
+  if (!isFirebaseConfigured || !functions) {
+    throw new Error("Firebase Functions is not configured");
+  }
+
+  const callable = httpsCallable<
+    SendStageSlackDmTestPayload,
+    SendStageSlackDmTestResult
+  >(functions, "sendStageSlackDmTest")
+
+  const result = await callable(payload)
+  return result.data
+}
+
+export async function sendStageSlackChannelAvailabilityTestViaFunction(
+  payload: SendStageSlackChannelAvailabilityTestPayload
+) {
+  if (!isFirebaseConfigured || !functions) {
+    throw new Error("Firebase Functions is not configured");
+  }
+
+  const callable = httpsCallable<
+    SendStageSlackChannelAvailabilityTestPayload,
+    SendStageSlackChannelAvailabilityTestResult
+  >(functions, "sendStageSlackChannelAvailabilityTest")
+
+  const result = await callable(payload)
+  return result.data
 }

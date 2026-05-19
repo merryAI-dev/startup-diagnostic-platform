@@ -15,7 +15,7 @@ export type ApprovalRole = "admin" | "company" | "consultant";
 
 export type AgendaScope = "internal" | "external";
 
-export type ProgramWeekday = "TUE" | "THU";
+export type ProgramWeekday = "TUE" | "WED" | "THU";
 
 export type ProgramKpiDefinition = {
   id: string;
@@ -37,6 +37,8 @@ export interface Program {
   externalTicketLimit?: number;
   companyLimit?: number;
   companyIds?: string[];
+  allowedAgendaIds?: string[];
+  managerUid?: string | null;
   periodStart?: string; // YYYY-MM-DD
   periodEnd?: string; // YYYY-MM-DD
   weekdays?: ProgramWeekday[];
@@ -136,6 +138,7 @@ export interface Agenda {
   scope: AgendaScope;
   description?: string;
   active?: boolean;
+  priorityConsultantIds?: string[];
   // Legacy UI compatibility
   category?: string;
 }
@@ -165,6 +168,7 @@ export interface RegularOfficeHour {
   availableDates: string[];
   description: string;
   agendaIds?: string[];
+  weekdays?: ProgramWeekday[];
   slots?: {
     id: string;
     date: string;
@@ -193,6 +197,7 @@ export interface Application {
   agenda: string;
   requestContent: string;
   rejectionReason?: string;
+  cancellationReason?: string;
   attachments?: string[];
   attachmentUrls?: string[];
   applicantName?: string;
@@ -207,9 +212,71 @@ export interface Application {
   createdByUid?: string;
   programId?: string; // 어느 사업에 속하는지
   duration?: number; // 세션 시간 (시간 단위)
+  reportPrefill?: {
+    topic?: string;
+    managerName?: string;
+    participants?: string[];
+    location?: string;
+  };
+  calendarSource?: {
+    type: "google-calendar";
+    sessionId: string;
+    rawTitle: string;
+    attendeeLabels: string[];
+    location?: string | null;
+    matchWarnings?: string[];
+  };
   createdAt: Date | string;
   updatedAt: Date | string;
   completedAt?: Date | string; // 완료 시점
+}
+
+export interface OfficeHourCalendarSession {
+  id: string;
+  source: "google-calendar";
+  sessionType: "irregular";
+  calendarId: string;
+  eventId: string;
+  sourceStatus: "active" | "cancelled";
+  rawTitle: string;
+  rawDescription?: string | null;
+  rawLocation?: string | null;
+  rawAttendeeEmails: string[];
+  attendeeLabels: string[];
+  sessionFormat?: SessionFormat;
+  parsedProgramName?: string | null;
+  parsedAgendaName?: string | null;
+  parsedCompanyName?: string | null;
+  programMatchStatus: "matched" | "unmatched" | "ambiguous";
+  programMatchSource?: "title" | "none";
+  agendaMatchStatus: "matched" | "unmatched" | "ambiguous";
+  agendaMatchSource?: "title" | "none";
+  companyMatchStatus: "matched" | "unmatched" | "ambiguous";
+  companyMatchSource?: "title" | "attendee" | "none";
+  programId?: string | null;
+  programName?: string | null;
+  agendaId?: string | null;
+  agendaName?: string | null;
+  companyId?: string | null;
+  companyName?: string | null;
+  companyProfileUid?: string | null;
+  consultantId?: string | null;
+  consultantName?: string | null;
+  consultantEmail?: string | null;
+  managerUid?: string | null;
+  managerName?: string | null;
+  managerEmail?: string | null;
+  scheduledDate: string;
+  scheduledTime: string;
+  scheduledStartAt: Date | string;
+  scheduledEndAt: Date | string;
+  duration: number;
+  matchWarnings?: string[];
+  manualReviewRequired?: boolean;
+  sourceCreatedAt?: Date | string;
+  sourceUpdatedAt?: Date | string;
+  lastSyncedAt?: Date | string;
+  deletedAt?: Date | string | null;
 }
 
 export interface FileItem {
@@ -228,6 +295,7 @@ export interface Consultant {
   organization?: string;
   secondaryEmail?: string;
   secondaryPhone?: string;
+  slackUserId?: string;
   fixedMeetingLink?: string;
   expertise: string[];
   bio: string;
@@ -242,18 +310,33 @@ export interface Consultant {
   rating?: number;
   avatarUrl?: string;
   joinedDate?: Date | string;
+  scope?: AgendaScope;
   agendaIds?: string[]; // 관리자가 매칭한 아젠다 ID 목록
   availability: ConsultantAvailability[];
+  monthlyAvailability?: ConsultantMonthlyAvailability;
+  monthlyAvailabilityMeta?: ConsultantMonthlyAvailabilityMeta;
 }
 
 export interface ConsultantAvailability {
   dayOfWeek: number; // 0 = Sunday, 1 = Monday, etc.
+  dateKey?: string; // YYYY-MM-DD, canonical per-date monthly schedule entry
   slots: {
     start: string; // "09:00"
     end: string;   // "10:00"
     available: boolean;
   }[];
 }
+
+export type ConsultantMonthlyAvailability = Record<string, ConsultantAvailability[]>;
+
+export type ConsultantMonthlyAvailabilityMeta = Record<
+  string,
+  {
+    status: "submitted";
+    submittedAt?: Date | string;
+    submittedByUid?: string;
+  }
+>;
 
 export interface UserWithPermissions {
   id: string;
@@ -280,9 +363,12 @@ export interface MessageTemplate {
   id: string;
   title: string;
   category: string;
+  channel?: "email" | "biztalk";
+  templateCase?: string;
   subject: string;
   content: string;
   variables: string[];
+  biztalkTemplateCode?: string;
   createdAt: Date;
   updatedAt: Date;
 }

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Plus, Send, Edit, Trash2, Copy, Mail, MessageSquare } from "lucide-react";
 import { Button } from "@/redesign/app/components/ui/button";
 import { Input } from "@/redesign/app/components/ui/input";
@@ -24,23 +24,228 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/redesign/app/components/ui/tabs";
 import { Checkbox } from "@/redesign/app/components/ui/checkbox";
 import { toast } from "sonner";
+import {
+  buildStageEmailPreview,
+  buildStageEmailTemplatePreview,
+  parseRecipientList,
+} from "@/redesign/app/lib/stage-email-templates";
+
+const variableLabelMap: Record<string, string> = {
+  companyName: "기업명",
+  consultantName: "컨설턴트명",
+  officeHourTypeLabel: "오피스아워 구분",
+  officeHourTitle: "오피스아워명",
+  programName: "사업명",
+  agendaName: "아젠다명",
+  scheduledDateTimeLabel: "진행 일정",
+  applicationScheduleLabel: "신청 일정",
+  registrationWindowLabel: "입력 등록 기간",
+  locationTypeLabel: "장소 유형",
+  detailLink: "상세 링크",
+  applicationLink: "신청 링크",
+  inputLink: "입력 링크",
+  meetingLink: "접속 링크",
+  reportLink: "보고서 등록 링크",
+  officeHourId: "오피스아워 ID",
+  arrangedScheduleId: "매칭 일정 ID",
+}
+
+function getVariableLabel(variable: string) {
+  return variableLabelMap[variable] ?? variable
+}
+
+const biztalkPlaceholderLabelMap: Record<string, string> = {
+  companyName: "기업명",
+  programName: "사업명",
+  agendaName: "주제명",
+  scheduledDateTimeLabel: "일시",
+  locationTypeLabel: "장소유형",
+  detailLink: "링크",
+  officeHourTypeLabel: "오피스아워구분",
+  officeHourId: "오피스아워ID",
+  arrangedScheduleId: "매칭일정ID",
+}
+
+function resolveBiztalkTemplateCode(template: MessageTemplate | null) {
+  return template?.biztalkTemplateCode?.trim() || ""
+}
+
+function convertTemplateContentToBiztalkPlaceholders(content: string) {
+  return content.replace(/\{\{\s*([a-zA-Z0-9]+)\s*\}\}/g, (_match, key: string) => {
+    const label = biztalkPlaceholderLabelMap[key]
+    return label ? `#{${label}}` : _match
+  })
+}
+
+function extractBiztalkPlaceholders(value: string) {
+  const matches = value.match(/#\{[^}]+\}/g) ?? []
+  return Array.from(new Set(matches))
+}
+
+function applyBiztalkPlaceholders(
+  value: string,
+  placeholderValues: Record<string, string>,
+) {
+  return value.replace(/#\{[^}]+\}/g, (placeholder) => {
+    const replacement = placeholderValues[placeholder]
+    return typeof replacement === "string" && replacement.length > 0 ? replacement : placeholder
+  })
+}
+
+function createBiztalkMessageId() {
+  return `msg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+}
+
+function delay(ms: number) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms)
+  })
+}
+
+function extractStageEmailPlaceholders(value: string) {
+  const matches = value.match(/\{\{\s*[a-zA-Z0-9]+\s*\}\}/g) ?? []
+  return Array.from(new Set(matches))
+}
+
+function applyStageEmailPlaceholders(
+  value: string,
+  placeholderValues: Record<string, string>,
+) {
+  return value.replace(/\{\{\s*([a-zA-Z0-9]+)\s*\}\}/g, (match, key: string) => {
+    const replacement = placeholderValues[key]
+    return typeof replacement === "string" && replacement.length > 0 ? replacement : match
+  })
+}
+
+function parseJsonObjectInput(value: string, fieldLabel: string) {
+  const normalized = value.trim()
+  if (!normalized) {
+    return {}
+  }
+
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(normalized)
+  } catch {
+    throw new Error(`${fieldLabel} JSON 형식이 올바르지 않습니다.`)
+  }
+
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error(`${fieldLabel}은 JSON 객체여야 합니다.`)
+  }
+
+  return parsed as Record<string, unknown>
+}
+
+const BIZTALK_TEMPLATE_PAYLOAD_METADATA: Record<
+  string,
+  {
+    title?: string
+    attach?: {
+      button: Array<{
+        name: string
+        type: string
+      }>
+    }
+  }
+> = {
+  officehour_001: {
+    title: "#{주제명} 일정 확정",
+    attach: {
+      button: [{ name: "채널 추가", type: "AC" }],
+    },
+  },
+  officehour_002: {
+    title: "#{주제명} 일정 리마인드",
+    attach: {
+      button: [{ name: "채널 추가", type: "AC" }],
+    },
+  },
+}
+
+const STAGE_EMAIL_FROM_ADDRESS = "no-reply@test.mysc.co.kr"
 
 interface AdminCommunicationProps {
   templates: MessageTemplate[];
   applications: Application[];
+  programNameById: Map<string, string>;
   onAddTemplate: (data: Omit<MessageTemplate, "id" | "createdAt" | "updatedAt">) => void;
   onUpdateTemplate: (id: string, data: Partial<MessageTemplate>) => void;
   onDeleteTemplate: (id: string) => void;
   onSendBulkMessage: (applicationIds: string[], templateId: string) => void;
+  onSendStageTestEmail: (payload: {
+    fromEmail: string;
+    replyTo?: string | null;
+    recipients: string[];
+    subject: string;
+    text: string;
+    html?: string;
+  }) => Promise<{
+    sentCount: number;
+  }>;
+  onSendBiztalkTestAlimtalk: (payload: {
+    recipient: string;
+    message: string;
+    msgIdx?: string;
+    title?: string;
+    tmpltCode?: string;
+    attach?: {
+      button: Array<{
+        name: string;
+        type: string;
+      }>;
+    };
+    dryRun?: boolean;
+  }) => Promise<{
+    ok: boolean;
+    [key: string]: unknown;
+  }>;
+  onQueryBiztalkAlimtalkResults: (payload: {
+    dryRun?: boolean;
+    method?: "GET" | "POST";
+    payload?: Record<string, unknown>;
+    query?: Record<string, string>;
+  }) => Promise<{
+    ok: boolean;
+    [key: string]: unknown;
+  }>;
+  onSendStageSlackDmTest: (payload: {
+    userId: string;
+    text: string;
+  }) => Promise<{
+    channel: string | null;
+    ts: string | null;
+  }>;
+  onSendStageSlackChannelAvailabilityTest: (payload: {
+    channelId: string;
+    monthKey: string;
+  }) => Promise<{
+    channel: string | null;
+    ts: string | null;
+    monthKey: string;
+    missingCount: number;
+    missingConsultants: Array<{
+      id: string;
+      name: string;
+      email: string;
+    }>;
+    skippedMissingScopeCount: number;
+  }>;
 }
 
 export function AdminCommunication({
   templates,
   applications,
+  programNameById,
   onAddTemplate,
   onUpdateTemplate,
   onDeleteTemplate,
   onSendBulkMessage,
+  onSendStageTestEmail,
+  onSendBiztalkTestAlimtalk,
+  onQueryBiztalkAlimtalkResults,
+  onSendStageSlackDmTest,
+  onSendStageSlackChannelAvailabilityTest,
 }: AdminCommunicationProps) {
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
@@ -49,6 +254,169 @@ export function AdminCommunication({
   const [selectedApplicationIds, setSelectedApplicationIds] = useState<string[]>([]);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>("");
   const [previewTemplate, setPreviewTemplate] = useState<MessageTemplate | null>(null);
+  const [selectedStageTemplateId, setSelectedStageTemplateId] = useState<string>("");
+  const [selectedStageBiztalkTemplateId, setSelectedStageBiztalkTemplateId] = useState<string>("");
+  const [selectedStageApplicationId, setSelectedStageApplicationId] = useState<string>("");
+  const [stageRecipientsText, setStageRecipientsText] = useState("");
+  const [stageReplyTo, setStageReplyTo] = useState("");
+  const [stageEmailPlaceholderValues, setStageEmailPlaceholderValues] = useState<Record<string, string>>({});
+  const [isStageSending, setIsStageSending] = useState(false);
+  const [stageBiztalkRecipient, setStageBiztalkRecipient] = useState("");
+  const [stageBiztalkMessage, setStageBiztalkMessage] = useState("");
+  const [stageBiztalkPlaceholderValues, setStageBiztalkPlaceholderValues] = useState<Record<string, string>>({});
+  const [isStageBiztalkSending, setIsStageBiztalkSending] = useState(false);
+  const [stageBiztalkResultMethod, setStageBiztalkResultMethod] = useState<"GET" | "POST">("GET");
+  const [stageBiztalkResultPayload, setStageBiztalkResultPayload] = useState("{}");
+  const [stageBiztalkResultQuery, setStageBiztalkResultQuery] = useState("{}");
+  const [stageBiztalkResultResponse, setStageBiztalkResultResponse] = useState("");
+  const [isStageBiztalkResultLoading, setIsStageBiztalkResultLoading] = useState(false);
+  const [stageSlackUserId, setStageSlackUserId] = useState("");
+  const [stageSlackMessage, setStageSlackMessage] = useState(
+    "오피스아워 일지 작성 Slack DM 타겟팅 테스트입니다."
+  );
+  const [isStageSlackSending, setIsStageSlackSending] = useState(false);
+  const [stageSlackChannelId, setStageSlackChannelId] = useState("C0B1WE3PVFC");
+  const [stageSlackMonthKey, setStageSlackMonthKey] = useState(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+  });
+  const [isStageSlackChannelSending, setIsStageSlackChannelSending] = useState(false);
+
+  const availableApplications = useMemo(
+    () => applications.filter((app) => app.status !== "cancelled" && app.status !== "completed"),
+    [applications],
+  );
+  const availableEmailTemplates = useMemo(
+    () => templates.filter((template) => template.channel === "email"),
+    [templates],
+  );
+  const availableBiztalkTemplates = useMemo(
+    () =>
+      templates.filter((template) => {
+        const code = template.biztalkTemplateCode?.trim() || ""
+        return code === "officehour_001" || code === "officehour_002"
+      }),
+    [templates],
+  );
+
+  useEffect(() => {
+    const firstTemplate = availableEmailTemplates[0];
+    const hasSelectedTemplate = availableEmailTemplates.some((template) => template.id === selectedStageTemplateId)
+    if ((!selectedStageTemplateId || !hasSelectedTemplate) && firstTemplate) {
+      setSelectedStageTemplateId(firstTemplate.id);
+    }
+  }, [availableEmailTemplates, selectedStageTemplateId]);
+
+  useEffect(() => {
+    const firstApplication = availableApplications[0];
+    const hasSelectedApplication = availableApplications.some(
+      (application) => application.id === selectedStageApplicationId,
+    )
+    if ((!selectedStageApplicationId || !hasSelectedApplication) && firstApplication) {
+      setSelectedStageApplicationId(firstApplication.id);
+    }
+  }, [availableApplications, selectedStageApplicationId]);
+
+  useEffect(() => {
+    const firstBiztalkTemplate = availableBiztalkTemplates[0];
+    if (!selectedStageBiztalkTemplateId && firstBiztalkTemplate) {
+      setSelectedStageBiztalkTemplateId(firstBiztalkTemplate.id);
+      setStageBiztalkMessage(convertTemplateContentToBiztalkPlaceholders(firstBiztalkTemplate.content));
+      setStageBiztalkPlaceholderValues({});
+    }
+  }, [availableBiztalkTemplates, selectedStageBiztalkTemplateId]);
+
+  const selectedStageTemplate = useMemo(
+    () => availableEmailTemplates.find((template) => template.id === selectedStageTemplateId) ?? null,
+    [availableEmailTemplates, selectedStageTemplateId],
+  );
+  const selectedStageApplication = useMemo(
+    () => availableApplications.find((application) => application.id === selectedStageApplicationId) ?? null,
+    [availableApplications, selectedStageApplicationId],
+  );
+  const selectedStageBiztalkTemplate = useMemo(
+    () => availableBiztalkTemplates.find((template) => template.id === selectedStageBiztalkTemplateId) ?? null,
+    [availableBiztalkTemplates, selectedStageBiztalkTemplateId],
+  );
+  const stagePreviewTemplate = useMemo(() => {
+    if (!selectedStageTemplate) {
+      return null;
+    }
+
+    return buildStageEmailTemplatePreview(selectedStageTemplate)
+  }, [selectedStageTemplate]);
+  const stageEmailDetectedPlaceholders = useMemo(
+    () => Array.from(new Set([
+      ...extractStageEmailPlaceholders(selectedStageTemplate?.subject ?? ""),
+      ...extractStageEmailPlaceholders(selectedStageTemplate?.content ?? ""),
+    ])),
+    [selectedStageTemplate],
+  )
+  const stagePreview = useMemo(() => {
+    if (!stagePreviewTemplate) {
+      return null
+    }
+
+    return {
+      ...stagePreviewTemplate,
+      subject: applyStageEmailPlaceholders(stagePreviewTemplate.subject, stageEmailPlaceholderValues),
+      text: applyStageEmailPlaceholders(stagePreviewTemplate.text, stageEmailPlaceholderValues),
+      html: applyStageEmailPlaceholders(stagePreviewTemplate.html, stageEmailPlaceholderValues),
+      variables: Object.fromEntries(
+        stageEmailDetectedPlaceholders.map((placeholder) => {
+          const key = placeholder.replace(/[{}]/g, "").trim()
+          return [key, stageEmailPlaceholderValues[key] ?? placeholder]
+        }),
+      ),
+    }
+  }, [stageEmailDetectedPlaceholders, stageEmailPlaceholderValues, stagePreviewTemplate]);
+
+  const selectedStageBiztalkTemplateCode = useMemo(
+    () => resolveBiztalkTemplateCode(selectedStageBiztalkTemplate),
+    [selectedStageBiztalkTemplate],
+  );
+  const selectedStageBiztalkPayloadMetadata = useMemo(
+    () => BIZTALK_TEMPLATE_PAYLOAD_METADATA[selectedStageBiztalkTemplateCode] ?? null,
+    [selectedStageBiztalkTemplateCode],
+  );
+  const stageBiztalkRawTitle = useMemo(
+    () => selectedStageBiztalkPayloadMetadata?.title?.trim() || "",
+    [selectedStageBiztalkPayloadMetadata],
+  )
+  const stageBiztalkTemplateDraft = useMemo(() => {
+    if (!selectedStageBiztalkTemplate) {
+      return ""
+    }
+
+    return convertTemplateContentToBiztalkPlaceholders(selectedStageBiztalkTemplate.content)
+  }, [selectedStageBiztalkTemplate]);
+  const stageBiztalkDetectedPlaceholders = useMemo(
+    () => Array.from(new Set([
+      ...extractBiztalkPlaceholders(stageBiztalkMessage),
+      ...extractBiztalkPlaceholders(stageBiztalkRawTitle),
+    ])),
+    [stageBiztalkMessage, stageBiztalkRawTitle],
+  )
+  const stageBiztalkResolvedMessage = useMemo(
+    () => applyBiztalkPlaceholders(stageBiztalkMessage.trim(), stageBiztalkPlaceholderValues),
+    [stageBiztalkMessage, stageBiztalkPlaceholderValues],
+  );
+  const stageBiztalkResolvedTitle = useMemo(
+    () => applyBiztalkPlaceholders(stageBiztalkRawTitle, stageBiztalkPlaceholderValues).trim(),
+    [stageBiztalkPlaceholderValues, stageBiztalkRawTitle],
+  )
+  const stageBiztalkResolvedAttach = useMemo(
+    () => selectedStageBiztalkPayloadMetadata?.attach,
+    [selectedStageBiztalkPayloadMetadata],
+  )
+
+  const handleStageBiztalkTemplateChange = (templateId: string) => {
+    setSelectedStageBiztalkTemplateId(templateId)
+    const nextTemplate = availableBiztalkTemplates.find((template) => template.id === templateId) ?? null
+    const nextDraft = nextTemplate ? convertTemplateContentToBiztalkPlaceholders(nextTemplate.content) : ""
+    setStageBiztalkMessage(nextDraft)
+    setStageBiztalkPlaceholderValues({})
+  }
 
   const handleCreateTemplate = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -59,6 +427,7 @@ export function AdminCommunication({
       category: formData.get("category") as MessageTemplate["category"],
       subject: formData.get("subject") as string,
       content: formData.get("content") as string,
+      biztalkTemplateCode: String(formData.get("biztalkTemplateCode") ?? "").trim(),
       variables: (formData.get("variables") as string)
         .split(",")
         .map((v) => v.trim())
@@ -81,6 +450,7 @@ export function AdminCommunication({
       category: formData.get("category") as MessageTemplate["category"],
       subject: formData.get("subject") as string,
       content: formData.get("content") as string,
+      biztalkTemplateCode: String(formData.get("biztalkTemplateCode") ?? "").trim(),
       variables: (formData.get("variables") as string)
         .split(",")
         .map((v) => v.trim())
@@ -104,6 +474,7 @@ export function AdminCommunication({
       category: template.category,
       subject: template.subject,
       content: template.content,
+      biztalkTemplateCode: template.biztalkTemplateCode ?? "",
       variables: template.variables,
     });
     toast.success("템플릿이 복사되었습니다");
@@ -124,6 +495,197 @@ export function AdminCommunication({
     setSelectedApplicationIds([]);
     setSelectedTemplateId("");
     toast.success(`${selectedApplicationIds.length}건의 메시지가 전송되었습니다`);
+  };
+
+  const handleStageEmailSend = async () => {
+    if (!stagePreview || !selectedStageTemplate) {
+      toast.error("미리보기 대상 템플릿을 선택해주세요");
+      return;
+    }
+
+    const recipients = parseRecipientList(stageRecipientsText);
+    if (recipients.length === 0) {
+      toast.error("받는 사람 이메일을 1개 이상 입력해주세요");
+      return;
+    }
+
+    setIsStageSending(true);
+    try {
+      const result = await onSendStageTestEmail({
+        fromEmail: STAGE_EMAIL_FROM_ADDRESS,
+        replyTo: stageReplyTo.trim() || null,
+        recipients,
+        subject: stagePreview.subject,
+        text: stagePreview.text,
+        html: stagePreview.html,
+      });
+      toast.success(`${result.sentCount}건의 stage 이메일을 발송했습니다`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "stage 이메일 발송에 실패했습니다");
+    } finally {
+      setIsStageSending(false);
+    }
+  };
+
+  const handleStageBiztalkSend = async () => {
+    if (!selectedStageBiztalkTemplate) {
+      toast.error("BizTalk 템플릿을 선택해주세요");
+      return;
+    }
+    if (!selectedStageBiztalkTemplateCode.trim()) {
+      toast.error("선택한 템플릿에 BizTalk 템플릿 코드가 없습니다");
+      return;
+    }
+    if (!stageBiztalkRecipient.trim()) {
+      toast.error("수신번호를 입력해주세요");
+      return;
+    }
+    if (!stageBiztalkResolvedMessage.trim()) {
+      toast.error("보낼 message 본문을 입력해주세요");
+      return;
+    }
+
+    const msgIdx = createBiztalkMessageId()
+    const resultQuery = { msgIdx }
+    setStageBiztalkResultMethod("GET")
+    setStageBiztalkResultQuery(JSON.stringify(resultQuery, null, 2))
+    setStageBiztalkResultPayload("{}")
+    setStageBiztalkResultResponse("")
+
+    setIsStageBiztalkSending(true);
+    try {
+      const result = await onSendBiztalkTestAlimtalk({
+        recipient: stageBiztalkRecipient.trim(),
+        message: stageBiztalkResolvedMessage,
+        msgIdx,
+        ...(stageBiztalkResolvedTitle ? { title: stageBiztalkResolvedTitle } : {}),
+        tmpltCode: selectedStageBiztalkTemplateCode.trim() || undefined,
+        ...(stageBiztalkResolvedAttach ? { attach: stageBiztalkResolvedAttach } : {}),
+        dryRun: false,
+      });
+      toast.success(`BizTalk 발송 요청 완료${result.ok ? "" : " (응답 확인 필요)"}`)
+      setIsStageBiztalkResultLoading(true)
+
+      let latestResult: Record<string, unknown> | null = null
+      for (let attempt = 0; attempt < 8; attempt += 1) {
+        const queryResult = await onQueryBiztalkAlimtalkResults({
+          method: "GET",
+          query: resultQuery,
+          payload: {},
+        })
+        latestResult = queryResult
+        setStageBiztalkResultResponse(JSON.stringify(queryResult, null, 2))
+
+        const responseItems = Array.isArray((queryResult as { upstreamBody?: { response?: unknown[] } }).upstreamBody?.response)
+          ? ((queryResult as { upstreamBody?: { response?: Array<Record<string, unknown>> } }).upstreamBody?.response ?? [])
+          : []
+        const matchedResult = responseItems.find((item) => String(item.msgIdx || "") === msgIdx)
+        if (matchedResult) {
+          const resultCode = String(matchedResult.resultCode || "")
+          if (resultCode === "1000") {
+            toast.success("BizTalk 최종 발송 성공")
+          } else {
+            toast.error(`BizTalk 최종 결과 실패 (${resultCode || "unknown"})`)
+          }
+          return
+        }
+
+        await delay(1200)
+      }
+
+      if (latestResult) {
+        setStageBiztalkResultResponse(JSON.stringify(latestResult, null, 2))
+      }
+      toast.message("BizTalk 결과가 아직 확정되지 않았습니다. 잠시 후 다시 확인해주세요.")
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "BizTalk 테스트 발송에 실패했습니다");
+    } finally {
+      setIsStageBiztalkSending(false);
+      setIsStageBiztalkResultLoading(false)
+    }
+  };
+
+  const handleStageBiztalkResultQuery = async () => {
+    let payload: Record<string, unknown>
+    let query: Record<string, string>
+
+    try {
+      payload = parseJsonObjectInput(stageBiztalkResultPayload, "결과조회 payload")
+      const rawQuery = parseJsonObjectInput(stageBiztalkResultQuery, "결과조회 query")
+      query = Object.fromEntries(
+        Object.entries(rawQuery).map(([key, value]) => [key, typeof value === "string" ? value : String(value)])
+      )
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "결과조회 입력값이 올바르지 않습니다")
+      return
+    }
+
+    setIsStageBiztalkResultLoading(true)
+    try {
+      const result = await onQueryBiztalkAlimtalkResults({
+        method: stageBiztalkResultMethod,
+        payload,
+        query,
+      })
+      setStageBiztalkResultResponse(JSON.stringify(result, null, 2))
+      toast.success("BizTalk 결과 조회를 완료했습니다")
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "BizTalk 결과 조회에 실패했습니다"
+      setStageBiztalkResultResponse(message)
+      toast.error(message)
+    } finally {
+      setIsStageBiztalkResultLoading(false)
+    }
+  };
+
+  const handleStageSlackDmSend = async () => {
+    if (!stageSlackUserId.trim()) {
+      toast.error("Slack User ID를 입력해주세요");
+      return;
+    }
+    if (!stageSlackMessage.trim()) {
+      toast.error("보낼 메시지를 입력해주세요");
+      return;
+    }
+
+    setIsStageSlackSending(true);
+    try {
+      const result = await onSendStageSlackDmTest({
+        userId: stageSlackUserId.trim(),
+        text: stageSlackMessage.trim(),
+      });
+      toast.success(`Slack DM 전송 완료${result.channel ? ` (${result.channel})` : ""}`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Slack DM 테스트 발송에 실패했습니다");
+    } finally {
+      setIsStageSlackSending(false);
+    }
+  };
+
+  const handleStageSlackChannelSend = async () => {
+    if (!stageSlackChannelId.trim()) {
+      toast.error("Slack Channel ID를 입력해주세요");
+      return;
+    }
+    if (!/^\d{4}-\d{2}$/u.test(stageSlackMonthKey.trim())) {
+      toast.error("YYYY-MM 형식의 월을 입력해주세요");
+      return;
+    }
+
+    setIsStageSlackChannelSending(true);
+    try {
+      const result = await onSendStageSlackChannelAvailabilityTest({
+        channelId: stageSlackChannelId.trim(),
+        monthKey: stageSlackMonthKey.trim(),
+      });
+      toast.success(
+        `Slack 채널 알림 전송 완료 (${result.monthKey}, ${result.missingCount}명)`
+      );
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Slack 채널 테스트 발송에 실패했습니다");
+    } finally {
+      setIsStageSlackChannelSending(false);
+    }
   };
 
   const toggleApplicationSelection = (id: string) => {
@@ -163,53 +725,37 @@ export function AdminCommunication({
   };
 
   return (
-    <div className="mx-auto max-w-[1600px] p-8">
+    <div className="mx-auto w-full max-w-[1600px] min-w-0 p-8">
       {/* Header */}
       <div className="mb-8">
         <div className="flex items-center justify-between mb-2">
           <div>
             <h1 className="text-2xl font-bold text-gray-900">커뮤니케이션 센터</h1>
             <p className="text-sm text-muted-foreground mt-1">
-              메시지 템플릿을 관리하고 일괄 메시지를 전송합니다
+              stage 발송 경로와 외부 메시지 연동을 테스트합니다
             </p>
           </div>
         </div>
       </div>
 
-      {/* Stats */}
-      <div className="grid grid-cols-4 gap-4 mb-6">
-        <div className="bg-white rounded-lg border p-4">
-          <div className="text-sm text-muted-foreground mb-1">전체 템플릿</div>
-          <div className="text-2xl font-bold">{templates.length}</div>
-        </div>
-        <div className="bg-white rounded-lg border p-4">
-          <div className="text-sm text-muted-foreground mb-1">확인 템플릿</div>
-          <div className="text-2xl font-bold text-blue-600">
-            {templates.filter((t) => t.category === "confirmation").length}
-          </div>
-        </div>
-        <div className="bg-white rounded-lg border p-4">
-          <div className="text-sm text-muted-foreground mb-1">리마인더 템플릿</div>
-          <div className="text-2xl font-bold text-purple-600">
-            {templates.filter((t) => t.category === "reminder").length}
-          </div>
-        </div>
-        <div className="bg-white rounded-lg border p-4">
-          <div className="text-sm text-muted-foreground mb-1">팔로우업 템플릿</div>
-          <div className="text-2xl font-bold text-green-600">
-            {templates.filter((t) => t.category === "followup").length}
-          </div>
-        </div>
-      </div>
-
-      <Tabs defaultValue="templates" className="space-y-6">
-        <TabsList>
-          <TabsTrigger value="templates">템플릿 관리</TabsTrigger>
-          <TabsTrigger value="bulk">일괄 메시지 전송</TabsTrigger>
+      <Tabs defaultValue="stage-biztalk" className="w-full min-w-0 space-y-6">
+        <TabsList className="grid h-auto w-full grid-cols-2 gap-2 p-2 md:grid-cols-2 xl:grid-cols-4">
+          <TabsTrigger value="stage-email" className="h-10 w-full px-3 text-center">
+            stage 이메일 테스트
+          </TabsTrigger>
+          <TabsTrigger value="stage-biztalk" className="h-10 w-full px-3 text-center">
+            stage BizTalk 테스트
+          </TabsTrigger>
+          <TabsTrigger value="stage-slack" className="h-10 w-full px-3 text-center">
+            stage Slack DM 테스트
+          </TabsTrigger>
+          <TabsTrigger value="stage-slack-channel" className="h-10 w-full px-3 text-center">
+            stage Slack 채널 테스트
+          </TabsTrigger>
         </TabsList>
 
         {/* Templates Tab */}
-        <TabsContent value="templates" className="space-y-4">
+        <TabsContent value="templates" className="w-full space-y-4">
           <div className="flex justify-end">
             <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
               <DialogTrigger asChild>
@@ -248,6 +794,17 @@ export function AdminCommunication({
                   <div>
                     <Label htmlFor="subject">제목</Label>
                     <Input id="subject" name="subject" required />
+                  </div>
+                  <div>
+                    <Label htmlFor="biztalkTemplateCode">BizTalk 템플릿 코드</Label>
+                    <Input
+                      id="biztalkTemplateCode"
+                      name="biztalkTemplateCode"
+                      placeholder="예: officehour_001"
+                    />
+                    <p className="text-xs text-muted-foreground mt-1">
+                      예: `officehour_001` 일정 확정, `officehour_002` 일정 리마인드, `officehour_003` 컨설턴트 요청사항 전달
+                    </p>
                   </div>
                   <div>
                     <Label htmlFor="content">내용</Label>
@@ -302,6 +859,11 @@ export function AdminCommunication({
                     <p className="text-sm text-muted-foreground mb-1">
                       <strong>제목:</strong> {template.subject}
                     </p>
+                    {resolveBiztalkTemplateCode(template) && (
+                      <p className="text-xs text-muted-foreground mb-2">
+                        <strong>BizTalk:</strong> {resolveBiztalkTemplateCode(template)}
+                      </p>
+                    )}
                     <p className="text-sm text-muted-foreground line-clamp-2">
                       {template.content}
                     </p>
@@ -344,11 +906,16 @@ export function AdminCommunication({
                 </div>
 
                 {template.variables.length > 0 && (
-                  <div className="flex items-center gap-2 text-xs">
+                  <div className="flex flex-wrap items-center gap-2 text-xs">
                     <span className="text-muted-foreground">사용 변수:</span>
                     {template.variables.map((variable, idx) => (
-                      <Badge key={idx} variant="outline" className="text-xs">
-                        {variable}
+                      <Badge
+                        key={idx}
+                        variant="outline"
+                        className="whitespace-nowrap text-xs"
+                        title={variable}
+                      >
+                        {getVariableLabel(variable)}
                       </Badge>
                     ))}
                   </div>
@@ -359,89 +926,530 @@ export function AdminCommunication({
         </TabsContent>
 
         {/* Bulk Send Tab */}
-        <TabsContent value="bulk" className="space-y-4">
-          <div className="bg-white rounded-lg border p-6">
-            <div className="mb-6">
+        <TabsContent value="bulk" className="w-full space-y-4">
+          <div className="space-y-6">
+            <div className="rounded-lg border bg-white p-6">
+              <h3 className="font-semibold mb-2">템플릿 선택</h3>
+              <p className="text-sm text-muted-foreground mb-4">
+                먼저 템플릿을 고르고, 아래에서 발송 대상을 선택하세요
+              </p>
+              <div className="grid gap-4 2xl:grid-cols-[minmax(0,420px)_minmax(0,1fr)]">
+                <div>
+                  <Select value={selectedTemplateId} onValueChange={setSelectedTemplateId}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="사용할 템플릿을 선택하세요" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {templates.map((template) => (
+                        <SelectItem key={template.id} value={template.id}>
+                          {template.title} ({getCategoryLabel(template.category)})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {selectedTemplateId ? (
+                  <div className="rounded-lg border bg-gray-50 p-4">
+                    {(() => {
+                      const template = templates.find((t) => t.id === selectedTemplateId);
+                      return template ? (
+                        <div>
+                          <p className="text-sm font-medium mb-1">미리보기</p>
+                          <p className="text-sm text-muted-foreground mb-2">
+                            <strong>제목:</strong> {template.subject}
+                          </p>
+                          <p className="text-sm text-muted-foreground whitespace-pre-wrap break-words">
+                            {template.content}
+                          </p>
+                        </div>
+                      ) : null;
+                    })()}
+                  </div>
+                ) : (
+                  <div className="rounded-lg border border-dashed bg-gray-50 p-4 text-sm text-muted-foreground">
+                    템플릿을 선택하면 제목과 본문 미리보기가 표시됩니다.
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="rounded-lg border bg-white p-6">
               <h3 className="font-semibold mb-2">신청 선택</h3>
               <p className="text-sm text-muted-foreground mb-4">
                 메시지를 보낼 신청을 선택하세요
               </p>
-              
-              <div className="space-y-2 max-h-96 overflow-y-auto">
-                {applications
-                  .filter((app) => app.status !== "cancelled" && app.status !== "completed")
-                  .map((app) => (
-                    <div
-                      key={app.id}
-                      className="flex items-center gap-3 p-3 border rounded-lg hover:bg-gray-50"
-                    >
-                      <Checkbox
-                        checked={selectedApplicationIds.includes(app.id)}
-                        onCheckedChange={() => toggleApplicationSelection(app.id)}
-                      />
-                      <div className="flex-1">
-                        <div className="font-medium text-sm">{app.officeHourTitle}</div>
-                        <div className="text-xs text-muted-foreground">
-                          {app.consultant} · {app.agenda}
-                        </div>
+
+              <div className="space-y-2 max-h-[36rem] overflow-y-auto pr-1">
+                {availableApplications.map((app) => (
+                  <div
+                    key={app.id}
+                    className="flex items-start gap-3 rounded-lg border p-3 transition-colors hover:bg-gray-50"
+                  >
+                    <Checkbox
+                      className="mt-0.5"
+                      checked={selectedApplicationIds.includes(app.id)}
+                      onCheckedChange={() => toggleApplicationSelection(app.id)}
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="font-medium text-sm">{app.officeHourTitle}</div>
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        <span className="break-words">
+                          {app.companyName ?? app.applicantName ?? "기업 미지정"}
+                        </span>
+                        {" · "}
+                        <span className="break-words">{app.consultant || "담당자 미지정"}</span>
+                        {" · "}
+                        <span className="break-words">{app.agenda || "아젠다 미지정"}</span>
                       </div>
-                      <Badge variant="outline">{app.status}</Badge>
                     </div>
-                  ))}
+                    <Badge variant="outline" className="shrink-0">
+                      {app.status}
+                    </Badge>
+                  </div>
+                ))}
               </div>
 
-              {selectedApplicationIds.length > 0 && (
-                <div className="mt-4 p-3 bg-blue-50 rounded-lg">
-                  <p className="text-sm text-blue-900">
-                    {selectedApplicationIds.length}개의 신청이 선택되었습니다
+              <div className="mt-4 flex flex-col gap-3 rounded-lg bg-blue-50 p-4 sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-sm text-blue-900">
+                  {selectedApplicationIds.length > 0
+                    ? `${selectedApplicationIds.length}개의 신청이 선택되었습니다`
+                    : "선택된 신청이 없습니다"}
+                </p>
+                <Button
+                  onClick={handleBulkSend}
+                  disabled={selectedApplicationIds.length === 0 || !selectedTemplateId}
+                  className="w-full sm:w-auto"
+                >
+                  <Send className="w-4 h-4 mr-2" />
+                  선택한 {selectedApplicationIds.length}건에 메시지 전송
+                </Button>
+              </div>
+            </div>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="stage-email" className="w-full min-w-0 space-y-4">
+          <div className="grid gap-6 lg:grid-cols-[420px_minmax(0,1fr)]">
+            <div className="space-y-4 rounded-lg border bg-white p-6">
+              <div>
+                <h3 className="font-semibold text-slate-900">발송 대상 데이터</h3>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  선택한 신청 정보로 placeholder가 자동 치환됩니다
+                </p>
+              </div>
+
+              <div>
+                <Label>템플릿</Label>
+                <Select value={selectedStageTemplateId} onValueChange={setSelectedStageTemplateId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="템플릿을 선택하세요" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {availableEmailTemplates.map((template) => (
+                      <SelectItem key={template.id} value={template.id}>
+                        {template.title}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div>
+                <Label>발신 이메일</Label>
+                <div className="rounded-lg border bg-slate-50 px-3 py-2 text-sm text-slate-900">
+                  {STAGE_EMAIL_FROM_ADDRESS}
+                </div>
+              </div>
+
+              <div>
+                <Label htmlFor="stage-reply-to">답장 받을 이메일</Label>
+                <Input
+                  id="stage-reply-to"
+                  placeholder="support@mysc.co.kr"
+                  value={stageReplyTo}
+                  onChange={(event) => setStageReplyTo(event.target.value)}
+                />
+              </div>
+
+              <div>
+                <Label htmlFor="stage-recipients">받는 사람</Label>
+                <Textarea
+                  id="stage-recipients"
+                  rows={5}
+                  placeholder={"test1@example.com\ntest2@example.com"}
+                  value={stageRecipientsText}
+                  onChange={(event) => setStageRecipientsText(event.target.value)}
+                />
+                <p className="mt-2 text-xs text-muted-foreground">
+                  쉼표 또는 줄바꿈으로 여러 명을 입력할 수 있으며, 실제 발송은 수신자별 별도 전송으로 처리됩니다.
+                </p>
+              </div>
+
+              {stageEmailDetectedPlaceholders.length > 0 ? (
+                <div className="rounded-lg border bg-slate-50 p-4">
+                  <p className="mb-3 text-sm font-medium text-slate-900">placeholder 값 입력</p>
+                  <div className="grid gap-3 md:grid-cols-2">
+                    {stageEmailDetectedPlaceholders.map((placeholder) => {
+                      const key = placeholder.replace(/[{}]/g, "").trim()
+                      return (
+                        <div key={placeholder}>
+                          <Label htmlFor={`stage-email-placeholder-${key}`} className="text-xs text-slate-500">
+                            {placeholder}
+                          </Label>
+                          <Input
+                            id={`stage-email-placeholder-${key}`}
+                            value={stageEmailPlaceholderValues[key] ?? ""}
+                            onChange={(event) =>
+                              setStageEmailPlaceholderValues((prev) => ({
+                                ...prev,
+                                [key]: event.target.value,
+                              }))
+                            }
+                            placeholder={`${placeholder} 값 입력`}
+                          />
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              ) : null}
+
+            </div>
+
+            <div className="space-y-4 rounded-lg border bg-white p-6">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h3 className="font-semibold text-slate-900">메일 미리보기</h3>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    현재 선택값 기준 최종 발송 제목/본문입니다
                   </p>
                 </div>
-              )}
-            </div>
+                <Button
+                  type="button"
+                  onClick={handleStageEmailSend}
+                  disabled={!stagePreview || isStageSending}
+                >
+                  <Mail className="mr-2 h-4 w-4" />
+                  {isStageSending ? "발송 중..." : "stage 이메일 발송"}
+                </Button>
+              </div>
 
-            <div className="mb-6">
-              <h3 className="font-semibold mb-2">템플릿 선택</h3>
-              <Select value={selectedTemplateId} onValueChange={setSelectedTemplateId}>
-                <SelectTrigger>
-                  <SelectValue placeholder="사용할 템플릿을 선택하세요" />
-                </SelectTrigger>
-                <SelectContent>
-                  {templates.map((template) => (
-                    <SelectItem key={template.id} value={template.id}>
-                      {template.title} ({getCategoryLabel(template.category)})
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <div className="rounded-lg border bg-slate-50 p-4">
+                <p className="mb-1 text-xs font-medium text-slate-500">제목</p>
+                <p className="text-sm font-medium text-slate-900">
+                  {stagePreview?.subject ?? "템플릿을 선택해주세요"}
+                </p>
+              </div>
 
-              {selectedTemplateId && (
-                <div className="mt-3 p-4 border rounded-lg bg-gray-50">
-                  {(() => {
-                    const template = templates.find((t) => t.id === selectedTemplateId);
-                    return template ? (
-                      <div>
-                        <p className="text-sm font-medium mb-1">미리보기:</p>
-                        <p className="text-sm text-muted-foreground mb-2">
-                          <strong>제목:</strong> {template.subject}
-                        </p>
-                        <p className="text-sm text-muted-foreground whitespace-pre-wrap">
-                          {template.content}
-                        </p>
-                      </div>
-                    ) : null;
-                  })()}
+              <div className="rounded-lg border p-5">
+                <p className="mb-3 text-xs font-medium text-slate-500">본문</p>
+                <div className="whitespace-pre-wrap text-sm leading-7 text-slate-800">
+                  {stagePreview?.text ?? "미리보기 없음"}
                 </div>
-              )}
+              </div>
+            </div>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="stage-biztalk" className="w-full min-w-0 space-y-4">
+          <div className="grid gap-6 lg:grid-cols-[420px_minmax(0,1fr)]">
+            <div className="max-h-[calc(100vh-220px)] space-y-4 overflow-y-auto rounded-lg border bg-white p-6">
+              <div>
+                <h3 className="font-semibold text-slate-900">BizTalk 발송 설정</h3>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  BizTalk 템플릿 목록에서 고른 템플릿명 기준으로 코드와 본문 초안이 함께 매핑됩니다
+                </p>
+              </div>
+
+              <div>
+                <Label>템플릿</Label>
+                <Select value={selectedStageBiztalkTemplateId} onValueChange={handleStageBiztalkTemplateChange}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="템플릿을 선택하세요" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {availableBiztalkTemplates.length === 0 ? (
+                      <div className="px-3 py-2 text-sm text-muted-foreground">
+                        등록된 BizTalk 템플릿이 없습니다
+                      </div>
+                    ) : null}
+                    {availableBiztalkTemplates.map((template) => (
+                      <SelectItem key={template.id} value={template.id}>
+                        {template.title}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="mt-2 text-xs text-muted-foreground">
+                  `biztalkTemplateCode`가 등록된 템플릿만 노출합니다.
+                </p>
+              </div>
+
+              <div>
+                <Label htmlFor="stage-biztalk-recipient">수신번호</Label>
+                <Input
+                  id="stage-biztalk-recipient"
+                  placeholder="01012345678"
+                  value={stageBiztalkRecipient}
+                  onChange={(event) => setStageBiztalkRecipient(event.target.value)}
+                />
+                <p className="mt-2 text-xs text-muted-foreground">
+                  이 값은 요청 payload에 직접 들어갑니다. `allowlist_only` 정책이면 허용 번호여야 실제 발송됩니다.
+                </p>
+              </div>
+
+              <div>
+                <Label>템플릿 코드</Label>
+                <div className="rounded-lg border bg-slate-50 px-3 py-2 text-sm text-slate-900">
+                  {selectedStageBiztalkTemplateCode || "매핑된 템플릿 코드 없음"}
+                </div>
+                <p className="mt-2 text-xs text-muted-foreground">
+                  템플릿 선택값에 따라 자동으로 매핑됩니다.
+                </p>
+              </div>
+
+              {stageBiztalkDetectedPlaceholders.length > 0 ? (
+                <div>
+                  <Label>placeholder 값 입력</Label>
+                  <div className="mt-2 grid gap-3 md:grid-cols-2">
+                    {stageBiztalkDetectedPlaceholders.map((placeholder) => (
+                      <div key={placeholder}>
+                        <Label htmlFor={`biztalk-placeholder-${placeholder}`} className="text-xs text-slate-500">
+                          {placeholder}
+                        </Label>
+                        <Input
+                          id={`biztalk-placeholder-${placeholder}`}
+                          value={stageBiztalkPlaceholderValues[placeholder] ?? ""}
+                          onChange={(event) =>
+                            setStageBiztalkPlaceholderValues((prev) => ({
+                              ...prev,
+                              [placeholder]: event.target.value,
+                            }))
+                          }
+                          placeholder={`${placeholder} 값 입력`}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+
             </div>
 
-            <Button
-              onClick={handleBulkSend}
-              disabled={selectedApplicationIds.length === 0 || !selectedTemplateId}
-              className="w-full"
-            >
-              <Send className="w-4 h-4 mr-2" />
-              선택한 {selectedApplicationIds.length}건에 메시지 전송
-            </Button>
+            <div className="space-y-4 rounded-lg border bg-white p-6">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h3 className="font-semibold text-slate-900">BizTalk 발송 미리보기</h3>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    현재 선택값 기준으로 `message`에 들어갈 최종 본문입니다
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  onClick={handleStageBiztalkSend}
+                  disabled={!stageBiztalkRecipient.trim() || !stageBiztalkResolvedMessage.trim() || isStageBiztalkSending}
+                >
+                  <MessageSquare className="mr-2 h-4 w-4" />
+                  {isStageBiztalkSending ? "발송 중..." : "BizTalk 발송"}
+                </Button>
+              </div>
+
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="rounded-lg border bg-slate-50 p-4">
+                  <p className="mb-1 text-xs font-medium text-slate-500">수신번호</p>
+                  <p className="text-sm font-medium text-slate-900">
+                    {stageBiztalkRecipient.trim() || "수신번호를 입력해주세요"}
+                  </p>
+                </div>
+                <div className="rounded-lg border bg-slate-50 p-4">
+                  <p className="mb-1 text-xs font-medium text-slate-500">템플릿 코드</p>
+                  <p className="text-sm font-medium text-slate-900">
+                    {selectedStageBiztalkTemplateCode || "매핑된 템플릿 코드 없음"}
+                  </p>
+                </div>
+              </div>
+
+              <div className="rounded-lg border p-5">
+                <p className="mb-3 text-xs font-medium text-slate-500">message 본문</p>
+                <div className="whitespace-pre-wrap text-sm leading-7 text-slate-800">
+                  {stageBiztalkResolvedMessage || "미리보기 없음"}
+                </div>
+                <p className="mt-2 text-xs text-muted-foreground">
+                  템플릿 원문은 고정이며, placeholder 입력값에 따라 최종 발송 본문만 바뀝니다.
+                </p>
+              </div>
+
+              <div className="rounded-lg border border-dashed p-5">
+                <div>
+                  <h4 className="font-semibold text-slate-900">BizTalk 결과 응답</h4>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    발송 직후 `/v2/kko/getResultAll` 결과를 자동 조회해 아래에 표시합니다.
+                  </p>
+                </div>
+
+                <div className="mt-4 rounded-lg border bg-slate-50 p-4">
+                  <p className="mb-2 text-xs font-medium text-slate-500">결과 조회 응답</p>
+                  <pre className="whitespace-pre-wrap break-all text-xs leading-6 text-slate-800">
+                    {stageBiztalkResultResponse
+                      || (isStageBiztalkResultLoading ? "자동 조회 중..." : "아직 발송하지 않았습니다")}
+                  </pre>
+                </div>
+              </div>
+            </div>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="stage-slack" className="w-full min-w-0 space-y-4">
+          <div className="grid gap-6 lg:grid-cols-[420px_minmax(0,1fr)]">
+            <div className="space-y-4 rounded-lg border bg-white p-6">
+              <div>
+                <h3 className="font-semibold text-slate-900">Slack DM 대상</h3>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  같은 워크스페이스 사용자의 Slack User ID로 직접 DM을 보냅니다
+                </p>
+              </div>
+
+              <div>
+                <Label htmlFor="stage-slack-user-id">Slack User ID</Label>
+                <Input
+                  id="stage-slack-user-id"
+                  placeholder="U0ABVB219AB"
+                  value={stageSlackUserId}
+                  onChange={(event) => setStageSlackUserId(event.target.value)}
+                />
+                <p className="mt-2 text-xs text-muted-foreground">
+                  프로필 메뉴의 Copy member ID로 확인한 U... 값을 입력하세요.
+                </p>
+              </div>
+
+              <div>
+                <Label htmlFor="stage-slack-message">메시지</Label>
+                <Textarea
+                  id="stage-slack-message"
+                  rows={8}
+                  placeholder="Slack DM 테스트 메시지"
+                  value={stageSlackMessage}
+                  onChange={(event) => setStageSlackMessage(event.target.value)}
+                />
+              </div>
+            </div>
+
+            <div className="space-y-4 rounded-lg border bg-white p-6">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h3 className="font-semibold text-slate-900">발송 미리보기</h3>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Slack DM 타겟팅이 되는지 최소 구성으로 확인합니다
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  onClick={handleStageSlackDmSend}
+                  disabled={!stageSlackUserId.trim() || !stageSlackMessage.trim() || isStageSlackSending}
+                >
+                  <MessageSquare className="mr-2 h-4 w-4" />
+                  {isStageSlackSending ? "발송 중..." : "stage Slack DM 발송"}
+                </Button>
+              </div>
+
+              <div className="rounded-lg border bg-slate-50 p-4">
+                <p className="mb-1 text-xs font-medium text-slate-500">대상</p>
+                <p className="text-sm font-medium text-slate-900">
+                  {stageSlackUserId.trim() || "Slack User ID를 입력해주세요"}
+                </p>
+              </div>
+
+              <div className="rounded-lg border p-5">
+                <p className="mb-3 text-xs font-medium text-slate-500">본문</p>
+                <div className="whitespace-pre-wrap text-sm leading-7 text-slate-800">
+                  {stageSlackMessage.trim() || "메시지를 입력해주세요"}
+                </div>
+              </div>
+            </div>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="stage-slack-channel" className="w-full min-w-0 space-y-4">
+          <div className="grid gap-6 lg:grid-cols-[420px_minmax(0,1fr)]">
+            <div className="space-y-4 rounded-lg border bg-white p-6">
+              <div>
+                <h3 className="font-semibold text-slate-900">Slack 채널 대상</h3>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  해당 월에 가능시간을 제출하지 않은 활성 내부 컨설턴트의 이메일 목록을 채널로 보냅니다
+                </p>
+              </div>
+
+              <div>
+                <Label htmlFor="stage-slack-channel-id">Slack Channel ID</Label>
+                <Input
+                  id="stage-slack-channel-id"
+                  placeholder="C0123456789"
+                  value={stageSlackChannelId}
+                  onChange={(event) => setStageSlackChannelId(event.target.value)}
+                />
+                <p className="mt-2 text-xs text-muted-foreground">
+                  채널 상세 정보의 Copy channel ID로 확인한 C... 또는 G... 값을 입력하세요.
+                </p>
+              </div>
+
+              <div>
+                <Label htmlFor="stage-slack-month-key">대상 월</Label>
+                <Input
+                  id="stage-slack-month-key"
+                  placeholder="2026-05"
+                  value={stageSlackMonthKey}
+                  onChange={(event) => setStageSlackMonthKey(event.target.value)}
+                />
+                <p className="mt-2 text-xs text-muted-foreground">
+                  `monthlyAvailabilityMeta` 기준으로 미제출자를 계산합니다.
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-4 rounded-lg border bg-white p-6">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h3 className="font-semibold text-slate-900">발송 미리보기</h3>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Firestore에서 계산한 결과를 그대로 Slack 채널에 보냅니다
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  onClick={handleStageSlackChannelSend}
+                  disabled={
+                    !stageSlackChannelId.trim() ||
+                    !stageSlackMonthKey.trim() ||
+                    isStageSlackChannelSending
+                  }
+                >
+                  <MessageSquare className="mr-2 h-4 w-4" />
+                  {isStageSlackChannelSending ? "발송 중..." : "stage Slack 채널 발송"}
+                </Button>
+              </div>
+
+              <div className="rounded-lg border bg-slate-50 p-4">
+                <p className="mb-1 text-xs font-medium text-slate-500">대상 채널</p>
+                <p className="text-sm font-medium text-slate-900">
+                  {stageSlackChannelId.trim() || "Slack Channel ID를 입력해주세요"}
+                </p>
+              </div>
+
+              <div className="rounded-lg border bg-slate-50 p-4">
+                <p className="mb-1 text-xs font-medium text-slate-500">대상 월</p>
+                <p className="text-sm font-medium text-slate-900">
+                  {stageSlackMonthKey.trim() || "YYYY-MM 형식으로 입력해주세요"}
+                </p>
+              </div>
+
+              <div className="rounded-lg border p-5">
+                <p className="mb-3 text-xs font-medium text-slate-500">전송 내용</p>
+                <div className="whitespace-pre-wrap text-sm leading-7 text-slate-800">
+                  {`[stage] ${stageSlackMonthKey.trim() || "YYYY-MM"} 가능시간 미제출 내부 컨설턴트 집계 결과를 채널로 전송합니다.`}
+                </div>
+              </div>
+            </div>
           </div>
         </TabsContent>
       </Tabs>
@@ -485,6 +1493,15 @@ export function AdminCommunication({
                   name="subject"
                   defaultValue={selectedTemplate.subject}
                   required
+                />
+              </div>
+              <div>
+                <Label htmlFor="edit-biztalk-template-code">BizTalk 템플릿 코드</Label>
+                <Input
+                  id="edit-biztalk-template-code"
+                  name="biztalkTemplateCode"
+                  defaultValue={selectedTemplate.biztalkTemplateCode ?? ""}
+                  placeholder="예: officehour_001"
                 />
               </div>
               <div>
@@ -546,8 +1563,13 @@ export function AdminCommunication({
                   <Label>사용 변수</Label>
                   <div className="flex flex-wrap gap-1 mt-1">
                     {previewTemplate.variables.map((variable, idx) => (
-                      <Badge key={idx} variant="outline">
-                        {variable}
+                      <Badge
+                        key={idx}
+                        variant="outline"
+                        className="whitespace-nowrap"
+                        title={variable}
+                      >
+                        {getVariableLabel(variable)}
                       </Badge>
                     ))}
                   </div>

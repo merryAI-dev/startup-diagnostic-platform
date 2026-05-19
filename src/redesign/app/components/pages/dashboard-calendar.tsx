@@ -16,6 +16,7 @@ import {
 } from "@/redesign/app/lib/types";
 import { Button } from "@/redesign/app/components/ui/button";
 import { StatusChip } from "@/redesign/app/components/status-chip";
+import { ApplicationChangeWindowBadge } from "@/redesign/app/components/application-change-window-badge";
 import { FileUpload } from "@/redesign/app/components/file-upload";
 import {
   AlertDialog,
@@ -36,6 +37,7 @@ import {
 } from "@/redesign/app/components/ui/dialog";
 import { Textarea } from "@/redesign/app/components/ui/textarea";
 import { Input } from "@/redesign/app/components/ui/input";
+import { Label } from "@/redesign/app/components/ui/label";
 import {
   format,
   startOfMonth,
@@ -55,13 +57,14 @@ import {
   parseLocalDateKey,
   parseLocalDateTimeKey,
 } from "@/redesign/app/lib/date-keys";
+import { isApplicationChangeWindowOpen } from "@/redesign/app/lib/application-change-window";
 
 interface DashboardCalendarProps {
   applications: Application[];
   applicationsWithoutAssignableConsultantIds?: string[];
   user: User;
   onNavigate: (page: string, id?: string) => void;
-  onCancelApplication: (id: string) => Promise<void> | void;
+  onCancelApplication: (id: string, reason: string) => Promise<void> | void;
   onUpdateCompanyApplication?: (
     id: string,
     payload: {
@@ -167,9 +170,10 @@ export function DashboardCalendar({
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState<Date | null>(new Date());
   const [cancelTarget, setCancelTarget] = useState<Application | null>(null);
+  const [cancelReason, setCancelReason] = useState("");
   const [cancelingApplication, setCancelingApplication] = useState(false);
   const [selectedApplicationId, setSelectedApplicationId] = useState<string | null>(null);
-  const [applicationListTab, setApplicationListTab] = useState<"pending" | "rejected">("pending");
+  const [applicationListTab, setApplicationListTab] = useState<"confirmed" | "closed">("confirmed");
   const [isEditingApplication, setIsEditingApplication] = useState(false);
   const [editingRequestSections, setEditingRequestSections] = useState<RequestSections>(
     createEmptyRequestSections()
@@ -217,18 +221,13 @@ export function DashboardCalendar({
   };
 
   // 대기중인 신청
-  const pendingApplications = userApplications.filter(
+  const confirmedApplications = userApplications.filter(
     (app) =>
-      (app.status === "pending" || app.status === "review")
+      app.status === "confirmed"
       && !hasSessionEnded(app)
   );
-  const rejectedApplications = userApplications.filter(
-    (app) =>
-      app.status === "rejected"
-      || (
-        (app.status === "pending" || app.status === "review")
-        && hasSessionEnded(app)
-      )
+  const closedApplications = userApplications.filter(
+    (app) => app.status === "rejected" || app.status === "cancelled",
   );
 
   // 캘린더 날짜 생성
@@ -290,7 +289,7 @@ export function DashboardCalendar({
   };
 
   const currentListApplications =
-    applicationListTab === "pending" ? pendingApplications : rejectedApplications;
+    applicationListTab === "confirmed" ? confirmedApplications : closedApplications;
 
   const openApplicationModal = (application: Application) => {
     setSelectedApplicationId(application.id);
@@ -321,18 +320,30 @@ export function DashboardCalendar({
 
   const canDeleteApplication =
     selectedApplication
-    && (selectedApplication.status === "pending" || selectedApplication.status === "review");
+    && selectedApplication.status === "confirmed"
+    && !hasSessionEnded(selectedApplication)
+    && isApplicationChangeWindowOpen(selectedApplication.createdAt);
+  const canShowDeleteApplicationAction =
+    Boolean(
+      selectedApplication
+      && selectedApplication.status === "confirmed"
+      && !hasSessionEnded(selectedApplication)
+    );
+  const isDeleteApplicationDisabledByExpiredWindow =
+    Boolean(
+      selectedApplication
+      && selectedApplication.status === "confirmed"
+      && !hasSessionEnded(selectedApplication)
+      && !isApplicationChangeWindowOpen(selectedApplication.createdAt)
+    );
   const canEditApplication =
     Boolean(
       selectedApplication
       && user.role === "user"
       && onUpdateCompanyApplication
       && !hasSessionEnded(selectedApplication)
-      && (
-        selectedApplication.status === "pending" ||
-        selectedApplication.status === "review" ||
-        selectedApplication.status === "confirmed"
-      )
+      && selectedApplication.status === "confirmed"
+      && isApplicationChangeWindowOpen(selectedApplication.createdAt)
     );
 
   const selectedApplicationAttachments = useMemo(() => {
@@ -368,7 +379,7 @@ export function DashboardCalendar({
     [selectedApplication?.requestContent]
   );
 
-  const listTabButtonClass = (tab: "pending" | "rejected") =>
+  const listTabButtonClass = (tab: "confirmed" | "closed") =>
     `group relative flex flex-1 items-center justify-center gap-2 border-b-2 px-2 py-3 text-sm font-semibold whitespace-nowrap transition ${
       applicationListTab === tab
         ? "border-slate-900 text-slate-900"
@@ -459,34 +470,34 @@ export function DashboardCalendar({
                 <div className="flex items-center gap-4">
                 <button
                   type="button"
-                  className={listTabButtonClass("pending")}
-                  onClick={() => setApplicationListTab("pending")}
+                  className={listTabButtonClass("confirmed")}
+                  onClick={() => setApplicationListTab("confirmed")}
                 >
-                  <span>대기중</span>
+                  <span>확정</span>
                   <span
                     className={`rounded-full px-1.5 py-0.5 text-[11px] leading-none transition ${
-                      applicationListTab === "pending"
+                      applicationListTab === "confirmed"
                         ? "bg-slate-900 text-white"
                         : "bg-slate-100 text-slate-500 group-hover:bg-slate-200"
                     }`}
                   >
-                    {pendingApplications.length}
+                    {confirmedApplications.length}
                   </span>
                 </button>
                 <button
                   type="button"
-                  className={listTabButtonClass("rejected")}
-                  onClick={() => setApplicationListTab("rejected")}
+                  className={listTabButtonClass("closed")}
+                  onClick={() => setApplicationListTab("closed")}
                 >
-                  <span>거절됨</span>
+                  <span>취소/거절</span>
                   <span
                     className={`rounded-full px-1.5 py-0.5 text-[11px] leading-none transition ${
-                      applicationListTab === "rejected"
+                      applicationListTab === "closed"
                         ? "bg-slate-900 text-white"
                         : "bg-slate-100 text-slate-500 group-hover:bg-slate-200"
                     }`}
                   >
-                    {rejectedApplications.length}
+                    {closedApplications.length}
                   </span>
                 </button>
                 </div>
@@ -523,15 +534,25 @@ export function DashboardCalendar({
                           {metaLine}
                         </p>
                       ) : null}
-                      {applicationListTab === "pending" && applicationsWithoutAssignableConsultantIdSet.has(app.id) ? (
+                      {applicationListTab === "confirmed" && applicationsWithoutAssignableConsultantIdSet.has(app.id) ? (
                         <p className="mt-1 line-clamp-2 text-[11px] text-amber-600">
                           현재 수락 가능한 컨설턴트가 없습니다. 일정조정과 관련하여 관리자에게 문의해주세요.
                         </p>
                       ) : null}
-                      {applicationListTab === "rejected" ? (
-                        <p className="mt-1 line-clamp-2 text-[11px] text-rose-600">
-                          거절 사유: {app.rejectionReason?.trim() || "사유가 등록되지 않았습니다."}
-                        </p>
+                      {applicationListTab === "closed" ? (
+                        app.status === "rejected" && app.rejectionReason ? (
+                          <p className="mt-1 line-clamp-2 text-[11px] text-rose-600">
+                            거절 사유: {app.rejectionReason}
+                          </p>
+                        ) : app.status === "rejected" ? (
+                          <p className="mt-1 line-clamp-2 text-[11px] text-rose-600">
+                            거절된 신청입니다.
+                          </p>
+                        ) : (
+                          <p className="mt-1 line-clamp-2 text-[11px] text-slate-500">
+                            취소된 신청입니다.
+                          </p>
+                        )
                       ) : (
                         <div className="mt-2 flex justify-end">
                           <button
@@ -542,7 +563,7 @@ export function DashboardCalendar({
                               setCancelTarget(app);
                             }}
                           >
-                            신청 삭제
+                            신청 취소
                           </button>
                         </div>
                       )}
@@ -552,9 +573,9 @@ export function DashboardCalendar({
               </div>
             ) : (
               <div className="flex min-h-0 flex-1 items-center justify-center rounded-xl border border-dashed border-slate-200 bg-slate-50 px-4 py-6 text-center text-xs text-slate-500">
-                {applicationListTab === "pending"
-                  ? "대기중인 신청이 없습니다."
-                  : "거절된 신청이 없습니다."}
+                {applicationListTab === "confirmed"
+                  ? "확정된 신청이 없습니다."
+                  : "취소/거절된 신청이 없습니다."}
               </div>
             )}
           </div>
@@ -767,6 +788,7 @@ export function DashboardCalendar({
                         {getApplicationTypeLabel(selectedApplication)}
                       </span>
                       <StatusChip status={selectedApplication.status} size="sm" />
+                      <ApplicationChangeWindowBadge application={selectedApplication} />
                     </DialogDescription>
                   </div>
                   <div className="-mr-2 flex items-center justify-end gap-2 self-end">
@@ -796,17 +818,26 @@ export function DashboardCalendar({
                         {isEditingApplication ? "편집 취소" : "수정하기"}
                       </Button>
                     ) : null}
-                    {canDeleteApplication ? (
+                    {canShowDeleteApplicationAction ? (
+                      <div className="flex flex-col items-end gap-1">
                       <Button
                         size="sm"
                         className="bg-rose-600 text-white hover:bg-rose-700"
                         onClick={() => {
+                          if (isDeleteApplicationDisabledByExpiredWindow) return;
                           setCancelTarget(selectedApplication);
                         }}
+                        disabled={isDeleteApplicationDisabledByExpiredWindow}
                       >
                         <Trash2 className="mr-2 h-4 w-4" />
-                        신청 삭제
+                        신청 취소
                       </Button>
+                        {isDeleteApplicationDisabledByExpiredWindow ? (
+                          <p className="text-xs text-slate-500">
+                            신청 후 72시간 이후에는 취소가 불가능합니다.
+                          </p>
+                        ) : null}
+                      </div>
                     ) : null}
                   </div>
                 </div>
@@ -831,7 +862,7 @@ export function DashboardCalendar({
                     </p>
                     {isEditingApplication ? (
                       <p className="mt-2 text-[11px] text-slate-500">
-                        대기중 리스트에서는 신청 내용과 첨부 파일만 수정할 수 있습니다.
+                        확정 리스트에서는 신청 내용과 첨부 파일만 수정할 수 있습니다.
                       </p>
                     ) : null}
                   </div>
@@ -1034,38 +1065,55 @@ export function DashboardCalendar({
         open={Boolean(cancelTarget)}
         onOpenChange={(open) => {
           if (cancelingApplication) return;
-          if (!open) setCancelTarget(null);
+          if (!open) {
+            setCancelTarget(null);
+            setCancelReason("");
+          }
         }}
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>신청을 삭제하시겠습니까?</AlertDialogTitle>
+            <AlertDialogTitle>신청을 취소하시겠습니까?</AlertDialogTitle>
             <AlertDialogDescription>
-              신청을 삭제하면 신청 내역은 사라집니다.
+              신청을 취소하면 상태가 취소로 변경되며, 신청 이력은 유지됩니다.
             </AlertDialogDescription>
           </AlertDialogHeader>
+          <div className="space-y-2 px-1">
+            <Label htmlFor={`cancel-reason-${cancelTarget?.id ?? "application"}`}>
+              취소 사유
+            </Label>
+            <Textarea
+              id={`cancel-reason-${cancelTarget?.id ?? "application"}`}
+              value={cancelReason}
+              onChange={(event) => setCancelReason(event.target.value)}
+              placeholder="취소 사유를 입력해주세요"
+              className="min-h-[90px]"
+            />
+          </div>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={cancelingApplication}>취소</AlertDialogCancel>
             <Button
               type="button"
-              disabled={cancelingApplication}
+              disabled={cancelingApplication || cancelReason.trim().length === 0}
               loading={cancelingApplication}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
               onClick={async () => {
                 if (!cancelTarget || cancelingApplication) return;
+                if (cancelReason.trim().length === 0) return;
                 setCancelingApplication(true);
                 try {
-                  await Promise.resolve(onCancelApplication(cancelTarget.id));
+                  await Promise.resolve(onCancelApplication(cancelTarget.id, cancelReason.trim()));
                   if (selectedApplication?.id === cancelTarget.id) {
                     setSelectedApplicationId(null);
                   }
                   setCancelTarget(null);
+                  setCancelReason("");
                 } finally {
                   setCancelingApplication(false);
                 }
               }}
             >
-              삭제
+              취소 확정
             </Button>
           </AlertDialogFooter>
         </AlertDialogContent>

@@ -6,6 +6,7 @@ import { Textarea } from "@/redesign/app/components/ui/textarea";
 import { Label } from "@/redesign/app/components/ui/label";
 import { Input } from "@/redesign/app/components/ui/input";
 import { StatusChip } from "@/redesign/app/components/status-chip";
+import { ApplicationChangeWindowBadge } from "@/redesign/app/components/application-change-window-badge";
 import { Application, Message } from "@/redesign/app/lib/types";
 import { format } from "date-fns";
 import { ko } from "date-fns/locale";
@@ -27,6 +28,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/redesign/app/components/ui/alert-dialog";
+import { isApplicationChangeWindowOpen } from "@/redesign/app/lib/application-change-window";
 
 interface ApplicationDetailProps {
   application: Application;
@@ -34,7 +36,7 @@ interface ApplicationDetailProps {
   messages: Message[];
   onBack: () => void;
   onSendMessage: (content: string, files: FileItem[]) => void;
-  onCancelApplication: () => Promise<void> | void;
+  onCancelApplication: (reason: string) => Promise<void> | void;
   onRejectApplication?: (reason: string) => void;
   onUpdateRejectionReason?: (reason: string) => void;
   onUpdateCompanyApplication?: (payload: {
@@ -74,6 +76,7 @@ export function ApplicationDetail({
   const [messageFiles, setMessageFiles] = useState<FileItem[]>([]);
   const [showCancelDialog, setShowCancelDialog] = useState(false);
   const [cancelingApplication, setCancelingApplication] = useState(false);
+  const [cancelReason, setCancelReason] = useState("");
   const [showRejectDialog, setShowRejectDialog] = useState(false);
   const [rejectReason, setRejectReason] = useState("");
   const [showEditRejectDialog, setShowEditRejectDialog] = useState(false);
@@ -120,10 +123,17 @@ export function ApplicationDetail({
   })();
   const isPendingLike =
     application.status === "pending" || application.status === "review";
+  const isWithinChangeWindow = isApplicationChangeWindowOpen(application.createdAt);
+  const canShowCancelAction =
+    isCompanyUser &&
+    application.status === "confirmed" &&
+    !isSessionEnded;
+  const isCancelDisabledByExpiredWindow =
+    canShowCancelAction
+    && !isWithinChangeWindow;
   const canCancel =
-    isCompanyUser
-    && isPendingLike
-    && !isSessionEnded;
+    canShowCancelAction
+    && isWithinChangeWindow;
   const shouldShowConsultant = (consultant?: string) =>
     Boolean(consultant && consultant !== "담당자 배정 중");
   const isAssignedToCurrentConsultant = () => {
@@ -142,9 +152,9 @@ export function ApplicationDetail({
     && (!application.consultant || application.consultant === "담당자 배정 중");
   const canReject =
     isConsultantUser
-    && isPendingLike
-    && (isUnassigned || isAssignedToCurrentConsultant())
-    && Boolean(onRejectApplication);
+    && Boolean(onRejectApplication)
+    && ((isPendingLike && (isUnassigned || isAssignedToCurrentConsultant()))
+      || (application.status === "confirmed" && isAssignedToCurrentConsultant()));
   const canEditRejectReason =
     isConsultantUser
     && application.status === "rejected"
@@ -176,7 +186,8 @@ export function ApplicationDetail({
   const canEditCompanyApplication =
     isCompanyUser
     && !isSessionEnded
-    && (isPendingLike || application.status === "confirmed")
+    && application.status === "confirmed"
+    && isWithinChangeWindow
     && Boolean(onUpdateCompanyApplication);
   const [isEditingCompanyApplication, setIsEditingCompanyApplication] = useState(false);
   const [editingRequestContent, setEditingRequestContent] = useState(
@@ -234,10 +245,13 @@ export function ApplicationDetail({
 
   const handleCancelApplicationConfirm = async () => {
     if (cancelingApplication) return;
+    const reason = cancelReason.trim();
+    if (!reason) return;
     setCancelingApplication(true);
     try {
-      await Promise.resolve(onCancelApplication());
+      await Promise.resolve(onCancelApplication(reason));
       setShowCancelDialog(false);
+      setCancelReason("");
     } finally {
       setCancelingApplication(false);
     }
@@ -255,6 +269,7 @@ export function ApplicationDetail({
             <div className="flex items-center gap-2 mb-2">
               <h1>{application.officeHourTitle}</h1>
               <StatusChip status={application.status} />
+              <ApplicationChangeWindowBadge application={application} />
             </div>
             {shouldShowConsultant(application.consultant) && (
               <div className="flex items-center gap-2">
@@ -305,17 +320,26 @@ export function ApplicationDetail({
                 거절 사유 수정
               </Button>
             )}
-            {canCancel && (
+            {canShowCancelAction && (
               <Button
                 variant="outline"
-                onClick={() => setShowCancelDialog(true)}
+                onClick={() => {
+                  if (isCancelDisabledByExpiredWindow) return;
+                  setShowCancelDialog(true);
+                }}
+                disabled={isCancelDisabledByExpiredWindow}
               >
                 <XCircle className="w-4 h-4 mr-2" />
-                신청 삭제
+                신청 취소
               </Button>
             )}
           </div>
         </div>
+        {isCancelDisabledByExpiredWindow ? (
+          <p className="mt-2 text-sm text-muted-foreground">
+            신청 후 72시간 이후에는 취소가 불가능합니다.
+          </p>
+        ) : null}
       </div>
 
       {showNoAssignableConsultantNotice && isCompanyUser && isPendingLike ? (
@@ -349,7 +373,7 @@ export function ApplicationDetail({
                   </div>
                 </div>
                 <p className="text-xs text-amber-700">
-                  일정이 바뀌면 다시 수락 대기 상태로 조정됩니다.
+                  일정이 바뀌면 배정 가능한 컨설턴트 기준으로 즉시 다시 배정됩니다.
                 </p>
               </div>
             ) : (
@@ -755,25 +779,38 @@ export function ApplicationDetail({
         onOpenChange={(open) => {
           if (cancelingApplication) return;
           setShowCancelDialog(open);
+          if (!open) {
+            setCancelReason("");
+          }
         }}
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>신청을 삭제하시겠습니까?</AlertDialogTitle>
+            <AlertDialogTitle>신청을 취소하시겠습니까?</AlertDialogTitle>
             <AlertDialogDescription>
-              이 작업은 되돌릴 수 없습니다. 삭제하면 신청 내역은 사라집니다.
+              신청을 취소하면 상태가 취소로 변경되며, 신청 이력은 유지됩니다.
             </AlertDialogDescription>
+            <div className="space-y-2 mt-2">
+              <Label htmlFor="cancel-reason">취소 사유</Label>
+              <Textarea
+                id="cancel-reason"
+                value={cancelReason}
+                onChange={(e) => setCancelReason(e.target.value)}
+                placeholder="취소 사유를 입력해주세요"
+                className="min-h-[90px]"
+              />
+            </div>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={cancelingApplication}>취소</AlertDialogCancel>
             <Button
               type="button"
               onClick={handleCancelApplicationConfirm}
-              disabled={cancelingApplication}
+              disabled={cancelingApplication || cancelReason.trim().length === 0}
               loading={cancelingApplication}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
-              삭제
+              취소 확정
             </Button>
           </AlertDialogFooter>
         </AlertDialogContent>

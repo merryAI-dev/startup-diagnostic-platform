@@ -36,13 +36,16 @@ import {
   CommandItem,
   CommandList,
 } from "@/redesign/app/components/ui/command";
-import { AlertCircle, Check, ChevronsUpDown, Clock, Download, Eye, FileText, Loader2, Mail, X } from "lucide-react";
+import { AlertCircle, Check, ChevronsUpDown, Clock, Download, Eye, FileText, Loader2, Mail, RotateCw, X } from "lucide-react";
 import { addDays, format, differenceInDays } from "date-fns";
 import { ko } from "date-fns/locale";
 import type { DateRange } from "react-day-picker";
 import { storage as firebaseStorage } from "@/redesign/app/lib/firebase";
 import { toast } from "sonner";
-import { parseLocalDateTimeKey } from "@/redesign/app/lib/date-keys";
+import {
+  canWriteApplicationReport,
+  getApplicationSessionTransitionTime,
+} from "@/redesign/app/lib/application-report-eligibility";
 
 const EXCEL_CELL_SAFE_TEXT_LIMIT = 30000;
 
@@ -233,6 +236,9 @@ const resolveManualReportApplicationType = (
   return "irregular";
 };
 
+const isSyntheticReportApplicationId = (applicationId: string) =>
+  applicationId.startsWith("manual-") || applicationId.startsWith("calendar-session-");
+
 const getApplicationTypeLabel = (type?: OfficeHourType) => {
   if (type === "regular") return "정기";
   if (type === "mentoring") return "멘토링&사후관리";
@@ -259,6 +265,19 @@ const getManualApplicationAgenda = (type: OfficeHourType, topic?: string) => {
   return type === "mentoring" ? "멘토링&사후관리" : "비정기 오피스아워";
 };
 
+const resolveDisplayedDurationHours = (
+  application: Pick<Application, "duration">,
+  report?: Pick<OfficeHourReport, "duration"> | null,
+) => {
+  if (typeof report?.duration === "number" && Number.isFinite(report.duration)) {
+    return report.duration;
+  }
+  if (typeof application.duration === "number" && Number.isFinite(application.duration)) {
+    return application.duration;
+  }
+  return null;
+};
+
 interface PendingReportsDashboardProps {
   applications: Application[];
   reports: OfficeHourReport[];
@@ -268,7 +287,9 @@ interface PendingReportsDashboardProps {
   currentUser: User;
   currentConsultantId?: string | null;
   currentConsultantName?: string | null;
+  refreshingSources?: boolean;
   onCreateReport: (applicationId: string) => void;
+  onRefreshSources?: () => Promise<void>;
   onEditReport: (report: OfficeHourReport) => void;
   onDeleteReport: (report: OfficeHourReport) => void;
 }
@@ -279,6 +300,7 @@ interface PendingReportItem {
   isOverdue: boolean;
   daysLeft: number;
   overdueDays: number;
+  canWrite: boolean;
   programName: string;
   programColor: string;
 }
@@ -295,6 +317,8 @@ type ReportRow = {
   report: OfficeHourReport | null;
   dueLabel: string;
   dueOverdue: boolean;
+  canCreateReport: boolean;
+  createDisabledReason?: string;
 };
 
 type EmailDraft = {
@@ -318,7 +342,10 @@ export function PendingReportsDashboard({
   currentUser,
   currentConsultantId,
   currentConsultantName,
+  refreshingSources = false,
   onCreateReport,
+  onEditReport,
+  onRefreshSources,
 }: PendingReportsDashboardProps) {
   const PAGE_SIZE = 10;
   const isConsultantUser = currentUser.role === "consultant";
@@ -334,7 +361,7 @@ export function PendingReportsDashboard({
   const [programFilter, setProgramFilter] = useState<string>("all");
   const [reportPage, setReportPage] = useState(1);
   const [selectedReportItem, setSelectedReportItem] = useState<{
-    report: OfficeHourReport;
+    report: OfficeHourReport | null;
     application: Application;
     programName: string;
     programColor: string;
@@ -676,48 +703,28 @@ export function PendingReportsDashboard({
     return false;
   };
 
-  const getSessionEndTime = (app: Application) => {
-    const durationHours = app.duration ?? 1;
-
-    if (app.scheduledDate && app.scheduledTime) {
-      const start = parseLocalDateTimeKey(app.scheduledDate, app.scheduledTime);
-      if (start) {
-        return new Date(start.getTime() + durationHours * 60 * 60 * 1000);
-      }
-    }
-
-    if (app.scheduledDate) {
-      const fallback = (() => {
-        const date = parseLocalDate(app.scheduledDate);
-        return date ? new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59) : null;
-      })();
-      if (fallback && !Number.isNaN(fallback.getTime())) {
-        return fallback;
-      }
-    }
-
-    return null;
-  };
-
   // 미작성 보고서 목록 계산
   const pendingReports = useMemo(() => {
+    const now = new Date();
     const eligibleApps = applications.filter(
       (app) =>
-        (app.status === "confirmed" || app.status === "completed")
-        && app.scheduledDate
+        app.scheduledDate
+        && (
+          app.status === "completed"
+          || (app.type === "irregular" && app.status !== "cancelled")
+        ),
     );
-
     const reportedAppIds = new Set(reports.map((r) => r.applicationId));
-    const now = new Date();
 
     const pending: PendingReportItem[] = eligibleApps
       .filter((app) => !reportedAppIds.has(app.id))
       .filter((app) => isForCurrentConsultant(app, null))
       .map((app) => {
-        const sessionEnd = getSessionEndTime(app);
-        const effectiveEnd = sessionEnd ?? parseLocalDate(app.scheduledDate!) ?? new Date();
-        const daysSince = differenceInDays(now, effectiveEnd);
-        const deadline = addDays(effectiveEnd, 3);
+        const transitionTime = getApplicationSessionTransitionTime(app);
+        const effectiveTime = transitionTime ?? parseLocalDate(app.scheduledDate!) ?? new Date();
+        const canWrite = canWriteApplicationReport(app, now);
+        const daysSince = differenceInDays(now, effectiveTime);
+        const deadline = addDays(effectiveTime, 3);
         const daysLeft = Math.max(0, differenceInDays(deadline, now));
         const overdueDays = Math.max(0, differenceInDays(now, deadline));
 
@@ -726,16 +733,13 @@ export function PendingReportsDashboard({
         return {
           application: app,
           daysSinceSession: daysSince,
-          isOverdue: now > deadline,
+          isOverdue: canWrite && now > deadline,
           daysLeft,
           overdueDays,
+          canWrite,
           programName: program?.name || "알 수 없음",
           programColor: program?.color || "#gray-500",
         };
-      })
-      .filter((item) => {
-        const sessionEnd = getSessionEndTime(item.application);
-        return sessionEnd ? now >= sessionEnd : true;
       })
       .sort((a, b) => b.daysSinceSession - a.daysSinceSession);
 
@@ -763,7 +767,7 @@ export function PendingReportsDashboard({
     return reports
       .map((report) => {
         const application = appMap.get(report.applicationId);
-        if (!application && report.applicationId.startsWith("manual-")) {
+        if (!application && isSyntheticReportApplicationId(report.applicationId)) {
           const manualType = resolveManualReportApplicationType(report);
           const syntheticApp: Application = {
             id: report.applicationId,
@@ -823,8 +827,14 @@ export function PendingReportsDashboard({
       consultantEmail: resolveConsultantEmail(item.application, null),
       statusLabel: "미작성",
       report: null,
-      dueLabel: item.isOverdue ? `${item.overdueDays}일 초과` : `D-${item.daysLeft}`,
+      dueLabel: item.canWrite
+        ? (item.isOverdue ? `${item.overdueDays}일 초과` : `D-${item.daysLeft}`)
+        : "진행 전",
       dueOverdue: item.isOverdue,
+      canCreateReport: item.canWrite,
+      createDisabledReason: item.canWrite
+        ? undefined
+        : "오피스아워 진행 시간이 지난 뒤에 일지를 작성할 수 있습니다.",
     }));
     submittedReports.forEach((item) => {
       rows.push({
@@ -839,6 +849,7 @@ export function PendingReportsDashboard({
         report: item.report,
         dueLabel: "작성됨",
         dueOverdue: false,
+        canCreateReport: false,
       });
     });
 
@@ -926,18 +937,41 @@ export function PendingReportsDashboard({
     [filteredReportRows],
   );
   const selectedReportContent = useMemo(
-    () => parseReportContent(selectedReportItem?.report.content),
-    [selectedReportItem?.report.content]
+    () => parseReportContent(selectedReportItem?.report?.content),
+    [selectedReportItem?.report?.content]
   );
+  const selectedPreviewTopic =
+    selectedReportItem?.report?.topic
+    || selectedReportItem?.application.reportPrefill?.topic
+    || selectedReportItem?.application.agenda
+    || selectedReportItem?.application.officeHourTitle
+    || "-";
+  const selectedPreviewManagerName =
+    selectedReportItem?.report?.managerName
+    || selectedReportItem?.application.reportPrefill?.managerName
+    || "-";
+  const selectedPreviewParticipants = (
+    selectedReportItem?.report?.participants
+    || selectedReportItem?.application.reportPrefill?.participants
+    || []
+  ).join(", ") || "-";
+  const selectedPreviewAgenda =
+    selectedReportContent.companyStatus
+    || selectedReportItem?.application.requestContent
+    || "-";
+  const selectedPreviewAdvisory = selectedReportContent.advisoryContent || "-";
+  const selectedPreviewFollowUp = selectedReportItem?.report?.followUp || "-";
   const selectedReportDetailTitle = useMemo(() => {
     if (!selectedReportItem) {
       return "오피스아워 일지 상세";
     }
 
     const reportType =
-      selectedReportItem.report.applicationType
+      selectedReportItem.report?.applicationType
       || selectedReportItem.application.type
-      || resolveManualReportApplicationType(selectedReportItem.report);
+      || (selectedReportItem.report
+        ? resolveManualReportApplicationType(selectedReportItem.report)
+        : selectedReportItem.application.type);
 
     if (reportType === "mentoring") {
       return "멘토링&사후관리 일지 상세";
@@ -962,11 +996,22 @@ export function PendingReportsDashboard({
   const pageTitle = isConsultantUser ? "오피스아워 일지" : "오피스아워 보고서";
   const pageDescription = isConsultantUser
     ? "배정된 세션의 오피스아워 일지 작성 현황을 확인합니다"
-    : "세션 완료 후 3일 이내 보고서 작성 현황을 관리합니다";
+    : "세션 시작 후 3일 이내 보고서 작성 현황을 관리합니다";
   const canCreateManualReport = currentUser.role === "consultant";
 
   const formatDurationHours = (value: number) =>
     Number.isInteger(value) ? `${value}시간` : `${value.toFixed(1)}시간`;
+
+  const handleRefreshSources = async () => {
+    if (!onRefreshSources || refreshingSources) return;
+    try {
+      await onRefreshSources();
+      toast.success("오피스아워 목록을 새로고침했습니다.");
+    } catch (error) {
+      console.error("pending report source refresh failed", error);
+      toast.error("오피스아워 목록 새로고침에 실패했습니다.");
+    }
+  };
 
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-gray-50">
@@ -1037,6 +1082,25 @@ export function PendingReportsDashboard({
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
               <h3 className="font-semibold text-gray-900">오피스아워 보고서 현황</h3>
               <div className="flex flex-wrap items-center gap-2 md:justify-end">
+                {onRefreshSources && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="bg-white"
+                    onClick={() => {
+                      void handleRefreshSources();
+                    }}
+                    disabled={refreshingSources}
+                  >
+                    {refreshingSources ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <RotateCw className="h-4 w-4" />
+                    )}
+                    목록 새로고침
+                  </Button>
+                )}
                 {isAdminUser && (
                   <Popover
                     open={companyFilterOpen}
@@ -1285,9 +1349,7 @@ export function PendingReportsDashboard({
                           )}
                         </TableCell>
                         <TableCell className="text-sm text-muted-foreground">
-                          {typeof row.report?.duration === "number" && Number.isFinite(row.report.duration)
-                            ? row.report.duration
-                            : "-"}
+                          {resolveDisplayedDurationHours(row.application, row.report) ?? "-"}
                         </TableCell>
                         <TableCell className="text-sm text-muted-foreground">
                           {row.report
@@ -1329,19 +1391,17 @@ export function PendingReportsDashboard({
                                 size="icon"
                                 variant="outline"
                                 className="h-8 w-8"
-                                disabled={!row.report}
                                 onClick={() => {
-                                  if (!row.report) return;
                                   setSelectedReportItem({
-                                    report: row.report,
+                                    report: row.report ?? null,
                                     application: row.application,
                                     programName: row.programName,
                                     programColor: row.programColor,
                                     programId: row.programId,
                                   });
                                 }}
-                                aria-label="상세 보기"
-                                title={row.report ? "상세 보기" : "작성된 일지가 없습니다"}
+                                aria-label="미리보기"
+                                title={row.report ? "상세 보기" : "작성 전 미리보기"}
                               >
                                 <Eye className="h-4 w-4" />
                               </Button>
@@ -1358,6 +1418,34 @@ export function PendingReportsDashboard({
                                 title={row.report ? "이미 작성된 일지입니다" : "리마인드 메일 전송"}
                               >
                                 <Mail className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          ) : isConsultantUser && row.type === "submitted" ? (
+                            <div className="flex justify-end gap-2">
+                              <Button
+                                size="icon"
+                                variant="outline"
+                                className="h-8 w-8"
+                                onClick={() =>
+                                  setSelectedReportItem({
+                                    report: row.report!,
+                                    application: row.application,
+                                    programName: row.programName,
+                                    programColor: row.programColor,
+                                    programId: row.programId,
+                                  })
+                                }
+                                aria-label="상세 보기"
+                                title="상세 보기"
+                              >
+                                <Eye className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => onEditReport(row.report!)}
+                              >
+                                수정
                               </Button>
                             </div>
                           ) : row.type === "submitted" ? (
@@ -1382,6 +1470,8 @@ export function PendingReportsDashboard({
                           ) : (
                             <Button
                               size="sm"
+                              disabled={!row.canCreateReport}
+                              title={row.createDisabledReason}
                               onClick={() => onCreateReport(row.application.id)}
                             >
                               작성
@@ -1418,6 +1508,11 @@ export function PendingReportsDashboard({
               </DialogHeader>
 
               <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
+                {!selectedReportItem.report && (
+                  <div className="mb-6 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                    작성된 일지가 없어 현재 세션 정보 기준으로 미리보기만 제공합니다.
+                  </div>
+                )}
                 <div className="grid grid-cols-1 gap-x-8 gap-y-5 border-b pb-6 text-sm md:grid-cols-2">
                   <div className="space-y-1.5">
                     <div className="text-xs font-medium text-slate-500">사업</div>
@@ -1426,7 +1521,7 @@ export function PendingReportsDashboard({
                   <div className="space-y-1.5">
                     <div className="text-xs font-medium text-slate-500">컨설턴트</div>
                     <div className="text-sm text-slate-900">
-                      {selectedReportItem.report.consultantName || selectedReportItem.application.consultant}
+                      {selectedReportItem.report?.consultantName || selectedReportItem.application.consultant}
                     </div>
                   </div>
                   <div className="space-y-1.5">
@@ -1450,19 +1545,26 @@ export function PendingReportsDashboard({
                   <div className="space-y-1.5">
                     <div className="text-xs font-medium text-slate-500">소요시간</div>
                     <div className="text-sm text-slate-900">
-                      {typeof selectedReportItem.report.duration === "number"
-                      && Number.isFinite(selectedReportItem.report.duration)
-                        ? `${selectedReportItem.report.duration}시간`
+                      {resolveDisplayedDurationHours(
+                        selectedReportItem.application,
+                        selectedReportItem.report,
+                      ) !== null
+                        ? `${resolveDisplayedDurationHours(
+                            selectedReportItem.application,
+                            selectedReportItem.report,
+                          )}시간`
                         : "-"}
                     </div>
                   </div>
                   <div className="space-y-1.5">
                     <div className="text-xs font-medium text-slate-500">작성일</div>
                     <div className="text-sm text-slate-900">
-                      {formatReportWrittenAtText(
-                        selectedReportItem.report.completedAt || selectedReportItem.report.createdAt,
-                        "yyyy년 M월 d일 HH:mm",
-                      )}
+                      {selectedReportItem.report
+                        ? formatReportWrittenAtText(
+                            selectedReportItem.report.completedAt || selectedReportItem.report.createdAt,
+                            "yyyy년 M월 d일 HH:mm",
+                          )
+                        : "작성 전"}
                     </div>
                   </div>
                 </div>
@@ -1470,57 +1572,57 @@ export function PendingReportsDashboard({
                 <div className="space-y-2 border-b py-6">
                   <div className="text-xs font-medium text-slate-500">주제</div>
                   <div className="text-sm leading-6 text-slate-900 break-all">
-                    {selectedReportItem.report.topic || "-"}
+                    {selectedPreviewTopic}
                   </div>
                 </div>
 
                 <div className="space-y-2 border-b py-6">
                   <div className="text-xs font-medium text-slate-500">담당자</div>
                   <div className="text-sm leading-6 text-slate-900 break-all">
-                    {selectedReportItem.report.managerName || "-"}
+                    {selectedPreviewManagerName}
                   </div>
                 </div>
 
                 <div className="space-y-2 border-b py-6">
                   <div className="text-xs font-medium text-slate-500">참여자</div>
                   <div className="text-sm leading-6 text-slate-900 break-all">
-                    {(selectedReportItem.report.participants ?? []).join(", ") || "-"}
+                    {selectedPreviewParticipants}
                   </div>
                 </div>
 
                 <div className="space-y-2 border-b py-6">
                   <div className="text-xs font-medium text-slate-500">미팅 아젠다</div>
                   <div className="whitespace-pre-wrap break-all text-sm leading-7 text-slate-900">
-                    {selectedReportContent.companyStatus || "-"}
+                    {selectedPreviewAgenda}
                   </div>
                 </div>
 
                 <div className="space-y-2 border-b py-6">
                   <div className="text-xs font-medium text-slate-500">자문내용</div>
                   <div className="whitespace-pre-wrap break-all text-sm leading-7 text-slate-900">
-                    {selectedReportContent.advisoryContent || "-"}
+                    {selectedPreviewAdvisory}
                   </div>
                 </div>
 
                 <div className="space-y-2 py-6">
                   <div className="text-xs font-medium text-slate-500">팔로업</div>
                   <div className="whitespace-pre-wrap break-all text-sm leading-7 text-slate-900">
-                    {selectedReportItem.report.followUp || "-"}
+                    {selectedPreviewFollowUp}
                   </div>
                 </div>
 
                 <div className="space-y-2 border-t py-6">
                   <div className="text-xs font-medium text-slate-500">스크립트</div>
                   <div className="max-h-[280px] overflow-y-auto rounded-md border bg-slate-50 px-4 py-3 whitespace-pre-wrap break-all text-sm leading-7 text-slate-900">
-                    {selectedReportItem.report.meetingRawText || "-"}
+                    {selectedReportItem.report?.meetingRawText || "-"}
                   </div>
                 </div>
 
-                {selectedReportItem.report.photos?.length > 0 && (
+                {(selectedReportItem.report?.photos?.length ?? 0) > 0 && (
                   <div className="space-y-3 border-t py-6">
                     <div className="text-xs font-medium text-slate-500">사진</div>
                     <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
-                      {selectedReportItem.report.photos.map((url, idx) => (
+                      {selectedReportItem.report?.photos?.map((url, idx) => (
                         <img
                           key={`${url}-${idx}`}
                           src={url}

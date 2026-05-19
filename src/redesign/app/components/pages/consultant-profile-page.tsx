@@ -1,14 +1,28 @@
-import { type FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { type FormEvent, useEffect, useMemo, useState } from "react";
 import { Agenda, Consultant, ConsultantAvailability } from "@/redesign/app/lib/types";
 import { Button } from "@/redesign/app/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/redesign/app/components/ui/card";
 import { Input } from "@/redesign/app/components/ui/input";
 import { Label } from "@/redesign/app/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/redesign/app/components/ui/select";
 import { Textarea } from "@/redesign/app/components/ui/textarea";
 import { cn } from "@/redesign/app/components/ui/utils";
+import {
+  buildDefaultConsultantAvailability,
+  getConsultantScheduleDayNumbers,
+  getMonthlyAvailabilityForMonth,
+} from "@/redesign/app/lib/consultant-monthly-availability";
+import * as regularOfficeHourPolicy from "@/redesign/app/lib/regular-office-hour-policy";
 
 export type ConsultantProfileFormValues = {
   name: string;
+  scope: "internal" | "external" | "";
   organization: string;
   email: string;
   phone: string;
@@ -33,7 +47,7 @@ interface ConsultantProfilePageProps {
   onBack?: () => void;
   backLabel?: string;
   scheduleSaving?: boolean;
-  onSaveSchedule?: (availability: ConsultantAvailability[]) => Promise<void> | void;
+  onSaveSchedule?: (monthKey: string, availability: ConsultantAvailability[]) => Promise<void> | void;
   onSubmit: (values: ConsultantProfileFormValues) => Promise<void> | void;
 }
 
@@ -64,6 +78,7 @@ function buildInitialValues(
 ): ConsultantProfileFormValues {
   return {
     name: consultant?.name ?? "",
+    scope: consultant?.scope ?? "",
     organization: consultant?.organization ?? "",
     email: consultant?.email ?? defaultEmail ?? "",
     phone: formatPhoneNumber(consultant?.phone ?? ""),
@@ -73,6 +88,34 @@ function buildInitialValues(
     expertise: consultant?.expertise?.join(", ") ?? "",
     bio: consultant?.bio ?? "",
   };
+}
+
+function formatMonthLabel(monthKey: string): string {
+  const [year, month] = monthKey.split("-")
+  return `${year}년 ${Number(month)}월`
+}
+
+function formatRegularOfficeHourWeekLabel(): string {
+  return regularOfficeHourPolicy.REGULAR_OFFICE_HOUR_WEEK_NUMBERS
+    .slice()
+    .sort((a, b) => a - b)
+    .map((weekOfMonth) => `${weekOfMonth}주차`)
+    .join("와 ")
+}
+
+function formatAvailabilitySectionLabel(day: ConsultantAvailability): string {
+  const weekdayLabel = day.dayOfWeek === 2 ? "화" : day.dayOfWeek === 3 ? "수" : day.dayOfWeek === 4 ? "목" : `${day.dayOfWeek}`
+  if (!day.dateKey) {
+    return `${weekdayLabel}요일`
+  }
+
+  const parsedDate = regularOfficeHourPolicy.parseDateKey(day.dateKey)
+  const weekInfo = regularOfficeHourPolicy.getOfficeHourWeekInfo(day.dateKey)
+  if (!parsedDate || !weekInfo) {
+    return `${weekdayLabel}요일`
+  }
+
+  return `${weekInfo.weekOfMonth}주차 ${weekdayLabel}요일 · ${parsedDate.getMonth() + 1}/${parsedDate.getDate()}`
 }
 
 export function ConsultantProfilePage({
@@ -107,61 +150,66 @@ export function ConsultantProfilePage({
     [consultant, defaultEmail]
   );
 
-  const scheduleDays = useMemo(
-    () => [
-      { value: 2, label: "화" },
-      { value: 4, label: "목" },
-    ],
+  const scheduleTargetMonthKey = useMemo(
+    () => regularOfficeHourPolicy.getNextMonthKey(new Date()),
     []
   );
-
-  const timeSlots = useMemo(
+  const [selectedScheduleMonthKey, setSelectedScheduleMonthKey] = useState(scheduleTargetMonthKey);
+  const scheduleMonthOptions = useMemo(() => {
+    const keys = new Set<string>([
+      ...Object.keys(consultant?.monthlyAvailability ?? {}),
+      scheduleTargetMonthKey,
+    ].filter(Boolean))
+    return Array.from(keys).sort((a, b) => b.localeCompare(a))
+  }, [consultant?.monthlyAvailability, scheduleTargetMonthKey])
+  const isScheduleEditable = useMemo(
     () =>
-      Array.from({ length: 9 }, (_, index) => {
-        const startHour = 9 + index;
-        const endHour = startHour + 1;
-        return {
-          start: `${String(startHour).padStart(2, "0")}:00`,
-          end: `${String(endHour).padStart(2, "0")}:00`,
-        };
+      Boolean(
+        selectedScheduleMonthKey &&
+          selectedScheduleMonthKey === scheduleTargetMonthKey &&
+          regularOfficeHourPolicy.canConsultantEditMonthlyAvailability(
+            selectedScheduleMonthKey,
+            new Date()
+          )
+      ),
+    [scheduleTargetMonthKey, selectedScheduleMonthKey]
+  );
+  const scheduleDayNumbers = useMemo(
+    () =>
+      getConsultantScheduleDayNumbers({
+        agendaIds: consultant?.agendaIds,
+        agendas,
+        scope: consultant?.scope,
       }),
-    []
+    [agendas, consultant?.agendaIds, consultant?.scope]
   );
-
-  const buildDefaultAvailability = useCallback(
-    () =>
-      scheduleDays.map((day) => ({
-        dayOfWeek: day.value,
-        slots: timeSlots.map((slot) => ({
-          start: slot.start,
-          end: slot.end,
-          available: false,
-        })),
-      })),
-    [scheduleDays, timeSlots]
-  );
-
   const normalizedAvailability = useMemo(
     () => {
-      const base = buildDefaultAvailability();
-      const input = consultant?.availability;
-      if (!input || input.length === 0) return base;
-      return base.map((baseDay) => {
-        const found = input.find((item) => item.dayOfWeek === baseDay.dayOfWeek);
-        if (!found) return baseDay;
-        return {
-          ...baseDay,
-          slots: baseDay.slots.map((baseSlot) => {
-            const existing = found.slots.find(
-              (slot) => slot.start === baseSlot.start && slot.end === baseSlot.end
-            );
-            return existing ?? baseSlot;
-          }),
-        };
-      });
+      if (!scheduleTargetMonthKey) {
+        return buildDefaultConsultantAvailability(scheduleDayNumbers);
+      }
+      return getMonthlyAvailabilityForMonth(
+        consultant?.monthlyAvailability,
+        selectedScheduleMonthKey,
+        scheduleDayNumbers,
+      );
     },
-    [consultant?.availability, buildDefaultAvailability]
+    [consultant?.monthlyAvailability, scheduleDayNumbers, selectedScheduleMonthKey, scheduleTargetMonthKey]
   );
+  const consultantScopeLabel = useMemo(() => {
+    if (consultant?.scope === "internal") return "내부"
+    if (consultant?.scope === "external") return "외부"
+    return "미설정"
+  }, [consultant?.scope]);
+  const isScopeEditable = embedded ? !consultant : true;
+  const consultantAgendaText = useMemo(() => {
+    const matchedAgendaNames = (consultant?.agendaIds ?? [])
+      .map((agendaId) => agendas.find((agenda) => agenda.id === agendaId)?.name)
+      .filter((agendaName): agendaName is string => Boolean(agendaName));
+    return matchedAgendaNames.length > 0
+      ? matchedAgendaNames.join(", ")
+      : "연결된 아젠다가 없습니다"
+  }, [agendas, consultant?.agendaIds]);
   const [draftAvailability, setDraftAvailability] = useState<ConsultantAvailability[]>(
     normalizedAvailability
   );
@@ -170,13 +218,20 @@ export function ConsultantProfilePage({
     setDraftAvailability(normalizedAvailability);
   }, [normalizedAvailability]);
 
+  useEffect(() => {
+    if (!scheduleMonthOptions.includes(selectedScheduleMonthKey)) {
+      setSelectedScheduleMonthKey(scheduleMonthOptions[0] ?? scheduleTargetMonthKey)
+    }
+  }, [scheduleMonthOptions, scheduleTargetMonthKey, selectedScheduleMonthKey])
+
   const isScheduleDirty =
     JSON.stringify(draftAvailability) !== JSON.stringify(normalizedAvailability);
 
-  const toggleSlot = (dayOfWeek: number, slotStart: string) => {
+  const toggleSlot = (dayKey: string, slotStart: string) => {
     setDraftAvailability((prev) =>
       prev.map((day) => {
-        if (day.dayOfWeek !== dayOfWeek) return day;
+        const currentDayKey = day.dateKey ?? String(day.dayOfWeek)
+        if (currentDayKey !== dayKey) return day;
         return {
           ...day,
           slots: day.slots.map((slot) =>
@@ -210,6 +265,7 @@ export function ConsultantProfilePage({
   const requiresBio = false;
   const isInvalid =
     !formValues.name.trim() ||
+    (formValues.scope !== "internal" && formValues.scope !== "external") ||
     !formValues.organization.trim() ||
     !formValues.email.trim() ||
     !formValues.phone.trim() ||
@@ -244,7 +300,13 @@ export function ConsultantProfilePage({
     return !["secondaryEmail", "secondaryPhone"].includes(key);
   };
   const isFieldInvalid = (key: keyof ConsultantProfileFormValues) =>
-    Boolean(touchedFields[key] && isFieldRequired(key) && !formValues[key].trim());
+    Boolean(
+      touchedFields[key] &&
+        isFieldRequired(key) &&
+        (key === "scope"
+          ? formValues.scope !== "internal" && formValues.scope !== "external"
+          : !formValues[key].trim())
+    );
   const getFieldClassName = (key: keyof ConsultantProfileFormValues) =>
     cn(
       embedded && [
@@ -298,6 +360,46 @@ export function ConsultantProfilePage({
             onSubmit={handleSubmit}
             className="grid grid-cols-1 gap-4 md:grid-cols-2"
           >
+            <div className="md:col-span-2 grid grid-cols-1 gap-4 md:grid-cols-2">
+              <div>
+                <Label className="mb-2 block">
+                  구분
+                  {isScopeEditable ? requiredMark : null}
+                </Label>
+                {isScopeEditable ? (
+                  <Select
+                    value={formValues.scope}
+                    onValueChange={(value) => {
+                      if (value !== "internal" && value !== "external") return
+                      updateField("scope", value)
+                    }}
+                  >
+                    <SelectTrigger
+                      className={getFieldClassName("scope")}
+                      aria-invalid={isFieldInvalid("scope")}
+                      onBlur={() => handleFieldBlur("scope")}
+                    >
+                      <SelectValue placeholder="내부/외부 선택" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="internal">내부</SelectItem>
+                      <SelectItem value="external">외부</SelectItem>
+                    </SelectContent>
+                  </Select>
+                ) : (
+                  <div className="text-[13px] font-medium text-slate-600">
+                    {consultantScopeLabel}
+                  </div>
+                )}
+              </div>
+              <div>
+                <Label className="mb-2 block">담당 아젠다</Label>
+                <div className="text-[13px] text-slate-600">
+                  {consultantAgendaText}
+                </div>
+              </div>
+            </div>
+
             <div>
               <Label className="mb-2 block" htmlFor="consultant-name">
                 컨설턴트명
@@ -491,17 +593,44 @@ export function ConsultantProfilePage({
               내 스케줄 설정
             </CardTitle>
             <CardDescription className="text-sm text-slate-500">
-              화요일/목요일 기준으로 가능한 시간을 선택하세요.
+              {selectedScheduleMonthKey
+                ? `${formatMonthLabel(selectedScheduleMonthKey)} 정기 오피스아워 가능 시간을 조회합니다. ${formatRegularOfficeHourWeekLabel()} 일정을 각각 다르게 설정할 수 있습니다.`
+                : "월별 정기 오피스아워 가능 시간을 조회합니다."}
             </CardDescription>
           </CardHeader>
           <CardContent className={cardContentClassName}>
+            <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+              <div className="w-full max-w-[220px]">
+                <Label className="mb-2 block">조회 월</Label>
+                <Select
+                  value={selectedScheduleMonthKey}
+                  onValueChange={setSelectedScheduleMonthKey}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="월 선택" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {scheduleMonthOptions.map((monthKey) => (
+                      <SelectItem key={monthKey} value={monthKey}>
+                        {formatMonthLabel(monthKey)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            {!isScheduleEditable && selectedScheduleMonthKey === scheduleTargetMonthKey && (
+              <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                {`컨설턴트 가능 시간은 매월 ${regularOfficeHourPolicy.CONSULTANT_SCHEDULE_OPEN_WEEK_NUMBER}주차에 다음 달 일정만 수정할 수 있습니다.`}
+            </div>
+            )}
             <div className="mb-4 flex flex-wrap items-center justify-end gap-2">
               <Button
                 type="button"
                 size="sm"
                 variant="outline"
                 onClick={() => setAllSlots(true)}
-                disabled={scheduleSaving}
+                disabled={scheduleSaving || !isScheduleEditable}
                 data-testid="consultant-schedule-select-all"
               >
                 전체 선택
@@ -511,7 +640,7 @@ export function ConsultantProfilePage({
                 size="sm"
                 variant="outline"
                 onClick={() => setAllSlots(false)}
-                disabled={scheduleSaving}
+                disabled={scheduleSaving || !isScheduleEditable}
               >
                 전체 해제
               </Button>
@@ -519,7 +648,7 @@ export function ConsultantProfilePage({
                 type="button"
                 size="sm"
                 variant="outline"
-                disabled={scheduleSaving || !isScheduleDirty}
+                disabled={scheduleSaving || !isScheduleEditable || !isScheduleDirty}
                 onClick={() => setDraftAvailability(normalizedAvailability)}
               >
                 되돌리기
@@ -527,8 +656,8 @@ export function ConsultantProfilePage({
               <Button
                 type="button"
                 size="sm"
-                disabled={scheduleSaving || !isScheduleDirty}
-                onClick={() => onSaveSchedule(draftAvailability)}
+                disabled={scheduleSaving || !isScheduleEditable || !isScheduleDirty}
+                onClick={() => onSaveSchedule(selectedScheduleMonthKey, draftAvailability)}
                 loading={scheduleSaving}
                 data-testid="consultant-schedule-save"
               >
@@ -537,25 +666,54 @@ export function ConsultantProfilePage({
             </div>
             <div className="grid gap-3">
               {draftAvailability.map((day) => {
-                const dayInfo = scheduleDays.find((item) => item.value === day.dayOfWeek);
                 return (
-                  <div key={day.dayOfWeek} className="rounded-lg border p-3">
-                    <div className="mb-2 text-xs font-semibold text-slate-600">
-                      {dayInfo?.label || "-"}요일
+                  <div
+                    key={day.dateKey ?? day.dayOfWeek}
+                    className={cn(
+                      "rounded-lg border p-3",
+                      isScheduleEditable
+                        ? "border-slate-200 bg-white"
+                        : "border-slate-200 bg-slate-50",
+                    )}
+                  >
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                      <div className="text-xs font-semibold text-slate-600">
+                        {formatAvailabilitySectionLabel(day)}
+                      </div>
+                      {!isScheduleEditable ? (
+                        <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-medium text-slate-500">
+                          읽기 전용
+                        </span>
+                      ) : null}
                     </div>
                     <div className="grid grid-cols-4 gap-1.5 md:grid-cols-6">
                       {day.slots.map((slot) => (
                         <button
-                          key={`${day.dayOfWeek}-${slot.start}`}
+                          key={`${day.dateKey ?? day.dayOfWeek}-${slot.start}`}
                           type="button"
                           aria-pressed={slot.available}
-                          title={slot.available ? "가능 일정" : "불가 일정"}
-                          onClick={() => toggleSlot(day.dayOfWeek, slot.start)}
+                          title={
+                            !isScheduleEditable
+                              ? slot.available
+                                ? "가능 일정 (조회 전용)"
+                                : "불가 일정 (조회 전용)"
+                              : slot.available
+                                ? "가능 일정"
+                                : "불가 일정"
+                          }
+                          onClick={() => toggleSlot(day.dateKey ?? String(day.dayOfWeek), slot.start)}
+                          disabled={!isScheduleEditable}
                           className={cn(
                             "rounded-md border px-2 py-1 text-[11px] transition",
-                            slot.available
+                            !isScheduleEditable &&
+                              "cursor-not-allowed border-slate-200 text-slate-400 shadow-none",
+                            isScheduleEditable && slot.available
                               ? "border-slate-900 bg-slate-900 text-white"
-                              : "border-slate-300 bg-white text-slate-500 hover:bg-slate-50"
+                              : isScheduleEditable
+                                ? "border-slate-300 bg-white text-slate-500 hover:bg-slate-50"
+                                : slot.available
+                                  ? "bg-slate-300/80"
+                                  : "bg-slate-100"
                           )}
                         >
                           {slot.start}
@@ -575,6 +733,12 @@ export function ConsultantProfilePage({
                 <span className="h-3.5 w-3.5 rounded border border-slate-300 bg-white" />
                 불가 일정
               </span>
+              {!isScheduleEditable ? (
+                <span className="inline-flex items-center gap-2 text-slate-500">
+                  <span className="h-3.5 w-3.5 rounded border border-slate-200 bg-slate-100" />
+                  조회 전용
+                </span>
+              ) : null}
             </div>
           </CardContent>
         </Card>

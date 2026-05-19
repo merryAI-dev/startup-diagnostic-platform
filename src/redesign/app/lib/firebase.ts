@@ -132,6 +132,7 @@ export const COLLECTIONS = {
   PROGRAMS: "programs",
   AGENDAS: "agendas",
   OFFICE_HOUR_APPLICATIONS: "officeHourApplications",
+  OFFICE_HOUR_CALENDAR_SESSIONS: "officeHourCalendarSessions",
   REPORTS: "reports",
   MESSAGES: "messages",
   TEMPLATES: "messageTemplates",

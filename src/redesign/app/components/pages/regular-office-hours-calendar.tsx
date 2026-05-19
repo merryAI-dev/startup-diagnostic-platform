@@ -6,6 +6,7 @@ import { Badge } from "@/redesign/app/components/ui/badge";
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameMonth, isSameDay, addMonths, subMonths, startOfWeek, endOfWeek, isToday, addDays, isBefore, startOfDay } from "date-fns";
 import { ko } from "date-fns/locale";
 import { parseLocalDateKey } from "@/redesign/app/lib/date-keys";
+import * as regularOfficeHourPolicy from "@/redesign/app/lib/regular-office-hour-policy";
 
 interface RegularOfficeHoursCalendarProps {
   officeHours: RegularOfficeHour[];
@@ -98,7 +99,10 @@ export function RegularOfficeHoursCalendar({
     () =>
       expandedSessions.filter((session) => {
         const parsed = parseLocalDateKey(session.date);
-        return parsed ? !isBefore(parsed, todayStart) : false;
+        return parsed
+          ? !isBefore(parsed, todayStart) &&
+              regularOfficeHourPolicy.canCompanyApplyForRegularDate(session.date, new Date())
+          : false;
       }),
     [expandedSessions, todayStart]
   );
@@ -138,6 +142,13 @@ export function RegularOfficeHoursCalendar({
   const isPastSessionDate = (dateKey: string) => {
     const parsed = parseLocalDateKey(dateKey);
     return parsed ? isBefore(parsed, todayStart) : false;
+  };
+  const isRequestableSessionDate = (dateKey: string) => {
+    const parsed = parseLocalDateKey(dateKey);
+    return parsed
+      ? !isBefore(parsed, todayStart) &&
+          regularOfficeHourPolicy.canCompanyApplyForRegularDate(dateKey, new Date())
+      : false;
   };
 
   const weekDays = ["일", "월", "화", "수", "목", "금", "토"];
@@ -359,7 +370,9 @@ export function RegularOfficeHoursCalendar({
                   {calendarDays.map((day, idx) => {
                     const sessions = getOfficeHoursForDate(day);
                     const hasSessions = sessions.length > 0;
-                    const hasRequestableSessions = sessions.some((session) => !isPastSessionDate(session.date));
+                    const hasRequestableSessions = sessions.some((session) =>
+                      isRequestableSessionDate(session.date),
+                    );
                     const isCurrentMonth = isSameMonth(day, currentMonth);
                     const isSelected = selectedDate && isSameDay(day, selectedDate);
                     const isTodayDate = isToday(day);

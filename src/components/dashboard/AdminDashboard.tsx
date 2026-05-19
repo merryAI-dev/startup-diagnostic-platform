@@ -12,7 +12,6 @@ import { getDownloadURL, ref as storageRef } from "firebase/storage"
 import ExcelJS from "exceljs"
 import {
   Check,
-  CheckCircle2,
   ChevronsUpDown,
   FileSpreadsheet,
   Save,
@@ -33,6 +32,7 @@ import {
 } from "recharts"
 import { SELF_ASSESSMENT_SECTIONS } from "@/data/selfAssessment"
 import { db, storage } from "@/firebase/client"
+import { ManagedCompanyInfoEditor } from "@/components/dashboard/ManagedCompanyInfoEditor"
 import { generateCompanyAnalysisReportViaFunction } from "@/redesign/app/lib/functions"
 import {
   Dialog,
@@ -72,6 +72,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/redesign/app/components/ui/select"
+import { Switch } from "@/redesign/app/components/ui/switch"
 import { ContentLoadingOverlay } from "@/redesign/app/components/ui/content-loading-overlay"
 import {
   COMPANY_ANALYSIS_AC_FIELDS,
@@ -125,6 +126,7 @@ type ProgramSummary = {
   externalTicketLimit?: number
   companyIds?: string[]
   kpiDefinitions?: ProgramKpiDefinition[]
+  managerUid?: string | null
 }
 
 type MetricFormat = "number" | "currency"
@@ -742,7 +744,9 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
   const [loadingDetails, setLoadingDetails] = useState(false)
   const [companyQuery, setCompanyQuery] = useState("")
   const [voucherFilterTags, setVoucherFilterTags] = useState<VoucherFilterTag[]>([])
+  const [voucherFilterOpen, setVoucherFilterOpen] = useState(false)
   const [selectedProgramFilterId, setSelectedProgramFilterId] = useState<string>("all")
+  const [showManagedCompaniesOnly, setShowManagedCompaniesOnly] = useState(false)
   const [companyPage, setCompanyPage] = useState(1)
   const [activeTab, setActiveTab] = useState<
     "info" | "assessment" | "statusAnalysis" | "metrics" | "report" | "officeHours"
@@ -754,6 +758,7 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
   const [programMetricFilterOpen, setProgramMetricFilterOpen] = useState(false)
   const [programMetricFilterQuery, setProgramMetricFilterQuery] = useState("")
   const [loadingPrograms, setLoadingPrograms] = useState(false)
+  const [managedCompanyEditorOpen, setManagedCompanyEditorOpen] = useState(false)
   const [ticketDrafts, setTicketDrafts] = useState<
     Record<string, { internal: string; external: string }>
   >({})
@@ -857,6 +862,7 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
             externalTicketLimit?: number
             companyIds?: string[]
             kpiDefinitions?: ProgramKpiDefinition[]
+            managerUid?: string | null
           }
           return {
             id: docSnap.id,
@@ -865,6 +871,7 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
             externalTicketLimit: data.externalTicketLimit ?? 0,
             companyIds: data.companyIds ?? [],
             kpiDefinitions: Array.isArray(data.kpiDefinitions) ? data.kpiDefinitions : [],
+            managerUid: typeof data.managerUid === "string" ? data.managerUid : null,
           }
         })
         setPrograms(list)
@@ -1032,6 +1039,10 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
       mounted = false
     }
   }, [programs, selectedCompanyId])
+
+  useEffect(() => {
+    setManagedCompanyEditorOpen(false)
+  }, [activeTab, selectedCompanyId])
 
   const formatValue = (value?: string | number | null) => {
     if (value === null || value === undefined || value === "") return "-"
@@ -1292,6 +1303,18 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
     return programs.filter((program) => selectedCompanyProgramIds.includes(program.id))
   }, [programs, selectedCompanyProgramIds])
 
+  const managedProgramsForSelectedCompany = useMemo(
+    () => participatingPrograms.filter((program) => program.managerUid === user.uid),
+    [participatingPrograms, user.uid],
+  )
+
+  const canEditSelectedCompanyInfo = managedProgramsForSelectedCompany.length > 0
+
+  const managedProgramNamesForSelectedCompany = useMemo(
+    () => managedProgramsForSelectedCompany.map((program) => program.name.trim()).filter(Boolean),
+    [managedProgramsForSelectedCompany],
+  )
+
   const companyProgramMetricViews = useMemo(
     () =>
       normalizeProgramMetrics(
@@ -1516,10 +1539,31 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
     setEditingTicketProgramId(null)
   }
 
+  const managedProgramIdSet = useMemo(
+    () =>
+      new Set(
+        programs.filter((program) => program.managerUid === user.uid).map((program) => program.id),
+      ),
+    [programs, user.uid],
+  )
+
+  const managedCompanyIdSet = useMemo(
+    () =>
+      new Set(
+        companies
+          .filter((company) => company.programs.some((programId) => managedProgramIdSet.has(programId)))
+          .map((company) => company.id),
+      ),
+    [companies, managedProgramIdSet],
+  )
+
   const filteredCompanies = useMemo(() => {
     const query = companyQuery.trim().toLowerCase()
     return companies.filter((company) => {
       const name = (company.name ?? "").toLowerCase()
+      if (showManagedCompaniesOnly && !managedCompanyIdSet.has(company.id)) {
+        return false
+      }
       if (query && !name.includes(query)) {
         return false
       }
@@ -1534,13 +1578,21 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
       }
       return true
     })
-  }, [companies, companyQuery, selectedProgramFilterId, voucherFilterTags])
+  }, [
+    companies,
+    companyQuery,
+    managedCompanyIdSet,
+    selectedProgramFilterId,
+    showManagedCompaniesOnly,
+    voucherFilterTags,
+  ])
 
   const showCompanyPaginationFooter =
     filteredCompanies.length > COMPANY_PAGE_SIZE ||
     companyQuery.trim().length > 0 ||
     voucherFilterTags.length > 0 ||
-    selectedProgramFilterId !== "all"
+    selectedProgramFilterId !== "all" ||
+    showManagedCompaniesOnly
 
   const totalCompanyPages = Math.max(1, Math.ceil(filteredCompanies.length / COMPANY_PAGE_SIZE))
 
@@ -1551,7 +1603,7 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
 
   useEffect(() => {
     setCompanyPage(1)
-  }, [companyQuery, selectedProgramFilterId, voucherFilterTags])
+  }, [companyQuery, selectedProgramFilterId, showManagedCompaniesOnly, voucherFilterTags])
 
   useEffect(() => {
     setCompanyPage((prev) => Math.min(prev, totalCompanyPages))
@@ -1578,19 +1630,46 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
       if (
         companyQuery.trim().length > 0 ||
         voucherFilterTags.length > 0 ||
-        selectedProgramFilterId !== "all"
+        selectedProgramFilterId !== "all" ||
+        showManagedCompaniesOnly
       ) {
         return "검색 결과에 해당하는 기업이 없습니다."
       }
       return "등록된 기업이 없습니다."
     }
     return "회사를 먼저 선택해주세요."
-  }, [companyQuery, filteredCompanies.length, selectedProgramFilterId, voucherFilterTags.length])
+  }, [
+    companyQuery,
+    filteredCompanies.length,
+    selectedProgramFilterId,
+    showManagedCompaniesOnly,
+    voucherFilterTags.length,
+  ])
 
   const programFilterOptions = useMemo(
     () => [...programs].sort((a, b) => a.name.localeCompare(b.name, "ko-KR")),
     [programs],
   )
+
+  const voucherFilterOptions = useMemo(
+    () =>
+      [
+        { id: "export" as const, label: "수출바우처 보유" },
+        { id: "innovation" as const, label: "혁신바우처 보유" },
+      ] satisfies Array<{ id: VoucherFilterTag; label: string }>,
+    [],
+  )
+
+  const selectedVoucherFilterOptions = useMemo(
+    () => voucherFilterOptions.filter((option) => voucherFilterTags.includes(option.id)),
+    [voucherFilterOptions, voucherFilterTags],
+  )
+
+  const selectedVoucherFilterValue = useMemo(() => {
+    if (voucherFilterTags.includes("export")) return "export"
+    if (voucherFilterTags.includes("innovation")) return "innovation"
+    return "all"
+  }, [voucherFilterTags])
 
   const toggleVoucherFilterTag = (tag: VoucherFilterTag) => {
     setVoucherFilterTags((prev) =>
@@ -2318,39 +2397,50 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
         ),
       )
 
-      const metricsSheet = createSheet("실적", [
-        12,
-        ...metricChartFields.map((field) => Math.max(14, field.label.length + 6)),
-      ])
+      const statusAnalysisSheet = createSheet("현황분석", [18, 18, 44, 14, 14, 56])
       rowIndex = writeSheetTitle(
-        metricsSheet,
-        "실적 관리",
-        hasMetricsDocument
-          ? `최근 업데이트 ${metricsUpdatedLabel ?? "기록 없음"}`
-          : "월별 실적 문서 없음",
+        statusAnalysisSheet,
+        "현황 분석",
+        `${selectedCompanyName} 관리자 작성 내용`,
       )
-      if (!hasMetricsDocument) {
-        rowIndex = writeSectionTitle(metricsSheet, rowIndex, "안내")
-        rowIndex = writeKeyValueRows(metricsSheet, rowIndex, [
-          ["상태", "월별 실적 문서는 아직 입력되지 않았습니다."],
-        ])
-        rowIndex += 1
-      }
-      writeTable(
-        metricsSheet,
+      rowIndex = writeSectionTitle(statusAnalysisSheet, rowIndex, "기본 정보")
+      rowIndex = writeKeyValueRows(statusAnalysisSheet, rowIndex, [
+        ["기업명", reportForm.companyName || selectedCompanyName],
+        ["작성자", statusAnalysisAuthor || "-"],
+        ["총점", `${formatScore(statusAnalysisSummary.totalScore)}/100`],
+      ])
+      rowIndex += 1
+      rowIndex = writeSectionTitle(statusAnalysisSheet, rowIndex, "점수 요약")
+      rowIndex = writeTable(
+        statusAnalysisSheet,
         rowIndex,
-        ["월", ...metricChartFields.map((field) => field.label)],
-        (hasMetricsDocument
-          ? recentMetricsRows
-          : emptyMetricsMonthSlots.map(({ year, month }) => createEmptyMonth(year, month))
-        ).map((row) => [
-          `${row.year}-${String(row.month).padStart(2, "0")}`,
-          ...metricChartFields.map((field) =>
-            hasMetricsDocument
-              ? formatMetricValue(getMetricCellValue(row, field.key), field.format)
-              : "-",
-          ),
+        ["대분류", "점수", "총점"],
+        statusAnalysisSummary.grouped.map((section) => [
+          section.sectionTitle,
+          formatScore(section.sectionScore),
+          formatScore(section.sectionTotal),
         ]),
+      )
+      rowIndex = writeSectionTitle(statusAnalysisSheet, rowIndex, "상세")
+      writeTable(
+        statusAnalysisSheet,
+        rowIndex,
+        ["대분류", "중분류", "문항", "기업 응답", "관리자 응답", "관리자 코멘트"],
+        statusAnalysisSummary.grouped.flatMap((section) =>
+          section.questions.map((item) => [
+            item.sectionTitle,
+            item.subsectionTitle,
+            item.questionText,
+            item.companyAnswerLabel,
+            item.answerLabel,
+            getStatusAnalysisReason(
+              statusAnalysisSections,
+              item.sectionKey,
+              item.subsectionKey,
+              item.questionKey,
+            ) || "-",
+          ]),
+        ),
       )
 
       const reportSheet = createSheet("분석보고서", [24, 70])
@@ -2407,6 +2497,41 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
         COMPANY_ANALYSIS_MILESTONE_FIELDS.map(({ key, label }) => [label, reportForm[key] || "-"]),
       )
 
+      const metricsSheet = createSheet("실적", [
+        12,
+        ...metricChartFields.map((field) => Math.max(14, field.label.length + 6)),
+      ])
+      rowIndex = writeSheetTitle(
+        metricsSheet,
+        "실적 관리",
+        hasMetricsDocument
+          ? `최근 업데이트 ${metricsUpdatedLabel ?? "기록 없음"}`
+          : "월별 실적 문서 없음",
+      )
+      if (!hasMetricsDocument) {
+        rowIndex = writeSectionTitle(metricsSheet, rowIndex, "안내")
+        rowIndex = writeKeyValueRows(metricsSheet, rowIndex, [
+          ["상태", "월별 실적 문서는 아직 입력되지 않았습니다."],
+        ])
+        rowIndex += 1
+      }
+      writeTable(
+        metricsSheet,
+        rowIndex,
+        ["월", ...metricChartFields.map((field) => field.label)],
+        (hasMetricsDocument
+          ? recentMetricsRows
+          : emptyMetricsMonthSlots.map(({ year, month }) => createEmptyMonth(year, month))
+        ).map((row) => [
+          `${row.year}-${String(row.month).padStart(2, "0")}`,
+          ...metricChartFields.map((field) =>
+            hasMetricsDocument
+              ? formatMetricValue(getMetricCellValue(row, field.key), field.format)
+              : "-",
+          ),
+        ]),
+      )
+
       const buffer = await workbook.xlsx.writeBuffer()
       const blob = new Blob([buffer], {
         type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -2441,7 +2566,7 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
                 기업 기본 정보, 자가진단표, 실적, 업로드 자료와 티켓 현황을 관리합니다.
               </p>
             </div>
-            <div className="grid min-w-0 grid-cols-1 gap-3 rounded-2xl border border-slate-200 bg-slate-50/70 px-3 py-3 sm:grid-cols-2 lg:grid-cols-[minmax(180px,0.9fr)_minmax(220px,1.1fr)_auto] lg:items-end xl:max-w-[940px] xl:flex-1">
+            <div className="grid min-w-0 grid-cols-1 gap-3 rounded-2xl border border-slate-200 bg-slate-50/70 px-3 py-3 sm:grid-cols-2 lg:grid-cols-[minmax(180px,0.9fr)_minmax(220px,1.1fr)_minmax(180px,0.9fr)_auto] lg:items-end xl:max-w-[1180px] xl:flex-1">
               <label className="min-w-0 text-xs font-medium text-slate-500">
                 회사명
                 <input
@@ -2467,35 +2592,40 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
                   </SelectContent>
                 </Select>
               </label>
-              <div className="flex flex-wrap gap-1.5 sm:col-span-2 lg:col-span-1 lg:justify-end lg:pb-1">
-                <button
-                  type="button"
-                  onClick={() => toggleVoucherFilterTag("export")}
-                  className={`inline-flex h-9 min-w-[118px] items-center justify-center gap-1 whitespace-nowrap rounded-full border px-3 text-[12px] font-semibold transition ${
-                    voucherFilterTags.includes("export")
-                      ? "border-slate-500 bg-slate-200 text-slate-800"
-                      : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
-                  }`}
+              <label className="min-w-0 text-xs font-medium text-slate-500">
+                바우처 보유여부
+                <Select
+                  value={selectedVoucherFilterValue}
+                  onValueChange={(value) => {
+                    if (value === "all") {
+                      setVoucherFilterTags([])
+                      return
+                    }
+                    setVoucherFilterTags([value as VoucherFilterTag])
+                  }}
                 >
-                  {voucherFilterTags.includes("export") ? (
-                    <CheckCircle2 className="h-3.5 w-3.5" />
-                  ) : null}
-                  수출바우처 보유
-                </button>
-                <button
-                  type="button"
-                  onClick={() => toggleVoucherFilterTag("innovation")}
-                  className={`inline-flex h-9 min-w-[118px] items-center justify-center gap-1 whitespace-nowrap rounded-full border px-3 text-[12px] font-semibold transition ${
-                    voucherFilterTags.includes("innovation")
-                      ? "border-slate-500 bg-slate-200 text-slate-800"
-                      : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
-                  }`}
-                >
-                  {voucherFilterTags.includes("innovation") ? (
-                    <CheckCircle2 className="h-3.5 w-3.5" />
-                  ) : null}
-                  혁신바우처 보유
-                </button>
+                  <SelectTrigger className="mt-1 h-10 w-full min-w-0 border border-slate-200 bg-white text-sm text-slate-700 shadow-none">
+                    <SelectValue placeholder="전체" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">전체</SelectItem>
+                    {voucherFilterOptions.map((option) => (
+                      <SelectItem key={option.id} value={option.id}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </label>
+              <div className="flex items-center justify-start sm:col-span-2 lg:col-span-1 lg:justify-end lg:pb-1">
+                <div className="inline-flex h-9 items-center gap-2 rounded-full border border-slate-200 bg-white px-3">
+                  <span className="text-[12px] font-semibold text-slate-700">내 사업만 보기</span>
+                  <Switch
+                    checked={showManagedCompaniesOnly}
+                    onCheckedChange={setShowManagedCompaniesOnly}
+                    aria-label="내 사업만 보기"
+                  />
+                </div>
               </div>
             </div>
           </div>
@@ -2678,7 +2808,13 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
               ) : activeTab === "info" ? (
                 !companyInfo ? (
                   <div className="rounded-xl border border-slate-100 bg-slate-50 p-4 text-xs text-slate-500">
-                    기업 정보가 없습니다.
+                    <div>기업 정보가 없습니다.</div>
+                    {canEditSelectedCompanyInfo ? (
+                      <div className="mt-2 text-slate-600">
+                        이 기업은 내 담당 사업에 속해 있으므로 상단의 기업정보 수정 버튼으로 입력을
+                        시작할 수 있습니다.
+                      </div>
+                    ) : null}
                   </div>
                 ) : (
                   <div className="min-h-0 flex-1 overflow-y-auto text-sm text-slate-700">
@@ -2720,6 +2856,32 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
                               ))}
                             </div>
                           </div>
+                        </div>
+                      </div>
+
+                      <div
+                        className={`rounded-2xl border px-4 py-3 text-sm ${
+                          canEditSelectedCompanyInfo
+                            ? "border-emerald-200 bg-emerald-50 text-emerald-900"
+                            : "border-slate-200 bg-slate-50 text-slate-600"
+                        }`}
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <div>
+                            {canEditSelectedCompanyInfo
+                              ? "이 기업은 현재 로그인한 PM의 담당 사업에 포함되어 있어 직접 수정할 수 있습니다."
+                              : "이 기업은 현재 로그인한 PM의 담당 사업에 포함되지 않아 조회만 가능합니다."}
+                          </div>
+                          {canEditSelectedCompanyInfo ? (
+                            <button
+                              type="button"
+                              onClick={() => setManagedCompanyEditorOpen(true)}
+                              className="inline-flex shrink-0 items-center gap-2 rounded-lg border border-emerald-800 bg-emerald-900 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-emerald-800"
+                            >
+                              <Save className="h-3.5 w-3.5" />
+                              기업정보 수정
+                            </button>
+                          ) : null}
                         </div>
                       </div>
 
@@ -4157,6 +4319,30 @@ export function AdminDashboard({ user, onLogout }: AdminDashboardProps) {
           </div>
         </div>
       </div>
+
+      <Dialog open={managedCompanyEditorOpen} onOpenChange={setManagedCompanyEditorOpen}>
+        <DialogContent className="!flex h-[90vh] max-h-[90vh] flex-col !gap-0 overflow-hidden p-0 sm:max-w-[1180px]">
+          <DialogHeader className="border-b border-slate-200 px-6 py-4 text-left">
+            <DialogTitle>기업 정보 수정</DialogTitle>
+            <DialogDescription>
+              현재 로그인한 PM이 담당하는 사업에 속한 기업만 수정할 수 있습니다.
+            </DialogDescription>
+          </DialogHeader>
+          {selectedCompanyId && canEditSelectedCompanyInfo ? (
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+              <ManagedCompanyInfoEditor
+                companyId={selectedCompanyId}
+                companyName={selectedCompanyName}
+                programNames={managedProgramNamesForSelectedCompany}
+                embedded
+                onRequestClose={() => setManagedCompanyEditorOpen(false)}
+              />
+            </div>
+          ) : (
+            <div className="px-6 py-8 text-sm text-slate-500">수정할 수 있는 기업이 아닙니다.</div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

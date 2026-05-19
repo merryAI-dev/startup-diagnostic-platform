@@ -89,6 +89,20 @@ export function SignupInfoPage() {
     [location.search, pendingSignup?.role, profile?.requestedRole]
   )
 
+  function redirectToPending(role: Role) {
+    sessionStorage.setItem(PENDING_REQUEST_FLAG, "1")
+    window.location.replace(`/pending?role=${role}`)
+  }
+
+  function handleCancel() {
+    sessionStorage.removeItem(PENDING_SIGNUP_KEY)
+    void signOutUser()
+      .catch(() => null)
+      .finally(() => {
+        window.location.replace("/login")
+      })
+  }
+
   useEffect(() => {
     if (creatingAccount) return
     if (loading) return
@@ -123,9 +137,9 @@ export function SignupInfoPage() {
   }
 
   const handleComplete = async () => {
-    sessionStorage.setItem(PENDING_REQUEST_FLAG, "1")
+    sessionStorage.removeItem(PENDING_SIGNUP_KEY)
     await signOutUser()
-    navigate(`/pending?role=${requestedRole}`)
+    redirectToPending(requestedRole)
   }
 
   async function guardExistingProfile(
@@ -172,8 +186,9 @@ export function SignupInfoPage() {
     } else {
       toast.error(`이미 ${existingRoleLabel} 역할로 승인 대기 중입니다. 승인 후 이용해주세요.`)
     }
+    sessionStorage.removeItem(PENDING_SIGNUP_KEY)
     await signOutUser()
-    navigate(`/pending?role=${existingRequestedRole}`)
+    redirectToPending(existingRequestedRole)
     return false
   }
 
@@ -292,7 +307,7 @@ export function SignupInfoPage() {
         ensureAuthUser={ensureAuthUser}
         guardExistingProfile={guardExistingProfile}
         onComplete={handleComplete}
-        onCancel={() => navigate("/login")}
+        onCancel={handleCancel}
       />
     )
   }
@@ -304,7 +319,7 @@ export function SignupInfoPage() {
       ensureAuthUser={ensureAuthUser}
       guardExistingProfile={guardExistingProfile}
       onComplete={handleComplete}
-      onCancel={() => navigate("/login")}
+      onCancel={handleCancel}
     />
   )
 }
@@ -336,6 +351,7 @@ function ConsultantSignupInfo({
 
   async function handleSubmit(values: {
     name: string
+    scope: "internal" | "external" | ""
     organization: string
     email: string
     phone: string
@@ -346,6 +362,10 @@ function ConsultantSignupInfo({
     bio: string
   }) {
     if (!db) return
+    if (values.scope !== "internal" && values.scope !== "external") {
+      toast.error("컨설턴트 구분을 선택해주세요.")
+      return
+    }
     if (submitLockRef.current) return
     submitLockRef.current = true
     setSubmitting(true)
@@ -359,7 +379,12 @@ function ConsultantSignupInfo({
         "company",
         requestedRole,
         authUser.email ?? userEmail,
-        { consultantInfo: values }
+        {
+          consultantInfo: {
+            ...values,
+            scope: values.scope,
+          },
+        }
       )
       await onComplete()
     } catch (error) {
@@ -452,6 +477,7 @@ function CompanySignupInfo({
   const [consentTerms, setConsentTerms] = useState(false)
   const [consentPrivacy, setConsentPrivacy] = useState(false)
   const [consentMarketing, setConsentMarketing] = useState(false)
+  const [consentServiceNotifications, setConsentServiceNotifications] = useState(false)
   const submitLockRef = useRef(false)
   const [consentError, setConsentError] = useState<string | null>(null)
   const [activeSignupSection, setActiveSignupSection] = useState("company-service")
@@ -1171,6 +1197,12 @@ function CompanySignupInfo({
             },
             marketing: {
               consented: consentMarketing,
+              version: CONSENT_VERSION,
+              method: CONSENT_METHOD,
+              userAgent,
+            },
+            serviceNotifications: {
+              consented: consentServiceNotifications,
               version: CONSENT_VERSION,
               method: CONSENT_METHOD,
               userAgent,
@@ -2773,9 +2805,6 @@ function CompanySignupInfo({
             <div className="flex shrink-0 items-start justify-between gap-4">
               <div>
                 <h2 className="text-lg font-semibold text-slate-900">약관 및 동의</h2>
-                <p className="mt-1 text-sm text-slate-500">
-                  필수 동의와 선택 동의를 구분해 받으며, 선택 동의 미동의 시에도 회원가입은 가능합니다.
-                </p>
               </div>
               <button
                 type="button"
@@ -2788,148 +2817,184 @@ function CompanySignupInfo({
             </div>
 
             <div className="mt-5 min-h-0 flex-1 space-y-4 overflow-y-auto pr-1 text-sm">
-              <label className="flex items-start gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-                <input
-                  type="checkbox"
-                  data-testid="company-consent-terms"
-                  className="mt-1"
-                  checked={consentTerms}
-                  onChange={(e) => {
-                    setConsentTerms(e.target.checked)
-                    if (e.target.checked) setConsentError(null)
-                  }}
-                />
-                <span>
-                  <span className="font-semibold text-slate-900">서비스 이용약관</span>{" "}
-                  <span className="text-rose-600">(필수)</span>
-                  <span className="block text-xs text-slate-500 mt-1">
-                    회원가입, 기업 등록 및 프로그램 운영 관련 서비스 이용을 위한 필수 약관입니다.
+              <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
+                <label className="flex items-start gap-3 bg-slate-50 px-3 py-3">
+                  <input
+                    type="checkbox"
+                    data-testid="company-consent-terms"
+                    className="mt-1"
+                    checked={consentTerms}
+                    onChange={(e) => {
+                      setConsentTerms(e.target.checked)
+                      if (e.target.checked) setConsentError(null)
+                    }}
+                  />
+                  <span>
+                    <span className="font-semibold text-slate-900">서비스 이용약관</span>{" "}
+                    <span className="text-rose-600">(필수)</span>
+                    <span className="mt-1 block text-xs text-slate-500">
+                      회원가입, 기업 등록 및 프로그램 운영 관련 서비스 이용을 위한 필수 약관입니다.
+                    </span>
                   </span>
-                </span>
-              </label>
-              <div className="max-h-40 overflow-y-auto rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600 leading-relaxed">
-                <p className="font-semibold text-slate-700">[서비스 이용약관]</p>
-                <p className="mt-2">제1조 (목적)</p>
-                <p>
-                  본 약관은 MYSC(이하 &quot;회사&quot;)가 제공하는 서비스의 이용과 관련하여 회사와 회원 간의
-                  권리, 의무 및 책임사항을 정함을 목적으로 합니다.
-                </p>
-                <p className="mt-2">제2조 (회원가입 및 이용)</p>
-                <p>
-                  회원은 회사가 정한 절차에 따라 가입을 신청하고, 회사의 승인에 따라 서비스를 이용할 수
-                  있습니다. 회원은 가입 신청 시 사실에 부합하는 정보를 제공하여야 하며, 제공한 정보에
-                  변경이 있는 경우 이를 즉시 수정하거나 회사에 알려야 합니다.
-                </p>
-                <p className="mt-2">제3조 (서비스의 제공)</p>
-                <p>
-                  회사는 회원에게 기업 등록, 프로그램 신청 및 참여, 심사 및 운영 안내, 후속 지원 검토,
-                  투자 검토 및 연계 가능성 검토 등 관련 서비스를 제공합니다.
-                </p>
-                <p className="mt-2">제4조 (기업정보의 제공 및 활용)</p>
-                <p>
-                  회원은 서비스 이용 과정에서 회사명, 회사 소개, 사업 내용, 매출, 자본, 투자 이력 및
-                  계획, 인력 현황, 바우처 및 인증 정보 등 기업 관련 정보를 회사에 제공할 수 있습니다.
-                </p>
-                <p className="mt-2">회사는 회원이 제공한 기업정보를 다음 목적 범위 내에서 활용할 수 있습니다.</p>
-                <p>1. 회원가입 심사 및 참여기업 확인</p>
-                <p>2. 프로그램 운영, 심사, 결과 안내 및 이력 관리</p>
-                <p>3. 내부 검토자료 작성, 투자 검토, 후속 지원 및 파트너 연계 가능성 검토</p>
-                <p>4. 회원 문의 대응 및 서비스 운영 품질 개선</p>
-                <p className="mt-2">
-                  회사는 회원의 별도 동의 없이 회원이 제공한 개인정보 또는 기업정보를 외부 제3자에게
-                  제공하지 않습니다. 다만, 법령에 따른 경우 또는 회원이 별도로 동의한 경우는 예외로
-                  합니다.
-                </p>
-                <p className="mt-2">제5조 (회원의 책임)</p>
-                <p>
-                  회원은 타인의 정보를 도용하거나 허위 정보를 등록하여서는 안 되며, 서비스 운영을 방해하는
-                  행위를 하여서는 안 됩니다.
-                </p>
-                <p className="mt-2">제6조 (약관의 변경)</p>
-                <p>
-                  회사는 관련 법령을 위반하지 않는 범위에서 약관을 변경할 수 있으며, 중요한 변경이 있는
-                  경우 사전에 공지하거나 회원에게 안내합니다.
-                </p>
+                </label>
+                <div className="max-h-40 overflow-y-auto border-t border-slate-200 px-3 py-3 text-xs leading-relaxed text-slate-600">
+                  <p className="font-semibold text-slate-700">[서비스 이용약관]</p>
+                  <p className="mt-2">제1조 (목적)</p>
+                  <p>
+                    본 약관은 MYSC(이하 &quot;회사&quot;)가 제공하는 서비스의 이용과 관련하여 회사와 회원 간의
+                    권리, 의무 및 책임사항을 정함을 목적으로 합니다.
+                  </p>
+                  <p className="mt-2">제2조 (회원가입 및 이용)</p>
+                  <p>
+                    회원은 회사가 정한 절차에 따라 가입을 신청하고, 회사의 승인에 따라 서비스를 이용할 수
+                    있습니다. 회원은 가입 신청 시 사실에 부합하는 정보를 제공하여야 하며, 제공한 정보에
+                    변경이 있는 경우 이를 즉시 수정하거나 회사에 알려야 합니다.
+                  </p>
+                  <p className="mt-2">제3조 (서비스의 제공)</p>
+                  <p>
+                    회사는 회원에게 기업 등록, 프로그램 신청 및 참여, 심사 및 운영 안내, 후속 지원 검토,
+                    투자 검토 및 연계 가능성 검토 등 관련 서비스를 제공합니다.
+                  </p>
+                  <p className="mt-2">제4조 (기업정보의 제공 및 활용)</p>
+                  <p>
+                    회원은 서비스 이용 과정에서 회사명, 회사 소개, 사업 내용, 매출, 자본, 투자 이력 및
+                    계획, 인력 현황, 바우처 및 인증 정보 등 기업 관련 정보를 회사에 제공할 수 있습니다.
+                  </p>
+                  <p className="mt-2">회사는 회원이 제공한 기업정보를 다음 목적 범위 내에서 활용할 수 있습니다.</p>
+                  <p>1. 회원가입 심사 및 참여기업 확인</p>
+                  <p>2. 프로그램 운영, 심사, 결과 안내 및 이력 관리</p>
+                  <p>3. 내부 검토자료 작성, 투자 검토, 후속 지원 및 파트너 연계 가능성 검토</p>
+                  <p>4. 회원 문의 대응 및 서비스 운영 품질 개선</p>
+                  <p className="mt-2">
+                    회사는 회원의 별도 동의 없이 회원이 제공한 개인정보 또는 기업정보를 외부 제3자에게
+                    제공하지 않습니다. 다만, 법령에 따른 경우 또는 회원이 별도로 동의한 경우는 예외로
+                    합니다.
+                  </p>
+                  <p className="mt-2">제5조 (회원의 책임)</p>
+                  <p>
+                    회원은 타인의 정보를 도용하거나 허위 정보를 등록하여서는 안 되며, 서비스 운영을 방해하는
+                    행위를 하여서는 안 됩니다.
+                  </p>
+                  <p className="mt-2">제6조 (약관의 변경)</p>
+                  <p>
+                    회사는 관련 법령을 위반하지 않는 범위에서 약관을 변경할 수 있으며, 중요한 변경이 있는
+                    경우 사전에 공지하거나 회원에게 안내합니다.
+                  </p>
+                </div>
               </div>
 
-              <label className="flex items-start gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-                <input
-                  type="checkbox"
-                  data-testid="company-consent-privacy"
-                  className="mt-1"
-                  checked={consentPrivacy}
-                  onChange={(e) => {
-                    setConsentPrivacy(e.target.checked)
-                    if (e.target.checked) setConsentError(null)
-                  }}
-                />
-                <span>
-                  <span className="font-semibold text-slate-900">개인정보 수집·이용 동의</span>{" "}
-                  <span className="text-rose-600">(필수)</span>
-                  <span className="block text-xs text-slate-500 mt-1">
-                    회원 식별, 가입 심사, 프로그램 운영 및 관련 연락을 위한 필수 동의입니다.
+              <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
+                <label className="flex items-start gap-3 bg-slate-50 px-3 py-3">
+                  <input
+                    type="checkbox"
+                    data-testid="company-consent-privacy"
+                    className="mt-1"
+                    checked={consentPrivacy}
+                    onChange={(e) => {
+                      setConsentPrivacy(e.target.checked)
+                      if (e.target.checked) setConsentError(null)
+                    }}
+                  />
+                  <span>
+                    <span className="font-semibold text-slate-900">개인정보 수집·이용 동의</span>{" "}
+                    <span className="text-rose-600">(필수)</span>
+                    <span className="mt-1 block text-xs text-slate-500">
+                      회원 식별, 가입 심사, 프로그램 운영 및 관련 연락을 위한 필수 동의입니다.
+                    </span>
                   </span>
-                </span>
-              </label>
-              <div className="max-h-36 overflow-y-auto rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600 leading-relaxed">
-                <p className="font-semibold text-slate-700">[개인정보 수집·이용 동의] (필수)</p>
-                <p className="mt-2">1. 수집·이용 목적</p>
-                <p>
-                  회사는 회원 식별, 가입 심사, 참여기업 확인, 프로그램 운영, 결과 안내, 문의 대응,
-                  공지사항 전달, 후속 지원 검토 및 관련 연락을 위하여 개인정보를 수집·이용합니다.
-                </p>
-                <p className="mt-2">2. 수집 항목</p>
-                <p>
-                  대표자 및 담당자의 이름, 이메일 주소, 휴대전화번호, 연령, 성별, 국적, 공동대표 정보
-                  (해당 시), 기타 회원가입 및 프로그램 운영에 필요한 연락 정보
-                </p>
-                <p className="mt-2">3. 보유 및 이용 기간</p>
-                <p>
-                  회원 탈퇴 시까지 보관하며, 관계 법령에 따라 별도 보관이 필요한 경우 해당 기간 동안
-                  보관합니다.
-                </p>
-                <p className="mt-2">4. 동의 거부권 및 불이익</p>
-                <p>
-                  이용자는 개인정보 수집·이용에 대한 동의를 거부할 권리가 있습니다. 다만 본 동의는
-                  회원가입 및 서비스 이용을 위한 필수 동의로, 동의를 거부할 경우 회원가입이 제한됩니다.
-                </p>
+                </label>
+                <div className="max-h-36 overflow-y-auto border-t border-slate-200 px-3 py-3 text-xs leading-relaxed text-slate-600">
+                  <p className="font-semibold text-slate-700">[개인정보 수집·이용 동의]</p>
+                  <p className="mt-2">1. 수집·이용 목적</p>
+                  <p>
+                    회사는 회원 식별, 가입 심사, 참여기업 확인, 프로그램 운영, 결과 안내, 문의 대응,
+                    공지사항 전달, 후속 지원 검토 및 관련 연락을 위하여 개인정보를 수집·이용합니다.
+                  </p>
+                  <p className="mt-2">2. 수집 항목</p>
+                  <p>
+                    대표자 및 담당자의 이름, 이메일 주소, 휴대전화번호, 연령, 성별, 국적, 공동대표 정보
+                    (해당 시), 기타 회원가입 및 프로그램 운영에 필요한 연락 정보
+                  </p>
+                  <p className="mt-2">3. 보유 및 이용 기간</p>
+                  <p>
+                    회원 탈퇴 시까지 보관하며, 관계 법령에 따라 별도 보관이 필요한 경우 해당 기간 동안
+                    보관합니다.
+                  </p>
+                  <p className="mt-2">4. 동의 거부권 및 불이익</p>
+                  <p>
+                    이용자는 개인정보 수집·이용에 대한 동의를 거부할 권리가 있습니다. 다만 본 동의는
+                    회원가입 및 서비스 이용을 위한 필수 동의로, 동의를 거부할 경우 회원가입이 제한됩니다.
+                  </p>
+                </div>
               </div>
 
-              <label className="flex items-start gap-3 rounded-lg border border-slate-200 px-3 py-2">
-                <input
-                  type="checkbox"
-                  className="mt-1"
-                  checked={consentMarketing}
-                  onChange={(e) => setConsentMarketing(e.target.checked)}
-                />
-                <span>
-                  <span className="font-semibold text-slate-900">마케팅 정보 수신 동의</span>{" "}
-                  <span className="text-slate-500">(선택)</span>
-                  <span className="block text-xs text-slate-500 mt-1">
-                    이벤트, 뉴스레터, 프로그램 안내 수신 여부를 선택할 수 있습니다.
+              <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
+                <label className="flex items-start gap-3 bg-white px-3 py-3">
+                  <input
+                    type="checkbox"
+                    className="mt-1"
+                    checked={consentMarketing}
+                    onChange={(e) => setConsentMarketing(e.target.checked)}
+                  />
+                  <span>
+                    <span className="font-semibold text-slate-900">마케팅 정보 수신 동의</span>{" "}
+                    <span className="text-slate-500">(선택)</span>
+                    <span className="mt-1 block text-xs text-slate-500">
+                      이벤트, 뉴스레터, 프로그램 안내 수신 여부를 선택할 수 있습니다.
+                    </span>
                   </span>
-                </span>
-              </label>
-              <div className="max-h-36 overflow-y-auto rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600 leading-relaxed">
-                <p className="font-semibold text-slate-700">[광고성 정보 수신 동의] 선택</p>
-                <p className="mt-2">1. 수신 목적</p>
-                <p>
-                  회사는 회원에게 이벤트, 혜택, 신규 서비스, 신규 프로그램 모집, 프로모션, 뉴스레터 등
-                  광고성 정보를 전송하기 위해 개인정보를 이용합니다.
-                </p>
-                <p className="mt-2">2. 수집·이용 항목</p>
-                <p>이메일 주소, 휴대전화번호, 앱 알림 수신 토큰(해당하는 경우)</p>
-                <p className="mt-2">3. 전송 방법</p>
-                <p>이메일, 문자메시지, 앱 알림(회사가 실제 제공하는 수단에 한함)</p>
-                <p className="mt-2">4. 보유 및 이용 기간</p>
-                <p>회원의 동의 철회 또는 회원 탈퇴 시까지 보유·이용합니다.</p>
-                <p className="mt-2">5. 동의 거부권 및 불이익</p>
-                <p>
-                  이용자는 광고성 정보 수신에 대한 동의를 거부할 권리가 있으며, 동의하지 않더라도 서비스
-                  이용에는 제한이 없습니다.
-                </p>
-                <p className="mt-2">6. 동의 철회 방법</p>
-                <p>이용자는 계정 설정 또는 고객센터를 통해 언제든지 동의를 철회할 수 있습니다.</p>
+                </label>
+                <div className="max-h-36 overflow-y-auto border-t border-slate-200 px-3 py-3 text-xs text-slate-600 leading-relaxed">
+                  <p className="font-semibold text-slate-700">[광고성 정보 수신 동의]</p>
+                  <p className="mt-2">1. 수신 목적</p>
+                  <p>
+                    회사는 회원에게 이벤트, 혜택, 신규 서비스, 신규 프로그램 모집, 프로모션, 뉴스레터 등
+                    광고성 정보를 전송하기 위해 개인정보를 이용합니다.
+                  </p>
+                  <p className="mt-2">2. 수집·이용 항목</p>
+                  <p>이메일 주소, 휴대전화번호, 앱 알림 수신 토큰(해당하는 경우)</p>
+                  <p className="mt-2">3. 전송 방법</p>
+                  <p>이메일, 문자메시지, 앱 알림(회사가 실제 제공하는 수단에 한함)</p>
+                  <p className="mt-2">4. 보유 및 이용 기간</p>
+                  <p>회원의 동의 철회 또는 회원 탈퇴 시까지 보유·이용합니다.</p>
+                  <p className="mt-2">5. 동의 거부권 및 불이익</p>
+                  <p>
+                    이용자는 광고성 정보 수신에 대한 동의를 거부할 권리가 있으며, 동의하지 않더라도 서비스
+                    이용에는 제한이 없습니다.
+                  </p>
+                  <p className="mt-2">6. 동의 철회 방법</p>
+                  <p>이용자는 계정 설정 또는 고객센터를 통해 언제든지 동의를 철회할 수 있습니다.</p>
+                </div>
+              </div>
+
+              <div className="overflow-hidden rounded-lg border border-sky-200 bg-sky-50/50">
+                <label className="flex items-start gap-3 bg-sky-50 px-3 py-3">
+                  <input
+                    type="checkbox"
+                    className="mt-1"
+                    checked={consentServiceNotifications}
+                    onChange={(e) => setConsentServiceNotifications(e.target.checked)}
+                  />
+                  <span>
+                    <span className="font-semibold text-slate-900">
+                      소식 알림 수신 동의
+                    </span>{" "}
+                    <span className="text-slate-500">(선택)</span>
+                    <span className="ml-2 inline-flex rounded-full bg-sky-100 px-2 py-0.5 text-[11px] font-semibold text-sky-700">
+                      권장
+                    </span>
+                    <span className="mt-1 block text-xs text-slate-600">
+                      오피스아워 신청 안내, 일정 확정, 일정 리마인드 등 운영에 필요한 안내를 메일 및 카카오톡으로 보내드립니다.
+                    </span>
+                  </span>
+                </label>
+                <div className="max-h-36 overflow-y-auto border-t border-sky-200 px-3 py-3 text-xs leading-relaxed text-slate-600">
+                  <p className="font-semibold text-slate-700">[소식 알림 수신 동의]</p>
+                  <p className="mt-2">
+                    오피스아워 신청 안내, 일정 확정, 일정 리마인드 등 홈페이지 이용에 필요한 안내 사항을 이메일 및 카카오톡으로 발송합니다.
+                  </p>
+                  <p className="mt-2">수집 항목: 이메일 주소, 휴대전화번호</p>
+                </div>
               </div>
 
               {consentError ? (

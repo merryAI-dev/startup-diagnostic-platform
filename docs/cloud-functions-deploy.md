@@ -12,6 +12,10 @@ Required deployed functions:
 - `runApplicationMaintenance`
 - `scheduledApplicationMaintenance`
 
+Optional stage-only diagnostic function:
+
+- `runBiztalkStageCheck`
+
 ## Firebase project aliases
 
 This repository uses the following aliases in [.firebaserc](/Users/mysc/Desktop/startup-diagnostic-platform/.firebaserc):
@@ -33,6 +37,13 @@ firebase functions:secrets:set GEMINI_API_KEY --project startup-diagnosis-platfo
 firebase functions:secrets:set GEMINI_API_KEY --project startup-acceleration-platform
 firebase functions:secrets:set SLACK_SIGNUP_REQUEST_WEBHOOK_URL --project startup-diagnosis-platform
 firebase functions:secrets:set SLACK_SIGNUP_REQUEST_WEBHOOK_URL --project startup-acceleration-platform
+```
+
+If you use the stage BizTalk Cloud Run probe, also configure:
+
+```bash
+firebase functions:secrets:set BIZTALK_DISPATCH_URL --project startup-diagnosis-platform
+firebase functions:secrets:set BIZTALK_DISPATCH_TOKEN --project startup-diagnosis-platform
 ```
 
 ## Deploy commands
