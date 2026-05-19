@@ -13,7 +13,7 @@
     "test:e2e": "playwright test",
     "test:e2e:headed": "playwright test --headed",
     "deploy:functions": "firebase deploy --only functions",
-    "deploy:functions:core": "firebase deploy --only functions:submitRegularApplication,functions:cancelApplication,functions:approvePendingUser,functions:transitionApplicationStatus,functions:runApplicationMaintenance,functions:scheduledApplicationMaintenance",
+    "deploy:functions:core": "firebase deploy --only functions:submitRegularApplication,functions:cancelApplication,functions:approvePendingUser,functions:updateCompanyPrograms,functions:transitionApplicationStatus,functions:syncConsultantScheduling,functions:runApplicationMaintenance,functions:scheduledApplicationMaintenance",
     "deploy:rules": "firebase deploy --only firestore:rules,storage",
     "deploy:stage:functions": "node scripts/firebase-deploy.mjs stage functions",
     "deploy:live:functions": "node scripts/firebase-deploy.mjs live functions",

@@ -25,6 +25,7 @@ const BATCH_COMMIT_SIZE = 400;
 function parseArgs(argv) {
   const result = {
     commit: false,
+    envFile: ".env",
     limit: null,
     help: false,
   };
@@ -49,6 +50,15 @@ function parseArgs(argv) {
       index += 1;
       continue;
     }
+    if (arg === "--env-file") {
+      const next = argv[index + 1];
+      if (!next || next.startsWith("--")) {
+        throw new Error("--env-file requires a path");
+      }
+      result.envFile = next;
+      index += 1;
+      continue;
+    }
     throw new Error(`Unknown argument: ${arg}`);
   }
 
@@ -59,9 +69,10 @@ function printUsage() {
   console.log("Backfill agenda.priorityConsultantIds from consultant.agendaIds");
   console.log("");
   console.log("Usage:");
-  console.log("  node scripts/backfill-agenda-priority-consultant-ids.mjs [--limit N] [--commit]");
+  console.log("  node scripts/backfill-agenda-priority-consultant-ids.mjs [--env-file .env] [--limit N] [--commit]");
   console.log("");
   console.log("Options:");
+  console.log("  --env-file   Env file to load before process.env overrides (default: .env)");
   console.log("  --limit N   Process only first N agendas that need updates");
   console.log("  --commit    Execute updates (default is dry-run)");
   console.log("  --help      Show this help");
@@ -169,7 +180,7 @@ async function main() {
 
   const currentFilePath = fileURLToPath(import.meta.url);
   const projectRoot = path.resolve(path.dirname(currentFilePath), "..");
-  const envFromFile = loadEnvFile(path.join(projectRoot, ".env"));
+  const envFromFile = loadEnvFile(path.resolve(projectRoot, options.envFile));
   const env = { ...envFromFile, ...process.env };
 
   const firebaseConfig = {

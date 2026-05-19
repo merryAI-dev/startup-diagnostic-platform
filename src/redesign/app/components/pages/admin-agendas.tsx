@@ -18,6 +18,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/redesign/app/components/ui/table"
 import { Textarea } from "@/redesign/app/components/ui/textarea"
 import { PaginationControls } from "@/redesign/app/components/ui/pagination-controls"
+import { cn } from "@/redesign/app/components/ui/utils"
 
 interface AdminAgendasProps {
   agendas: Agenda[]
@@ -37,6 +38,15 @@ function scopeBadgeClassName(scope: Agenda["scope"]) {
 }
 
 const PAGE_SIZE = 10
+
+type AgendaPriorityConsultantEntry = {
+  id: string
+  consultant: Consultant | null
+}
+
+function formatMissingConsultantLabel(consultantId: string) {
+  return `문서 없음: ${consultantId.slice(0, 8)}`
+}
 
 export function AdminAgendas({
   agendas,
@@ -84,12 +94,16 @@ export function AdminAgendas({
     () => new Map(consultants.map((consultant) => [consultant.id, consultant])),
     [consultants],
   )
-  const consultantsByAgendaId = useMemo(() => {
+  const priorityConsultantsByAgendaId = useMemo(() => {
     return new Map(
       agendas.map((agenda) => {
-        const linkedConsultants = Array.from(new Set(agenda.priorityConsultantIds ?? []))
-          .map((consultantId) => consultantById.get(consultantId))
-          .filter((consultant): consultant is Consultant => Boolean(consultant))
+        const linkedConsultants = Array.from(new Set(agenda.priorityConsultantIds ?? [])).map(
+          (consultantId) =>
+            ({
+              id: consultantId,
+              consultant: consultantById.get(consultantId) ?? null,
+            }) satisfies AgendaPriorityConsultantEntry,
+        )
 
         return [agenda.id, linkedConsultants] as const
       }),
@@ -98,26 +112,53 @@ export function AdminAgendas({
   const consultantNamesByAgendaId = useMemo(
     () =>
       new Map(
-        Array.from(consultantsByAgendaId.entries()).map(([agendaId, linkedConsultants]) => [
+        Array.from(priorityConsultantsByAgendaId.entries()).map(([agendaId, linkedConsultants]) => [
           agendaId,
-          linkedConsultants.map((consultant) => consultant.name.trim()).filter(Boolean),
+          linkedConsultants.map((entry) => {
+            const name = entry.consultant?.name.trim()
+            return name || formatMissingConsultantLabel(entry.id)
+          }),
         ]),
       ),
-    [consultantsByAgendaId],
+    [priorityConsultantsByAgendaId],
   )
+  const consultantAssignmentNamesByAgendaId = useMemo(() => {
+    const next = new Map<string, string[]>()
+
+    consultants.forEach((consultant) => {
+      const name = consultant.name.trim() || formatMissingConsultantLabel(consultant.id)
+      Array.from(new Set(consultant.agendaIds ?? [])).forEach((agendaId) => {
+        next.set(agendaId, [...(next.get(agendaId) ?? []), name])
+      })
+    })
+
+    next.forEach((names, agendaId) => {
+      next.set(agendaId, Array.from(new Set(names)).sort((a, b) => a.localeCompare(b, "ko-KR")))
+    })
+
+    return next
+  }, [consultants])
+  const selectedAgendaAssignmentNames = useMemo(() => {
+    if (!selectedAgenda) return []
+    return consultantAssignmentNamesByAgendaId.get(selectedAgenda.id) ?? []
+  }, [consultantAssignmentNamesByAgendaId, selectedAgenda])
   const selectedAgendaLinkedConsultants = useMemo(() => {
     if (!selectedAgenda) return []
-    return consultantsByAgendaId.get(selectedAgenda.id) ?? []
-  }, [consultantsByAgendaId, selectedAgenda])
+    return priorityConsultantsByAgendaId.get(selectedAgenda.id) ?? []
+  }, [priorityConsultantsByAgendaId, selectedAgenda])
   const priorityConsultantIdsForDialog = useMemo(() => {
     if (draftPriorityConsultantIds) return draftPriorityConsultantIds
-    return selectedAgendaLinkedConsultants.map((consultant) => consultant.id)
+    return selectedAgendaLinkedConsultants.map((entry) => entry.id)
   }, [draftPriorityConsultantIds, selectedAgendaLinkedConsultants])
-  const selectedAgendaPriorityConsultants = useMemo(
+  const selectedAgendaPriorityConsultantEntries = useMemo(
     () =>
-      priorityConsultantIdsForDialog
-        .map((consultantId) => consultantById.get(consultantId))
-        .filter((consultant): consultant is Consultant => Boolean(consultant)),
+      priorityConsultantIdsForDialog.map(
+        (consultantId) =>
+          ({
+            id: consultantId,
+            consultant: consultantById.get(consultantId) ?? null,
+          }) satisfies AgendaPriorityConsultantEntry,
+      ),
     [consultantById, priorityConsultantIdsForDialog],
   )
 
@@ -168,7 +209,7 @@ export function AdminAgendas({
 
   function movePriorityConsultant(consultantId: string, direction: "up" | "down") {
     setDraftPriorityConsultantIds((prev) => {
-      const base = prev ?? selectedAgendaLinkedConsultants.map((consultant) => consultant.id)
+      const base = prev ?? selectedAgendaLinkedConsultants.map((entry) => entry.id)
       const currentIndex = base.indexOf(consultantId)
       if (currentIndex < 0) return base
 
@@ -316,6 +357,10 @@ export function AdminAgendas({
                   {paginatedAgendas.map((agenda) => {
                     const active = agenda.active !== false
                     const assignedConsultantNames = consultantNamesByAgendaId.get(agenda.id) ?? []
+                    const consultantAssignmentNames =
+                      consultantAssignmentNamesByAgendaId.get(agenda.id) ?? []
+                    const hasAssignmentWithoutPriority =
+                      assignedConsultantNames.length === 0 && consultantAssignmentNames.length > 0
                     const topPriorityNames = assignedConsultantNames.slice(0, 3)
                     const remainingPriorityCount = Math.max(0, assignedConsultantNames.length - 3)
                     return (
@@ -336,10 +381,17 @@ export function AdminAgendas({
                         </TableCell>
                         <TableCell>
                           <div className="space-y-1">
-                            <p className="text-sm font-semibold text-slate-800">
+                            <p
+                              className={cn(
+                                "text-sm font-semibold",
+                                hasAssignmentWithoutPriority ? "text-rose-700" : "text-slate-800",
+                              )}
+                            >
                               {assignedConsultantNames.length > 0
                                 ? `${assignedConsultantNames.length}명`
-                                : "미지정"}
+                                : hasAssignmentWithoutPriority
+                                  ? "우선순위 누락"
+                                  : "미지정"}
                             </p>
                             {topPriorityNames.length > 0 ? (
                               <p
@@ -350,6 +402,13 @@ export function AdminAgendas({
                                   .map((name, index) => `${index + 1}순위 ${name}`)
                                   .join(" / ")}
                                 {remainingPriorityCount > 0 ? ` 외 ${remainingPriorityCount}명` : ""}
+                              </p>
+                            ) : hasAssignmentWithoutPriority ? (
+                              <p
+                                className="max-w-[320px] truncate text-xs text-rose-600"
+                                title={consultantAssignmentNames.join(", ")}
+                              >
+                                컨설턴트 관리에는 {consultantAssignmentNames.length}명 매칭됨
                               </p>
                             ) : null}
                           </div>
@@ -449,22 +508,29 @@ export function AdminAgendas({
                   />
                 </div>
                 <div>
-                  <Label className="mb-2 block">담당 컨설턴트</Label>
+                  <Label className="mb-2 block">담당 컨설턴트 우선순위</Label>
                   <div className="rounded-md border bg-slate-50 px-3 py-3">
-                    {selectedAgendaPriorityConsultants.length > 0 ? (
+                    {selectedAgendaPriorityConsultantEntries.length > 0 ? (
                       <div className="max-h-[184px] space-y-2 overflow-y-auto pr-1">
-                        {selectedAgendaPriorityConsultants.map((consultant, index) => (
+                        {selectedAgendaPriorityConsultantEntries.map((entry, index) => (
                           <div
-                            key={consultant.id}
+                            key={entry.id}
                             className="flex items-center justify-between gap-3 rounded-md border border-slate-200 bg-white px-3 py-2"
                           >
                             <div className="flex min-w-0 items-center gap-2">
                               <span className="inline-flex h-6 min-w-6 items-center justify-center rounded-full bg-slate-100 px-2 text-[11px] font-semibold text-slate-700">
-                                {index + 1}
+                                {index + 1}순위
                               </span>
-                              <span className="truncate text-sm font-medium text-slate-800">
-                                {consultant.name}
-                              </span>
+                              <div className="min-w-0">
+                                <p className="truncate text-sm font-medium text-slate-800">
+                                  {entry.consultant?.name.trim() || formatMissingConsultantLabel(entry.id)}
+                                </p>
+                                {!entry.consultant ? (
+                                  <p className="truncate text-xs text-rose-600">
+                                    priorityConsultantIds에 있지만 consultants 문서를 찾을 수 없습니다.
+                                  </p>
+                                ) : null}
+                              </div>
                             </div>
                             <div className="flex items-center gap-1">
                               <Button
@@ -473,7 +539,7 @@ export function AdminAgendas({
                                 variant="outline"
                                 className="h-7 w-7"
                                 disabled={index === 0}
-                                onClick={() => movePriorityConsultant(consultant.id, "up")}
+                                onClick={() => movePriorityConsultant(entry.id, "up")}
                               >
                                 <ArrowUp className="h-3.5 w-3.5" />
                               </Button>
@@ -482,8 +548,8 @@ export function AdminAgendas({
                                 size="icon"
                                 variant="outline"
                                 className="h-7 w-7"
-                                disabled={index === selectedAgendaPriorityConsultants.length - 1}
-                                onClick={() => movePriorityConsultant(consultant.id, "down")}
+                                disabled={index === selectedAgendaPriorityConsultantEntries.length - 1}
+                                onClick={() => movePriorityConsultant(entry.id, "down")}
                               >
                                 <ArrowDown className="h-3.5 w-3.5" />
                               </Button>
@@ -492,6 +558,17 @@ export function AdminAgendas({
                         ))}
                         <p className="text-xs text-slate-500">
                           컨설턴트 추가/제거는 컨설턴트 관리에서 하고, 여기서는 순서만 조정합니다.
+                        </p>
+                      </div>
+                    ) : selectedAgendaAssignmentNames.length > 0 ? (
+                      <div className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2">
+                        <p className="text-sm font-semibold text-rose-700">
+                          아젠다 우선순위 원본이 비어 있습니다.
+                        </p>
+                        <p className="mt-1 text-xs text-rose-700">
+                          컨설턴트 관리에는 {selectedAgendaAssignmentNames.length}명(
+                          {selectedAgendaAssignmentNames.join(", ")})이 매칭되어 있지만,
+                          agendas.priorityConsultantIds가 비어 있어 담당 컨설턴트로 표시하지 않습니다.
                         </p>
                       </div>
                     ) : (

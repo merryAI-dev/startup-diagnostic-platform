@@ -11,7 +11,9 @@ const DEPLOY_TARGETS = {
     "functions:submitRegularApplication",
     "functions:cancelApplication",
     "functions:approvePendingUser",
+    "functions:updateCompanyPrograms",
     "functions:transitionApplicationStatus",
+    "functions:syncConsultantScheduling",
     "functions:runApplicationMaintenance",
     "functions:scheduledApplicationMaintenance",
   ].join(","),
@@ -21,7 +23,9 @@ const DEPLOY_TARGETS = {
     "functions:submitRegularApplication",
     "functions:cancelApplication",
     "functions:approvePendingUser",
+    "functions:updateCompanyPrograms",
     "functions:transitionApplicationStatus",
+    "functions:syncConsultantScheduling",
     "functions:runApplicationMaintenance",
     "functions:scheduledApplicationMaintenance",
     "functions:generateCompanyAnalysisReport",
@@ -71,4 +75,3 @@ for (const [alias, projectId] of projectEntries) {
     process.exit(result.status ?? 1);
   }
 }
-
