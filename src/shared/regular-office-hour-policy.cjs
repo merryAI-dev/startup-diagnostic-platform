@@ -126,6 +126,12 @@ function getWeekStartMonday(date) {
   return addDays(date, diff);
 }
 
+function getFirstThursdayOfMonth(monthStart) {
+  const currentDay = monthStart.getDay();
+  const daysUntilThursday = (4 - currentDay + 7) % 7;
+  return addDays(monthStart, daysUntilThursday);
+}
+
 function getOfficeHourWeekInfo(value) {
   const sourceDate =
     typeof value === "string" ? parseDateKey(value) : getSeoulTodayDate(value instanceof Date ? value : new Date(value));
@@ -141,8 +147,7 @@ function getOfficeHourWeekInfo(value) {
     return null;
   }
 
-  const firstWeekStart = getWeekStartMonday(monthStart);
-  const firstWeekThursday = addDays(firstWeekStart, 3);
+  const firstWeekThursday = getFirstThursdayOfMonth(monthStart);
   const weekOfMonth =
     Math.floor((weekThursday.getTime() - firstWeekThursday.getTime()) / (7 * 24 * 60 * 60 * 1000)) + 1;
 
@@ -211,6 +216,21 @@ function getRegularOfficeHourDateKeysForMonth(monthKey, scope) {
   }
 
   return dates;
+}
+
+function getRegularOfficeHourDateKeysForDayNumbers(monthKey, dayNumbers) {
+  const allowedDayNumbers = Array.from(new Set(Array.isArray(dayNumbers) ? dayNumbers : []))
+    .map((value) => Number(value))
+    .filter((value) => Number.isInteger(value))
+    .sort((a, b) => a - b);
+  if (allowedDayNumbers.length === 0) {
+    return [];
+  }
+
+  return getRegularOfficeHourDateKeysForMonth(monthKey).filter((dateKey) => {
+    const parsed = parseDateKey(dateKey);
+    return Boolean(parsed && allowedDayNumbers.includes(parsed.getDay()));
+  });
 }
 
 function getNextMonthKey(value) {
@@ -319,6 +339,7 @@ module.exports = {
   getScopeDayNumbers,
   isRegularOfficeHourDateForScope,
   getRegularOfficeHourDateKeysForMonth,
+  getRegularOfficeHourDateKeysForDayNumbers,
   getNextMonthKey,
   canConsultantEditMonthlyAvailability,
   canCompanyManageRegularApplication,

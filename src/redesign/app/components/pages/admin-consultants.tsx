@@ -53,6 +53,30 @@ function formatMonthLabel(monthKey: string): string {
   return `${year}년 ${Number(month)}월`
 }
 
+function formatRegularOfficeHourWeekLabel(): string {
+  return regularOfficeHourPolicy.REGULAR_OFFICE_HOUR_WEEK_NUMBERS
+    .slice()
+    .sort((a, b) => a - b)
+    .map((weekOfMonth) => `${weekOfMonth}주차`)
+    .join("와 ")
+}
+
+function formatAvailabilitySectionLabel(day: ConsultantAvailability): string {
+  const weekdayLabel =
+    day.dayOfWeek === 2 ? "화" : day.dayOfWeek === 3 ? "수" : day.dayOfWeek === 4 ? "목" : `${day.dayOfWeek}`
+  if (!day.dateKey) {
+    return `${weekdayLabel}요일`
+  }
+
+  const parsedDate = regularOfficeHourPolicy.parseDateKey(day.dateKey)
+  const weekInfo = regularOfficeHourPolicy.getOfficeHourWeekInfo(day.dateKey)
+  if (!parsedDate || !weekInfo) {
+    return `${weekdayLabel}요일`
+  }
+
+  return `${weekInfo.weekOfMonth}주차 ${weekdayLabel}요일 · ${parsedDate.getMonth() + 1}/${parsedDate.getDate()}`
+}
+
 export function AdminConsultants({
   consultants,
   agendas,
@@ -79,6 +103,7 @@ export function AdminConsultants({
   const [slackUserIdDrafts, setSlackUserIdDrafts] = useState<Record<string, string>>({})
   const [editingSlackUserIdIds, setEditingSlackUserIdIds] = useState<string[]>([])
   const [savingSlackUserIdIds, setSavingSlackUserIdIds] = useState<string[]>([])
+  const [savingSchedule, setSavingSchedule] = useState(false)
   const [selectedScheduleMonthKey, setSelectedScheduleMonthKey] = useState("")
 
   const selectedConsultant = useMemo(
@@ -143,15 +168,6 @@ export function AdminConsultants({
       }),
     [agendas, selectedConsultant?.agendaIds, selectedConsultant?.scope],
   )
-  const scheduleDays = useMemo(
-    () =>
-      selectedScheduleDayNumbers.map((value) => ({
-        value,
-        label: value === 2 ? "화" : value === 3 ? "수" : "목",
-      })),
-    [selectedScheduleDayNumbers],
-  )
-
   const normalizedSelectedAvailability = useMemo(
     () =>
       selectedScheduleMonthKey
@@ -248,11 +264,13 @@ export function AdminConsultants({
     }
   }, [scheduleMonthOptions, scheduleTargetMonthKey, selectedScheduleMonthKey])
 
-  function toggleSlot(dayOfWeek: number, slotStart: string) {
+  function toggleSlot(dayKey: string, slotStart: string) {
+    if (savingSchedule) return
     setDraftScheduleAvailability((prev) => {
       const base = prev ?? normalizedSelectedAvailability
       return base.map((day) => {
-        if (day.dayOfWeek !== dayOfWeek) return day
+        const currentDayKey = day.dateKey ?? String(day.dayOfWeek)
+        if (currentDayKey !== dayKey) return day
         return {
           ...day,
           slots: day.slots.map((slot) =>
@@ -263,21 +281,28 @@ export function AdminConsultants({
     })
   }
 
-  function handleSaveSchedule() {
+  async function handleSaveSchedule() {
     if (!selectedConsultant || !selectedScheduleMonthKey) return
-    onUpdateConsultant(selectedConsultant.id, {
-      monthlyAvailability: {
-        ...(selectedConsultant.monthlyAvailability ?? {}),
-        [selectedScheduleMonthKey]: scheduleAvailability,
-      },
-      monthlyAvailabilityMeta: {
-        [selectedScheduleMonthKey]: {
-          status: "submitted",
-        },
-      },
-    })
-    setIsScheduleDialogOpen(false)
-    setDraftScheduleAvailability(null)
+    setSavingSchedule(true)
+    try {
+      await Promise.resolve(
+        onUpdateConsultant(selectedConsultant.id, {
+          monthlyAvailability: {
+            ...(selectedConsultant.monthlyAvailability ?? {}),
+            [selectedScheduleMonthKey]: scheduleAvailability,
+          },
+          monthlyAvailabilityMeta: {
+            [selectedScheduleMonthKey]: {
+              status: "submitted",
+            },
+          },
+        }),
+      )
+      setIsScheduleDialogOpen(false)
+      setDraftScheduleAvailability(null)
+    } finally {
+      setSavingSchedule(false)
+    }
   }
 
   function toggleConsultantAgenda(agendaId: string, checked: boolean) {
@@ -972,6 +997,7 @@ export function AdminConsultants({
                                   isScheduleDialogOpen && selectedConsultantId === consultant.id
                                 }
                                 onOpenChange={(open) => {
+                                  if (savingSchedule) return
                                   setIsScheduleDialogOpen(open)
                                   if (open) {
                                     setSelectedConsultantId(consultant.id)
@@ -1017,15 +1043,15 @@ export function AdminConsultants({
                                   </Button>
                                 </DialogTrigger>
                                 <DialogContent className="max-w-3xl">
-                                  <DialogHeader>
-                                    <DialogTitle className="flex items-center gap-2">
-                                      <UserCog className="w-4 h-4" />
-                                      {consultant.name} 컨설턴트 가능 시간
-                                    </DialogTitle>
-                                    <DialogDescription>
-                                      {scheduleTargetMonthKey} 정기 오피스아워 가능 시간을 설정합니다.
-                                    </DialogDescription>
-                                  </DialogHeader>
+                                    <DialogHeader>
+                                      <DialogTitle className="flex items-center gap-2">
+                                        <UserCog className="w-4 h-4" />
+                                        {consultant.name} 컨설턴트 가능 시간
+                                      </DialogTitle>
+                                      <DialogDescription>
+                                        {scheduleTargetMonthKey} 정기 오피스아워 가능 시간을 설정합니다. {formatRegularOfficeHourWeekLabel()} 일정을 각각 다르게 입력할 수 있습니다.
+                                      </DialogDescription>
+                                    </DialogHeader>
 
                                   <div className="space-y-4 max-h-[65vh] overflow-y-auto pr-1">
                                     <div className="w-full max-w-[220px]">
@@ -1048,16 +1074,13 @@ export function AdminConsultants({
                                     </div>
                                     {!isScheduleEditable && selectedScheduleMonthKey === scheduleTargetMonthKey && (
                                       <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-                                        컨설턴트 가능 시간은 매월 3주차에 다음 달 일정만 수정할 수 있습니다.
-                                      </div>
-                                    )}
+                                        {`컨설턴트 가능 시간은 매월 ${regularOfficeHourPolicy.CONSULTANT_SCHEDULE_OPEN_WEEK_NUMBER}주차에 다음 달 일정만 수정할 수 있습니다.`}
+                                    </div>
+                                  )}
                                     {scheduleAvailability.map((day) => {
-                                      const dayInfo = scheduleDays.find(
-                                        (item) => item.value === day.dayOfWeek,
-                                      )
                                       return (
                                         <div
-                                          key={day.dayOfWeek}
+                                          key={day.dateKey ?? day.dayOfWeek}
                                           className={cn(
                                             "rounded-lg border p-4",
                                             isScheduleEditable
@@ -1067,7 +1090,7 @@ export function AdminConsultants({
                                         >
                                           <div className="mb-3 flex items-center justify-between gap-2">
                                             <div className="text-sm font-semibold">
-                                              {dayInfo?.label || "-"}요일
+                                              {formatAvailabilitySectionLabel(day)}
                                             </div>
                                             {!isScheduleEditable ? (
                                               <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-medium text-slate-500">
@@ -1078,7 +1101,7 @@ export function AdminConsultants({
                                           <div className="grid grid-cols-3 gap-2 md:grid-cols-5">
                                             {day.slots.map((slot) => (
                                               <button
-                                                key={`${day.dayOfWeek}-${slot.start}`}
+                                                key={`${day.dateKey ?? day.dayOfWeek}-${slot.start}`}
                                                 type="button"
                                                 aria-pressed={slot.available}
                                                 title={
@@ -1091,9 +1114,9 @@ export function AdminConsultants({
                                                       : "불가 일정"
                                                 }
                                                 onClick={() =>
-                                                  toggleSlot(day.dayOfWeek, slot.start)
+                                                  toggleSlot(day.dateKey ?? String(day.dayOfWeek), slot.start)
                                                 }
-                                                disabled={!isScheduleEditable}
+                                                disabled={!isScheduleEditable || savingSchedule}
                                                 className={cn(
                                                   "rounded-lg border px-2 py-2 text-xs transition",
                                                   !isScheduleEditable &&
@@ -1135,6 +1158,7 @@ export function AdminConsultants({
                                     <Button
                                       type="button"
                                       variant="outline"
+                                      disabled={savingSchedule}
                                       onClick={() => {
                                         setIsScheduleDialogOpen(false)
                                         setDraftScheduleAvailability(null)
@@ -1145,9 +1169,10 @@ export function AdminConsultants({
                                     <Button
                                       type="button"
                                       onClick={handleSaveSchedule}
-                                      disabled={!isScheduleEditable || !isScheduleDirty}
+                                      disabled={savingSchedule || !isScheduleEditable || !isScheduleDirty}
+                                      loading={savingSchedule}
                                     >
-                                      저장
+                                      {savingSchedule ? "저장 중" : "저장"}
                                     </Button>
                                   </div>
                                 </DialogContent>

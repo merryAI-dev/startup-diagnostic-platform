@@ -123,6 +123,11 @@ const IRREGULAR_OFFICE_HOUR_CONFIRMED_CONSULTANT_EMAIL_TEMPLATE = [
   "",
   "구글 캘린더 초대와 함께 세부 일정을 확인 부탁드립니다.",
 ].join("\n");
+
+const CONSULTANT_SCHEDULE_OPEN_WEEK_NUMBER =
+  regularOfficeHourPolicy.CONSULTANT_SCHEDULE_OPEN_WEEK_NUMBER ?? 3;
+const COMPANY_APPLICATION_OPEN_WEEK_NUMBER =
+  regularOfficeHourPolicy.COMPANY_APPLICATION_OPEN_WEEK_NUMBER ?? 4;
 const IRREGULAR_OFFICE_HOUR_CONFIRMED_COMPANY_EMAIL_SUBJECT =
   "[MYSC] 비정기 오피스아워 일정 안내";
 const IRREGULAR_OFFICE_HOUR_CONFIRMED_COMPANY_EMAIL_TEMPLATE = [
@@ -243,6 +248,35 @@ const OFFICE_HOUR_REPORT_REMINDER_INTERNAL_SLACK_TEMPLATE = [
   "주제 : {{agendaName}}",
   "일시 : {{scheduledDateTimeLabel}}",
   "보고서 등록 링크 : {{reportLink}}",
+].join("\n");
+const OFFICE_HOUR_REJECTED_COMPANY_EMAIL_SUBJECT = "[MYSC] 오피스아워 신청 취소 안내";
+const OFFICE_HOUR_REJECTED_COMPANY_EMAIL_TEMPLATE = [
+  "안녕하세요. {{companyName}} 님.",
+  "",
+  "신청하신 오피스아워 일정이 컨설턴트에 의해 취소되었습니다.",
+  "",
+  "구분 : {{officeHourTypeLabel}}",
+  "사업 : {{programName}}",
+  "주제 : {{agendaName}}",
+  "일시 : {{scheduledDateTimeLabel}}",
+  "취소 사유 : {{rejectionReason}}",
+  "",
+  "자세한 내용은 링크: {{detailLink}} 확인 및 사업팀 소통 부탁드립니다.",
+].join("\n");
+
+const OFFICE_HOUR_CANCELLED_CONSULTANT_EMAIL_SUBJECT = "[MYSC] 오피스아워 일정 취소 안내";
+const OFFICE_HOUR_CANCELLED_CONSULTANT_EMAIL_TEMPLATE = [
+  "안녕하세요. {{consultantName}}님.",
+  "",
+  "신청하신 오피스아워 일정이 취소되었습니다.",
+  "",
+  "기업 : {{companyName}}",
+  "사업 : {{programName}}",
+  "주제 : {{agendaName}}",
+  "일시 : {{scheduledDateTimeLabel}}",
+  "취소 사유 : {{cancellationReason}}",
+  "",
+  "자세한 내용은 홈페이지 확인 후 사업팀 소통 부탁드립니다.",
 ].join("\n");
 const DEFAULT_COMPANY_FORM = {
   companyType: "법인",
@@ -738,7 +772,8 @@ async function loadOfficeHourApplicationContext(applicationId) {
     consultantEmail:
       normalizeEmail(consultantProfile?.email) ||
       normalizeEmail(consultantDoc?.email) ||
-      normalizeEmail(consultantDoc?.secondaryEmail),
+      normalizeEmail(consultantDoc?.secondaryEmail) ||
+      normalizeEmail(application?.consultantEmail),
   };
 }
 
@@ -1630,12 +1665,18 @@ async function sendSlackChannelMessage({ token, channelId, text }) {
 function buildInternalConsultantAvailabilityAlertText({
   monthKey,
   missingConsultants,
+  totalConsultantCount = 0,
   skippedMissingScopeCount,
   labelPrefix = "",
 }) {
-  const header = `${labelPrefix}${monthKey} 가능시간 미제출 내부 컨설턴트 ${missingConsultants.length}명`;
+  const normalizedTotal = Number.isInteger(totalConsultantCount)
+    ? Math.max(totalConsultantCount, 0)
+    : 0;
+  const missingCount = Array.isArray(missingConsultants) ? missingConsultants.length : 0;
+  const submittedCount = Math.max(normalizedTotal - missingCount, 0);
+  const header = `${labelPrefix}${monthKey} 가능시간 등록 현황: ${normalizedTotal}명중 ${submittedCount}명 등록 / ${missingCount}명 미등록`;
   const lines =
-    missingConsultants.length > 0
+    missingCount > 0
       ? missingConsultants.map((consultant) => {
           const email = normalizeString(consultant.email) || "이메일 미입력";
           return `- ${normalizeString(consultant.name) || consultant.id} <${email}>`;
@@ -1655,11 +1696,13 @@ function buildInternalConsultantAvailabilityAlertText({
 function buildStageSlackAvailabilityAlertText({
   monthKey,
   missingConsultants,
+  totalConsultantCount,
   skippedMissingScopeCount,
 }) {
   return buildInternalConsultantAvailabilityAlertText({
     monthKey,
     missingConsultants,
+    totalConsultantCount,
     skippedMissingScopeCount,
     labelPrefix: "[stage] ",
   });
@@ -1707,15 +1750,15 @@ function resolveConsultantSlackDmTarget(consultantDoc) {
 }
 
 function buildCompanyRegularApplicationLink() {
-  return `${DEFAULT_NOTIFICATION_DETAIL_BASE_URL}/company/regular`;
+  return DEFAULT_NOTIFICATION_DETAIL_BASE_URL;
 }
 
 function buildConsultantScheduleInputLink() {
-  return `${DEFAULT_NOTIFICATION_DETAIL_BASE_URL}/admin/consultant-calendar`;
+  return DEFAULT_NOTIFICATION_DETAIL_BASE_URL;
 }
 
 function buildConsultantReportLink() {
-  return `${DEFAULT_NOTIFICATION_DETAIL_BASE_URL}/admin/pending-reports`;
+  return DEFAULT_NOTIFICATION_DETAIL_BASE_URL;
 }
 
 async function claimNotificationBatchRun(batchKey, runValue, fieldName = "lastDateKey") {
@@ -1822,11 +1865,11 @@ function renderTemplateString(template, variables) {
 }
 
 function buildNotificationDetailLink(application) {
-  const officeHourId = normalizeString(application?.officeHourId);
-  if (normalizeString(application?.type) === "irregular" && officeHourId) {
-    return `${DEFAULT_NOTIFICATION_DETAIL_BASE_URL}/system/company/irregular-officehour/${officeHourId}/arranged-schedule/${application.id}`;
-  }
-  return `${DEFAULT_NOTIFICATION_DETAIL_BASE_URL}/system/company/application?id=${application.id}`;
+  return DEFAULT_NOTIFICATION_DETAIL_BASE_URL;
+}
+
+function buildOfficeHourRejectionDetailLink(application) {
+  return buildNotificationDetailLink(application);
 }
 
 function buildNotificationMeetingLink(application) {
@@ -1923,6 +1966,22 @@ function buildRegularApplicationNotificationVariables(context) {
     locationTypeLabel: normalizeString(application.sessionFormat) === "offline" ? "오프라인" : "온라인",
     detailLink: buildNotificationDetailLink(application),
     meetingLink: buildNotificationMeetingLink(application),
+  };
+}
+
+function buildRejectionNotificationVariables(context, rejectionReason) {
+  const base = buildRegularApplicationNotificationVariables(context);
+  return {
+    ...base,
+    detailLink: buildOfficeHourRejectionDetailLink(context.application),
+    rejectionReason: rejectionReason || "사유 미입력",
+  };
+}
+
+function buildCancellationNotificationVariables(context, cancellationReason) {
+  return {
+    ...buildRegularApplicationNotificationVariables(context),
+    cancellationReason: cancellationReason || "사유 미입력",
   };
 }
 
@@ -2076,6 +2135,68 @@ async function writeIrregularCalendarSessionConfirmationState(sessionId, patch) 
   payload["notificationState.confirmation.updatedAt"] = FieldValue.serverTimestamp();
 
   await db.collection(IRREGULAR_CALENDAR_SESSION_COLLECTION).doc(sessionId).set(payload, { merge: true });
+}
+
+async function claimRegularApplicationConfirmationDispatch(applicationId) {
+  return db.runTransaction(async (transaction) => {
+    const applicationRef = db.collection("officeHourApplications").doc(applicationId);
+    const applicationSnap = await transaction.get(applicationRef);
+    if (!applicationSnap.exists) {
+      return { ok: false, reason: "application-not-found" };
+    }
+
+    const application = applicationSnap.data() || {};
+    if (normalizeApplicationStatus(application.status) !== "confirmed") {
+      return { ok: false, reason: "application-not-confirmed" };
+    }
+
+    const confirmationState = application.notificationState?.confirmation || {};
+    if (confirmationState.sentAt || normalizeString(confirmationState.status) === "completed") {
+      return { ok: false, reason: "already-sent" };
+    }
+    if (normalizeString(confirmationState.status) === "dispatching") {
+      return { ok: false, reason: "already-dispatching" };
+    }
+
+    transaction.set(
+      applicationRef,
+      {
+        notificationState: {
+          confirmation: {
+            status: "dispatching",
+            dispatchRequestedAt: FieldValue.serverTimestamp(),
+            updatedAt: FieldValue.serverTimestamp(),
+            lastError: FieldValue.delete(),
+          },
+        },
+      },
+      { merge: true },
+    );
+
+    return { ok: true };
+  });
+}
+
+async function writeRegularApplicationConfirmationState(applicationId, patch) {
+  const payload = {};
+
+  if (Object.prototype.hasOwnProperty.call(patch, "status")) {
+    payload["notificationState.confirmation.status"] = patch.status || FieldValue.delete();
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, "channels")) {
+    payload["notificationState.confirmation.channels"] = isPlainObject(patch.channels)
+      ? patch.channels
+      : FieldValue.delete();
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, "message")) {
+    payload["notificationState.confirmation.lastError"] = patch.message || FieldValue.delete();
+  }
+  if (Object.prototype.hasOwnProperty.call(patch, "sentAt")) {
+    payload["notificationState.confirmation.sentAt"] = patch.sentAt || FieldValue.delete();
+  }
+  payload["notificationState.confirmation.updatedAt"] = FieldValue.serverTimestamp();
+
+  await db.collection("officeHourApplications").doc(applicationId).set(payload, { merge: true });
 }
 
 async function dispatchIrregularCalendarSessionConfirmationEmails(sessionId) {
@@ -2665,7 +2786,7 @@ async function dispatchConsultantScheduleRegistrationAlerts(now = new Date()) {
   const weekInfo = regularOfficeHourPolicy.getOfficeHourWeekInfo(now);
   const { dateKey } = getCurrentSeoulDateTimeKeys(now);
 
-  if (!weekInfo || weekInfo.weekOfMonth !== 3) {
+  if (!weekInfo || weekInfo.weekOfMonth !== CONSULTANT_SCHEDULE_OPEN_WEEK_NUMBER) {
     return {
       status: "skipped",
       reason: "outside-registration-week",
@@ -2778,7 +2899,7 @@ async function dispatchInternalConsultantAvailabilityReminders(now = new Date())
   const weekInfo = regularOfficeHourPolicy.getOfficeHourWeekInfo(now);
   const { dateKey } = getCurrentSeoulDateTimeKeys(now);
 
-  if (!weekInfo || weekInfo.weekOfMonth !== 3) {
+  if (!weekInfo || weekInfo.weekOfMonth !== CONSULTANT_SCHEDULE_OPEN_WEEK_NUMBER) {
     return {
       status: "skipped",
       reason: "outside-registration-week",
@@ -2819,11 +2940,13 @@ async function dispatchInternalConsultantAvailabilityReminders(now = new Date())
   const monthKey = regularOfficeHourPolicy.getNextMonthKey(now);
   const consultantsSnap = await db.collection("consultants").where("status", "==", "active").get();
   const normalizedConsultants = consultantsSnap.docs.map((doc) => normalizeConsultantDoc(doc));
+  const internalConsultants = normalizedConsultants.filter(
+    (consultant) => normalizeString(consultant.scope) === "internal"
+  );
   const skippedMissingScopeCount = normalizedConsultants.filter(
     (consultant) => !normalizeString(consultant.scope)
   ).length;
-  const missingConsultants = normalizedConsultants
-    .filter((consultant) => normalizeString(consultant.scope) === "internal")
+  const missingConsultants = internalConsultants
     .filter((consultant) => !consultant.monthlyAvailabilityMeta?.[monthKey])
     .map((consultant) => ({
       id: consultant.id,
@@ -2832,19 +2955,10 @@ async function dispatchInternalConsultantAvailabilityReminders(now = new Date())
     }))
     .sort((a, b) => a.name.localeCompare(b.name, "ko"));
 
-  if (missingConsultants.length === 0) {
-    return {
-      status: "skipped",
-      reason: "all-submitted",
-      dateKey,
-      monthKey,
-      skippedMissingScopeCount,
-    };
-  }
-
   const text = buildInternalConsultantAvailabilityAlertText({
     monthKey,
     missingConsultants,
+    totalConsultantCount: internalConsultants.length,
     skippedMissingScopeCount,
   });
   const result = await sendSlackChannelMessage({
@@ -2857,6 +2971,8 @@ async function dispatchInternalConsultantAvailabilityReminders(now = new Date())
     status: "completed",
     dateKey,
     monthKey,
+    totalInternalConsultantCount: internalConsultants.length,
+    submittedCount: Math.max(internalConsultants.length - missingConsultants.length, 0),
     missingCount: missingConsultants.length,
     skippedMissingScopeCount,
     channel: normalizeString(result.channel) || null,
@@ -2872,6 +2988,7 @@ async function dispatchInternalConsultantAvailabilityReminders(now = new Date())
 async function dispatchInternalConsultantAvailabilitySubmittedNotification({
   consultant,
   monthKey,
+  monthlyAvailability = [],
 }) {
   const token = normalizeString(SLACK_BOT_TOKEN.value());
   const channelId = normalizeSlackChannelId(INTERNAL_CONSULTANT_NOTICE_SLACK_CHANNEL_ID);
@@ -2884,9 +3001,39 @@ async function dispatchInternalConsultantAvailabilitySubmittedNotification({
 
   const consultantName = normalizeString(consultant?.name) || normalizeString(consultant?.id) || "컨설턴트";
   const consultantEmail = normalizeEmail(consultant?.email) || "이메일 미입력";
+  const scheduleLines = Array.isArray(monthlyAvailability)
+    ? monthlyAvailability
+        .map((day) => {
+          const dateKey = normalizeString(day?.dateKey);
+          const availableTimes = Array.isArray(day?.slots)
+            ? day.slots
+                .filter((slot) => slot?.available === true)
+                .map((slot) => normalizeTimeKey(slot.start))
+                .filter(Boolean)
+            : [];
+          const date = parseDateKey(dateKey);
+          if (!date || availableTimes.length === 0) {
+            return "";
+          }
+          const dateParts = new Intl.DateTimeFormat("ko-KR", {
+            timeZone: "Asia/Seoul",
+            month: "long",
+            day: "numeric",
+            weekday: "short",
+          }).formatToParts(date);
+          const monthText = dateParts.find((part) => part.type === "month")?.value || "";
+          const dayText = dateParts.find((part) => part.type === "day")?.value || "";
+          const weekday = dateParts.find((part) => part.type === "weekday")?.value || "";
+          return `  - ${monthText} ${dayText}일(${weekday}): ${availableTimes.join(", ")}`;
+        })
+        .filter(Boolean)
+    : [];
   const text = [
-    `${buildConsultantTargetMonthLabel(monthKey)} 일정 등록 완료`,
-    `- ${consultantName} <${consultantEmail}>`,
+    `${buildConsultantTargetMonthLabel(monthKey)} 일정등록 완료`,
+    `- 컨설턴트: ${consultantName} <${consultantEmail}>`,
+    `- 등록 시간:`,
+    ...(scheduleLines.length > 0 ? scheduleLines : ["  - 등록된 가능 시간이 없습니다."]),
+    `- 등록 시각: ${formatSeoulDateLabel(new Date())}`,
   ].join("\n");
 
   const result = await sendSlackChannelMessage({
@@ -2902,11 +3049,38 @@ async function dispatchInternalConsultantAvailabilitySubmittedNotification({
   };
 }
 
+function summarizeMonthlyAvailability(availability) {
+  if (!Array.isArray(availability)) {
+    return {
+      activeDateCount: 0,
+      availableSlotCount: 0,
+    };
+  }
+
+  return availability.reduce(
+    (acc, day) => {
+      if (!Array.isArray(day?.slots)) {
+        return acc;
+      }
+
+      const availableSlotCount = day.slots.filter((slot) => slot?.available === true).length;
+      return {
+        activeDateCount: acc.activeDateCount + (availableSlotCount > 0 ? 1 : 0),
+        availableSlotCount: acc.availableSlotCount + availableSlotCount,
+      };
+    },
+    {
+      activeDateCount: 0,
+      availableSlotCount: 0,
+    }
+  );
+}
+
 async function dispatchCompanyOfficeHourApplicationAlerts(now = new Date()) {
   const weekInfo = regularOfficeHourPolicy.getOfficeHourWeekInfo(now);
   const { dateKey } = getCurrentSeoulDateTimeKeys(now);
 
-  if (!weekInfo || weekInfo.weekOfMonth !== 4) {
+  if (!weekInfo || weekInfo.weekOfMonth !== COMPANY_APPLICATION_OPEN_WEEK_NUMBER) {
     return {
       status: "skipped",
       reason: "outside-application-week",
@@ -3314,7 +3488,7 @@ async function runOfficeHourReportReminderDispatchCore(now = new Date()) {
   };
 }
 
-async function dispatchRegularApplicationImmediateConfirmationNotifications(applicationId) {
+async function dispatchRegularApplicationConfirmationNotifications(applicationId) {
   try {
     const context = await loadRegularApplicationNotificationContext(applicationId);
     if (!context) {
@@ -3561,7 +3735,147 @@ async function dispatchRegularApplicationImmediateConfirmationNotifications(appl
       channels,
     };
   } catch (error) {
-    console.error("dispatchRegularApplicationImmediateConfirmationNotifications failed", {
+    console.error("dispatchRegularApplicationConfirmationNotifications failed", {
+      applicationId,
+      errorMessage: error instanceof Error ? error.message : String(error),
+      errorStack: error instanceof Error ? error.stack : null,
+    });
+    return {
+      ok: false,
+      status: "error",
+      message: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+async function dispatchRegularApplicationRejectionNotifications(applicationId, rejectionReason) {
+  try {
+    const context = await loadRegularApplicationNotificationContext(applicationId);
+    if (!context) {
+      return {
+        ok: false,
+        status: "skipped",
+        reason: "application-not-found",
+      };
+    }
+
+    const companyEmail = normalizeEmail(context.companyEmail);
+    const variables = buildRejectionNotificationVariables(context, rejectionReason);
+    const channels = {
+      companyEmail: {
+        status: "skipped",
+        reason: "not-attempted",
+      },
+    };
+
+    const apiKey = normalizeString(RESEND_API_KEY.value());
+    if (!apiKey) {
+      channels.companyEmail = {
+        status: "skipped",
+        reason: "resend-not-configured",
+      };
+
+      return {
+        ok: false,
+        status: "skipped",
+        reason: "resend-not-configured",
+        channels,
+      };
+    }
+
+    if (!companyEmail) {
+      channels.companyEmail = {
+        status: "skipped",
+        reason: "company-email-missing",
+      };
+
+      return {
+        ok: false,
+        status: "skipped",
+        reason: "company-email-missing",
+        channels,
+      };
+    }
+
+    const responseBody = await sendResendEmail({
+      apiKey,
+      fromEmail: DEFAULT_NOTIFICATION_EMAIL_FROM_ADDRESS,
+      to: companyEmail,
+      subject: OFFICE_HOUR_REJECTED_COMPANY_EMAIL_SUBJECT,
+      text: renderTemplateString(OFFICE_HOUR_REJECTED_COMPANY_EMAIL_TEMPLATE, variables),
+    });
+
+    channels.companyEmail = {
+      status: "sent",
+      recipient: companyEmail,
+      deliveryId: normalizeString(responseBody?.id) || null,
+    };
+
+    return {
+      ok: true,
+      status: "completed",
+      channels,
+    };
+  } catch (error) {
+    console.error("dispatchRegularApplicationRejectionNotifications failed", {
+      applicationId,
+      errorMessage: error instanceof Error ? error.message : String(error),
+      errorStack: error instanceof Error ? error.stack : null,
+    });
+    return {
+      ok: false,
+      status: "error",
+      message: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+async function dispatchRegularApplicationCancellationNotifications(applicationId, cancellationReason) {
+  try {
+    const context = await loadRegularApplicationNotificationContext(applicationId);
+    if (!context) {
+      return {
+        ok: false,
+        status: "skipped",
+        reason: "application-not-found",
+      };
+    }
+
+    const consultantEmail =
+      normalizeEmail(context.consultantEmail) || normalizeEmail(context.application?.consultantEmail);
+    if (!consultantEmail) {
+      return {
+        ok: false,
+        status: "skipped",
+        reason: "consultant-email-missing",
+      };
+    }
+
+    const apiKey = normalizeString(RESEND_API_KEY.value());
+    if (!apiKey) {
+      return {
+        ok: false,
+        status: "skipped",
+        reason: "resend-not-configured",
+      };
+    }
+
+    const variables = buildCancellationNotificationVariables(context, cancellationReason);
+    const responseBody = await sendResendEmail({
+      apiKey,
+      fromEmail: DEFAULT_NOTIFICATION_EMAIL_FROM_ADDRESS,
+      to: consultantEmail,
+      subject: OFFICE_HOUR_CANCELLED_CONSULTANT_EMAIL_SUBJECT,
+      text: renderTemplateString(OFFICE_HOUR_CANCELLED_CONSULTANT_EMAIL_TEMPLATE, variables),
+    });
+
+    return {
+      ok: true,
+      status: "completed",
+      deliveryId: normalizeString(responseBody?.id) || null,
+    };
+  } catch (error) {
+    console.error("dispatchRegularApplicationCancellationNotifications failed", {
       applicationId,
       errorMessage: error instanceof Error ? error.message : String(error),
       errorStack: error instanceof Error ? error.stack : null,
@@ -3656,7 +3970,11 @@ function isPastScheduledStart(dateKey, timeKey, now = new Date()) {
 }
 
 function normalizeConsultantDisplayName(value) {
-  return normalizeString(value).replace(/\s*컨설턴트\s*$/u, "").toLowerCase();
+  const normalized = normalizeString(value).replace(/\s*컨설턴트\s*$/u, "").toLowerCase();
+  if (normalized === "담당자 배정 중" || normalized === "담당자 배정중") {
+    return "";
+  }
+  return normalized;
 }
 
 function sanitizeAiPayload(value) {
@@ -4332,6 +4650,9 @@ exports.sendStageSlackChannelAvailabilityTest = onCall(
       const text = buildStageSlackAvailabilityAlertText({
         monthKey,
         missingConsultants,
+        totalConsultantCount: normalizedConsultants.filter(
+          (consultant) => normalizeString(consultant.scope) === "internal"
+        ).length,
         skippedMissingScopeCount,
       });
 
@@ -4346,6 +4667,9 @@ exports.sendStageSlackChannelAvailabilityTest = onCall(
         channel: normalizeString(result.channel) || null,
         ts: normalizeString(result.ts) || null,
         monthKey,
+        totalConsultantCount: normalizedConsultants.filter(
+          (consultant) => normalizeString(consultant.scope) === "internal"
+        ).length,
         missingCount: missingConsultants.length,
         missingConsultants,
         skippedMissingScopeCount,
@@ -4612,7 +4936,7 @@ function buildDefaultConsultantAvailability() {
   }));
 }
 
-function buildDefaultConsultantAvailabilityForDays(scheduleDays) {
+function buildDefaultConsultantAvailabilityForDays(scheduleDays, dateKeys = []) {
   const timeSlots = Array.from({ length: 9 }, (_, index) => {
     const startHour = 9 + index;
     const endHour = startHour + 1;
@@ -4621,6 +4945,21 @@ function buildDefaultConsultantAvailabilityForDays(scheduleDays) {
       end: `${String(endHour).padStart(2, "0")}:00`,
     };
   });
+
+  if (Array.isArray(dateKeys) && dateKeys.length > 0) {
+    return dateKeys.map((dateKey) => {
+      const parsedDate = regularOfficeHourPolicy.parseDateKey(dateKey);
+      return {
+        dayOfWeek: parsedDate ? parsedDate.getDay() : 0,
+        dateKey,
+        slots: timeSlots.map((slot) => ({
+          start: slot.start,
+          end: slot.end,
+          available: false,
+        })),
+      };
+    });
+  }
 
   return scheduleDays.map((dayOfWeek) => ({
     dayOfWeek,
@@ -4636,19 +4975,36 @@ function buildDefaultConsultantMonthlyAvailability() {
   return buildDefaultConsultantAvailabilityForDays(regularOfficeHourPolicy.ALL_DAY_NUMBERS);
 }
 
-function sanitizeConsultantAvailabilityWithDefaults(value, defaults) {
+function buildDefaultConsultantMonthlyAvailabilityForMonth(monthKey) {
+  const regularDateKeys = regularOfficeHourPolicy.getRegularOfficeHourDateKeysForDayNumbers(
+    monthKey,
+    regularOfficeHourPolicy.ALL_DAY_NUMBERS
+  );
+  return buildDefaultConsultantAvailabilityForDays(
+    regularOfficeHourPolicy.ALL_DAY_NUMBERS,
+    regularDateKeys
+  );
+}
+
+function sanitizeConsultantAvailabilityWithDefaults(value, defaults, useDateKeyMatching = false) {
   if (!Array.isArray(value) || value.length === 0) {
     return defaults;
   }
 
   return defaults.map((defaultDay) => {
-    const matchedDay = value.find((item) => item?.dayOfWeek === defaultDay.dayOfWeek);
+    const matchedDay = value.find((item) => {
+      if (useDateKeyMatching && isDateKey(defaultDay?.dateKey)) {
+        return normalizeString(item?.dateKey) === defaultDay.dateKey;
+      }
+      return item?.dayOfWeek === defaultDay.dayOfWeek;
+    });
     if (!matchedDay || !Array.isArray(matchedDay.slots)) {
       return defaultDay;
     }
 
     return {
       dayOfWeek: defaultDay.dayOfWeek,
+      ...(isDateKey(defaultDay.dateKey) ? { dateKey: defaultDay.dateKey } : {}),
       slots: defaultDay.slots.map((defaultSlot) => {
         const matchedSlot = matchedDay.slots.find(
           (slot) =>
@@ -4682,12 +5038,46 @@ function sanitizeConsultantMonthlyAvailability(value) {
       .filter(([monthKey]) => regularOfficeHourPolicy.isMonthKey(monthKey))
       .map(([monthKey, availability]) => [
         monthKey,
-        sanitizeConsultantAvailabilityWithDefaults(
-          availability,
-          buildDefaultConsultantMonthlyAvailability()
-        ),
+        (() => {
+          const defaults = buildDefaultConsultantMonthlyAvailabilityForMonth(monthKey);
+          return sanitizeConsultantAvailabilityWithDefaults(
+            availability,
+            defaults,
+            true
+          );
+        })(),
       ])
   );
+}
+
+function sanitizeConsultantMonthlyAvailabilityForScope(value, scope) {
+  const scopeDayNumbers = scope ? regularOfficeHourPolicy.getScopeDayNumbers(scope) : null;
+  if (!Array.isArray(scopeDayNumbers) || scopeDayNumbers.length === 0) {
+    return sanitizeConsultantMonthlyAvailability(value);
+  }
+
+  const normalizedMonthMap = sanitizeConsultantMonthlyAvailability(value);
+  return Object.fromEntries(
+    Object.entries(normalizedMonthMap).map(([monthKey, availability]) => {
+      if (!Array.isArray(availability)) {
+        return [monthKey, []];
+      }
+
+      const allowedDateKeys = new Set(
+        regularOfficeHourPolicy.getRegularOfficeHourDateKeysForDayNumbers(monthKey, scopeDayNumbers),
+      );
+
+      return [
+        monthKey,
+        availability.filter((entry) => isDateKey(entry?.dateKey) && allowedDateKeys.has(entry.dateKey)),
+      ];
+    }),
+  );
+}
+
+function sanitizeConsultantMonthlyAvailabilityForConsultant(value, consultant) {
+  const scope = consultant?.scope === "external" ? "external" : consultant?.scope === "internal" ? "internal" : null;
+  return sanitizeConsultantMonthlyAvailabilityForScope(value, scope);
 }
 
 function sanitizeConsultantMonthlyAvailabilityMeta(value) {
@@ -4887,8 +5277,9 @@ function isConsultantAvailableAt(consultant, dateKey, time) {
   const monthlyAvailability = sanitizeConsultantMonthlyAvailability(consultant.monthlyAvailability);
   const availabilityList = Array.isArray(monthlyAvailability[monthKey])
     ? monthlyAvailability[monthKey]
-    : buildDefaultConsultantMonthlyAvailability();
-  const dayAvailability = availabilityList.find((item) => item?.dayOfWeek === dayOfWeek);
+    : buildDefaultConsultantMonthlyAvailabilityForMonth(monthKey);
+  const dayAvailability =
+    availabilityList.find((item) => normalizeString(item?.dateKey) === dateKey);
   if (!dayAvailability || !Array.isArray(dayAvailability.slots)) return false;
   return dayAvailability.slots.some(
     (slot) => normalizeTimeKey(slot?.start) === time && slot?.available === true
@@ -4933,10 +5324,14 @@ function getApplicationProgramId(application) {
 
 function normalizeConsultantDoc(consultantSnap) {
   const data = consultantSnap.data() || {};
+  const scope = data?.scope === "external" ? "external" : data?.scope === "internal" ? "internal" : null;
   return {
     id: consultantSnap.id,
     ...data,
-    monthlyAvailability: sanitizeConsultantMonthlyAvailability(data.monthlyAvailability),
+    monthlyAvailability: sanitizeConsultantMonthlyAvailabilityForScope(
+      data.monthlyAvailability,
+      scope,
+    ),
     monthlyAvailabilityMeta: sanitizeConsultantMonthlyAvailabilityMeta(data.monthlyAvailabilityMeta),
   };
 }
@@ -5060,8 +5455,11 @@ async function syncConsultantSchedulingCore(params) {
     agendaIds === undefined ? normalizeStringArray(currentConsultant.agendaIds) : normalizeStringArray(agendaIds);
   const nextMonthlyAvailability =
     monthlyAvailability === undefined
-      ? sanitizeConsultantMonthlyAvailability(currentConsultant.monthlyAvailability)
-      : sanitizeConsultantMonthlyAvailability(monthlyAvailability);
+      ? sanitizeConsultantMonthlyAvailabilityForConsultant(
+          currentConsultant.monthlyAvailability,
+          currentConsultant
+        )
+      : sanitizeConsultantMonthlyAvailabilityForConsultant(monthlyAvailability, currentConsultant);
   const currentMonthlyAvailabilityMeta = sanitizeConsultantMonthlyAvailabilityMeta(
     currentConsultant.monthlyAvailabilityMeta
   );
@@ -5094,23 +5492,26 @@ async function syncConsultantSchedulingCore(params) {
     monthlyAvailabilityMeta: nextMonthlyAvailabilityMeta,
   };
 
+  const normalizedCurrentMonthlyAvailability = sanitizeConsultantMonthlyAvailabilityForConsultant(
+    currentConsultant.monthlyAvailability,
+    currentConsultant
+  );
+
   const changedMonthlyAvailabilityKeys = Array.from(
     new Set([
-      ...Object.keys(sanitizeConsultantMonthlyAvailability(currentConsultant.monthlyAvailability)),
+      ...Object.keys(normalizedCurrentMonthlyAvailability),
       ...Object.keys(nextMonthlyAvailability),
     ])
   ).filter((monthKey) => {
-    const currentValue = JSON.stringify(
-      sanitizeConsultantMonthlyAvailability(currentConsultant.monthlyAvailability)[monthKey] ?? []
-    );
+    const currentValue = JSON.stringify(normalizedCurrentMonthlyAvailability[monthKey] ?? []);
     const nextValue = JSON.stringify(nextMonthlyAvailability[monthKey] ?? []);
     return currentValue !== nextValue;
   });
-  const newlySubmittedMonthKeys =
+  const notificationMonthKeys =
     providedMonthlyAvailabilityMeta === undefined
       ? []
       : Object.keys(providedMonthlyAvailabilityMeta).filter(
-          (monthKey) => !currentMonthlyAvailabilityMeta[monthKey]
+          (monthKey) => !Object.prototype.hasOwnProperty.call(currentMonthlyAvailabilityMeta, monthKey)
         );
 
   if (changedMonthlyAvailabilityKeys.length > 0) {
@@ -5119,8 +5520,8 @@ async function syncConsultantSchedulingCore(params) {
     );
     if (invalidMonthKey) {
       throw new HttpsError(
-        "failed-precondition",
-        "컨설턴트 가능 시간은 매월 3주차에 다음 달 일정만 수정할 수 있습니다."
+      "failed-precondition",
+        `컨설턴트 가능 시간은 매월 ${CONSULTANT_SCHEDULE_OPEN_WEEK_NUMBER}주차에 다음 달 일정만 수정할 수 있습니다.`
       );
     }
   }
@@ -5214,17 +5615,24 @@ async function syncConsultantSchedulingCore(params) {
   }
 
   if (
-    actorRole === "consultant" &&
-    actorUid === consultantId &&
     normalizeString(currentConsultant.scope) === "internal" &&
-    newlySubmittedMonthKeys.length > 0
+    notificationMonthKeys.length > 0
   ) {
-    for (const monthKey of newlySubmittedMonthKeys) {
+    for (const monthKey of notificationMonthKeys) {
       try {
-        await dispatchInternalConsultantAvailabilitySubmittedNotification({
+        const notificationResult = await dispatchInternalConsultantAvailabilitySubmittedNotification({
           consultant: currentConsultant,
           monthKey,
+          monthlyAvailability: nextMonthlyAvailability[monthKey],
         });
+        console.info(
+          "dispatchInternalConsultantAvailabilitySubmittedNotification summary",
+          JSON.stringify({
+            consultantId,
+            monthKey,
+            notificationResult,
+          })
+        );
       } catch (error) {
         console.error("dispatchInternalConsultantAvailabilitySubmittedNotification failed", {
           consultantId,
@@ -5826,7 +6234,7 @@ exports.submitRegularApplication = onCall(
       if (!regularOfficeHourPolicy.canCompanyApplyForRegularDate(scheduledDate, new Date())) {
         throw new HttpsError(
           "failed-precondition",
-          "정기 오피스아워 신청은 매월 4주차에 다음 달 일정만 신청할 수 있습니다."
+          `정기 오피스아워 신청은 매월 ${COMPANY_APPLICATION_OPEN_WEEK_NUMBER}주차에 다음 달 일정만 신청할 수 있습니다.`
         );
       }
       if (!isProgramRegularOfficeHourDateAvailable(targetProgramDoc, agendaScope, scheduledDate)) {
@@ -5951,6 +6359,9 @@ exports.submitRegularApplication = onCall(
         normalizeString(companyDoc.name) ||
         normalizeString(profile.companyName) ||
         "회사명 미입력";
+      const assignedConsultantEmail =
+        normalizeEmail(assignedConsultant.email) ||
+        normalizeEmail(assignedConsultant.secondaryEmail);
 
       transaction.set(applicationRef, {
         type: "regular",
@@ -5965,6 +6376,7 @@ exports.submitRegularApplication = onCall(
         companyName,
         consultant: normalizeString(assignedConsultant.name) || "담당자 배정 중",
         consultantId: assignedConsultant.id,
+        ...(assignedConsultantEmail ? { consultantEmail: assignedConsultantEmail } : {}),
         sessionFormat,
         agenda: normalizeString(agendaDoc.name) || "미지정",
         requestContent,
@@ -5987,8 +6399,46 @@ exports.submitRegularApplication = onCall(
     });
 
     const calendarSync = await upsertRegularApplicationGoogleCalendarEvent(result.applicationId);
-    const notificationDispatch =
-      await dispatchRegularApplicationImmediateConfirmationNotifications(result.applicationId);
+    const notificationClaim = await claimRegularApplicationConfirmationDispatch(result.applicationId);
+    let notificationDispatch = {
+      ok: false,
+      status: "skipped",
+      reason: notificationClaim.reason || "claim-failed",
+      claim: notificationClaim,
+    };
+
+    if (notificationClaim.ok) {
+      const dispatchResult = await dispatchRegularApplicationConfirmationNotifications(result.applicationId);
+      notificationDispatch = {
+        ...dispatchResult,
+        claim: notificationClaim,
+      };
+      if (dispatchResult.ok) {
+        await writeRegularApplicationConfirmationState(result.applicationId, {
+          status: "completed",
+          channels: dispatchResult.channels,
+          sentAt: FieldValue.serverTimestamp(),
+        });
+      } else {
+        await writeRegularApplicationConfirmationState(result.applicationId, {
+          status: dispatchResult.status || "error",
+          channels: dispatchResult.channels || null,
+          message:
+            dispatchResult.message || dispatchResult.reason || "unknown-error",
+        });
+      }
+    }
+
+    if (!notificationClaim.ok) {
+      console.info(
+        "submitRegularApplication confirmation claim-skip",
+        JSON.stringify({
+          applicationId: result.applicationId,
+          claimReason: notificationClaim.reason,
+        })
+      );
+    }
+
     console.info(
       "submitRegularApplication notificationDispatch",
       JSON.stringify({
@@ -6203,6 +6653,9 @@ exports.updateCompanyApplication = onCall(
             "선택한 시간에 현재 배정 가능한 컨설턴트가 없어 변경할 수 없습니다."
           );
         }
+        const reassignedConsultantEmail =
+          normalizeEmail(assignedConsultant.email) ||
+          normalizeEmail(assignedConsultant.secondaryEmail);
 
         transaction.update(applicationRef, {
           requestContent,
@@ -6215,6 +6668,7 @@ exports.updateCompanyApplication = onCall(
           status: "confirmed",
           consultant: normalizeString(assignedConsultant.name) || "컨설턴트",
           consultantId: assignedConsultant.id,
+          ...(reassignedConsultantEmail ? { consultantEmail: reassignedConsultantEmail } : {}),
           pendingConsultantIds: FieldValue.delete(),
           reservedConsultantId: FieldValue.delete(),
           rejectionReason: FieldValue.delete(),
@@ -6261,6 +6715,7 @@ exports.cancelApplication = onCall(
       GOOGLE_CALENDAR_CLIENT_SECRET,
       GOOGLE_CALENDAR_REFRESH_TOKEN,
       GOOGLE_CALENDAR_TARGET_CALENDAR_ID,
+      RESEND_API_KEY,
     ],
   },
   async (request) => {
@@ -6269,7 +6724,9 @@ exports.cancelApplication = onCall(
     }
 
     const uid = request.auth.uid;
-    const applicationId = normalizeString(request.data?.applicationId);
+    const payload = request.data ?? {};
+    const applicationId = normalizeString(payload.applicationId);
+    const cancellationReason = normalizeString(payload.cancellationReason);
 
     if (!applicationId) {
       throw new HttpsError("invalid-argument", "신청 식별자가 필요합니다.");
@@ -6313,6 +6770,9 @@ exports.cancelApplication = onCall(
         actorRole === "consultant" &&
         ((consultantId && consultantId === uid) ||
           (!consultantId && consultantName && consultantName === normalizeString(profile.name)));
+      if (canCancelAsCompany && !cancellationReason) {
+        throw new HttpsError("invalid-argument", "취소 사유를 입력해주세요.");
+      }
 
       if (!canCancelAsCompany && !canCancelAsConsultant) {
         throw new HttpsError("permission-denied", "신청을 취소할 권한이 없습니다.");
@@ -6330,6 +6790,9 @@ exports.cancelApplication = onCall(
 
       transaction.update(applicationRef, {
         status: "cancelled",
+        ...(canCancelAsCompany
+          ? { cancellationReason }
+          : { cancellationReason: FieldValue.delete() }),
         updatedAt: FieldValue.serverTimestamp(),
       });
 
@@ -6337,12 +6800,21 @@ exports.cancelApplication = onCall(
         applicationId,
         outcome: "cancelled",
         status: "cancelled",
+        sendConsultantCancellationNotification: canCancelAsCompany,
       };
     });
+
+    const cancellationNotificationDispatch = result.sendConsultantCancellationNotification
+      ? await dispatchRegularApplicationCancellationNotifications(
+          result.applicationId,
+          cancellationReason,
+        )
+      : null;
 
     const calendarSync = await deleteRegularApplicationGoogleCalendarEvent(result.applicationId);
     return {
       ...result,
+      cancellationNotificationDispatch,
       calendarSyncStatus: calendarSync.status,
       ...(calendarSync.error ? { calendarSyncError: calendarSync.error } : {}),
     };
@@ -6459,8 +6931,9 @@ exports.approvePendingUser = onCall(
               status: "active",
               joinedDate: existingConsultant.joinedDate || FieldValue.serverTimestamp(),
               availability: sanitizeConsultantAvailability(existingConsultant.availability),
-              monthlyAvailability: sanitizeConsultantMonthlyAvailability(
-                existingConsultant.monthlyAvailability
+              monthlyAvailability: sanitizeConsultantMonthlyAvailabilityForScope(
+                existingConsultant.monthlyAvailability,
+                scope
               ),
               monthlyAvailabilityMeta: sanitizeConsultantMonthlyAvailabilityMeta(
                 existingConsultant.monthlyAvailabilityMeta
@@ -6705,6 +7178,7 @@ exports.syncConsultantScheduling = onCall(
     region: REGION,
     timeoutSeconds: 60,
     memory: "256MiB",
+    secrets: [SLACK_BOT_TOKEN],
   },
   async (request) => {
     if (!request.auth?.uid) {
@@ -6984,6 +7458,7 @@ exports.syncRegularApplicationCalendar = onCall(
       GOOGLE_CALENDAR_CLIENT_SECRET,
       GOOGLE_CALENDAR_REFRESH_TOKEN,
       GOOGLE_CALENDAR_TARGET_CALENDAR_ID,
+      RESEND_API_KEY,
     ],
   },
   async (request) => {
@@ -7024,6 +7499,7 @@ exports.transitionApplicationStatus = onCall(
       GOOGLE_CALENDAR_CLIENT_SECRET,
       GOOGLE_CALENDAR_REFRESH_TOKEN,
       GOOGLE_CALENDAR_TARGET_CALENDAR_ID,
+      RESEND_API_KEY,
     ],
   },
   async (request) => {
@@ -7036,6 +7512,7 @@ exports.transitionApplicationStatus = onCall(
     const applicationId = normalizeString(payload.applicationId);
     const action = normalizeString(payload.action);
     const rejectionReason = normalizeString(payload.rejectionReason);
+    const now = new Date();
 
     if (!applicationId) {
       throw new HttpsError("invalid-argument", "신청 식별자가 필요합니다.");
@@ -7085,10 +7562,11 @@ exports.transitionApplicationStatus = onCall(
             );
           }
 
-	        transaction.update(applicationRef, {
+	          transaction.update(applicationRef, {
 	          status: "pending",
 	          consultant: "담당자 배정 중",
 	          consultantId: FieldValue.delete(),
+            consultantEmail: FieldValue.delete(),
             pendingConsultantIds,
 	          reservedConsultantId: FieldValue.delete(),
             officeHourSlotId: FieldValue.delete(),
@@ -7155,17 +7633,20 @@ exports.transitionApplicationStatus = onCall(
             throw new HttpsError("failed-precondition", "컨설턴트 설정상 가능한 시간이 아닙니다.");
           }
 
-          const autoRejectedIds = await rejectUnassignableSameTimePendingApplications(
+	          const autoRejectedIds = await rejectUnassignableSameTimePendingApplications(
             transaction,
             application,
             applicationId,
             consultant
           );
+          const consultantEmail = normalizeEmail(consultant.email) ||
+            normalizeEmail(consultant.secondaryEmail);
 
 	          transaction.update(applicationRef, {
 	            status: "confirmed",
 	            consultant: normalizeString(consultant.name) || "컨설턴트",
 	            consultantId: consultant.id,
+              consultantEmail: consultantEmail || FieldValue.delete(),
               pendingConsultantIds: FieldValue.delete(),
 	            reservedConsultantId: FieldValue.delete(),
 	            officeHourSlotId: FieldValue.delete(),
@@ -7182,7 +7663,7 @@ exports.transitionApplicationStatus = onCall(
           };
         }
 
-	        if (action === "reopen") {
+        if (action === "reopen") {
 	          if (!["confirmed", "rejected"].includes(currentStatus) || !isAssignedToCurrent) {
 	            throw new HttpsError("failed-precondition", "수락 대기로 되돌릴 수 있는 상태가 아닙니다.");
 	          }
@@ -7202,6 +7683,7 @@ exports.transitionApplicationStatus = onCall(
 	            status: "pending",
 	            consultant: "담당자 배정 중",
 	            consultantId: FieldValue.delete(),
+	            consultantEmail: FieldValue.delete(),
               pendingConsultantIds: nextPendingConsultantIds,
 	            reservedConsultantId: FieldValue.delete(),
               officeHourSlotId: FieldValue.delete(),
@@ -7220,17 +7702,49 @@ exports.transitionApplicationStatus = onCall(
         if (!rejectionReason) {
           throw new HttpsError("invalid-argument", "거절 사유를 입력해주세요.");
         }
-        if (currentStatus !== "pending" || !isUnassigned) {
+        const canRejectPending =
+          currentStatus === "pending" || currentStatus === "review";
+        const canRejectConfirmed = currentStatus === "confirmed";
+
+        if (!canRejectPending && !canRejectConfirmed) {
           throw new HttpsError("failed-precondition", "거절할 수 있는 상태가 아닙니다.");
         }
-        if (pendingConsultantIds.length > 0 && !isPendingTargetedToCurrent) {
-          throw new HttpsError("failed-precondition", "요청 대상 컨설턴트만 이 신청을 처리할 수 있습니다.");
+        if (!isApplicationChangeWindowOpen(application, now)) {
+          throw new HttpsError(
+            "failed-precondition",
+            "신청 후 72시간이 지나 거절할 수 없습니다."
+          );
+        }
+
+        if (canRejectPending) {
+          if (!isUnassigned && !isAssignedToCurrent) {
+            throw new HttpsError("failed-precondition", "거절할 수 있는 상태가 아닙니다.");
+          }
+          if (pendingConsultantIds.length > 0 && !isPendingTargetedToCurrent && !isAssignedToCurrent) {
+            throw new HttpsError(
+              "failed-precondition",
+              "요청 대상 컨설턴트만 이 신청을 처리할 수 있습니다."
+            );
+          }
+        }
+
+        if (canRejectConfirmed) {
+          if (!isAssignedToCurrent) {
+            throw new HttpsError("failed-precondition", "거절할 수 있는 상태가 아닙니다.");
+          }
+          if (hasSessionStarted(application, now)) {
+            throw new HttpsError(
+              "failed-precondition",
+              "진행 시간이 지난 신청은 거절할 수 없습니다."
+            );
+          }
         }
 
         transaction.update(applicationRef, {
           status: "rejected",
           consultant: normalizeString(consultant.name) || "컨설턴트",
           consultantId: FieldValue.delete(),
+          consultantEmail: FieldValue.delete(),
           pendingConsultantIds: FieldValue.delete(),
           reservedConsultantId: FieldValue.delete(),
           officeHourSlotId: FieldValue.delete(),
@@ -7251,6 +7765,13 @@ exports.transitionApplicationStatus = onCall(
       });
 
       const nextStatus = normalizeApplicationStatus(result.status);
+      const rejectionNotificationDispatch =
+        nextStatus === "rejected" && result.rejectionReason
+          ? await dispatchRegularApplicationRejectionNotifications(
+              result.applicationId,
+              result.rejectionReason,
+            )
+          : null;
       const calendarSync =
         nextStatus === "confirmed"
           ? await upsertRegularApplicationGoogleCalendarEvent(result.applicationId)
@@ -7259,6 +7780,7 @@ exports.transitionApplicationStatus = onCall(
       return {
         ...result,
         calendarSyncStatus: calendarSync.status,
+        ...(rejectionNotificationDispatch ? { rejectionNotificationDispatch } : {}),
         ...(calendarSync.error ? { calendarSyncError: calendarSync.error } : {}),
       };
     } catch (error) {

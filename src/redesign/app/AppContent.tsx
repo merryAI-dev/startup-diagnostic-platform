@@ -123,8 +123,10 @@ import {
 import { DEFAULT_STAGE_EMAIL_TEMPLATES, normalizeStageTemplates } from "@/redesign/app/lib/stage-email-templates"
 import {
   buildDefaultConsultantAvailability,
+  findConsultantAvailabilityEntryForDate,
   getConsultantAvailabilityForDate,
   getConsultantScheduleDayNumbers,
+  getMonthlyAvailabilityForMonth,
   normalizeMonthlyAvailabilityMap,
 } from "@/redesign/app/lib/consultant-monthly-availability"
 import {
@@ -374,8 +376,11 @@ function buildReportParticipantLabels(session: OfficeHourCalendarSession): strin
   })
 }
 
-function buildAvailabilitySlotKey(dayOfWeek: number, timeKey: string): string {
-  return `${dayOfWeek}:${normalizeTimeKey(timeKey)}`
+function buildAvailabilitySlotKey(
+  availability: Pick<Consultant["availability"][number], "dayOfWeek" | "dateKey">,
+  timeKey: string,
+): string {
+  return `${availability.dateKey ?? availability.dayOfWeek}:${normalizeTimeKey(timeKey)}`
 }
 
 function normalizeTimeKey(value?: string): string {
@@ -389,13 +394,12 @@ function normalizeTimeKey(value?: string): string {
 
 function isConsultantAvailableAt(consultant: Consultant, dateKey: string, time: string): boolean {
   if (!isDateKey(dateKey) || !time) return false
-  const dayOfWeek = parseDateKey(dateKey).getDay()
   const availability = getConsultantAvailabilityForDate(
     consultant,
     dateKey,
     regularOfficeHourPolicy.ALL_DAY_NUMBERS,
   )
-  const dayAvailability = availability.find((item) => item.dayOfWeek === dayOfWeek)
+  const dayAvailability = findConsultantAvailabilityEntryForDate(availability, dateKey)
   if (!dayAvailability) return false
   return dayAvailability.slots.some((slot) => slot.start === time && slot.available)
 }
@@ -1283,7 +1287,6 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     }
     return officeHourApplicationDocs
       .map((application) => normalizeApplicationDoc(application, resolveCompanyName))
-      .filter((application) => application.status !== "cancelled")
       .sort((a, b) => getTimeValue(b.createdAt) - getTimeValue(a.createdAt))
   }, [applications, isFirebaseConfigured, officeHourApplicationDocs, resolveCompanyName])
 
@@ -1374,7 +1377,6 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
       const uid = firebaseUser?.uid ?? user.id
       if (!uid) return []
       return resolvedApplications.filter((application) => {
-        if (application.status === "cancelled") return false
         return Boolean(application.createdByUid) && application.createdByUid === uid
       })
     }
@@ -1853,7 +1855,6 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     if (!isFirebaseConfigured || !needsApplications) return
     const normalized = officeHourApplicationDocs
       .map((application) => normalizeApplicationDoc(application, resolveCompanyName))
-      .filter((application) => application.status !== "cancelled")
       .sort((a, b) => getTimeValue(b.createdAt) - getTimeValue(a.createdAt))
     setApplications(normalized)
   }, [officeHourApplicationDocs, resolveCompanyName, needsApplications])
@@ -2612,7 +2613,9 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
         return
       }
       if (!regularOfficeHourPolicy.canCompanyApplyForRegularDate(scheduledDate, new Date())) {
-        toast.error("정기 오피스아워 신청은 매월 4주차에 다음 달 일정만 신청할 수 있습니다.")
+        toast.error(
+          `정기 오피스아워 신청은 매월 ${regularOfficeHourPolicy.COMPANY_APPLICATION_OPEN_WEEK_NUMBER}주차에 다음 달 일정만 신청할 수 있습니다.`,
+        )
         return
       }
       const targetProgram = programList.find((program) => program.id === officeHour.programId)
@@ -2901,12 +2904,16 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     toast.success("메시지가 전송되었습니다")
   }
 
-  const handleCancelApplication = async (id: string) => {
+  const handleCancelApplication = async (id: string, cancellationReason?: string) => {
     const targetApplication = applications.find((app) => app.id === id)
     if (!targetApplication) return
+    const normalizedCancellationReason = cancellationReason?.trim() ?? ""
     if (isFirebaseConfigured) {
       try {
-        const result = await cancelApplicationViaFunction(id)
+        const result = await cancelApplicationViaFunction({
+          applicationId: id,
+          cancellationReason: normalizedCancellationReason || null,
+        })
         if (result.outcome === "cancelled") {
           if (result.calendarSyncStatus === "error") {
             toast.warning("신청은 취소되었지만 캘린더 삭제에 실패했습니다", {
@@ -2940,6 +2947,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
         ? {
             ...app,
             status: "cancelled" as const,
+            cancellationReason: normalizedCancellationReason || "",
             updatedAt: new Date(),
           }
         : app,
@@ -2956,7 +2964,10 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     if (isFirebaseConfigured) {
       if (status === "cancelled") {
         try {
-          const result = await cancelApplicationViaFunction(id)
+          const result = await cancelApplicationViaFunction({
+            applicationId: id,
+            cancellationReason: null,
+          })
           if (result.outcome === "cancelled") {
             if (result.calendarSyncStatus === "error") {
               toast.warning("신청은 취소되었지만 캘린더 삭제에 실패했습니다", {
@@ -3194,6 +3205,17 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
         toast.error("거절 사유를 입력해주세요")
         return
       }
+      const targetStatus = normalizeApplicationStatus(targetApplication.status)
+      const canRejectPending = targetStatus === "pending" || targetStatus === "review"
+      const canRejectConfirmed = targetStatus === "confirmed"
+      if (!canRejectPending && !canRejectConfirmed) {
+        toast.error("거절할 수 있는 상태가 아닙니다")
+        return
+      }
+      if (!isApplicationChangeWindowOpen(targetApplication.createdAt)) {
+        toast.error("신청 후 72시간이 지나 거절할 수 없습니다")
+        return
+      }
       if (isFirebaseConfigured) {
         try {
           await transitionApplicationStatusViaFunction({
@@ -3208,20 +3230,34 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
         return
       }
 
-      const isAcceptableStatus = normalizeApplicationStatus(targetApplication.status) === "pending"
-      const isUnassigned =
-        !targetApplication.consultantId &&
-        (!targetApplication.consultant || targetApplication.consultant === "담당자 배정 중")
       const isAssignedToCurrent = targetApplication.consultantId === currentConsultant.id
-      const pendingConsultantIds = getPendingConsultantIds(targetApplication)
-      if (pendingConsultantIds.length > 0 && !pendingConsultantIds.includes(currentConsultant.id)) {
-        toast.error("배정된 컨설턴트만 이 신청을 처리할 수 있습니다")
-        return
-      }
 
-      if (!isAcceptableStatus || !(isUnassigned || isAssignedToCurrent)) {
-        toast.error("거절할 수 있는 상태가 아닙니다")
-        return
+      if (canRejectPending) {
+        const isUnassigned =
+          !targetApplication.consultantId &&
+          (!targetApplication.consultant || targetApplication.consultant === "담당자 배정 중")
+        const pendingConsultantIds = getPendingConsultantIds(targetApplication)
+        if (
+          pendingConsultantIds.length > 0 &&
+          !pendingConsultantIds.includes(currentConsultant.id) &&
+          !isAssignedToCurrent
+        ) {
+          toast.error("배정된 컨설턴트만 이 신청을 처리할 수 있습니다")
+          return
+        }
+        if (!(isUnassigned || isAssignedToCurrent)) {
+          toast.error("거절할 수 있는 상태가 아닙니다")
+          return
+        }
+      } else {
+        if (!isAssignedToCurrent) {
+          toast.error("거절할 수 있는 상태가 아닙니다")
+          return
+        }
+        if (hasApplicationSessionStarted(targetApplication)) {
+          toast.error("진행 시간이 지난 신청은 거절할 수 없습니다")
+          return
+        }
       }
 
       const updatedAt = new Date()
@@ -3939,19 +3975,28 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     const currentMonthlyAvailability = normalizeMonthlyAvailabilityMap(
       currentConsultant?.monthlyAvailability,
     )
-    const currentMonthAvailability = currentMonthlyAvailability[monthKey] ?? []
+    const consultantScheduleDayNumbers = getConsultantScheduleDayNumbers({
+      agendaIds: currentConsultant?.agendaIds,
+      agendas: agendaList,
+      scope: currentConsultant?.scope,
+    })
+    const currentMonthAvailability = getMonthlyAvailabilityForMonth(
+      currentMonthlyAvailability,
+      monthKey,
+      consultantScheduleDayNumbers,
+    )
     const currentAvailableSlotKeys = new Set(
       currentMonthAvailability.flatMap((day) =>
         day.slots
           .filter((slot) => slot.available)
-          .map((slot) => buildAvailabilitySlotKey(day.dayOfWeek, slot.start)),
+          .map((slot) => buildAvailabilitySlotKey(day, slot.start)),
       ),
     )
     const nextAvailableSlotKeys = new Set(
       availability.flatMap((day) =>
         day.slots
           .filter((slot) => slot.available)
-          .map((slot) => buildAvailabilitySlotKey(day.dayOfWeek, slot.start)),
+          .map((slot) => buildAvailabilitySlotKey(day, slot.start)),
       ),
     )
     const removedSlotKeys = new Set(
@@ -3979,7 +4024,13 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
         if (end <= new Date()) return false
 
         if (!application.scheduledDate.startsWith(`${monthKey}-`)) return false
-        const slotKey = buildAvailabilitySlotKey(start.getDay(), application.scheduledTime)
+        const slotKey = buildAvailabilitySlotKey(
+          {
+            dayOfWeek: start.getDay(),
+            dateKey: application.scheduledDate,
+          },
+          application.scheduledTime,
+        )
         return removedSlotKeys.has(slotKey)
       })
 
@@ -4580,7 +4631,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
 
     if (resolvedRole === "user") {
       const uid = firebaseUser?.uid ?? user.id
-      if (!uid || resolvedDoc.status === "cancelled") return undefined
+      if (!uid) return undefined
       return resolvedDoc.createdByUid === uid ? resolvedDoc : undefined
     }
     if (resolvedRole !== "consultant") {
@@ -4813,7 +4864,9 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
               onSendMessage={(content, files) =>
                 handleSendMessage(selectedApplication.id, content, files)
               }
-              onCancelApplication={() => handleCancelApplication(selectedApplication.id)}
+              onCancelApplication={(reason) =>
+                handleCancelApplication(selectedApplication.id, reason)
+              }
               onRejectApplication={(reason) =>
                 handleRejectApplication(selectedApplication.id, reason)
               }

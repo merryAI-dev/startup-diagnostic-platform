@@ -50,6 +50,11 @@ type TransitionApplicationResult = {
   calendarSyncError?: string;
 };
 
+export type CancelApplicationPayload = {
+  applicationId: string;
+  cancellationReason?: string | null;
+};
+
 type CancelApplicationResult = {
   applicationId: string;
   outcome: "cancelled";
@@ -334,17 +339,17 @@ export async function transitionApplicationStatusViaFunction(
   return result.data;
 }
 
-export async function cancelApplicationViaFunction(applicationId: string) {
+export async function cancelApplicationViaFunction(payload: CancelApplicationPayload) {
   if (!isFirebaseConfigured || !functions) {
     throw new Error("Firebase Functions is not configured");
   }
 
-  const callable = httpsCallable<{ applicationId: string }, CancelApplicationResult>(
+  const callable = httpsCallable<CancelApplicationPayload, CancelApplicationResult>(
     functions,
     "cancelApplication"
   );
 
-  const result = await callable({ applicationId });
+  const result = await callable(payload);
   return result.data;
 }
 

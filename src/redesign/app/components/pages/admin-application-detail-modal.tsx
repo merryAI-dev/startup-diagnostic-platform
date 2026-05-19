@@ -129,6 +129,8 @@ export function AdminApplicationDetailModal({
   const isPendingLike =
     application.status === "pending" || application.status === "review";
   const isWithinChangeWindow = isApplicationChangeWindowOpen(application.createdAt);
+  const isConsultantActionMode = allowStatusActions;
+  const showRejectActionAsCancellation = isConsultantActionMode && application.status === "confirmed";
   const attachmentItems = useMemo(() => {
     const names = application.attachments ?? [];
     const urls = application.attachmentUrls ?? [];
@@ -496,11 +498,15 @@ export function AdminApplicationDetailModal({
                     {application.status === "confirmed" && !isSessionEnded && isWithinChangeWindow && (
                       <Button
                         size="sm"
-                        variant="outline"
-                        onClick={() => handleStatusChange("cancelled")}
+                        variant={showRejectActionAsCancellation ? "destructive" : "outline"}
+                        onClick={() =>
+                          showRejectActionAsCancellation
+                            ? handleOpenAction("reject")
+                            : handleStatusChange("cancelled")
+                        }
                       >
                         <XCircle className="w-4 h-4 mr-2" />
-                        취소
+                        {showRejectActionAsCancellation ? "거절" : "취소"}
                       </Button>
                     )}
                   </div>

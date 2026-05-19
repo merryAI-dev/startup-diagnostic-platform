@@ -431,16 +431,11 @@ function buildScheduledDateTimeLabel(application: Application) {
 }
 
 function buildDetailLink(application: Application) {
-  const officeHourId = application.officeHourId?.trim() ?? ""
-  if (application.type === "irregular" && officeHourId) {
-    return `${DEFAULT_DETAIL_BASE_URL}/system/company/irregular-officehour/${officeHourId}/arranged-schedule/${application.id}`
-  }
-
-  return `${DEFAULT_DETAIL_BASE_URL}/system/company/application?id=${application.id}`
+  return DEFAULT_DETAIL_BASE_URL
 }
 
 function buildApplicationLink(application: Application) {
-  return `${DEFAULT_DETAIL_BASE_URL}/company/regular`
+  return DEFAULT_DETAIL_BASE_URL
 }
 
 function buildApplicationScheduleLabel() {
@@ -452,7 +447,7 @@ function buildRegistrationWindowLabel() {
 }
 
 function buildInputLink() {
-  return `${DEFAULT_DETAIL_BASE_URL}/admin/consultant-calendar`
+  return DEFAULT_DETAIL_BASE_URL
 }
 
 function buildMeetingLink(application: Application) {
@@ -464,7 +459,7 @@ function buildMeetingLink(application: Application) {
 }
 
 function buildReportLink(application: Application) {
-  return `${DEFAULT_DETAIL_BASE_URL}/admin/pending-reports`
+  return DEFAULT_DETAIL_BASE_URL
 }
 
 export function buildStageEmailVariables(

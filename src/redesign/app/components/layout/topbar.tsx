@@ -1,4 +1,4 @@
-import { LogOut, User as UserIcon } from "lucide-react";
+import { User as UserIcon } from "lucide-react";
 import { Button } from "@/redesign/app/components/ui/button";
 import {
   DropdownMenu,
@@ -9,6 +9,7 @@ import {
   DropdownMenuTrigger,
 } from "@/redesign/app/components/ui/dropdown-menu";
 import { User } from "@/redesign/app/lib/types";
+import emaStationLogoUrl from "../../../../../EMA Station Logo (1).svg";
 
 interface TopbarProps {
   user: User;
@@ -43,12 +44,11 @@ export function Topbar({
   return (
     <div className="h-16 border-b bg-white flex items-center justify-between px-6">
       <div className="flex items-center gap-3">
-        <div className="flex items-center gap-2">
-          <div>
-            <h2 className="font-semibold">MYSC 기업육성플랫폼</h2>
-            <p className="text-xs text-muted-foreground">{user.programName}</p>
-          </div>
-        </div>
+        <img
+          src={emaStationLogoUrl}
+          alt="EMA Station"
+          className="h-11 w-auto"
+        />
       </div>
 
       <div className="flex items-center gap-2">
