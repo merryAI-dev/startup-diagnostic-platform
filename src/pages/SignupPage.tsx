@@ -6,6 +6,7 @@ import { signOutUser } from "@/firebase/auth"
 import type { Role } from "@/types/auth"
 import { toast } from "sonner"
 import { PENDING_REQUEST_FLAG, PENDING_SIGNUP_KEY } from "@/constants/signup"
+import { getSignupRoleEmailError } from "@/lib/signup-role-email"
 
 function getSignupErrorMessage(error: any) {
   const code = error?.code ?? ""
@@ -71,6 +72,11 @@ export function SignupPage() {
     setLoadingEmail(true)
     setError(null)
     try {
+      const roleEmailError = getSignupRoleEmailError(nextRole, email)
+      if (roleEmailError) {
+        setError(roleEmailError)
+        return
+      }
       savePendingSignup({
         role: nextRole,
         email: email.trim(),
