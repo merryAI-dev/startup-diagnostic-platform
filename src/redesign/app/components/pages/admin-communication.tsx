@@ -519,9 +519,9 @@ export function AdminCommunication({
         text: stagePreview.text,
         html: stagePreview.html,
       });
-      toast.success(`${result.sentCount}건의 stage 이메일을 발송했습니다`);
+      toast.success(`${result.sentCount}건의 이메일 테스트를 발송했습니다`);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "stage 이메일 발송에 실패했습니다");
+      toast.error(error instanceof Error ? error.message : "이메일 테스트 발송에 실패했습니다");
     } finally {
       setIsStageSending(false);
     }
@@ -741,7 +741,7 @@ export function AdminCommunication({
       <Tabs defaultValue="stage-biztalk" className="w-full min-w-0 space-y-6">
         <TabsList className="grid h-auto w-full grid-cols-2 gap-2 p-2 md:grid-cols-2 xl:grid-cols-4">
           <TabsTrigger value="stage-email" className="h-10 w-full px-3 text-center">
-            stage 이메일 테스트
+            이메일 테스트
           </TabsTrigger>
           <TabsTrigger value="stage-biztalk" className="h-10 w-full px-3 text-center">
             stage BizTalk 테스트
@@ -1131,7 +1131,7 @@ export function AdminCommunication({
                   disabled={!stagePreview || isStageSending}
                 >
                   <Mail className="mr-2 h-4 w-4" />
-                  {isStageSending ? "발송 중..." : "stage 이메일 발송"}
+                  {isStageSending ? "발송 중..." : "이메일 테스트 발송"}
                 </Button>
               </div>
 

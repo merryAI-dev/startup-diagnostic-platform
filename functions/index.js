@@ -4454,8 +4454,8 @@ exports.sendStageTestEmail = onCall(
     if (!request.auth?.uid) {
       throw new HttpsError("unauthenticated", "로그인이 필요합니다.");
     }
-    if (!isStageProject()) {
-      throw new HttpsError("failed-precondition", "이메일 테스트 발송은 stage 프로젝트에서만 실행할 수 있습니다.");
+    if (!isStageProject() && !isLiveProject()) {
+      throw new HttpsError("failed-precondition", "이메일 테스트 발송은 stage 또는 live 프로젝트에서만 실행할 수 있습니다.");
     }
 
     const uid = request.auth.uid;
