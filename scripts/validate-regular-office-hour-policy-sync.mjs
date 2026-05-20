@@ -66,7 +66,12 @@ function collectMonthlyDayNumberDates(policy, monthKey, dayNumbers) {
   return [...result];
 }
 
-const functionMissing = ["getRegularOfficeHourDateKeysForDayNumbers"].filter(
+const functionMissing = [
+  "getRegularOfficeHourDateKeysForDayNumbers",
+  "getCompanyApplicationWindow",
+  "shouldDispatchCompanyApplicationAlert",
+  "shouldDispatchConsultantScheduleRegistrationAlert",
+].filter(
   (name) => !Object.prototype.hasOwnProperty.call(sharedPolicy, name),
 );
 if (functionMissing.length > 0) {
@@ -200,4 +205,69 @@ function assertNoDiff() {
 }
 
 assertNoDiff();
+
+const pilotConsultantStart = new Date("2026-05-20T10:00:00+09:00");
+const pilotConsultantEnd = new Date("2026-05-28T10:00:00+09:00");
+const originalConsultantAlertDate = new Date("2026-05-18T09:00:00+09:00");
+const originalCompanyAlertDate = new Date("2026-05-25T09:00:00+09:00");
+const pilotCompanyStart = new Date("2026-05-29T10:00:00+09:00");
+const pilotCompanyAlertDate = new Date("2026-05-29T09:00:00+09:00");
+const pilotCompanyEnd = new Date("2026-06-04T10:00:00+09:00");
+const postPilotCompany = new Date("2026-06-05T10:00:00+09:00");
+
+assertEqual(
+  functionsPolicy.canConsultantEditMonthlyAvailability("2026-06", originalConsultantAlertDate),
+  false,
+  "pilot consultant registration should not use the original third-week opening date",
+);
+assertEqual(
+  functionsPolicy.canConsultantEditMonthlyAvailability("2026-06", pilotConsultantStart),
+  true,
+  "pilot consultant registration start should be open",
+);
+assertEqual(
+  functionsPolicy.canConsultantEditMonthlyAvailability("2026-06", pilotConsultantEnd),
+  true,
+  "pilot consultant registration end should be open",
+);
+assertEqual(
+  functionsPolicy.canCompanyManageRegularApplication("2026-06", originalCompanyAlertDate),
+  false,
+  "pilot company application should not use the original fourth-week opening date",
+);
+assertEqual(
+  functionsPolicy.canCompanyManageRegularApplication("2026-06", pilotCompanyStart),
+  true,
+  "pilot company application start should be open",
+);
+assertEqual(
+  functionsPolicy.canCompanyManageRegularApplication("2026-06", pilotCompanyEnd),
+  true,
+  "pilot company application end should be open",
+);
+assertEqual(
+  functionsPolicy.canCompanyManageRegularApplication("2026-06", postPilotCompany),
+  false,
+  "pilot company application should close after the exception window",
+);
+assertEqual(
+  functionsPolicy.shouldDispatchConsultantScheduleRegistrationAlert(originalConsultantAlertDate),
+  false,
+  "pilot consultant registration alert should be suppressed",
+);
+assertEqual(
+  functionsPolicy.shouldDispatchCompanyApplicationAlert(originalCompanyAlertDate),
+  false,
+  "pilot company application alert should skip the original fourth-week Monday",
+);
+assertEqual(
+  functionsPolicy.shouldDispatchCompanyApplicationAlert(pilotCompanyAlertDate),
+  true,
+  "pilot company application alert should dispatch on 2026-05-29",
+);
+assertDeepEqual(
+  functionsPolicy.getCompanyApplicationWindow(pilotCompanyStart),
+  sharedPolicy.getCompanyApplicationWindow(pilotCompanyStart),
+  "pilot company application window mismatch",
+);
 console.log("OK: regular office-hour policy sync validated (functions <-> shared)");

@@ -8,6 +8,11 @@ const INTERNAL_DAY_NUMBERS = [2, 3];
 const EXTERNAL_DAY_NUMBERS = [4];
 const ALL_DAY_NUMBERS = [2, 3, 4];
 const STAGE_PROJECT_ID = "startup-diagnosis-platform";
+const PILOT_REGULAR_OFFICE_HOUR_MONTH_KEY = "2026-06";
+const PILOT_CONSULTANT_REGISTRATION_START_DATE_KEY = "2026-05-20";
+const PILOT_CONSULTANT_REGISTRATION_END_DATE_KEY = "2026-05-28";
+const PILOT_COMPANY_APPLICATION_START_DATE_KEY = "2026-05-29";
+const PILOT_COMPANY_APPLICATION_END_DATE_KEY = "2026-06-04";
 
 function padNumber(value) {
   return String(value).padStart(2, "0");
@@ -241,6 +246,87 @@ function getNextMonthKey(value) {
   return nextMonth ? formatMonthKey(nextMonth) : "";
 }
 
+function isDateKeyInRange(dateKey, startDateKey, endDateKey) {
+  return isDateKey(dateKey) && dateKey >= startDateKey && dateKey <= endDateKey;
+}
+
+function buildWindow(targetMonthKey, startDateKey, endDateKey, kind) {
+  return {
+    targetMonthKey,
+    startDateKey,
+    endDateKey,
+    startDate: parseDateKey(startDateKey),
+    endDate: parseDateKey(endDateKey),
+    kind,
+  };
+}
+
+function getCompanyApplicationWindow(now) {
+  const currentDate = now instanceof Date ? now : new Date(now || Date.now());
+  const todayKey = formatDateKey(currentDate);
+  if (
+    isDateKeyInRange(
+      todayKey,
+      PILOT_COMPANY_APPLICATION_START_DATE_KEY,
+      PILOT_COMPANY_APPLICATION_END_DATE_KEY
+    )
+  ) {
+    return buildWindow(
+      PILOT_REGULAR_OFFICE_HOUR_MONTH_KEY,
+      PILOT_COMPANY_APPLICATION_START_DATE_KEY,
+      PILOT_COMPANY_APPLICATION_END_DATE_KEY,
+      "pilot"
+    );
+  }
+
+  const targetMonthKey = getNextMonthKey(currentDate);
+  if (!canCompanyManageRegularApplication(targetMonthKey, currentDate)) {
+    return null;
+  }
+
+  const weekInfo = getOfficeHourWeekInfo(currentDate);
+  if (!weekInfo) {
+    return null;
+  }
+
+  const startDateKey = formatDateKey(weekInfo.weekStart);
+  const endDateKey = formatDateKey(addDays(weekInfo.weekStart, 6));
+  return buildWindow(targetMonthKey, startDateKey, endDateKey, "regular");
+}
+
+function shouldDispatchCompanyApplicationAlert(now) {
+  const currentDate = now instanceof Date ? now : new Date(now || Date.now());
+  const todayKey = formatDateKey(currentDate);
+  if (todayKey === PILOT_COMPANY_APPLICATION_START_DATE_KEY) {
+    return true;
+  }
+
+  if (getNextMonthKey(currentDate) === PILOT_REGULAR_OFFICE_HOUR_MONTH_KEY) {
+    return false;
+  }
+
+  const weekInfo = getOfficeHourWeekInfo(currentDate);
+  return Boolean(
+      weekInfo &&
+      weekInfo.weekOfMonth === COMPANY_APPLICATION_OPEN_WEEK_NUMBER &&
+      weekInfo.date.getDay() === 1
+  );
+}
+
+function shouldDispatchConsultantScheduleRegistrationAlert(now) {
+  const currentDate = now instanceof Date ? now : new Date(now || Date.now());
+  if (getNextMonthKey(currentDate) === PILOT_REGULAR_OFFICE_HOUR_MONTH_KEY) {
+    return false;
+  }
+
+  const weekInfo = getOfficeHourWeekInfo(currentDate);
+  return Boolean(
+      weekInfo &&
+      weekInfo.weekOfMonth === CONSULTANT_SCHEDULE_OPEN_WEEK_NUMBER &&
+      weekInfo.date.getDay() === 1
+  );
+}
+
 function isRegularOfficeHourWindowOverrideEnabled() {
   if (process.env.REGULAR_OFFICE_HOUR_TESTING === "true") {
     return true;
@@ -275,6 +361,15 @@ function canConsultantEditMonthlyAvailability(targetMonthKey, now) {
   }
 
   const currentDate = now instanceof Date ? now : new Date(now || Date.now());
+  const todayKey = formatDateKey(currentDate);
+  if (targetMonthKey === PILOT_REGULAR_OFFICE_HOUR_MONTH_KEY) {
+    return isDateKeyInRange(
+      todayKey,
+      PILOT_CONSULTANT_REGISTRATION_START_DATE_KEY,
+      PILOT_CONSULTANT_REGISTRATION_END_DATE_KEY
+    );
+  }
+
   if (isRegularOfficeHourWindowOverrideEnabled()) {
     return targetMonthKey === getNextMonthKey(currentDate);
   }
@@ -296,6 +391,15 @@ function canCompanyManageRegularApplication(targetMonthKey, now) {
   }
 
   const currentDate = now instanceof Date ? now : new Date(now || Date.now());
+  const todayKey = formatDateKey(currentDate);
+  if (targetMonthKey === PILOT_REGULAR_OFFICE_HOUR_MONTH_KEY) {
+    return isDateKeyInRange(
+      todayKey,
+      PILOT_COMPANY_APPLICATION_START_DATE_KEY,
+      PILOT_COMPANY_APPLICATION_END_DATE_KEY
+    );
+  }
+
   if (isRegularOfficeHourWindowOverrideEnabled()) {
     return targetMonthKey === getNextMonthKey(currentDate);
   }
@@ -340,6 +444,9 @@ module.exports = {
   getRegularOfficeHourDateKeysForMonth,
   getRegularOfficeHourDateKeysForDayNumbers,
   getNextMonthKey,
+  getCompanyApplicationWindow,
+  shouldDispatchCompanyApplicationAlert,
+  shouldDispatchConsultantScheduleRegistrationAlert,
   canConsultantEditMonthlyAvailability,
   canCompanyManageRegularApplication,
   canCompanyApplyForRegularDate,

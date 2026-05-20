@@ -2786,7 +2786,10 @@ async function dispatchConsultantScheduleRegistrationAlerts(now = new Date()) {
   const weekInfo = regularOfficeHourPolicy.getOfficeHourWeekInfo(now);
   const { dateKey } = getCurrentSeoulDateTimeKeys(now);
 
-  if (!weekInfo || weekInfo.weekOfMonth !== CONSULTANT_SCHEDULE_OPEN_WEEK_NUMBER) {
+  if (
+    !weekInfo ||
+    !regularOfficeHourPolicy.shouldDispatchConsultantScheduleRegistrationAlert(now)
+  ) {
     return {
       status: "skipped",
       reason: "outside-registration-week",
@@ -3077,10 +3080,13 @@ function summarizeMonthlyAvailability(availability) {
 }
 
 async function dispatchCompanyOfficeHourApplicationAlerts(now = new Date()) {
-  const weekInfo = regularOfficeHourPolicy.getOfficeHourWeekInfo(now);
   const { dateKey } = getCurrentSeoulDateTimeKeys(now);
+  const applicationWindow = regularOfficeHourPolicy.getCompanyApplicationWindow(now);
 
-  if (!weekInfo || weekInfo.weekOfMonth !== COMPANY_APPLICATION_OPEN_WEEK_NUMBER) {
+  if (
+    !applicationWindow ||
+    !regularOfficeHourPolicy.shouldDispatchCompanyApplicationAlert(now)
+  ) {
     return {
       status: "skipped",
       reason: "outside-application-week",
@@ -3110,8 +3116,8 @@ async function dispatchCompanyOfficeHourApplicationAlerts(now = new Date()) {
   }
 
   const applicationScheduleLabel = buildSeoulWeekRangeLabel(
-    weekInfo.weekStart,
-    addDaysToDate(weekInfo.weekStart, 6)
+    applicationWindow.startDate,
+    applicationWindow.endDate
   );
   const companiesSnap = await db.collection("companies").get();
 
@@ -3194,6 +3200,8 @@ async function dispatchCompanyOfficeHourApplicationAlerts(now = new Date()) {
     "dispatchCompanyOfficeHourApplicationAlerts summary",
     JSON.stringify({
       dateKey,
+      targetMonthKey: applicationWindow.targetMonthKey,
+      applicationWindowKind: applicationWindow.kind,
       applicationScheduleLabel,
       sentCount,
       skippedCount,
@@ -3205,6 +3213,8 @@ async function dispatchCompanyOfficeHourApplicationAlerts(now = new Date()) {
   return {
     status: "completed",
     dateKey,
+    targetMonthKey: applicationWindow.targetMonthKey,
+    applicationWindowKind: applicationWindow.kind,
     applicationScheduleLabel,
     sentCount,
     skippedCount,
@@ -7392,6 +7402,20 @@ exports.sendCompanyOfficeHourApplicationAlerts = onSchedule(
   {
     region: REGION,
     schedule: "0 9 * * 1",
+    timeZone: "Asia/Seoul",
+    timeoutSeconds: 300,
+    memory: "256MiB",
+    secrets: [RESEND_API_KEY],
+  },
+  async () => {
+    return dispatchCompanyOfficeHourApplicationAlerts();
+  }
+);
+
+exports.sendPilotJuneCompanyOfficeHourApplicationAlerts = onSchedule(
+  {
+    region: REGION,
+    schedule: "0 9 29 5 *",
     timeZone: "Asia/Seoul",
     timeoutSeconds: 300,
     memory: "256MiB",

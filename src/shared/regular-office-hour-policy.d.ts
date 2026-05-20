@@ -36,6 +36,16 @@ export function getRegularOfficeHourDateKeysForDayNumbers(
   dayNumbers: number[],
 ): string[]
 export function getNextMonthKey(value: Date): string
+export function getCompanyApplicationWindow(value: Date): {
+  targetMonthKey: string
+  startDateKey: string
+  endDateKey: string
+  startDate: Date | null
+  endDate: Date | null
+  kind: string
+} | null
+export function shouldDispatchCompanyApplicationAlert(value: Date): boolean
+export function shouldDispatchConsultantScheduleRegistrationAlert(value: Date): boolean
 export function canConsultantEditMonthlyAvailability(targetMonthKey: string, now: Date): boolean
 export function canCompanyManageRegularApplication(targetMonthKey: string, now: Date): boolean
 export function canCompanyApplyForRegularDate(dateKey: string, now: Date): boolean
