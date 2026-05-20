@@ -9,7 +9,7 @@ import {
   DropdownMenuTrigger,
 } from "@/redesign/app/components/ui/dropdown-menu";
 import { User } from "@/redesign/app/lib/types";
-import emaStationLogoUrl from "../../../../../EMA Station Logo (1).svg";
+import emaStationLogoUrl from "../../../../../EMA Station Logo (2).svg";
 
 interface TopbarProps {
   user: User;
@@ -42,7 +42,7 @@ export function Topbar({
   const resolvedDisplayName = displayName || user.companyName;
 
   return (
-    <div className="h-16 border-b bg-white flex items-center justify-between pl-2 pr-6">
+    <div className="h-16 border-b bg-white flex items-center justify-between pl-[14px] pr-6">
       <div className="flex items-center gap-3">
         <img
           src={emaStationLogoUrl}
