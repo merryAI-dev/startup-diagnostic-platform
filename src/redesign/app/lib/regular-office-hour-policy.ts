@@ -367,6 +367,10 @@ export function canConsultantEditMonthlyAvailability(targetMonthKey: string, now
     return false
   }
 
+  if (isRegularOfficeHourWindowOverrideEnabled()) {
+    return targetMonthKey === getNextMonthKey(now)
+  }
+
   const todayKey = formatDateKey(now)
   if (targetMonthKey === PILOT_REGULAR_OFFICE_HOUR_MONTH_KEY) {
     return isDateKeyInRange(
@@ -374,10 +378,6 @@ export function canConsultantEditMonthlyAvailability(targetMonthKey: string, now
       PILOT_CONSULTANT_REGISTRATION_START_DATE_KEY,
       PILOT_CONSULTANT_REGISTRATION_END_DATE_KEY,
     )
-  }
-
-  if (isRegularOfficeHourWindowOverrideEnabled()) {
-    return targetMonthKey === getNextMonthKey(now)
   }
 
   const weekInfo = getOfficeHourWeekInfo(now)
@@ -396,6 +396,10 @@ export function canCompanyManageRegularApplication(targetMonthKey: string, now: 
     return false
   }
 
+  if (isRegularOfficeHourWindowOverrideEnabled()) {
+    return targetMonthKey === getNextMonthKey(now)
+  }
+
   const todayKey = formatDateKey(now)
   if (targetMonthKey === PILOT_REGULAR_OFFICE_HOUR_MONTH_KEY) {
     return isDateKeyInRange(
@@ -403,10 +407,6 @@ export function canCompanyManageRegularApplication(targetMonthKey: string, now: 
       PILOT_COMPANY_APPLICATION_START_DATE_KEY,
       PILOT_COMPANY_APPLICATION_END_DATE_KEY,
     )
-  }
-
-  if (isRegularOfficeHourWindowOverrideEnabled()) {
-    return targetMonthKey === getNextMonthKey(now)
   }
 
   const weekInfo = getOfficeHourWeekInfo(now)

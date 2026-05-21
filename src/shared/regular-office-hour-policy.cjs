@@ -362,6 +362,10 @@ function canConsultantEditMonthlyAvailability(targetMonthKey, now) {
   }
 
   const currentDate = now instanceof Date ? now : new Date(now || Date.now());
+  if (isRegularOfficeHourWindowOverrideEnabled()) {
+    return targetMonthKey === getNextMonthKey(currentDate);
+  }
+
   const todayKey = formatDateKey(currentDate);
   if (targetMonthKey === PILOT_REGULAR_OFFICE_HOUR_MONTH_KEY) {
     return isDateKeyInRange(
@@ -369,10 +373,6 @@ function canConsultantEditMonthlyAvailability(targetMonthKey, now) {
       PILOT_CONSULTANT_REGISTRATION_START_DATE_KEY,
       PILOT_CONSULTANT_REGISTRATION_END_DATE_KEY
     );
-  }
-
-  if (isRegularOfficeHourWindowOverrideEnabled()) {
-    return targetMonthKey === getNextMonthKey(currentDate);
   }
 
   const weekInfo = getOfficeHourWeekInfo(currentDate);
@@ -392,6 +392,10 @@ function canCompanyManageRegularApplication(targetMonthKey, now) {
   }
 
   const currentDate = now instanceof Date ? now : new Date(now || Date.now());
+  if (isRegularOfficeHourWindowOverrideEnabled()) {
+    return targetMonthKey === getNextMonthKey(currentDate);
+  }
+
   const todayKey = formatDateKey(currentDate);
   if (targetMonthKey === PILOT_REGULAR_OFFICE_HOUR_MONTH_KEY) {
     return isDateKeyInRange(
@@ -399,10 +403,6 @@ function canCompanyManageRegularApplication(targetMonthKey, now) {
       PILOT_COMPANY_APPLICATION_START_DATE_KEY,
       PILOT_COMPANY_APPLICATION_END_DATE_KEY
     );
-  }
-
-  if (isRegularOfficeHourWindowOverrideEnabled()) {
-    return targetMonthKey === getNextMonthKey(currentDate);
   }
 
   const weekInfo = getOfficeHourWeekInfo(currentDate);
