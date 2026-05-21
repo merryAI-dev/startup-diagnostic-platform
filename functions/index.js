@@ -6770,24 +6770,19 @@ exports.cancelApplication = onCall(
       const applicationOwnerUid = normalizeString(application.createdByUid);
       const profileCompanyId = normalizeString(profile.companyId);
       const applicationCompanyId = normalizeString(application.companyId);
-      const consultantId = normalizeString(application.consultantId);
-      const consultantName = normalizeString(application.consultant);
       const canCancelAsCompany =
         actorRole === "company" &&
         ((applicationOwnerUid && applicationOwnerUid === uid) ||
           (profileCompanyId && applicationCompanyId && profileCompanyId === applicationCompanyId));
-      const canCancelAsConsultant =
-        actorRole === "consultant" &&
-        ((consultantId && consultantId === uid) ||
-          (!consultantId && consultantName && consultantName === normalizeString(profile.name)));
+      const canCancelAsAdmin = actorRole === "admin";
       if (canCancelAsCompany && !cancellationReason) {
         throw new HttpsError("invalid-argument", "취소 사유를 입력해주세요.");
       }
 
-      if (!canCancelAsCompany && !canCancelAsConsultant) {
+      if (!canCancelAsCompany && !canCancelAsAdmin) {
         throw new HttpsError("permission-denied", "신청을 취소할 권한이 없습니다.");
       }
-      if (!isApplicationChangeWindowOpen(application, new Date())) {
+      if (!canCancelAsAdmin && !isApplicationChangeWindowOpen(application, new Date())) {
         throw new HttpsError(
           "failed-precondition",
           "신청 후 72시간이 지나 취소할 수 없습니다."
@@ -6803,6 +6798,15 @@ exports.cancelApplication = onCall(
         ...(canCancelAsCompany
           ? { cancellationReason }
           : { cancellationReason: FieldValue.delete() }),
+        cancelledByRole: actorRole,
+        cancelledByUid: uid,
+        cancelledByName:
+          normalizeString(profile.name) ||
+          normalizeString(profile.companyName) ||
+          normalizeEmail(profile.email) ||
+          uid,
+        cancelledByEmail: normalizeEmail(profile.email) || FieldValue.delete(),
+        cancelledAt: FieldValue.serverTimestamp(),
         updatedAt: FieldValue.serverTimestamp(),
       });
 
@@ -6811,6 +6815,7 @@ exports.cancelApplication = onCall(
         outcome: "cancelled",
         status: "cancelled",
         sendConsultantCancellationNotification: canCancelAsCompany,
+        actorRole,
       };
     });
 

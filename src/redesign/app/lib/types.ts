@@ -198,6 +198,11 @@ export interface Application {
   requestContent: string;
   rejectionReason?: string;
   cancellationReason?: string;
+  cancelledByRole?: string;
+  cancelledByUid?: string;
+  cancelledByName?: string;
+  cancelledByEmail?: string;
+  cancelledAt?: Date | string;
   attachments?: string[];
   attachmentUrls?: string[];
   applicantName?: string;

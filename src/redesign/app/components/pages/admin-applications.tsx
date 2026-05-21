@@ -61,6 +61,7 @@ export function AdminApplications({
   const [page, setPage] = useState(1);
   const [selectedApplicationId, setSelectedApplicationId] = useState<string | null>(null);
   const isConsultantUser = currentUserRole === "consultant";
+  const isAdminUser = currentUserRole === "admin";
   const pageContainerClassName = isConsultantUser
     ? "mx-auto w-full max-w-[1600px]"
     : "mx-auto w-full max-w-[1600px]";
@@ -480,6 +481,8 @@ export function AdminApplications({
           onRequestApplication={onRequestApplication}
           readOnly={true}
           allowStatusActions={isConsultantUser}
+          allowAdminCancellation={isAdminUser}
+          currentUserRole={currentUserRole}
           currentConsultantName={currentConsultantName}
         />
       )}

@@ -71,6 +71,8 @@ interface AdminApplicationDetailModalProps {
   onRequestApplication?: (id: string) => void;
   readOnly?: boolean;
   allowStatusActions?: boolean;
+  allowAdminCancellation?: boolean;
+  currentUserRole?: string;
   currentConsultantName?: string | null;
 }
 
@@ -84,6 +86,8 @@ export function AdminApplicationDetailModal({
   onRequestApplication,
   readOnly = false,
   allowStatusActions = false,
+  allowAdminCancellation = false,
+  currentUserRole,
   currentConsultantName,
 }: AdminApplicationDetailModalProps) {
   const [isEditing, setIsEditing] = useState(false);
@@ -94,6 +98,8 @@ export function AdminApplicationDetailModal({
   const [actionType, setActionType] = useState<"confirm" | "reject">("confirm");
   const [rejectReason, setRejectReason] = useState("");
   const [isActionPending, setIsActionPending] = useState(false);
+  const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
+  const [isCancelPending, setIsCancelPending] = useState(false);
   const [activeCompanyTab, setActiveCompanyTab] = useState<"info" | "assessment" | "report">(
     "info"
   );
@@ -130,7 +136,12 @@ export function AdminApplicationDetailModal({
     application.status === "pending" || application.status === "review";
   const isWithinChangeWindow = isApplicationChangeWindowOpen(application.createdAt);
   const isConsultantActionMode = allowStatusActions;
+  const isAdminActionMode = allowAdminCancellation && currentUserRole === "admin";
   const showRejectActionAsCancellation = isConsultantActionMode && application.status === "confirmed";
+  const canShowConfirmedCancellation =
+    application.status === "confirmed" &&
+    !isSessionEnded &&
+    (isAdminActionMode || (isConsultantActionMode && isWithinChangeWindow));
   const attachmentItems = useMemo(() => {
     const names = application.attachments ?? [];
     const urls = application.attachmentUrls ?? [];
@@ -161,7 +172,7 @@ export function AdminApplicationDetailModal({
     toast.success("신청 정보가 업데이트되었습니다");
   };
 
-  const handleStatusChange = (newStatus: ApplicationStatus) => {
+  const handleStatusChange = async (newStatus: ApplicationStatus) => {
     if (
       isSessionEnded
       && newStatus !== "rejected"
@@ -169,8 +180,21 @@ export function AdminApplicationDetailModal({
       toast.error("진행 시간이 지난 신청은 거절됨 외 상태로 변경할 수 없습니다");
       return;
     }
-    onUpdateStatus(application.id, newStatus);
+    await Promise.resolve(onUpdateStatus(application.id, newStatus));
     toast.success(`상태가 '${getStatusLabel(newStatus)}'로 변경되었습니다`);
+  };
+
+  const handleConfirmCancellation = async () => {
+    if (isCancelPending) return;
+    setIsCancelPending(true);
+    try {
+      await handleStatusChange("cancelled");
+      setCancelDialogOpen(false);
+    } catch (error) {
+      console.error("Failed to cancel application:", error);
+    } finally {
+      setIsCancelPending(false);
+    }
   };
 
   const handleOpenAction = (type: "confirm" | "reject") => {
@@ -236,6 +260,25 @@ export function AdminApplicationDetailModal({
     };
     return labels[status];
   };
+
+  const getCancellationActorRoleLabel = (role?: string | null) => {
+    switch ((role ?? "").trim()) {
+      case "admin":
+        return "관리자";
+      case "company":
+        return "기업";
+      case "consultant":
+        return "컨설턴트";
+      default:
+        return "확인되지 않은 사용자";
+    }
+  };
+
+  const cancellationActorLabel = application.cancelledByRole
+    ? `${getCancellationActorRoleLabel(application.cancelledByRole)}${
+        application.cancelledByName ? ` ${application.cancelledByName}` : ""
+      }`
+    : "";
 
   useEffect(() => {
     let mounted = true;
@@ -467,12 +510,12 @@ export function AdminApplicationDetailModal({
         <div className="grid flex-1 min-h-0 gap-8 py-4 lg:grid-cols-[560px_minmax(0,1fr)]">
           <div className="min-h-0 overflow-y-auto lg:pr-4 space-y-6">
             {/* Status Management */}
-            {(allowStatusActions || !readOnly) && (
+            {(allowStatusActions || allowAdminCancellation || !readOnly) && (
               <>
                 <div className="space-y-3">
                   <Label>상태 관리</Label>
                   <div className="flex gap-2 flex-wrap">
-                    {isPendingLike && !isSessionEnded && (
+                    {isConsultantActionMode && isPendingLike && !isSessionEnded && (
                       <Button
                         data-testid="application-accept"
                         size="sm"
@@ -484,7 +527,7 @@ export function AdminApplicationDetailModal({
                         수락
                       </Button>
                     )}
-                    {isPendingLike && (
+                    {isConsultantActionMode && isPendingLike && (
                       <Button
                         data-testid="application-reject"
                         size="sm"
@@ -495,18 +538,19 @@ export function AdminApplicationDetailModal({
                         최종 거절
                       </Button>
                     )}
-                    {application.status === "confirmed" && !isSessionEnded && isWithinChangeWindow && (
+                    {canShowConfirmedCancellation && (
                       <Button
                         size="sm"
-                        variant={showRejectActionAsCancellation ? "destructive" : "outline"}
+                        variant="destructive"
+                        className="shadow-sm"
                         onClick={() =>
                           showRejectActionAsCancellation
                             ? handleOpenAction("reject")
-                            : handleStatusChange("cancelled")
+                            : setCancelDialogOpen(true)
                         }
                       >
                         <XCircle className="w-4 h-4 mr-2" />
-                        {showRejectActionAsCancellation ? "거절" : "취소"}
+                        {showRejectActionAsCancellation ? "거절" : "신청 취소"}
                       </Button>
                     )}
                   </div>
@@ -674,6 +718,24 @@ export function AdminApplicationDetailModal({
                     <p className="text-sm whitespace-pre-wrap text-rose-900">
                       {application.rejectionReason?.trim() || "거절 사유가 등록되지 않았습니다."}
                     </p>
+                  </div>
+                </div>
+              )}
+
+              {application.status === "cancelled" && (
+                <div className="space-y-2">
+                  <Label>취소 정보</Label>
+                  <div className="rounded-lg border border-rose-200 bg-rose-50 p-3">
+                    <p className="text-sm text-rose-900">
+                      {cancellationActorLabel
+                        ? `${cancellationActorLabel}에 의해 취소되었습니다.`
+                        : "취소 처리자 정보가 없습니다."}
+                    </p>
+                    {application.cancellationReason?.trim() ? (
+                      <p className="mt-2 text-sm whitespace-pre-wrap text-rose-900">
+                        사유: {application.cancellationReason.trim()}
+                      </p>
+                    ) : null}
                   </div>
                 </div>
               )}
@@ -1478,6 +1540,40 @@ export function AdminApplicationDetailModal({
               닫기
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={cancelDialogOpen} onOpenChange={setCancelDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>신청을 취소하시겠습니까?</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-2 text-sm text-slate-600">
+            <p>취소하면 신청 상태가 취소로 변경되며, 신청 이력은 유지됩니다.</p>
+            <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-3 text-rose-900">
+              <p className="font-medium">{application.companyName || application.applicantName || "기업"}</p>
+              <p className="mt-1">
+                {[application.scheduledDate, application.scheduledTime].filter(Boolean).join(" ") || "일정 미지정"}
+              </p>
+            </div>
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setCancelDialogOpen(false)}
+              disabled={isCancelPending}
+            >
+              닫기
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleConfirmCancellation}
+              disabled={isCancelPending}
+              loading={isCancelPending}
+            >
+              취소 확정
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
 
