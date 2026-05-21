@@ -2979,8 +2979,11 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
           }
         } catch (error) {
           toast.error(getFunctionErrorMessage(error, "신청 취소에 실패했습니다"))
-          return
+          throw error
         }
+        const error = new Error("신청 취소 결과를 확인할 수 없습니다")
+        toast.error(error.message)
+        throw error
       }
       if (status === "pending") {
         try {

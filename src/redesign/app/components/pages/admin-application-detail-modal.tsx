@@ -178,7 +178,7 @@ export function AdminApplicationDetailModal({
       && newStatus !== "rejected"
     ) {
       toast.error("진행 시간이 지난 신청은 거절됨 외 상태로 변경할 수 없습니다");
-      return;
+      throw new Error("Session has already ended");
     }
     await Promise.resolve(onUpdateStatus(application.id, newStatus));
     toast.success(`상태가 '${getStatusLabel(newStatus)}'로 변경되었습니다`);
