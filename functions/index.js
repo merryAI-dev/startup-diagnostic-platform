@@ -690,6 +690,9 @@ async function writeGoogleCalendarSyncState(applicationId, patch) {
       ? patch.attendeeEmails
       : FieldValue.delete();
   }
+  if (Object.prototype.hasOwnProperty.call(patch, "meetingLink")) {
+    payload["googleCalendar.meetingLink"] = patch.meetingLink || FieldValue.delete();
+  }
   if (Object.prototype.hasOwnProperty.call(patch, "warningMessages")) {
     payload["googleCalendar.warningMessages"] = Array.isArray(patch.warningMessages)
       ? patch.warningMessages
@@ -706,6 +709,21 @@ async function writeGoogleCalendarSyncState(applicationId, patch) {
   }
 
   await db.collection("officeHourApplications").doc(applicationId).update(payload);
+}
+
+function getGoogleCalendarMeetingLink(event) {
+  const hangoutLink = normalizeString(event?.hangoutLink);
+  if (hangoutLink) {
+    return hangoutLink;
+  }
+
+  const entryPoints = Array.isArray(event?.conferenceData?.entryPoints)
+    ? event.conferenceData.entryPoints
+    : [];
+  const videoEntryPoint = entryPoints.find((entryPoint) => {
+    return normalizeString(entryPoint?.entryPointType) === "video" && normalizeString(entryPoint?.uri);
+  });
+  return normalizeString(videoEntryPoint?.uri);
 }
 
 async function loadOfficeHourApplicationContext(applicationId) {
@@ -853,6 +871,7 @@ async function upsertRegularApplicationGoogleCalendarEvent(applicationId) {
     ].filter((email) => isValidCalendarAttendeeEmail(email));
     const uniqueAttendeeEmails = Array.from(new Set(attendeeEmails));
     const existingEventId = normalizeString(context.application.googleCalendar?.eventId);
+    const shouldCreateMeet = normalizeString(context.application.sessionFormat) !== "offline";
 
     const eventPayload = {
       summary: title,
@@ -869,6 +888,18 @@ async function upsertRegularApplicationGoogleCalendarEvent(applicationId) {
         ? { attendees: uniqueAttendeeEmails.map((email) => ({ email })) }
         : {}),
       location: normalizeString(context.application.sessionFormat) === "offline" ? "오프라인" : "온라인",
+      ...(shouldCreateMeet
+        ? {
+            conferenceData: {
+              createRequest: {
+                requestId: `office-hour-${applicationId}`.replace(/[^a-zA-Z0-9_-]/g, "-").slice(0, 64),
+                conferenceSolutionKey: {
+                  type: "hangoutsMeet",
+                },
+              },
+            },
+          }
+        : {}),
       extendedProperties: {
         private: {
           applicationId,
@@ -881,13 +912,19 @@ async function upsertRegularApplicationGoogleCalendarEvent(applicationId) {
       ? await googleCalendarRequest(config, {
           method: "PATCH",
           path: `/calendars/${encodeURIComponent(config.calendarId)}/events/${encodeURIComponent(existingEventId)}`,
-          query: { sendUpdates: getGoogleCalendarSendUpdatesMode() },
+          query: {
+            sendUpdates: getGoogleCalendarSendUpdatesMode(),
+            ...(shouldCreateMeet ? { conferenceDataVersion: "1" } : {}),
+          },
           body: eventPayload,
         })
       : await googleCalendarRequest(config, {
           method: "POST",
           path: `/calendars/${encodeURIComponent(config.calendarId)}/events`,
-          query: { sendUpdates: getGoogleCalendarSendUpdatesMode() },
+          query: {
+            sendUpdates: getGoogleCalendarSendUpdatesMode(),
+            ...(shouldCreateMeet ? { conferenceDataVersion: "1" } : {}),
+          },
           body: eventPayload,
         });
 
@@ -902,6 +939,7 @@ async function upsertRegularApplicationGoogleCalendarEvent(applicationId) {
       eventId,
       title,
       attendeeEmails: uniqueAttendeeEmails,
+      meetingLink: getGoogleCalendarMeetingLink(event),
       warningMessages,
       lastError: "",
       syncedAt: FieldValue.serverTimestamp(),
@@ -1877,7 +1915,7 @@ function buildNotificationMeetingLink(application) {
     return "해당 없음";
   }
 
-  return "온라인 접속 링크 미연결";
+  return normalizeString(application?.googleCalendar?.meetingLink) || "온라인 접속 링크 미연결";
 }
 
 function buildNotificationScheduledDateTimeLabel(application) {
