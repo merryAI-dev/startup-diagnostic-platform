@@ -5,6 +5,7 @@ const { onDocumentCreated } = require("firebase-functions/v2/firestore");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
 const { defineSecret } = require("firebase-functions/params");
 const { initializeApp } = require("firebase-admin/app");
+const { getAuth } = require("firebase-admin/auth");
 const { FieldValue, getFirestore } = require("firebase-admin/firestore");
 const {
   COMPANY_ANALYSIS_REPORT_SCHEMA,
@@ -46,6 +47,7 @@ const IRREGULAR_CALENDAR_SYNC_LOOKBACK_DAYS = 120;
 const IRREGULAR_CALENDAR_SYNC_LOOKAHEAD_DAYS = 180;
 const DEFAULT_NOTIFICATION_DETAIL_BASE_URL = "https://startup-diagnostic-platform.vercel.app";
 const DEFAULT_NOTIFICATION_EMAIL_FROM_ADDRESS = "no-reply@test.mysc.co.kr";
+const ADMIN_PASSWORD_RESET_EMAIL_SUBJECT = "[MYSC] 관리자 계정 비밀번호 재설정";
 const INTERNAL_CONSULTANT_NOTICE_SLACK_CHANNEL_ID = "C0B1WE3PVFC";
 const OFFICE_HOUR_CONFIRMED_BIZTALK_TEMPLATE_CODE = "officehour_001";
 const OFFICE_HOUR_CONFIRMED_BIZTALK_ATTACH = {
@@ -438,6 +440,30 @@ function normalizeEmailArray(value) {
         .filter(Boolean)
     )
   );
+}
+
+function isAdminAuthEmail(value) {
+  return /^[^@\s]+_admin@mysc\.co\.kr$/i.test(normalizeEmail(value));
+}
+
+function inferAdminRecoveryEmail(value) {
+  const authEmail = normalizeEmail(value);
+  const match = authEmail.match(/^([^@\s]+)_admin@mysc\.co\.kr$/i);
+  if (!match) return "";
+  return `${match[1]}@mysc.co.kr`;
+}
+
+function buildAdminPasswordResetEmailText({ authEmail, resetLink }) {
+  return [
+    "안녕하세요. MYSC 관리자 계정 비밀번호 재설정 안내입니다.",
+    "",
+    `관리자 로그인 ID: ${authEmail}`,
+    "",
+    "아래 링크를 열어 새 비밀번호를 설정해주세요.",
+    resetLink,
+    "",
+    "본인이 요청하지 않았다면 이 메일을 무시해주세요.",
+  ].join("\n");
 }
 
 function isStageProject() {
@@ -4571,6 +4597,87 @@ exports.sendStageTestEmail = onCall(
       throw new HttpsError(
         "internal",
         error instanceof Error ? error.message : "이메일 테스트 발송에 실패했습니다."
+      );
+    }
+  }
+);
+
+exports.sendAdminPasswordResetEmail = onCall(
+  {
+    region: REGION,
+    timeoutSeconds: 60,
+    memory: "256MiB",
+    secrets: [RESEND_API_KEY],
+  },
+  async (request) => {
+    if (!request.auth?.uid) {
+      throw new HttpsError("unauthenticated", "로그인이 필요합니다.");
+    }
+    if (!isStageProject() && !isLiveProject()) {
+      throw new HttpsError("failed-precondition", "관리자 비밀번호 재설정은 stage 또는 live 프로젝트에서만 실행할 수 있습니다.");
+    }
+
+    const requesterSnap = await db.collection("profiles").doc(request.auth.uid).get();
+    const requesterProfile = requesterSnap.data() || {};
+    if (normalizeString(requesterProfile.role) !== "admin" || requesterProfile.active !== true) {
+      throw new HttpsError("permission-denied", "관리자 계정만 비밀번호 재설정 메일을 발송할 수 있습니다.");
+    }
+
+    const authEmail = normalizeEmail(request.data?.authEmail);
+    if (!isAdminAuthEmail(authEmail)) {
+      throw new HttpsError("invalid-argument", "관리자 로그인 ID 형식이 올바르지 않습니다.");
+    }
+
+    const recoveryEmail = inferAdminRecoveryEmail(authEmail);
+    if (!recoveryEmail) {
+      throw new HttpsError("invalid-argument", "복구 이메일을 확인할 수 없습니다.");
+    }
+
+    const apiKey = normalizeString(RESEND_API_KEY.value());
+    if (!apiKey) {
+      throw new HttpsError("failed-precondition", "RESEND_API_KEY is not configured.");
+    }
+
+    try {
+      const authUser = await getAuth().getUserByEmail(authEmail);
+      const profileSnap = await db.collection("profiles").doc(authUser.uid).get();
+      const profile = profileSnap.data() || {};
+      const role = normalizeString(profile.role);
+
+      if (role !== "admin" || profile.active !== true) {
+        throw new HttpsError("permission-denied", "활성 관리자 계정만 이 방식으로 비밀번호를 재설정할 수 있습니다.");
+      }
+
+      const resetLink = await getAuth().generatePasswordResetLink(authEmail);
+      const text = buildAdminPasswordResetEmailText({ authEmail, resetLink });
+      const responseBody = await sendResendEmail({
+        apiKey,
+        fromEmail: DEFAULT_NOTIFICATION_EMAIL_FROM_ADDRESS,
+        to: recoveryEmail,
+        subject: ADMIN_PASSWORD_RESET_EMAIL_SUBJECT,
+        text,
+      });
+
+      return {
+        ok: true,
+        recoveryEmail,
+        id: normalizeString(responseBody?.id) || null,
+      };
+    } catch (error) {
+      if (error instanceof HttpsError) {
+        throw error;
+      }
+
+      console.error("sendAdminPasswordResetEmail failed", {
+        requesterUid: request.auth.uid,
+        authEmail,
+        recoveryEmail,
+        errorMessage: error instanceof Error ? error.message : String(error),
+        errorStack: error instanceof Error ? error.stack : null,
+      });
+      throw new HttpsError(
+        "internal",
+        error instanceof Error ? error.message : "관리자 비밀번호 재설정 메일 발송에 실패했습니다."
       );
     }
   }
