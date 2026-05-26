@@ -2,8 +2,10 @@ import { useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { AuthCard } from "@/components/auth/AuthCard"
 import { readFirebaseErrorCode } from "@/firebase/errors"
-import { requestPasswordReset } from "@/firebase/auth"
+import { requestAdminPasswordReset, requestPasswordReset } from "@/firebase/auth"
 import type { Role } from "@/types/auth"
+
+const adminAuthEmailPattern = /^[^@\s]+_admin@mysc\.co\.kr$/i
 
 export function PasswordResetPage() {
   const [loading, setLoading] = useState(false)
@@ -19,6 +21,14 @@ export function PasswordResetPage() {
     setNotice(null)
 
     try {
+      if (adminAuthEmailPattern.test(email.trim())) {
+        const result = await requestAdminPasswordReset(email)
+        setNotice(
+          `${result.recoveryEmail}로 비밀번호 재설정 메일이 발송되었습니다. 메일함과 스팸함을 확인해주세요.`,
+        )
+        return
+      }
+
       await requestPasswordReset(email)
       setNotice(
         "입력한 이메일이 가입된 계정과 일치하면 비밀번호 재설정 메일이 발송됩니다. 메일함과 스팸함을 확인해주세요.",

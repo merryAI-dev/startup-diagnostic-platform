@@ -4610,17 +4610,23 @@ exports.sendAdminPasswordResetEmail = onCall(
     secrets: [RESEND_API_KEY],
   },
   async (request) => {
-    if (!request.auth?.uid) {
-      throw new HttpsError("unauthenticated", "로그인이 필요합니다.");
-    }
     if (!isStageProject() && !isLiveProject()) {
       throw new HttpsError("failed-precondition", "관리자 비밀번호 재설정은 stage 또는 live 프로젝트에서만 실행할 수 있습니다.");
     }
 
-    const requesterSnap = await db.collection("profiles").doc(request.auth.uid).get();
-    const requesterProfile = requesterSnap.data() || {};
-    if (normalizeString(requesterProfile.role) !== "admin" || requesterProfile.active !== true) {
-      throw new HttpsError("permission-denied", "관리자 계정만 비밀번호 재설정 메일을 발송할 수 있습니다.");
+    const requesterUid = request.auth?.uid || null;
+    const isSelfService = request.data?.selfService === true;
+
+    if (!requesterUid && !isSelfService) {
+      throw new HttpsError("unauthenticated", "로그인이 필요합니다.");
+    }
+
+    if (!isSelfService) {
+      const requesterSnap = await db.collection("profiles").doc(requesterUid).get();
+      const requesterProfile = requesterSnap.data() || {};
+      if (normalizeString(requesterProfile.role) !== "admin" || requesterProfile.active !== true) {
+        throw new HttpsError("permission-denied", "관리자 계정만 비밀번호 재설정 메일을 발송할 수 있습니다.");
+      }
     }
 
     const authEmail = normalizeEmail(request.data?.authEmail);
@@ -4669,7 +4675,8 @@ exports.sendAdminPasswordResetEmail = onCall(
       }
 
       console.error("sendAdminPasswordResetEmail failed", {
-        requesterUid: request.auth.uid,
+        requesterUid,
+        selfService: isSelfService,
         authEmail,
         recoveryEmail,
         errorMessage: error instanceof Error ? error.message : String(error),
