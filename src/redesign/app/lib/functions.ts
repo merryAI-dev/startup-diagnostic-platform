@@ -277,6 +277,16 @@ export type SendStageTestEmailResult = {
   }>;
 };
 
+export type SendAdminPasswordResetEmailPayload = {
+  authEmail: string;
+};
+
+export type SendAdminPasswordResetEmailResult = {
+  ok: boolean;
+  recoveryEmail: string;
+  id: string | null;
+};
+
 export type SendStageSlackDmTestPayload = {
   userId: string;
   text: string;
@@ -550,6 +560,22 @@ export async function sendStageTestEmailViaFunction(
     SendStageTestEmailPayload,
     SendStageTestEmailResult
   >(functions, "sendStageTestEmail")
+
+  const result = await callable(payload)
+  return result.data
+}
+
+export async function sendAdminPasswordResetEmailViaFunction(
+  payload: SendAdminPasswordResetEmailPayload
+) {
+  if (!isFirebaseConfigured || !functions) {
+    throw new Error("Firebase Functions is not configured");
+  }
+
+  const callable = httpsCallable<
+    SendAdminPasswordResetEmailPayload,
+    SendAdminPasswordResetEmailResult
+  >(functions, "sendAdminPasswordResetEmail")
 
   const result = await callable(payload)
   return result.data

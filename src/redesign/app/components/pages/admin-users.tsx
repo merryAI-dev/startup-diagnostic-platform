@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react"
-import { Calendar, Filter, Mail, Search, Shield } from "lucide-react"
+import { Calendar, Filter, KeyRound, Mail, Search, Shield } from "lucide-react"
 import { Button } from "@/redesign/app/components/ui/button"
 import { Input } from "@/redesign/app/components/ui/input"
 import { Badge } from "@/redesign/app/components/ui/badge"
@@ -28,6 +28,7 @@ interface AdminUsersProps {
   onAddUser: (data: Omit<UserWithPermissions, "id" | "createdAt">) => void
   pendingApprovals: PendingProfileApproval[]
   onApprovePendingUser: (pendingProfile: PendingProfileApproval) => Promise<void> | void
+  onSendAdminPasswordReset?: (user: UserWithPermissions) => Promise<void> | void
   approvalSaving?: boolean
 }
 
@@ -40,6 +41,7 @@ export function AdminUsers({
   onAddUser: _onAddUser,
   pendingApprovals,
   onApprovePendingUser,
+  onSendAdminPasswordReset,
   approvalSaving = false,
 }: AdminUsersProps) {
   const pageTitleClassName = "text-2xl font-semibold text-slate-900"
@@ -51,6 +53,7 @@ export function AdminUsers({
   const [approvalSearchQuery, setApprovalSearchQuery] = useState("")
   const [approvalRoleFilter, setApprovalRoleFilter] = useState<string>("all")
   const [approvingUserId, setApprovingUserId] = useState<string | null>(null)
+  const [resettingUserId, setResettingUserId] = useState<string | null>(null)
   const [pendingPage, setPendingPage] = useState(1)
   const [userPage, setUserPage] = useState(1)
 
@@ -157,6 +160,19 @@ export function AdminUsers({
       setApprovingUserId(null)
     }
   }
+
+  const handleSendAdminPasswordReset = async (user: UserWithPermissions) => {
+    if (!onSendAdminPasswordReset) return
+    setResettingUserId(user.id)
+    try {
+      await Promise.resolve(onSendAdminPasswordReset(user))
+    } finally {
+      setResettingUserId(null)
+    }
+  }
+
+  const canSendAdminPasswordReset = (user: UserWithPermissions) =>
+    user.role === "admin" && /_admin@mysc\.co\.kr$/i.test(user.email)
 
   const paginatedPendingApprovals = filteredPendingApprovals.slice(
     (pendingPage - 1) * PENDING_PAGE_SIZE,
@@ -333,13 +349,14 @@ export function AdminUsers({
                       <TableHead className="w-24 bg-white">역할</TableHead>
                       <TableHead className="w-28 bg-white">가입일</TableHead>
                       <TableHead className="w-32 bg-white">상태</TableHead>
+                      <TableHead className="w-32 bg-white">관리</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {filteredUsers.length === 0 && (
                       <TableRow>
                         <TableCell
-                          colSpan={6}
+                          colSpan={7}
                           className="h-24 text-center text-sm text-muted-foreground"
                         >
                           검색 결과가 없습니다
@@ -402,6 +419,24 @@ export function AdminUsers({
                             >
                               {user.status === "active" ? "활성" : "비활성"}
                             </Badge>
+                          </TableCell>
+                          <TableCell>
+                            {canSendAdminPasswordReset(user) ? (
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="h-8 gap-1"
+                                disabled={resettingUserId === user.id}
+                                loading={resettingUserId === user.id}
+                                onClick={() => handleSendAdminPasswordReset(user)}
+                              >
+                                <KeyRound className="h-3.5 w-3.5" />
+                                재설정
+                              </Button>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">-</span>
+                            )}
                           </TableCell>
                         </TableRow>
                       )

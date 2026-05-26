@@ -102,6 +102,7 @@ import {
   cancelApplicationViaFunction,
   queryBiztalkAlimtalkResultsViaFunction,
   runApplicationMaintenanceViaFunction,
+  sendAdminPasswordResetEmailViaFunction,
   sendBiztalkTestAlimtalkViaFunction,
   sendStageSlackChannelAvailabilityTestViaFunction,
   sendStageSlackDmTestViaFunction,
@@ -4541,6 +4542,24 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
     })
   }
 
+  const handleSendAdminPasswordReset = async (targetUser: UserWithPermissions) => {
+    if (!isFirebaseConfigured) {
+      toast.error("Firebase 연결 후 재설정 메일을 발송할 수 있습니다")
+      return
+    }
+    if (targetUser.role !== "admin") {
+      toast.error("관리자 계정만 재설정 메일을 발송할 수 있습니다")
+      return
+    }
+
+    try {
+      const result = await sendAdminPasswordResetEmailViaFunction({ authEmail: targetUser.email })
+      toast.success(`${result.recoveryEmail}로 비밀번호 재설정 메일을 발송했습니다`)
+    } catch (error) {
+      toast.error(getFunctionErrorMessage(error, "비밀번호 재설정 메일 발송에 실패했습니다"))
+    }
+  }
+
   const handleAddTemplate = (data: Omit<MessageTemplate, "id" | "createdAt" | "updatedAt">) => {
     const newTemplate: MessageTemplate = {
       ...data,
@@ -5249,6 +5268,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
                 onAddUser={handleAddUser}
                 pendingApprovals={pendingProfileApprovals}
                 onApprovePendingUser={handleApprovePendingUser}
+                onSendAdminPasswordReset={handleSendAdminPasswordReset}
                 approvalSaving={profileCrud.saving}
               />
             </ProtectedRoute>

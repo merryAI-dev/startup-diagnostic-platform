@@ -51,6 +51,7 @@ export function PasswordResetPage() {
           role="company"
           showRoleSelector={false}
           showPasswordField={false}
+          disableRoleEmailValidation
           loadingEmail={loading}
           error={error}
           notice={notice}

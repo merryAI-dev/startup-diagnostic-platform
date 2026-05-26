@@ -25,6 +25,7 @@ type AuthCardProps = {
   onForgotPassword?: () => void
   forgotPasswordPrompt?: string
   forgotPasswordLabel?: string
+  disableRoleEmailValidation?: boolean
 }
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
@@ -77,6 +78,7 @@ export function AuthCard({
   onForgotPassword,
   forgotPasswordPrompt = "비밀번호를 잊으셨나요?",
   forgotPasswordLabel = "비밀번호 찾기",
+  disableRoleEmailValidation = false,
 }: AuthCardProps) {
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
@@ -88,7 +90,9 @@ export function AuthCard({
   const passwordError = showPasswordField ? getPasswordError(password) : null
   const selectedRole = role ?? "company"
   const roleEmailError =
-    swapLabel === "로그인" ? getSignupRoleEmailError(selectedRole, email) : null
+    !disableRoleEmailValidation && swapLabel === "로그인"
+      ? getSignupRoleEmailError(selectedRole, email)
+      : null
   const resolvedEmailError = emailError ?? roleEmailError
   const showEmailError =
     (touched.email && emailError) || (submitted && resolvedEmailError)
