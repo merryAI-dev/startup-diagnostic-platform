@@ -610,7 +610,11 @@ export function AdminObservability() {
           label="클릭/제출"
           value={(displayedInteractionEvents.length + filteredApplications.length).toLocaleString()}
         />
-        <MetricCard icon={Clock} label="아젠다 선택까지" value={formatDuration(averageAgendaSelectionMs)} />
+        <MetricCard
+          icon={Clock}
+          label="아젠다 선택까지"
+          value={agendaSelectionEvents.length ? formatDuration(averageAgendaSelectionMs) : "데이터 없음"}
+        />
         <MetricCard icon={Clock} label="평균 세션" value={formatDuration(averageSessionMs)} />
         <MetricCard icon={Clock} label="평균 화면 체류" value={formatDuration(averageDwellMs)} />
         <MetricCard icon={AlertTriangle} label="에러" value={errorEvents.length.toLocaleString()} tone="danger" />
