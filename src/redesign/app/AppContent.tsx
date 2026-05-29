@@ -5270,6 +5270,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
                 }))}
                 onAddUser={handleAddUser}
                 pendingApprovals={pendingProfileApprovals}
+                signupRequests={signupRequestDocs}
                 onApprovePendingUser={handleApprovePendingUser}
                 onSendAdminPasswordReset={handleSendAdminPasswordReset}
                 approvalSaving={profileCrud.saving}

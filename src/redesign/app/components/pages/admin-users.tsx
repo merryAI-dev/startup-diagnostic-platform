@@ -1,10 +1,12 @@
-import { useEffect, useState } from "react"
-import { Calendar, Filter, KeyRound, Mail, Search, Shield } from "lucide-react"
+import { useEffect, useState, type ReactNode } from "react"
+import { BriefcaseBusiness, Building2, Calendar, Filter, KeyRound, Mail, Search, Shield, UserRound, X, type LucideIcon } from "lucide-react"
 import { Button } from "@/redesign/app/components/ui/button"
 import { Input } from "@/redesign/app/components/ui/input"
 import { Badge } from "@/redesign/app/components/ui/badge"
 import { PendingProfileApproval, UserWithPermissions } from "@/redesign/app/lib/types"
 import { Card, CardHeader, CardTitle } from "@/redesign/app/components/ui/card"
+import type { CompanyInfoForm, InvestmentInput } from "@/types/company"
+import type { ConsentSnapshot } from "@/types/auth"
 import {
   Select,
   SelectContent,
@@ -27,9 +29,40 @@ interface AdminUsersProps {
   consultants?: { id: string; name: string; email: string }[]
   onAddUser: (data: Omit<UserWithPermissions, "id" | "createdAt">) => void
   pendingApprovals: PendingProfileApproval[]
+  signupRequests?: SignupRequestPreview[]
   onApprovePendingUser: (pendingProfile: PendingProfileApproval) => Promise<void> | void
   onSendAdminPasswordReset?: (user: UserWithPermissions) => Promise<void> | void
   approvalSaving?: boolean
+}
+
+type ConsultantInfoPreview = {
+  name?: string | null
+  email?: string | null
+  phone?: string | null
+  organization?: string | null
+  scope?: string | null
+  secondaryEmail?: string | null
+  secondaryPhone?: string | null
+  fixedMeetingLink?: string | null
+  expertise?: string[] | string | null
+  bio?: string | null
+}
+
+type SignupRequestPreview = {
+  id: string
+  uid?: string
+  role?: string
+  requestedRole?: string | null
+  email?: string | null
+  companyId?: string | null
+  status?: string
+  consents?: ConsentSnapshot | null
+  consultantInfo?: Partial<ConsultantInfoPreview> | null
+  companyInfo?: Partial<CompanyInfoForm> | null
+  programIds?: string[] | null
+  investmentRows?: InvestmentInput[] | null
+  createdAt?: unknown
+  updatedAt?: unknown
 }
 
 const PENDING_PAGE_SIZE = 5
@@ -40,6 +73,7 @@ export function AdminUsers({
   consultants = [],
   onAddUser: _onAddUser,
   pendingApprovals,
+  signupRequests = [],
   onApprovePendingUser,
   onSendAdminPasswordReset,
   approvalSaving = false,
@@ -56,6 +90,7 @@ export function AdminUsers({
   const [resettingUserId, setResettingUserId] = useState<string | null>(null)
   const [pendingPage, setPendingPage] = useState(1)
   const [userPage, setUserPage] = useState(1)
+  const [selectedPendingId, setSelectedPendingId] = useState<string | null>(null)
 
   const filteredUsers = users.filter((user) => {
     const keyword = searchQuery.trim().toLowerCase()
@@ -103,9 +138,14 @@ export function AdminUsers({
     }
   }, [filteredUsers.length, userPage])
 
-  const formatDate = (date?: Date | string) => {
+  const formatDate = (date?: unknown) => {
     if (!date) return "-"
-    const parsedDate = date instanceof Date ? date : new Date(date)
+    const parsedDate =
+      date instanceof Date
+        ? date
+        : typeof date === "object" && date !== null && "toDate" in date && typeof date.toDate === "function"
+          ? date.toDate()
+          : new Date(String(date))
     if (Number.isNaN(parsedDate.getTime())) return "-"
     return new Intl.DateTimeFormat("ko-KR", {
       year: "numeric",
@@ -156,6 +196,7 @@ export function AdminUsers({
     setApprovingUserId(pending.id)
     try {
       await Promise.resolve(onApprovePendingUser(pending))
+      setSelectedPendingId((current) => (current === pending.id ? null : current))
     } finally {
       setApprovingUserId(null)
     }
@@ -183,6 +224,10 @@ export function AdminUsers({
     (userPage - 1) * USER_PAGE_SIZE,
     userPage * USER_PAGE_SIZE,
   )
+  const signupRequestById = new Map(signupRequests.map((request) => [request.id, request]))
+  const selectedPendingApproval =
+    pendingApprovals.find((pending) => pending.id === selectedPendingId) ?? null
+  const selectedSignupRequest = selectedPendingId ? signupRequestById.get(selectedPendingId) ?? null : null
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-slate-50">
@@ -249,7 +294,21 @@ export function AdminUsers({
                     const requestedRoleLabel = getRoleLabel(requestedRole)
 
                     return (
-                      <div key={pending.id} className="p-4">
+                      <div
+                        key={pending.id}
+                        role="button"
+                        tabIndex={0}
+                        className={`block w-full p-4 text-left transition hover:bg-slate-50 ${
+                          selectedPendingId === pending.id ? "bg-sky-50" : ""
+                        }`}
+                        onClick={() => setSelectedPendingId(pending.id)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" || event.key === " ") {
+                            event.preventDefault()
+                            setSelectedPendingId(pending.id)
+                          }
+                        }}
+                      >
                         <div className="flex items-center justify-between gap-3">
                           <div className="min-w-0 flex-1">
                             <p className="truncate text-sm font-medium text-slate-900">
@@ -268,7 +327,10 @@ export function AdminUsers({
                             className="shrink-0"
                             disabled={isApproving}
                             loading={isApproving}
-                            onClick={() => handleApprovePendingUser(pending)}
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              void handleApprovePendingUser(pending)
+                            }}
                           >
                             승인
                           </Button>
@@ -458,6 +520,208 @@ export function AdminUsers({
           </section>
         </div>
       </div>
+
+      {selectedPendingApproval && (
+        <div
+          className="fixed inset-0 z-50 flex justify-end bg-black/30"
+          onClick={() => setSelectedPendingId(null)}
+        >
+          <aside
+            className="h-full w-full max-w-2xl overflow-y-auto bg-white shadow-xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="sticky top-0 z-10 border-b bg-white px-6 py-5">
+              <div className="flex items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h2 className="truncate text-lg font-semibold text-slate-900">
+                      가입 신청 정보
+                    </h2>
+                    <Badge variant="secondary">
+                      {getRoleLabel(selectedPendingApproval.requestedRole ?? selectedPendingApproval.role)}
+                    </Badge>
+                  </div>
+                  <p className="mt-1 truncate text-sm text-slate-500">
+                    {selectedPendingApproval.email || selectedSignupRequest?.email || "-"}
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8 w-8 p-0"
+                  onClick={() => setSelectedPendingId(null)}
+                  aria-label="닫기"
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+
+            <div className="space-y-5 px-6 py-5">
+              <DetailSection icon={UserRound} title="계정 정보">
+                <DetailGrid>
+                  <DetailItem label="이메일" value={selectedPendingApproval.email || selectedSignupRequest?.email} />
+                  <DetailItem label="요청 역할" value={getRoleLabel(selectedPendingApproval.requestedRole ?? selectedPendingApproval.role)} />
+                  <DetailItem label="상태" value={selectedSignupRequest?.status || "pending"} />
+                  <DetailItem label="신청일" value={formatDate(selectedSignupRequest?.createdAt ?? selectedPendingApproval.createdAt)} />
+                  <DetailItem label="UID" value={selectedSignupRequest?.uid || selectedPendingApproval.id} />
+                  <DetailItem label="회사 ID" value={selectedSignupRequest?.companyId || selectedPendingApproval.companyId} />
+                </DetailGrid>
+              </DetailSection>
+
+              {(selectedSignupRequest?.requestedRole ?? selectedSignupRequest?.role ?? selectedPendingApproval.requestedRole ?? selectedPendingApproval.role) === "consultant" ? (
+                <DetailSection icon={BriefcaseBusiness} title="컨설턴트 신청 정보">
+                  <DetailGrid>
+                    <DetailItem label="이름" value={selectedSignupRequest?.consultantInfo?.name} />
+                    <DetailItem label="소속" value={selectedSignupRequest?.consultantInfo?.organization} />
+                    <DetailItem label="구분" value={selectedSignupRequest?.consultantInfo?.scope === "external" ? "외부" : selectedSignupRequest?.consultantInfo?.scope === "internal" ? "내부" : selectedSignupRequest?.consultantInfo?.scope} />
+                    <DetailItem label="이메일" value={selectedSignupRequest?.consultantInfo?.email} />
+                    <DetailItem label="전화번호" value={selectedSignupRequest?.consultantInfo?.phone} />
+                    <DetailItem label="보조 이메일" value={selectedSignupRequest?.consultantInfo?.secondaryEmail} />
+                    <DetailItem label="보조 전화번호" value={selectedSignupRequest?.consultantInfo?.secondaryPhone} />
+                    <DetailItem label="고정 미팅 링크" value={selectedSignupRequest?.consultantInfo?.fixedMeetingLink} />
+                    <DetailItem label="전문 분야" value={formatList(selectedSignupRequest?.consultantInfo?.expertise)} wide />
+                    <DetailItem label="소개" value={selectedSignupRequest?.consultantInfo?.bio} wide />
+                  </DetailGrid>
+                </DetailSection>
+              ) : (
+                <DetailSection icon={Building2} title="회사 신청 정보">
+                  <DetailGrid>
+                    <DetailItem label="회사명" value={selectedSignupRequest?.companyInfo?.companyInfo} />
+                    <DetailItem label="기업 유형" value={selectedSignupRequest?.companyInfo?.companyType} />
+                    <DetailItem label="대표자" value={selectedSignupRequest?.companyInfo?.ceoName} />
+                    <DetailItem label="대표 이메일" value={selectedSignupRequest?.companyInfo?.ceoEmail} />
+                    <DetailItem label="대표 전화" value={selectedSignupRequest?.companyInfo?.ceoPhone} />
+                    <DetailItem label="사업자번호" value={selectedSignupRequest?.companyInfo?.businessNumber} />
+                    <DetailItem label="설립일" value={selectedSignupRequest?.companyInfo?.foundedAt} />
+                    <DetailItem label="웹사이트" value={selectedSignupRequest?.companyInfo?.website} />
+                    <DetailItem label="주요 사업" value={selectedSignupRequest?.companyInfo?.primaryBusiness} />
+                    <DetailItem label="주요 산업" value={selectedSignupRequest?.companyInfo?.primaryIndustry} />
+                    <DetailItem label="본사" value={selectedSignupRequest?.companyInfo?.headOffice} />
+                    <DetailItem label="지점/연구소" value={selectedSignupRequest?.companyInfo?.branchOffice} />
+                    <DetailItem label="대표 솔루션" value={selectedSignupRequest?.companyInfo?.representativeSolution} wide />
+                    <DetailItem label="희망 투자금" value={selectedSignupRequest?.companyInfo?.desiredInvestment2026} />
+                    <DetailItem label="희망 Pre-value" value={selectedSignupRequest?.companyInfo?.desiredPreValue} />
+                  </DetailGrid>
+                </DetailSection>
+              )}
+
+              <DetailSection icon={BriefcaseBusiness} title="사업/투자/동의">
+                <DetailGrid>
+                  <DetailItem label="신청 사업" value={formatList(selectedSignupRequest?.programIds)} wide />
+                  <DetailItem label="동의 현황" value={formatConsents(selectedSignupRequest?.consents)} wide />
+                </DetailGrid>
+                {selectedSignupRequest?.investmentRows && selectedSignupRequest.investmentRows.length > 0 && (
+                  <div className="mt-4 overflow-hidden rounded-lg border">
+                    <table className="w-full text-left text-sm">
+                      <thead className="bg-slate-50 text-xs text-slate-500">
+                        <tr>
+                          <th className="px-3 py-2">단계</th>
+                          <th className="px-3 py-2">일자</th>
+                          <th className="px-3 py-2">Post-money</th>
+                          <th className="px-3 py-2">주요 주주</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y">
+                        {selectedSignupRequest.investmentRows.map((row, index) => (
+                          <tr key={`${row.stage}-${row.date}-${index}`}>
+                            <td className="px-3 py-2">{formatValue(row.stage)}</td>
+                            <td className="px-3 py-2">{formatValue(row.date)}</td>
+                            <td className="px-3 py-2">{formatValue(row.postMoney)}</td>
+                            <td className="px-3 py-2">{formatValue(row.majorShareholder)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </DetailSection>
+            </div>
+
+            <div className="sticky bottom-0 flex justify-end gap-2 border-t bg-white px-6 py-4">
+              <Button type="button" variant="outline" onClick={() => setSelectedPendingId(null)}>
+                닫기
+              </Button>
+              <Button
+                type="button"
+                disabled={approvalSaving || approvingUserId === selectedPendingApproval.id}
+                loading={approvalSaving || approvingUserId === selectedPendingApproval.id}
+                onClick={() => void handleApprovePendingUser(selectedPendingApproval)}
+              >
+                이 정보로 승인
+              </Button>
+            </div>
+          </aside>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function formatValue(value: unknown) {
+  if (value == null || value === "") return "-"
+  if (Array.isArray(value)) return value.length ? value.join(", ") : "-"
+  if (typeof value === "boolean") return value ? "예" : "아니오"
+  return String(value)
+}
+
+function formatList(value?: string[] | string | null) {
+  if (!value) return "-"
+  if (Array.isArray(value)) return value.filter(Boolean).join(", ") || "-"
+  return value
+}
+
+function formatConsents(consents?: ConsentSnapshot | null) {
+  if (!consents) return "-"
+  const labels: Record<string, string> = {
+    terms: "이용약관",
+    privacy: "개인정보",
+    marketing: "마케팅",
+    serviceNotifications: "서비스 알림",
+  }
+  return Object.entries(consents)
+    .map(([key, record]) => `${labels[key] ?? key}: ${record?.consented ? "동의" : "미동의"}`)
+    .join(" · ") || "-"
+}
+
+function DetailSection({
+  icon: Icon,
+  title,
+  children,
+}: {
+  icon: LucideIcon
+  title: string
+  children: ReactNode
+}) {
+  return (
+    <section className="rounded-xl border border-slate-200 bg-white p-4">
+      <div className="mb-4 flex items-center gap-2">
+        <Icon className="h-4 w-4 text-slate-500" />
+        <h3 className="text-sm font-semibold text-slate-900">{title}</h3>
+      </div>
+      {children}
+    </section>
+  )
+}
+
+function DetailGrid({ children }: { children: ReactNode }) {
+  return <div className="grid gap-3 sm:grid-cols-2">{children}</div>
+}
+
+function DetailItem({
+  label,
+  value,
+  wide = false,
+}: {
+  label: string
+  value: unknown
+  wide?: boolean
+}) {
+  return (
+    <div className={wide ? "sm:col-span-2" : undefined}>
+      <dt className="text-xs font-medium text-slate-500">{label}</dt>
+      <dd className="mt-1 whitespace-pre-wrap break-words text-sm text-slate-900">{formatValue(value)}</dd>
     </div>
   )
 }
