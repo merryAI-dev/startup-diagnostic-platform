@@ -73,13 +73,21 @@ type OfficeHourApplicationDoc = {
   companyId?: string | null
   companyName?: string | null
   officeHourTitle?: string | null
+  agendaId?: string | null
   agenda?: string | null
   applicantEmail?: string | null
   createdByUid?: string | null
+  consultant?: string | null
   consultantId?: string | null
+  consultantEmail?: string | null
   pendingConsultantIds?: string[]
+  scheduledDate?: string | null
+  scheduledTime?: string | null
   createdAt?: { toDate?: () => Date } | Date | string | null
+  updatedAt?: { toDate?: () => Date } | Date | string | null
 }
+
+type DailyMetricKey = "signup" | "approved" | "applications" | "confirmed" | "waiting" | "unassigned"
 
 type GroupRow = {
   key: string
@@ -295,6 +303,38 @@ function officeHourTypeLabel(type?: string | null) {
   }
 }
 
+function signupStatusLabel(status?: string | null) {
+  switch (status) {
+    case "approved":
+      return "승인"
+    case "pending":
+      return "승인 대기"
+    case "rejected":
+      return "반려"
+    default:
+      return status || "상태 미기록"
+  }
+}
+
+function applicationStatusLabel(status?: string | null) {
+  switch (status) {
+    case "confirmed":
+      return "확정"
+    case "pending":
+      return "수락 대기"
+    case "review":
+      return "검토 중"
+    case "completed":
+      return "완료"
+    case "cancelled":
+      return "취소"
+    case "rejected":
+      return "거절"
+    default:
+      return status || "상태 미기록"
+  }
+}
+
 function applicationRoute(type?: string | null) {
   return type === "irregular" ? "/company/irregular-wizard" : "/company/regular-wizard"
 }
@@ -359,6 +399,7 @@ export function AdminObservability() {
   const [error, setError] = useState<string | null>(null)
   const [userFilter, setUserFilter] = useState("")
   const [selectedGroup, setSelectedGroup] = useState<GroupRow | null>(null)
+  const [selectedDailyMetric, setSelectedDailyMetric] = useState<DailyMetricKey | null>(null)
 
   const loadTelemetry = async () => {
     if (!isFirebaseConfigured || !db) {
@@ -522,6 +563,53 @@ export function AdminObservability() {
   const todayUnassignedApplications = todayPendingApplications.filter(
     (application) => !application.consultantId && (application.pendingConsultantIds ?? []).length === 0,
   )
+  const dailyMetricDetails: Record<
+    DailyMetricKey,
+    {
+      title: string
+      description: string
+      kind: "signup" | "application"
+      rows: Array<SignupRequestDoc | OfficeHourApplicationDoc>
+    }
+  > = {
+    signup: {
+      title: "오늘 가입 신청",
+      description: "createdAt이 오늘인 signupRequests 문서입니다.",
+      kind: "signup",
+      rows: todaySignupRequests,
+    },
+    approved: {
+      title: "오늘 승인",
+      description: "approvedAt, activatedAt 또는 updatedAt이 오늘인 승인 문서입니다.",
+      kind: "signup",
+      rows: todayApprovedSignupRequests,
+    },
+    applications: {
+      title: "오늘 오피스아워 신청",
+      description: "createdAt이 오늘인 officeHourApplications 문서입니다.",
+      kind: "application",
+      rows: todayApplications,
+    },
+    confirmed: {
+      title: "오늘 확정",
+      description: "오늘 신청된 오피스아워 중 status가 confirmed인 문서입니다.",
+      kind: "application",
+      rows: todayConfirmedApplications,
+    },
+    waiting: {
+      title: "오늘 수락 대기",
+      description: "오늘 신청된 오피스아워 중 컨설턴트 응답을 기다리는 문서입니다.",
+      kind: "application",
+      rows: todayWaitingConsultantApplications,
+    },
+    unassigned: {
+      title: "오늘 배정 대기",
+      description: "오늘 신청된 오피스아워 중 아직 컨설턴트 배정 후보가 없는 문서입니다.",
+      kind: "application",
+      rows: todayUnassignedApplications,
+    },
+  }
+  const selectedDailyDetail = selectedDailyMetric ? dailyMetricDetails[selectedDailyMetric] : null
 
   const companyEvents = useMemo(
     () =>
@@ -669,12 +757,43 @@ export function AdminObservability() {
           <p className="mt-1 text-xs text-slate-500">가입 승인과 오피스아워 신청 데이터를 Firestore 기준으로 집계합니다.</p>
         </div>
         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
-          <MetricCard icon={UserPlus} label="오늘 가입 신청" value={todaySignupRequests.length.toLocaleString()} />
-          <MetricCard icon={UserCheck} label="오늘 승인" value={todayApprovedSignupRequests.length.toLocaleString()} />
-          <MetricCard icon={CalendarCheck} label="오늘 오피스아워 신청" value={todayApplications.length.toLocaleString()} />
-          <MetricCard icon={CalendarCheck} label="오늘 확정" value={todayConfirmedApplications.length.toLocaleString()} />
-          <MetricCard icon={Clock} label="오늘 수락 대기" value={todayWaitingConsultantApplications.length.toLocaleString()} />
-          <MetricCard icon={AlertTriangle} label="오늘 배정 대기" value={todayUnassignedApplications.length.toLocaleString()} tone={todayUnassignedApplications.length ? "danger" : "default"} />
+          <MetricCard
+            icon={UserPlus}
+            label="오늘 가입 신청"
+            value={todaySignupRequests.length.toLocaleString()}
+            onClick={() => setSelectedDailyMetric("signup")}
+          />
+          <MetricCard
+            icon={UserCheck}
+            label="오늘 승인"
+            value={todayApprovedSignupRequests.length.toLocaleString()}
+            onClick={() => setSelectedDailyMetric("approved")}
+          />
+          <MetricCard
+            icon={CalendarCheck}
+            label="오늘 오피스아워 신청"
+            value={todayApplications.length.toLocaleString()}
+            onClick={() => setSelectedDailyMetric("applications")}
+          />
+          <MetricCard
+            icon={CalendarCheck}
+            label="오늘 확정"
+            value={todayConfirmedApplications.length.toLocaleString()}
+            onClick={() => setSelectedDailyMetric("confirmed")}
+          />
+          <MetricCard
+            icon={Clock}
+            label="오늘 수락 대기"
+            value={todayWaitingConsultantApplications.length.toLocaleString()}
+            onClick={() => setSelectedDailyMetric("waiting")}
+          />
+          <MetricCard
+            icon={AlertTriangle}
+            label="오늘 배정 대기"
+            value={todayUnassignedApplications.length.toLocaleString()}
+            tone={todayUnassignedApplications.length ? "danger" : "default"}
+            onClick={() => setSelectedDailyMetric("unassigned")}
+          />
         </div>
       </section>
 
@@ -683,22 +802,22 @@ export function AdminObservability() {
           <h2 className="text-sm font-semibold text-slate-900">Company 행동 지표</h2>
           <p className="mt-1 text-xs text-slate-500">관리자/컨설턴트 행동과 알려진 관측 코드 오류는 제외합니다.</p>
         </div>
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
-        <MetricCard icon={Activity} label="웹뷰" value={pageViews.length.toLocaleString()} />
-        <MetricCard
-          icon={MousePointerClick}
-          label="클릭/제출"
-          value={(displayedInteractionEvents.length + filteredApplications.length).toLocaleString()}
-        />
-        <MetricCard
-          icon={Clock}
-          label="아젠다 선택까지"
-          value={agendaSelectionEvents.length ? formatDuration(averageAgendaSelectionMs) : "데이터 없음"}
-        />
-        <MetricCard icon={Clock} label="평균 세션" value={formatDuration(averageSessionMs)} />
-        <MetricCard icon={Clock} label="평균 화면 체류" value={formatDuration(averageDwellMs)} />
-        <MetricCard icon={AlertTriangle} label="에러" value={errorEvents.length.toLocaleString()} tone="danger" />
-      </div>
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
+          <MetricCard icon={Activity} label="웹뷰" value={pageViews.length.toLocaleString()} />
+          <MetricCard
+            icon={MousePointerClick}
+            label="클릭/제출"
+            value={(displayedInteractionEvents.length + filteredApplications.length).toLocaleString()}
+          />
+          <MetricCard
+            icon={Clock}
+            label="아젠다 선택까지"
+            value={agendaSelectionEvents.length ? formatDuration(averageAgendaSelectionMs) : "데이터 없음"}
+          />
+          <MetricCard icon={Clock} label="평균 세션" value={formatDuration(averageSessionMs)} />
+          <MetricCard icon={Clock} label="평균 화면 체류" value={formatDuration(averageDwellMs)} />
+          <MetricCard icon={AlertTriangle} label="에러" value={errorEvents.length.toLocaleString()} tone="danger" />
+        </div>
       </section>
 
       <section className="rounded-lg border border-slate-200 bg-white shadow-sm">
@@ -911,6 +1030,121 @@ export function AdminObservability() {
         </div>
       )}
 
+      {selectedDailyDetail && (
+        <div className="fixed inset-0 z-50 flex justify-end bg-black/30" onClick={() => setSelectedDailyMetric(null)}>
+          <aside
+            className="h-full w-full max-w-4xl overflow-y-auto bg-white p-6 shadow-xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 className="text-lg font-semibold text-slate-900">{selectedDailyDetail.title}</h2>
+                <p className="mt-1 text-sm text-slate-500">
+                  {selectedDailyDetail.description} 현재 화면 기준 {selectedDailyDetail.rows.length.toLocaleString()}건입니다.
+                </p>
+              </div>
+              <button
+                type="button"
+                className="rounded-md border px-3 py-1 text-sm"
+                onClick={() => setSelectedDailyMetric(null)}
+              >
+                닫기
+              </button>
+            </div>
+
+            <div className="mt-6 overflow-x-auto rounded-lg border border-slate-200">
+              {selectedDailyDetail.kind === "signup" ? (
+                <table className="w-full min-w-[760px] text-left text-sm">
+                  <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+                    <tr>
+                      <th className="px-4 py-3">신청 시각</th>
+                      <th className="px-4 py-3">이메일</th>
+                      <th className="px-4 py-3">요청 역할</th>
+                      <th className="px-4 py-3">상태</th>
+                      <th className="px-4 py-3">승인 시각</th>
+                      <th className="px-4 py-3">문서 ID</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {(selectedDailyDetail.rows as SignupRequestDoc[]).map((request) => (
+                      <tr key={request.id}>
+                        <td className="px-4 py-3">{formatDate(toDate(request.createdAt))}</td>
+                        <td className="max-w-xs truncate px-4 py-3 font-medium text-slate-900">{request.email || "-"}</td>
+                        <td className="px-4 py-3">{roleLabel(request.requestedRole ?? request.role)}</td>
+                        <td className="px-4 py-3">{signupStatusLabel(request.status)}</td>
+                        <td className="px-4 py-3">{formatDate(toDate(request.approvedAt ?? request.activatedAt))}</td>
+                        <td className="px-4 py-3 font-mono text-xs text-slate-500">{shortId(request.id)}</td>
+                      </tr>
+                    ))}
+                    {selectedDailyDetail.rows.length === 0 && (
+                      <tr>
+                        <td colSpan={6} className="px-4 py-8 text-center text-slate-500">
+                          해당 문서가 없습니다.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              ) : (
+                <table className="w-full min-w-[980px] text-left text-sm">
+                  <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+                    <tr>
+                      <th className="px-4 py-3">신청 시각</th>
+                      <th className="px-4 py-3">기업</th>
+                      <th className="px-4 py-3">아젠다</th>
+                      <th className="px-4 py-3">컨설턴트</th>
+                      <th className="px-4 py-3">상태</th>
+                      <th className="px-4 py-3">일정</th>
+                      <th className="px-4 py-3">신청자</th>
+                      <th className="px-4 py-3">문서 ID</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {(selectedDailyDetail.rows as OfficeHourApplicationDoc[]).map((application) => {
+                      const company =
+                        application.companyName ||
+                        (application.companyId ? companyById.get(application.companyId)?.name : null) ||
+                        "회사명 미입력"
+                      const pendingConsultants = (application.pendingConsultantIds ?? [])
+                        .map((consultantId) => consultantById.get(consultantId)?.name || shortId(consultantId))
+                        .join(", ")
+                      const consultant =
+                        application.consultant ||
+                        (application.consultantId ? consultantById.get(application.consultantId)?.name : null) ||
+                        pendingConsultants ||
+                        "배정 대기"
+                      const schedule = [application.scheduledDate, application.scheduledTime].filter(Boolean).join(" ")
+
+                      return (
+                        <tr key={application.id}>
+                          <td className="px-4 py-3">{formatDate(toDate(application.createdAt))}</td>
+                          <td className="max-w-[180px] truncate px-4 py-3 font-medium text-slate-900">{company}</td>
+                          <td className="max-w-[200px] truncate px-4 py-3">
+                            {application.agenda || application.agendaId || "-"}
+                          </td>
+                          <td className="max-w-[200px] truncate px-4 py-3">{consultant}</td>
+                          <td className="px-4 py-3">{applicationStatusLabel(application.status)}</td>
+                          <td className="px-4 py-3">{schedule || "-"}</td>
+                          <td className="max-w-[220px] truncate px-4 py-3">{application.applicantEmail || "-"}</td>
+                          <td className="px-4 py-3 font-mono text-xs text-slate-500">{shortId(application.id)}</td>
+                        </tr>
+                      )
+                    })}
+                    {selectedDailyDetail.rows.length === 0 && (
+                      <tr>
+                        <td colSpan={8} className="px-4 py-8 text-center text-slate-500">
+                          해당 문서가 없습니다.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </aside>
+        </div>
+      )}
+
       {loading && <p className="text-sm text-slate-500">운영 로그를 불러오는 중입니다.</p>}
     </div>
   )
@@ -921,14 +1155,16 @@ function MetricCard({
   label,
   value,
   tone = "default",
+  onClick,
 }: {
   icon: typeof Activity
   label: string
   value: string
   tone?: "default" | "danger"
+  onClick?: () => void
 }) {
-  return (
-    <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+  const content = (
+    <>
       <div className="flex items-center gap-2 text-sm text-slate-500">
         <Icon className={tone === "danger" ? "h-4 w-4 text-red-500" : "h-4 w-4 text-slate-400"} />
         {label}
@@ -936,6 +1172,24 @@ function MetricCard({
       <div className={tone === "danger" ? "mt-2 text-2xl font-semibold text-red-600" : "mt-2 text-2xl font-semibold text-slate-900"}>
         {value}
       </div>
+    </>
+  )
+
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        className="rounded-lg border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:border-slate-300 hover:bg-slate-50"
+      >
+        {content}
+      </button>
+    )
+  }
+
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+      {content}
     </div>
   )
 }
