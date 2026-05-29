@@ -23,7 +23,7 @@ export function InteractionTelemetry() {
   useEffect(() => {
     const handleClick = (event: MouseEvent) => {
       const target = event.target instanceof HTMLElement ? event.target : null
-      const element = target?.closest("button,a,[role='button'],[data-observability-action']")
+      const element = target?.closest("button,a,[role='button'],[data-observability-action]")
       if (!(element instanceof HTMLElement)) return
 
       const tagName = element.tagName.toLowerCase()
@@ -72,4 +72,3 @@ export function InteractionTelemetry() {
 
   return null
 }
-

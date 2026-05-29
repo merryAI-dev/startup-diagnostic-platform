@@ -44,6 +44,19 @@ type TelemetrySession = {
   lastSeenAt?: { toDate?: () => Date } | Date | null
 }
 
+type OfficeHourApplicationDoc = {
+  id: string
+  type?: string | null
+  status?: string | null
+  companyId?: string | null
+  companyName?: string | null
+  officeHourTitle?: string | null
+  agenda?: string | null
+  applicantEmail?: string | null
+  createdByUid?: string | null
+  createdAt?: { toDate?: () => Date } | Date | string | null
+}
+
 type GroupRow = {
   key: string
   label: string
@@ -52,6 +65,16 @@ type GroupRow = {
   affectedUsers: number
   latestAt: Date | null
   sample: TelemetryEvent
+}
+
+type InteractionRow = {
+  key: string
+  label: string
+  eventType: string
+  route: string
+  count: number
+  latestAt: Date | null
+  source: "telemetry" | "application"
 }
 
 type ProfileDoc = {
@@ -122,9 +145,10 @@ const ROUTE_LABELS: Record<string, string> = {
   "/company/settings": "설정",
 }
 
-function toDate(value: TelemetryEvent["createdAt"]) {
+function toDate(value: { toDate?: () => Date } | Date | string | null | undefined) {
   if (!value) return null
   if (value instanceof Date) return value
+  if (typeof value === "string") return new Date(value)
   if (typeof value.toDate === "function") return value.toDate()
   return null
 }
@@ -199,9 +223,36 @@ function eventLabel(eventType?: string) {
       return "링크 클릭"
     case "form_submit":
       return "폼 제출"
+    case "application_created":
+      return "신청 완료"
     default:
       return eventType || "이벤트"
   }
+}
+
+function officeHourTypeLabel(type?: string | null) {
+  switch (type) {
+    case "regular":
+      return "정기 오피스아워"
+    case "irregular":
+      return "비정기 오피스아워"
+    case "mentoring":
+      return "멘토링"
+    default:
+      return "오피스아워"
+  }
+}
+
+function applicationRoute(type?: string | null) {
+  return type === "irregular" ? "/company/irregular-wizard" : "/company/regular-wizard"
+}
+
+function isKnownTelemetrySelectorError(event: TelemetryEvent) {
+  return (
+    event.eventType === "client_error" &&
+    (event.message || "").includes("Failed to execute 'closest'") &&
+    (event.message || "").includes("data-observability-action")
+  )
 }
 
 function groupEvents(events: TelemetryEvent[], predicate: (event: TelemetryEvent) => boolean) {
@@ -245,6 +296,7 @@ export function AdminObservability() {
   const [profiles, setProfiles] = useState<ProfileDoc[]>([])
   const [companies, setCompanies] = useState<CompanyDoc[]>([])
   const [consultants, setConsultants] = useState<ConsultantDoc[]>([])
+  const [officeHourApplications, setOfficeHourApplications] = useState<OfficeHourApplicationDoc[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [userFilter, setUserFilter] = useState("")
@@ -259,12 +311,13 @@ export function AdminObservability() {
     setLoading(true)
     setError(null)
     try {
-      const [eventSnap, sessionSnap, profileSnap, companySnap, consultantSnap] = await Promise.all([
+      const [eventSnap, sessionSnap, profileSnap, companySnap, consultantSnap, applicationSnap] = await Promise.all([
         getDocs(query(collection(db, "telemetryEvents"), orderBy("createdAt", "desc"), limit(500))),
         getDocs(query(collection(db, "telemetrySessions"), orderBy("lastSeenAt", "desc"), limit(200))),
         getDocs(query(collection(db, "profiles"), limit(500))),
         getDocs(query(collection(db, "companies"), limit(500))),
         getDocs(query(collection(db, "consultants"), limit(500))),
+        getDocs(query(collection(db, "officeHourApplications"), orderBy("createdAt", "desc"), limit(500))),
       ])
       setEvents(eventSnap.docs.map((doc) => ({ id: doc.id, ...(doc.data() as Omit<TelemetryEvent, "id">) })))
       setSessions(
@@ -274,6 +327,9 @@ export function AdminObservability() {
       setCompanies(companySnap.docs.map((doc) => ({ id: doc.id, ...(doc.data() as Omit<CompanyDoc, "id">) })))
       setConsultants(
         consultantSnap.docs.map((doc) => ({ id: doc.id, ...(doc.data() as Omit<ConsultantDoc, "id">) })),
+      )
+      setOfficeHourApplications(
+        applicationSnap.docs.map((doc) => ({ id: doc.id, ...(doc.data() as Omit<OfficeHourApplicationDoc, "id">) })),
       )
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : String(loadError))
@@ -369,7 +425,27 @@ export function AdminObservability() {
     })
   }, [resolveUserDisplay, sessions, userFilter])
 
-  const errorEvents = filteredEvents.filter((event) => event.severity === "error" || event.severity === "fatal")
+  const filteredApplications = useMemo(() => {
+    const filter = userFilter.trim().toLowerCase()
+    if (!filter) return officeHourApplications
+    return officeHourApplications.filter((application) => {
+      const company = application.companyId ? companyById.get(application.companyId) : null
+      const user = resolveUserDisplay(application.createdByUid, null, null, "company")
+      return [
+        application.companyName,
+        company?.name,
+        application.applicantEmail,
+        application.createdByUid,
+        user.primary,
+        user.secondary,
+      ].some((value) => String(value ?? "").toLowerCase().includes(filter))
+    })
+  }, [companyById, officeHourApplications, resolveUserDisplay, userFilter])
+
+  const ignoredTelemetrySelectorErrors = filteredEvents.filter(isKnownTelemetrySelectorError)
+  const errorEvents = filteredEvents.filter(
+    (event) => (event.severity === "error" || event.severity === "fatal") && !isKnownTelemetrySelectorError(event),
+  )
   const pageViews = filteredEvents.filter((event) => event.eventType === "page_view")
   const interactions = filteredEvents.filter((event) =>
     ["button_click", "link_click", "form_submit"].includes(event.eventType || ""),
@@ -381,7 +457,45 @@ export function AdminObservability() {
     ? filteredSessions.reduce((sum, session) => sum + (session.durationMs || 0), 0) / filteredSessions.length
     : 0
   const errorGroups = groupEvents(errorEvents, () => true)
-  const interactionGroups = groupEvents(interactions, () => true)
+  const interactionGroups: InteractionRow[] = [
+    ...groupEvents(interactions, () => true).map((group) => ({
+      key: group.key,
+      label: group.label,
+      eventType: eventLabel(group.sample.eventType),
+      route: group.route,
+      count: group.count,
+      latestAt: group.latestAt,
+      source: "telemetry" as const,
+    })),
+    ...Array.from(
+      filteredApplications.reduce((groups, application) => {
+        const route = applicationRoute(application.type)
+        const label = `${officeHourTypeLabel(application.type)} 신청 완료`
+        const key = `application_created|${route}|${application.type || "unknown"}`
+        const existing =
+          groups.get(key) ??
+          ({
+            key,
+            label,
+            eventType: "신청 완료",
+            route,
+            count: 0,
+            latestAt: null,
+            source: "application" as const,
+          } satisfies InteractionRow)
+        existing.count += 1
+        const createdAt = toDate(application.createdAt)
+        if (!existing.latestAt || (createdAt && createdAt > existing.latestAt)) {
+          existing.latestAt = createdAt
+        }
+        groups.set(key, existing)
+        return groups
+      }, new Map<string, InteractionRow>()),
+    ).map(([, row]) => row),
+  ].sort((a, b) => {
+    const latestDiff = (b.latestAt?.getTime() ?? 0) - (a.latestAt?.getTime() ?? 0)
+    return latestDiff || b.count - a.count
+  })
   const rawGroupEvents = selectedGroup
     ? filteredEvents.filter((event) => {
         const groupKey =
@@ -430,10 +544,19 @@ export function AdminObservability() {
           {error}
         </div>
       )}
+      {ignoredTelemetrySelectorErrors.length > 0 && (
+        <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          해결된 관측 코드 오류 {ignoredTelemetrySelectorErrors.length.toLocaleString()}건은 유저 에러 지표에서 제외했습니다.
+        </div>
+      )}
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
         <MetricCard icon={Activity} label="웹뷰" value={pageViews.length.toLocaleString()} />
-        <MetricCard icon={MousePointerClick} label="클릭/제출" value={interactions.length.toLocaleString()} />
+        <MetricCard
+          icon={MousePointerClick}
+          label="클릭/제출"
+          value={(interactions.length + filteredApplications.length).toLocaleString()}
+        />
         <MetricCard icon={Clock} label="평균 세션" value={formatDuration(averageSessionMs)} />
         <MetricCard icon={Clock} label="평균 화면 체류" value={formatDuration(averageDwellMs)} />
         <MetricCard icon={AlertTriangle} label="에러" value={errorEvents.length.toLocaleString()} tone="danger" />
@@ -504,7 +627,14 @@ export function AdminObservability() {
               {interactionGroups.slice(0, 20).map((group) => (
                 <tr key={group.key}>
                   <td className="max-w-sm truncate px-4 py-3 font-medium">{group.label}</td>
-                  <td className="px-4 py-3">{eventLabel(group.sample.eventType)}</td>
+                  <td className="px-4 py-3">
+                    <span>{group.eventType}</span>
+                    {group.source === "application" && (
+                      <span className="ml-2 rounded-full bg-emerald-50 px-2 py-0.5 text-xs text-emerald-700">
+                        기존 신청
+                      </span>
+                    )}
+                  </td>
                   <td className="max-w-xs px-4 py-3">
                     <div className="font-medium text-slate-900">{routeLabel(group.route)}</div>
                     <div className="truncate text-xs text-slate-500">{group.route}</div>
