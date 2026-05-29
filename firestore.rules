@@ -42,6 +42,15 @@ service cloud.firestore {
       return isAdmin() || isConsultant() || isStaff();
     }
 
+    function isEmaDashboardViewer() {
+      return isSignedIn()
+        && request.auth.token.email is string
+        && (
+          request.auth.token.email == "admin123@gmail.com"
+          || request.auth.token.email.matches('.*@mysc\\.co\\.kr$')
+        );
+    }
+
     function isCompanyOwner(companyId) {
       return isSignedIn()
         && get(/databases/$(database)/documents/companies/$(companyId)).data.ownerUid == request.auth.uid;
@@ -73,6 +82,7 @@ service cloud.firestore {
       allow read: if isSignedIn()
         && request.auth.uid == userId;
       allow read: if isAdmin();
+      allow read: if isEmaDashboardViewer();
 
       allow update: if isAdmin()
         && request.resource.data.role in ["admin", "company", "consultant"]
@@ -171,7 +181,7 @@ service cloud.firestore {
           ]);
       }
 
-      allow read: if isCompanyMember(companyId) || isInternalOperator();
+      allow read: if isCompanyMember(companyId) || isInternalOperator() || isEmaDashboardViewer();
       allow create: if isSignedIn()
         && (
           request.resource.data.ownerUid == request.auth.uid
@@ -203,13 +213,13 @@ service cloud.firestore {
           && company.createdByUid == request.auth.uid;
       }
 
-      allow read: if isCompanyMember(companyId) || isInternalOperator();
+      allow read: if isCompanyMember(companyId) || isInternalOperator() || isEmaDashboardViewer();
       allow create, update: if isCompanyMember(companyId) || isConsultantManualCompanyOwnerAfter();
       allow delete: if false;
     }
 
     match /companies/{companyId}/selfAssessment/{docId} {
-      allow read: if isCompanyMember(companyId) || isInternalOperator();
+      allow read: if isCompanyMember(companyId) || isInternalOperator() || isEmaDashboardViewer();
       allow create, update: if isCompanyMember(companyId);
       allow delete: if false;
     }
@@ -232,13 +242,13 @@ service cloud.firestore {
     }
 
     match /companies/{companyId}/analysisReport/{docId} {
-      allow read: if isInternalOperator();
+      allow read: if isInternalOperator() || isEmaDashboardViewer();
       allow create, update: if isAdmin();
       allow delete: if false;
     }
 
     match /companies/{companyId}/statusAnalysis/{docId} {
-      allow read: if isInternalOperator();
+      allow read: if isInternalOperator() || isEmaDashboardViewer();
       allow create, update: if isAdmin();
       allow delete: if false;
     }
@@ -279,7 +289,7 @@ service cloud.firestore {
     }
 
     match /agendas/{agendaId} {
-      allow read: if isActiveUser();
+      allow read: if isActiveUser() || isEmaDashboardViewer();
       allow create, update, delete: if isAdmin();
     }
 
@@ -289,12 +299,12 @@ service cloud.firestore {
     }
 
     match /officeHourSlots/{slotId} {
-      allow read: if isActiveUser();
+      allow read: if isActiveUser() || isEmaDashboardViewer();
       allow create, update, delete: if isAdmin() || isConsultant();
     }
 
     match /officeHourApplications/{applicationId} {
-      allow read: if isActiveUser();
+      allow read: if isActiveUser() || isEmaDashboardViewer();
       allow create: if isActiveUser()
         && request.resource.data.createdByUid == request.auth.uid;
       allow update: if isAdmin()
