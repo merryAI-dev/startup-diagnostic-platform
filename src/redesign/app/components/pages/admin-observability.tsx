@@ -187,6 +187,10 @@ function routeLabel(route?: string | null) {
   return ROUTE_LABELS[normalized] || normalized
 }
 
+function isAdminRoute(route?: string | null) {
+  return normalizeRoute(route).startsWith("/admin")
+}
+
 function roleLabel(role?: string | null) {
   switch (role) {
     case "admin":
@@ -267,6 +271,10 @@ function isKnownTelemetrySelectorError(event: TelemetryEvent) {
     message.includes("data-observability-action") &&
     (message.includes("not a valid selector") || message.includes("closest"))
   )
+}
+
+function isInternalOperatorRole(role?: string | null) {
+  return role === "관리자" || role === "운영 스태프" || role === "컨설턴트"
 }
 
 function groupEvents(events: TelemetryEvent[], predicate: (event: TelemetryEvent) => boolean) {
@@ -456,7 +464,25 @@ export function AdminObservability() {
     })
   }, [companyById, officeHourApplications, resolveUserDisplay, userFilter])
 
-  const errorEvents = filteredEvents.filter(
+  const companyEvents = useMemo(
+    () =>
+      filteredEvents.filter((event) => {
+        const user = resolveUserDisplay(event.uid, event.anonymousId, event.sessionId, event.role)
+        return !isInternalOperatorRole(user.role) && !isAdminRoute(event.route)
+      }),
+    [filteredEvents, resolveUserDisplay],
+  )
+
+  const companySessions = useMemo(
+    () =>
+      filteredSessions.filter((session) => {
+        const user = resolveUserDisplay(session.uid, session.anonymousId, session.sessionId, session.role)
+        return !isInternalOperatorRole(user.role) && !isAdminRoute(session.firstRoute) && !isAdminRoute(session.lastRoute)
+      }),
+    [filteredSessions, resolveUserDisplay],
+  )
+
+  const errorEvents = companyEvents.filter(
     (event) => (event.severity === "error" || event.severity === "fatal") && !isKnownTelemetrySelectorError(event),
   )
   const visibleErrorCountBySessionId = useMemo(() => {
@@ -467,11 +493,11 @@ export function AdminObservability() {
     })
     return map
   }, [errorEvents])
-  const pageViews = filteredEvents.filter((event) => event.eventType === "page_view")
-  const interactions = filteredEvents.filter((event) =>
+  const pageViews = companyEvents.filter((event) => event.eventType === "page_view")
+  const interactions = companyEvents.filter((event) =>
     ["button_click", "link_click", "form_submit"].includes(event.eventType || ""),
   )
-  const applicationFunnelEvents = filteredEvents.filter(
+  const applicationFunnelEvents = companyEvents.filter(
     (event) =>
       event.eventType === "user_action" &&
       ["application_agenda_selected", "application_submit"].includes(event.action || ""),
@@ -483,11 +509,11 @@ export function AdminObservability() {
   const averageAgendaSelectionMs = agendaSelectionEvents.length
     ? agendaSelectionEvents.reduce((sum, event) => sum + (event.durationMs || 0), 0) / agendaSelectionEvents.length
     : 0
-  const routeDwellEvents = filteredEvents.filter((event) => event.eventType === "route_dwell")
+  const routeDwellEvents = companyEvents.filter((event) => event.eventType === "route_dwell")
   const totalDwellMs = routeDwellEvents.reduce((sum, event) => sum + (event.durationMs || 0), 0)
   const averageDwellMs = routeDwellEvents.length ? totalDwellMs / routeDwellEvents.length : 0
-  const averageSessionMs = filteredSessions.length
-    ? filteredSessions.reduce((sum, session) => sum + (session.durationMs || 0), 0) / filteredSessions.length
+  const averageSessionMs = companySessions.length
+    ? companySessions.reduce((sum, session) => sum + (session.durationMs || 0), 0) / companySessions.length
     : 0
   const errorGroups = groupEvents(errorEvents, () => true)
   const interactionGroups: InteractionRow[] = [
@@ -530,7 +556,7 @@ export function AdminObservability() {
     return latestDiff || b.count - a.count
   })
   const rawGroupEvents = selectedGroup
-    ? filteredEvents.filter((event) => {
+    ? companyEvents.filter((event) => {
         const groupKey =
           event.stackHash ||
           [event.eventType, event.functionName, event.errorCode, event.route, event.action, event.message]
@@ -546,7 +572,7 @@ export function AdminObservability() {
         <div>
           <h1 className="text-2xl font-semibold text-slate-900">운영 로그</h1>
           <p className="mt-1 text-sm text-slate-600">
-            웹뷰, 버튼 클릭, 체류시간, 유저별 에러 지점을 확인합니다.
+            Company 방문자의 웹뷰, 버튼 클릭, 체류시간, 에러 지점을 확인합니다.
           </p>
         </div>
         <button
@@ -704,7 +730,7 @@ export function AdminObservability() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {filteredSessions.map((session) => {
+              {companySessions.map((session) => {
                 const user = resolveUserDisplay(session.uid, session.anonymousId, session.sessionId, session.role)
                 const visibleErrorCount = session.sessionId ? visibleErrorCountBySessionId.get(session.sessionId) ?? 0 : 0
 
@@ -736,7 +762,7 @@ export function AdminObservability() {
                   </tr>
                 )
               })}
-              {filteredSessions.length === 0 && (
+              {companySessions.length === 0 && (
                 <tr>
                   <td colSpan={10} className="px-4 py-8 text-center text-slate-500">
                     기록된 세션이 없습니다.
