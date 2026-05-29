@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { collection, getDocs, limit, orderBy, query } from "firebase/firestore"
 import { Activity, AlertTriangle, Clock, MousePointerClick, RefreshCcw, Search } from "lucide-react"
 import { db, isFirebaseConfigured } from "@/redesign/app/lib/firebase"
@@ -54,6 +54,74 @@ type GroupRow = {
   sample: TelemetryEvent
 }
 
+type ProfileDoc = {
+  id: string
+  role?: string | null
+  email?: string | null
+  companyId?: string | null
+  active?: boolean
+}
+
+type CompanyDoc = {
+  id: string
+  name?: string | null
+  ownerUid?: string | null
+}
+
+type ConsultantDoc = {
+  id: string
+  name?: string | null
+  email?: string | null
+  organization?: string | null
+}
+
+type UserDisplay = {
+  primary: string
+  secondary: string
+  role: string
+}
+
+const ROUTE_LABELS: Record<string, string> = {
+  "/": "홈",
+  "/login": "로그인",
+  "/signup": "회원가입",
+  "/signup-info": "회원가입 정보 입력",
+  "/reset-password": "비밀번호 재설정",
+  "/pending": "승인 대기",
+  "/admin/admin-dashboard": "관리자 대시보드",
+  "/admin/admin-applications": "신청 관리",
+  "/admin/admin-communication": "커뮤니케이션",
+  "/admin/admin-observability": "운영 로그",
+  "/admin/admin-program-list": "사업 관리",
+  "/admin/startup-diagnostic": "기업 관리",
+  "/admin/admin-agendas": "아젠다 관리",
+  "/admin/admin-consultants": "컨설턴트 관리",
+  "/admin/admin-users": "사용자 관리",
+  "/admin/pending-reports": "오피스아워 보고서",
+  "/admin/consultant-calendar": "내 일정 캘린더",
+  "/admin/consultant-profile": "내 정보 입력",
+  "/admin/consultant-companies": "기업 등록",
+  "/company/dashboard": "대시보드",
+  "/company/notifications": "알림",
+  "/company/messages": "메시지",
+  "/company/unified-calendar": "통합 캘린더",
+  "/company/goals-kanban": "목표 관리",
+  "/company/ai-recommendations": "AI 추천",
+  "/company/team-collaboration": "팀 협업",
+  "/company/consultants": "컨설턴트",
+  "/company/regular": "정기 오피스아워",
+  "/company/regular-detail": "정기 오피스아워 상세",
+  "/company/regular-wizard": "정기 오피스아워 신청",
+  "/company/irregular": "비정기 오피스아워",
+  "/company/irregular-wizard": "비정기 오피스아워 신청",
+  "/company/history": "전체 내역",
+  "/company/application": "신청 상세",
+  "/company/company-metrics": "실적 관리",
+  "/company/company-newsletter": "기업 리포트",
+  "/company/company-info": "기업 정보 입력",
+  "/company/settings": "설정",
+}
+
 function toDate(value: TelemetryEvent["createdAt"]) {
   if (!value) return null
   if (value instanceof Date) return value
@@ -78,6 +146,37 @@ function formatDuration(ms = 0) {
   const minutes = Math.floor(seconds / 60)
   const rest = seconds % 60
   return rest ? `${minutes}분 ${rest}초` : `${minutes}분`
+}
+
+function shortId(value?: string | null) {
+  if (!value) return "-"
+  return value.length > 12 ? `${value.slice(0, 8)}...${value.slice(-4)}` : value
+}
+
+function normalizeRoute(route?: string | null) {
+  const withoutQuery = (route || "/").split("?")[0] ?? "/"
+  return withoutQuery.replace(/\/$/, "") || "/"
+}
+
+function routeLabel(route?: string | null) {
+  const normalized = normalizeRoute(route)
+  return ROUTE_LABELS[normalized] || normalized
+}
+
+function roleLabel(role?: string | null) {
+  switch (role) {
+    case "admin":
+      return "관리자"
+    case "staff":
+      return "운영 스태프"
+    case "consultant":
+      return "컨설턴트"
+    case "company":
+    case "user":
+      return "기업"
+    default:
+      return "역할 미확인"
+  }
 }
 
 function eventLabel(eventType?: string) {
@@ -143,6 +242,9 @@ function groupEvents(events: TelemetryEvent[], predicate: (event: TelemetryEvent
 export function AdminObservability() {
   const [events, setEvents] = useState<TelemetryEvent[]>([])
   const [sessions, setSessions] = useState<TelemetrySession[]>([])
+  const [profiles, setProfiles] = useState<ProfileDoc[]>([])
+  const [companies, setCompanies] = useState<CompanyDoc[]>([])
+  const [consultants, setConsultants] = useState<ConsultantDoc[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [userFilter, setUserFilter] = useState("")
@@ -157,13 +259,21 @@ export function AdminObservability() {
     setLoading(true)
     setError(null)
     try {
-      const [eventSnap, sessionSnap] = await Promise.all([
+      const [eventSnap, sessionSnap, profileSnap, companySnap, consultantSnap] = await Promise.all([
         getDocs(query(collection(db, "telemetryEvents"), orderBy("createdAt", "desc"), limit(500))),
         getDocs(query(collection(db, "telemetrySessions"), orderBy("lastSeenAt", "desc"), limit(200))),
+        getDocs(query(collection(db, "profiles"), limit(500))),
+        getDocs(query(collection(db, "companies"), limit(500))),
+        getDocs(query(collection(db, "consultants"), limit(500))),
       ])
       setEvents(eventSnap.docs.map((doc) => ({ id: doc.id, ...(doc.data() as Omit<TelemetryEvent, "id">) })))
       setSessions(
         sessionSnap.docs.map((doc) => ({ id: doc.id, ...(doc.data() as Omit<TelemetrySession, "id">) })),
+      )
+      setProfiles(profileSnap.docs.map((doc) => ({ id: doc.id, ...(doc.data() as Omit<ProfileDoc, "id">) })))
+      setCompanies(companySnap.docs.map((doc) => ({ id: doc.id, ...(doc.data() as Omit<CompanyDoc, "id">) })))
+      setConsultants(
+        consultantSnap.docs.map((doc) => ({ id: doc.id, ...(doc.data() as Omit<ConsultantDoc, "id">) })),
       )
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : String(loadError))
@@ -176,25 +286,88 @@ export function AdminObservability() {
     void loadTelemetry()
   }, [])
 
+  const profileByUid = useMemo(() => new Map(profiles.map((profile) => [profile.id, profile])), [profiles])
+  const companyById = useMemo(() => new Map(companies.map((company) => [company.id, company])), [companies])
+  const companyByOwnerUid = useMemo(
+    () => new Map(companies.filter((company) => company.ownerUid).map((company) => [company.ownerUid as string, company])),
+    [companies],
+  )
+  const consultantById = useMemo(
+    () => new Map(consultants.map((consultant) => [consultant.id, consultant])),
+    [consultants],
+  )
+  const consultantByEmail = useMemo(
+    () =>
+      new Map(
+        consultants
+          .filter((consultant) => consultant.email)
+          .map((consultant) => [consultant.email!.toLowerCase(), consultant]),
+      ),
+    [consultants],
+  )
+
+  const resolveUserDisplay = useCallback(
+    (uid?: string | null, anonymousId?: string | null, sessionId?: string | null, eventRole?: string | null): UserDisplay => {
+      if (!uid) {
+        return {
+          primary: "로그인 전 방문자",
+          secondary: `브라우저 익명 ID: ${shortId(anonymousId || sessionId)}`,
+          role: "비로그인",
+        }
+      }
+
+      const profile = profileByUid.get(uid)
+      const role = profile?.role || eventRole
+      const email = profile?.email || ""
+      const consultant = consultantById.get(uid) || (email ? consultantByEmail.get(email.toLowerCase()) : null)
+      const company = (profile?.companyId ? companyById.get(profile.companyId) : null) || companyByOwnerUid.get(uid)
+
+      if (role === "consultant") {
+        return {
+          primary: consultant?.name || email || "컨설턴트 이름 미입력",
+          secondary: [consultant?.organization, email, `UID: ${shortId(uid)}`].filter(Boolean).join(" · "),
+          role: roleLabel(role),
+        }
+      }
+
+      if (role === "company" || role === "user" || company) {
+        return {
+          primary: company?.name || email || "회사명 미입력",
+          secondary: [email, `UID: ${shortId(uid)}`].filter(Boolean).join(" · "),
+          role: roleLabel(role || "company"),
+        }
+      }
+
+      return {
+        primary: role === "admin" ? "관리자" : role === "staff" ? "운영 스태프" : email || "사용자 정보 미등록",
+        secondary: [email, `UID: ${shortId(uid)}`].filter(Boolean).join(" · "),
+        role: roleLabel(role),
+      }
+    },
+    [companyById, companyByOwnerUid, consultantByEmail, consultantById, profileByUid],
+  )
+
   const filteredEvents = useMemo(() => {
     const filter = userFilter.trim().toLowerCase()
     if (!filter) return events
-    return events.filter((event) =>
-      [event.uid, event.anonymousId, event.sessionId].some((value) =>
+    return events.filter((event) => {
+      const user = resolveUserDisplay(event.uid, event.anonymousId, event.sessionId, event.role)
+      return [event.uid, event.anonymousId, event.sessionId, user.primary, user.secondary, user.role].some((value) =>
         String(value ?? "").toLowerCase().includes(filter),
-      ),
-    )
-  }, [events, userFilter])
+      )
+    })
+  }, [events, resolveUserDisplay, userFilter])
 
   const filteredSessions = useMemo(() => {
     const filter = userFilter.trim().toLowerCase()
     if (!filter) return sessions
-    return sessions.filter((session) =>
-      [session.uid, session.anonymousId, session.sessionId].some((value) =>
+    return sessions.filter((session) => {
+      const user = resolveUserDisplay(session.uid, session.anonymousId, session.sessionId, session.role)
+      return [session.uid, session.anonymousId, session.sessionId, user.primary, user.secondary, user.role].some((value) =>
         String(value ?? "").toLowerCase().includes(filter),
-      ),
-    )
-  }, [sessions, userFilter])
+      )
+    })
+  }, [resolveUserDisplay, sessions, userFilter])
 
   const errorEvents = filteredEvents.filter((event) => event.severity === "error" || event.severity === "fatal")
   const pageViews = filteredEvents.filter((event) => event.eventType === "page_view")
@@ -244,10 +417,13 @@ export function AdminObservability() {
         <input
           value={userFilter}
           onChange={(event) => setUserFilter(event.target.value)}
-          placeholder="유저 ID, 익명 ID, 세션 ID로 필터"
+          placeholder="회사명, 사람 이름, 이메일, UID, 브라우저 ID로 필터"
           className="min-w-0 flex-1 bg-transparent text-sm outline-none"
         />
       </div>
+      <p className="-mt-4 text-xs text-slate-500">
+        브라우저 익명 ID는 로그인 전/비로그인 방문 흐름을 이어 보기 위한 기기 단위 식별자입니다.
+      </p>
 
       {error && (
         <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
@@ -288,7 +464,10 @@ export function AdminObservability() {
                 >
                   <td className="px-4 py-3 font-medium">{eventLabel(group.sample.eventType)}</td>
                   <td className="max-w-xs truncate px-4 py-3">{group.label}</td>
-                  <td className="max-w-xs truncate px-4 py-3">{group.route}</td>
+                  <td className="max-w-xs px-4 py-3">
+                    <div className="font-medium text-slate-900">{routeLabel(group.route)}</div>
+                    <div className="truncate text-xs text-slate-500">{group.route}</div>
+                  </td>
                   <td className="px-4 py-3">{group.count}</td>
                   <td className="px-4 py-3">{group.affectedUsers}</td>
                   <td className="px-4 py-3">{formatDate(group.latestAt)}</td>
@@ -326,7 +505,10 @@ export function AdminObservability() {
                 <tr key={group.key}>
                   <td className="max-w-sm truncate px-4 py-3 font-medium">{group.label}</td>
                   <td className="px-4 py-3">{eventLabel(group.sample.eventType)}</td>
-                  <td className="max-w-xs truncate px-4 py-3">{group.route}</td>
+                  <td className="max-w-xs px-4 py-3">
+                    <div className="font-medium text-slate-900">{routeLabel(group.route)}</div>
+                    <div className="truncate text-xs text-slate-500">{group.route}</div>
+                  </td>
                   <td className="px-4 py-3">{group.count}</td>
                   <td className="px-4 py-3">{formatDate(group.latestAt)}</td>
                 </tr>
@@ -351,11 +533,11 @@ export function AdminObservability() {
           <table className="w-full min-w-[960px] text-left text-sm">
             <thead className="bg-slate-50 text-xs uppercase text-slate-500">
               <tr>
-                <th className="px-4 py-3">유저 ID</th>
-                <th className="px-4 py-3">익명 ID</th>
+                <th className="px-4 py-3">사용자</th>
+                <th className="px-4 py-3">브라우저 ID</th>
                 <th className="px-4 py-3">역할</th>
-                <th className="px-4 py-3">첫 경로</th>
-                <th className="px-4 py-3">마지막 경로</th>
+                <th className="px-4 py-3">첫 화면</th>
+                <th className="px-4 py-3">마지막 화면</th>
                 <th className="px-4 py-3">체류</th>
                 <th className="px-4 py-3">웹뷰</th>
                 <th className="px-4 py-3">클릭</th>
@@ -364,24 +546,37 @@ export function AdminObservability() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {filteredSessions.slice(0, 50).map((session) => (
-                <tr key={session.id}>
-                  <td className="max-w-[160px] truncate px-4 py-3 font-mono text-xs">{session.uid || "-"}</td>
-                  <td className="max-w-[160px] truncate px-4 py-3 font-mono text-xs">
-                    {session.anonymousId || "-"}
-                  </td>
-                  <td className="px-4 py-3">{session.role || "-"}</td>
-                  <td className="max-w-xs truncate px-4 py-3">{session.firstRoute || "-"}</td>
-                  <td className="max-w-xs truncate px-4 py-3">{session.lastRoute || "-"}</td>
-                  <td className="px-4 py-3">{formatDuration(session.durationMs || 0)}</td>
-                  <td className="px-4 py-3">{session.pageViewCount || 0}</td>
-                  <td className="px-4 py-3">
-                    {(session.buttonClickCount || 0) + (session.linkClickCount || 0) + (session.formSubmitCount || 0)}
-                  </td>
-                  <td className="px-4 py-3">{session.errorCount || 0}</td>
-                  <td className="px-4 py-3">{formatDate(toDate(session.lastSeenAt))}</td>
-                </tr>
-              ))}
+              {filteredSessions.slice(0, 50).map((session) => {
+                const user = resolveUserDisplay(session.uid, session.anonymousId, session.sessionId, session.role)
+
+                return (
+                  <tr key={session.id}>
+                    <td className="max-w-[260px] px-4 py-3">
+                      <div className="font-medium text-slate-900">{user.primary}</div>
+                      <div className="truncate text-xs text-slate-500">{user.secondary}</div>
+                    </td>
+                    <td className="max-w-[160px] truncate px-4 py-3 font-mono text-xs">
+                      {shortId(session.anonymousId)}
+                    </td>
+                    <td className="px-4 py-3">{user.role}</td>
+                    <td className="max-w-xs px-4 py-3">
+                      <div className="font-medium text-slate-900">{routeLabel(session.firstRoute)}</div>
+                      <div className="truncate text-xs text-slate-500">{session.firstRoute || "-"}</div>
+                    </td>
+                    <td className="max-w-xs px-4 py-3">
+                      <div className="font-medium text-slate-900">{routeLabel(session.lastRoute)}</div>
+                      <div className="truncate text-xs text-slate-500">{session.lastRoute || "-"}</div>
+                    </td>
+                    <td className="px-4 py-3">{formatDuration(session.durationMs || 0)}</td>
+                    <td className="px-4 py-3">{session.pageViewCount || 0}</td>
+                    <td className="px-4 py-3">
+                      {(session.buttonClickCount || 0) + (session.linkClickCount || 0) + (session.formSubmitCount || 0)}
+                    </td>
+                    <td className="px-4 py-3">{session.errorCount || 0}</td>
+                    <td className="px-4 py-3">{formatDate(toDate(session.lastSeenAt))}</td>
+                  </tr>
+                )
+              })}
               {filteredSessions.length === 0 && (
                 <tr>
                   <td colSpan={10} className="px-4 py-8 text-center text-slate-500">
@@ -410,31 +605,37 @@ export function AdminObservability() {
               </button>
             </div>
             <div className="mt-6 space-y-3">
-              {rawGroupEvents.slice(0, 50).map((event) => (
-                <pre
-                  key={event.id}
-                  className="overflow-x-auto rounded-md bg-slate-950 p-4 text-xs text-slate-100"
-                >
-                  {JSON.stringify(
-                    {
-                      id: event.id,
-                      type: event.eventType,
-                      severity: event.severity,
-                      uid: event.uid,
-                      anonymousId: event.anonymousId,
-                      sessionId: event.sessionId,
-                      route: event.route,
-                      action: event.action,
-                      functionName: event.functionName,
-                      errorCode: event.errorCode,
-                      message: event.message,
-                      createdAt: formatDate(toDate(event.createdAt)),
-                    },
-                    null,
-                    2,
-                  )}
-                </pre>
-              ))}
+              {rawGroupEvents.slice(0, 50).map((event) => {
+                const user = resolveUserDisplay(event.uid, event.anonymousId, event.sessionId, event.role)
+
+                return (
+                  <pre
+                    key={event.id}
+                    className="overflow-x-auto rounded-md bg-slate-950 p-4 text-xs text-slate-100"
+                  >
+                    {JSON.stringify(
+                      {
+                        id: event.id,
+                        type: event.eventType,
+                        severity: event.severity,
+                        user,
+                        screen: routeLabel(event.route),
+                        uid: event.uid,
+                        anonymousId: event.anonymousId,
+                        sessionId: event.sessionId,
+                        route: event.route,
+                        action: event.action,
+                        functionName: event.functionName,
+                        errorCode: event.errorCode,
+                        message: event.message,
+                        createdAt: formatDate(toDate(event.createdAt)),
+                      },
+                      null,
+                      2,
+                    )}
+                  </pre>
+                )
+              })}
             </div>
           </aside>
         </div>
@@ -468,4 +669,3 @@ function MetricCard({
     </div>
   )
 }
-
