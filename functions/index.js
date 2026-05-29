@@ -1,5 +1,6 @@
 "use strict";
 
+const { createHash } = require("crypto");
 const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { onDocumentCreated } = require("firebase-functions/v2/firestore");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
@@ -326,6 +327,43 @@ const DEFAULT_COMPANY_FORM = {
 
 function normalizeString(value) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function clampTelemetryString(value, maxLength = 500) {
+  const normalized = normalizeString(value);
+  return normalized ? normalized.slice(0, maxLength) : "";
+}
+
+function normalizeTelemetryMetadata(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+
+  return Object.fromEntries(
+    Object.entries(value)
+      .slice(0, 20)
+      .map(([key, item]) => {
+        const safeKey = clampTelemetryString(key, 80);
+        if (!safeKey) return null;
+        if (typeof item === "string") return [safeKey, item.slice(0, 300)];
+        if (typeof item === "number" || typeof item === "boolean" || item === null) {
+          return [safeKey, item];
+        }
+        return [safeKey, String(item).slice(0, 300)];
+      })
+      .filter(Boolean)
+  );
+}
+
+function hashTelemetryStack(stack) {
+  const normalized = clampTelemetryString(stack, 2000);
+  if (!normalized) return null;
+  return createHash("sha256").update(normalized).digest("hex").slice(0, 24);
+}
+
+function telemetryMapKey(value) {
+  const normalized = clampTelemetryString(value, 120);
+  return normalized.replace(/[^A-Za-z0-9_-]/g, "_").slice(0, 80) || "unknown";
 }
 
 function normalizeApplicationStatus(value) {
@@ -4283,6 +4321,189 @@ function syncCompanyProgramsInTransaction(transaction, params) {
     );
   });
 }
+
+exports.recordTelemetryEvent = onCall(
+  {
+    region: REGION,
+    timeoutSeconds: 10,
+    memory: "256MiB",
+  },
+  async (request) => {
+    const payload = request.data;
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+      throw new HttpsError("invalid-argument", "Telemetry payload must be an object.");
+    }
+
+    const eventType = clampTelemetryString(payload.eventType, 80) || "client_error";
+    const severity = ["info", "warning", "error", "fatal"].includes(payload.severity)
+      ? payload.severity
+      : "info";
+    const sessionId = clampTelemetryString(payload.sessionId, 160);
+    const anonymousId = clampTelemetryString(payload.anonymousId, 160);
+    const route = clampTelemetryString(payload.route, 300) || "/";
+    const uid = request.auth?.uid || null;
+    const stack = clampTelemetryString(payload.stack, 2000);
+    const componentStack = clampTelemetryString(payload.componentStack, 2000);
+    const durationMs = Number.isFinite(payload.durationMs)
+      ? Math.max(0, Math.round(payload.durationMs))
+      : null;
+    const dateKey = new Date().toISOString().slice(0, 10);
+    const routeKey = telemetryMapKey(route);
+    const action = clampTelemetryString(payload.action, 160) || null;
+    const actionKey = telemetryMapKey(action || "unknown");
+    const functionName = clampTelemetryString(payload.functionName, 120) || null;
+    const errorCode = clampTelemetryString(payload.errorCode, 120) || null;
+    const isError = [
+      "client_error",
+      "promise_rejection",
+      "react_error",
+      "function_error",
+      "firestore_error",
+      "storage_error",
+      "auth_error",
+    ].includes(eventType);
+    const isFatal = severity === "fatal";
+    const isRouteDwell = eventType === "route_dwell";
+    const isPageView = eventType === "page_view";
+    const isButtonClick = eventType === "button_click";
+    const isLinkClick = eventType === "link_click";
+    const isFormSubmit = eventType === "form_submit";
+
+    if (!sessionId || !anonymousId) {
+      throw new HttpsError("invalid-argument", "Telemetry session identifiers are required.");
+    }
+
+    const eventDoc = {
+      schemaVersion: 1,
+      eventType,
+      severity,
+      sessionId,
+      anonymousId,
+      uid,
+      role: clampTelemetryString(payload.role, 40) || null,
+      route,
+      pageTitle: clampTelemetryString(payload.pageTitle, 200) || null,
+      action,
+      elementLabel: clampTelemetryString(payload.elementLabel, 160) || null,
+      elementRole: clampTelemetryString(payload.elementRole, 80) || null,
+      elementTestId: clampTelemetryString(payload.elementTestId, 120) || null,
+      message: clampTelemetryString(payload.message, 500) || eventType,
+      errorCode,
+      stackHash: hashTelemetryStack(stack),
+      stackPreview: stack ? stack.slice(0, 500) : null,
+      componentStackPreview: componentStack ? componentStack.slice(0, 500) : null,
+      functionName,
+      durationMs,
+      userAgent: clampTelemetryString(payload.userAgent, 300),
+      viewport: {
+        width: Number.isFinite(payload.viewport?.width) ? Math.round(payload.viewport.width) : 0,
+        height: Number.isFinite(payload.viewport?.height) ? Math.round(payload.viewport.height) : 0,
+      },
+      referrer: clampTelemetryString(payload.referrer, 300) || null,
+      release: clampTelemetryString(payload.release, 120) || null,
+      metadata: normalizeTelemetryMetadata(payload.metadata),
+      createdAt: FieldValue.serverTimestamp(),
+    };
+
+    const batch = db.batch();
+    const eventRef = db.collection("telemetryEvents").doc();
+    const sessionRef = db.collection("telemetrySessions").doc(sessionId);
+    const rollupRef = db.collection("telemetryDailyRollups").doc(dateKey);
+
+    batch.set(eventRef, eventDoc);
+    batch.set(
+      sessionRef,
+      {
+        schemaVersion: 1,
+        sessionId,
+        anonymousId,
+        uid,
+        role: eventDoc.role,
+        lastSeenAt: FieldValue.serverTimestamp(),
+        lastRoute: route,
+        userAgent: eventDoc.userAgent,
+        ...(eventType === "session_start"
+          ? { startedAt: FieldValue.serverTimestamp(), firstRoute: route }
+          : {}),
+        ...(eventType === "session_end"
+          ? { endedAt: FieldValue.serverTimestamp(), durationMs: durationMs || 0 }
+          : {}),
+        ...(isPageView ? { pageViewCount: FieldValue.increment(1) } : {}),
+        ...(isRouteDwell
+          ? {
+              routeDwellCount: FieldValue.increment(1),
+              totalRouteDwellMs: FieldValue.increment(durationMs || 0),
+            }
+          : {}),
+        ...(eventType === "user_action" ? { actionCount: FieldValue.increment(1) } : {}),
+        ...(isButtonClick
+          ? { buttonClickCount: FieldValue.increment(1), actionCount: FieldValue.increment(1) }
+          : {}),
+        ...(isLinkClick
+          ? { linkClickCount: FieldValue.increment(1), actionCount: FieldValue.increment(1) }
+          : {}),
+        ...(isFormSubmit
+          ? { formSubmitCount: FieldValue.increment(1), actionCount: FieldValue.increment(1) }
+          : {}),
+        ...(isError ? { errorCount: FieldValue.increment(1) } : {}),
+        ...(isFatal ? { fatalCount: FieldValue.increment(1) } : {}),
+      },
+      { merge: true }
+    );
+    batch.set(
+      rollupRef,
+      {
+        dateKey,
+        updatedAt: FieldValue.serverTimestamp(),
+        ...(eventType === "session_start" ? { sessionCount: FieldValue.increment(1) } : {}),
+        ...(isPageView
+          ? {
+              pageViewCount: FieldValue.increment(1),
+              [`routeCounts.${routeKey}`]: FieldValue.increment(1),
+            }
+          : {}),
+        ...(isRouteDwell
+          ? {
+              routeDwellCount: FieldValue.increment(1),
+              totalRouteDwellMs: FieldValue.increment(durationMs || 0),
+              [`routeDwellMs.${routeKey}`]: FieldValue.increment(durationMs || 0),
+            }
+          : {}),
+        ...(eventType === "user_action" ? { actionCount: FieldValue.increment(1) } : {}),
+        ...(isButtonClick
+          ? {
+              buttonClickCount: FieldValue.increment(1),
+              actionCount: FieldValue.increment(1),
+              [`buttonClickCounts.${actionKey}`]: FieldValue.increment(1),
+            }
+          : {}),
+        ...(isLinkClick
+          ? { linkClickCount: FieldValue.increment(1), actionCount: FieldValue.increment(1) }
+          : {}),
+        ...(isFormSubmit
+          ? { formSubmitCount: FieldValue.increment(1), actionCount: FieldValue.increment(1) }
+          : {}),
+        ...(isError
+          ? {
+              errorCount: FieldValue.increment(1),
+              [`routeErrorCounts.${routeKey}`]: FieldValue.increment(1),
+            }
+          : {}),
+        ...(isFatal ? { fatalCount: FieldValue.increment(1) } : {}),
+        ...(functionName
+          ? { [`functionErrorCounts.${telemetryMapKey(functionName)}`]: FieldValue.increment(1) }
+          : {}),
+        ...(errorCode
+          ? { [`errorCodeCounts.${telemetryMapKey(errorCode)}`]: FieldValue.increment(1) }
+          : {}),
+      },
+      { merge: true }
+    );
+
+    await batch.commit();
+    return { ok: true, eventId: eventRef.id };
+  }
+);
 
 exports.notifySlackOnSignupRequestCreated = onDocumentCreated(
   {

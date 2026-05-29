@@ -355,5 +355,20 @@ service cloud.firestore {
         && request.resource.data.method is string;
       allow update, delete: if false;
     }
+
+    match /telemetryEvents/{eventId} {
+      allow read: if isAdmin();
+      allow create, update, delete: if false;
+    }
+
+    match /telemetrySessions/{sessionId} {
+      allow read: if isAdmin();
+      allow create, update, delete: if false;
+    }
+
+    match /telemetryDailyRollups/{dateKey} {
+      allow read: if isAdmin();
+      allow create, update, delete: if false;
+    }
   }
 }

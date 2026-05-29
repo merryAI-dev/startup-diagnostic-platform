@@ -15,6 +15,27 @@ import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { where, orderBy, QueryConstraint } from "firebase/firestore";
 import { isFirebaseConfigured, COLLECTIONS } from "@/redesign/app/lib/firebase";
 import { firestoreService, BatchOperation } from "@/redesign/app/lib/firestore-service";
+import { recordTelemetryEvent } from "@/observability/client";
+
+type CalendarEventItem = Record<string, unknown> & {
+  title?: string;
+  start?: Date | string;
+  end?: Date | string;
+};
+
+function recordFirestoreError(action: string, collectionName: string, error: unknown, docId?: string | null) {
+  void recordTelemetryEvent({
+    eventType: "firestore_error",
+    severity: "error",
+    action,
+    message: error instanceof Error ? error.message : String(error),
+    errorCode: typeof error === "object" && error && "code" in error ? String(error.code) : null,
+    metadata: {
+      collectionName,
+      docId: docId ?? null,
+    },
+  });
+}
 
 // ──────────────────────────────────────────────
 // Connection Hook
@@ -87,6 +108,7 @@ export function useFirestoreCollection<T>(
         orderDirection: options?.orderDirection,
         limitCount: options?.limitCount,
         onError: (err) => {
+          recordFirestoreError("subscribe_collection", collectionName, err);
           setError(err);
           setLoading(false);
         },
@@ -133,6 +155,7 @@ export function useFirestoreDocument<T>(
         setError(null);
       },
       (err) => {
+        recordFirestoreError("subscribe_document", collectionName, err, docId);
         setError(err);
         setLoading(false);
       }
@@ -177,6 +200,7 @@ export function useFirestoreDocumentOnce<T>(
       })
       .catch((err) => {
         if (cancelled) return;
+        recordFirestoreError("get_document", collectionName, err, docId);
         setError(err as Error);
       })
       .finally(() => {
@@ -195,7 +219,7 @@ export function useFirestoreDocumentOnce<T>(
 // ──────────────────────────────────────────────
 // CRUD Operations Hook
 // ──────────────────────────────────────────────
-export function useFirestoreCRUD<T extends Record<string, any>>(
+export function useFirestoreCRUD<T extends Record<string, unknown>>(
   collectionName: string
 ) {
   const [saving, setSaving] = useState(false);
@@ -206,6 +230,9 @@ export function useFirestoreCRUD<T extends Record<string, any>>(
       setSaving(true);
       try {
         return await firestoreService.createDocument(collectionName, data);
+      } catch (error) {
+        recordFirestoreError("create_document", collectionName, error);
+        throw error;
       } finally {
         setSaving(false);
       }
@@ -219,6 +246,9 @@ export function useFirestoreCRUD<T extends Record<string, any>>(
       setSaving(true);
       try {
         return await firestoreService.setDocument(collectionName, docId, data, merge);
+      } catch (error) {
+        recordFirestoreError("set_document", collectionName, error, docId);
+        throw error;
       } finally {
         setSaving(false);
       }
@@ -231,7 +261,10 @@ export function useFirestoreCRUD<T extends Record<string, any>>(
       if (!isFirebaseConfigured) return false;
       setSaving(true);
       try {
-        return await firestoreService.updateDocument(collectionName, docId, data as Record<string, any>);
+        return await firestoreService.updateDocument(collectionName, docId, data as Record<string, unknown>);
+      } catch (error) {
+        recordFirestoreError("update_document", collectionName, error, docId);
+        throw error;
       } finally {
         setSaving(false);
       }
@@ -245,6 +278,9 @@ export function useFirestoreCRUD<T extends Record<string, any>>(
       setSaving(true);
       try {
         return await firestoreService.deleteDocument(collectionName, docId);
+      } catch (error) {
+        recordFirestoreError("delete_document", collectionName, error, docId);
+        throw error;
       } finally {
         setSaving(false);
       }
@@ -258,6 +294,9 @@ export function useFirestoreCRUD<T extends Record<string, any>>(
       setSaving(true);
       try {
         return await firestoreService.executeBatch(operations);
+      } catch (error) {
+        recordFirestoreError("execute_batch", collectionName, error);
+        throw error;
       } finally {
         setSaving(false);
       }
@@ -276,7 +315,7 @@ export function useCalendarEvents(
   dateRange?: { start: Date; end: Date },
   options?: { enabled?: boolean }
 ) {
-  const [events, setEvents] = useState<any[]>([]);
+  const [events, setEvents] = useState<CalendarEventItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
   const enabled = options?.enabled !== false;
@@ -336,7 +375,7 @@ export function useCalendarEvents(
   );
 
   const updateEvent = useCallback(
-    async (eventId: string, data: Record<string, any>) => {
+    async (eventId: string, data: Record<string, unknown>) => {
       return firestoreService.updateDocument(COLLECTIONS.CALENDAR_EVENTS, eventId, data);
     },
     []
@@ -356,7 +395,7 @@ export function useCalendarEvents(
 // Notifications Hook
 // ──────────────────────────────────────────────
 export function useNotifications(userId: string | null) {
-  const [notifications, setNotifications] = useState<any[]>([]);
+  const [notifications, setNotifications] = useState<Array<{ isRead?: boolean }>>([]);
   const [loading, setLoading] = useState(true);
   const [unreadCount, setUnreadCount] = useState(0);
 
@@ -368,7 +407,7 @@ export function useNotifications(userId: string | null) {
 
     const key = firestoreService.subscribeToNotifications(userId, (notifs) => {
       setNotifications(notifs);
-      setUnreadCount(notifs.filter((n: any) => !n.isRead).length);
+      setUnreadCount(notifs.filter((n: { isRead?: boolean }) => !n.isRead).length);
       setLoading(false);
     });
 
@@ -409,7 +448,7 @@ export function useNotifications(userId: string | null) {
 // Chat Hook
 // ──────────────────────────────────────────────
 export function useChat(chatRoomId: string | null) {
-  const [messages, setMessages] = useState<any[]>([]);
+  const [messages, setMessages] = useState<unknown[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -433,7 +472,7 @@ export function useChat(chatRoomId: string | null) {
       senderId: string;
       senderName: string;
       content: string;
-      attachments?: any[];
+      attachments?: unknown[];
     }) => {
       if (!chatRoomId) return null;
       return firestoreService.sendChatMessage({

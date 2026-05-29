@@ -1,6 +1,7 @@
 import { type ComponentType } from "react";
 import {
   AlertCircle,
+  Activity,
   Bell,
   Calendar,
   CalendarClock,
@@ -42,6 +43,7 @@ const adminNavItems: NavItem[] = [
   { id: "admin-dashboard", label: "관리자 대시보드", icon: Shield },
   { id: "admin-applications", label: "신청 관리", icon: ClipboardList },
   { id: "admin-communication", label: "커뮤니케이션", icon: Mail },
+  { id: "admin-observability", label: "운영 로그", icon: Activity },
   { id: "admin-program-list", label: "사업 관리", icon: FileText },
   { id: "startup-diagnostic", label: "기업 관리", icon: FileText },
   { id: "admin-agendas", label: "아젠다 관리", icon: FileText },

@@ -47,6 +47,7 @@ import { AdminAgendas } from "@/redesign/app/components/pages/admin-agendas"
 import { AdminConsultants } from "@/redesign/app/components/pages/admin-consultants"
 import { AdminUsers } from "@/redesign/app/components/pages/admin-users"
 import { AdminCommunication } from "@/redesign/app/components/pages/admin-communication"
+import { AdminObservability } from "@/redesign/app/components/pages/admin-observability"
 import { AdminPrograms } from "@/redesign/app/components/pages/admin-programs"
 import { ConsultantsDirectory } from "@/redesign/app/components/pages/consultants-directory"
 import {
@@ -167,6 +168,7 @@ type AppPage =
   | "admin-consultants"
   | "admin-users"
   | "admin-communication"
+  | "admin-observability"
   | "admin-programs"
   | "admin-program-list"
   | "admin-agendas"
@@ -1072,6 +1074,7 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
         "admin-consultants",
         "admin-users",
         "admin-communication",
+        "admin-observability",
         "pending-reports",
         "startup-diagnostic",
       ]),
@@ -5290,6 +5293,12 @@ export function AppContent({ roleOverride }: { roleOverride?: UserRole }) {
                 onSendStageSlackDmTest={handleSendStageSlackDmTest}
                 onSendStageSlackChannelAvailabilityTest={handleSendStageSlackChannelAvailabilityTest}
               />
+            </ProtectedRoute>
+          )}
+
+          {currentPage === "admin-observability" && (
+            <ProtectedRoute requiredRole="admin">
+              <AdminObservability />
             </ProtectedRoute>
           )}
 

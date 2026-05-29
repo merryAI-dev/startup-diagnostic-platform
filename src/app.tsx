@@ -10,6 +10,9 @@ import { PasswordResetPage } from "@/pages/PasswordResetPage"
 import { SignupPage } from "@/pages/SignupPage"
 import { SignupInfoPage } from "@/pages/SignupInfoPage"
 import { Toaster } from "sonner"
+import { InteractionTelemetry } from "@/observability/InteractionTelemetry"
+import { RouteTelemetry } from "@/observability/RouteTelemetry"
+
 function PublicLayout() {
   const location = useLocation()
   const isSignupInfo = location.pathname === "/signup-info"
@@ -36,6 +39,8 @@ function PublicLayout() {
 export function App() {
   return (
     <BrowserRouter>
+      <RouteTelemetry />
+      <InteractionTelemetry />
       <Routes>
         <Route element={<PublicLayout />}>
           <Route path="/" element={<HomeRedirect />} />

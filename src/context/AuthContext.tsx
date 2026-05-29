@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useMemo, useState } from "react"
 import { onAuthStateChanged, type User } from "firebase/auth"
 import { auth } from "@/firebase/client"
 import { getSignupRequest, getUserProfile } from "@/firebase/profile"
+import { setTelemetryUserContext } from "@/observability/client"
 import type { SignupRequest, UserProfile } from "@/types/auth"
 
 type AuthState = {
@@ -23,6 +24,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   async function refreshProfile() {
     if (!auth.currentUser) {
       setProfile(null)
+      setTelemetryUserContext(null)
       setSignupRequest(null)
       return
     }
@@ -32,9 +34,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         getSignupRequest(auth.currentUser.uid),
       ])
       setProfile(nextProfile)
+      setTelemetryUserContext(nextProfile?.role ?? null)
       setSignupRequest(nextSignupRequest)
     } catch {
       setProfile(null)
+      setTelemetryUserContext(null)
       setSignupRequest(null)
     }
   }
@@ -49,13 +53,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             getSignupRequest(nextUser.uid),
           ])
           setProfile(nextProfile)
+          setTelemetryUserContext(nextProfile?.role ?? null)
           setSignupRequest(nextSignupRequest)
         } catch {
           setProfile(null)
+          setTelemetryUserContext(null)
           setSignupRequest(null)
         }
       } else {
         setProfile(null)
+        setTelemetryUserContext(null)
         setSignupRequest(null)
       }
       setLoading(false)

@@ -7,6 +7,7 @@ import {
 } from "firebase/auth"
 import { getFunctions, httpsCallable } from "firebase/functions"
 import { auth } from "@/firebase/client"
+import { recordTelemetryEvent } from "@/observability/client"
 
 type SendAdminPasswordResetEmailPayload = {
   authEmail: string
@@ -20,11 +21,29 @@ type SendAdminPasswordResetEmailResult = {
 }
 
 export function signInWithEmail(email: string, password: string) {
-  return signInWithEmailAndPassword(auth, email, password)
+  return signInWithEmailAndPassword(auth, email, password).catch((error) => {
+    void recordTelemetryEvent({
+      eventType: "auth_error",
+      severity: "error",
+      action: "sign_in",
+      message: error instanceof Error ? error.message : String(error),
+      errorCode: typeof error === "object" && error && "code" in error ? String(error.code) : null,
+    })
+    throw error
+  })
 }
 
 export function signUpWithEmail(email: string, password: string) {
-  return createUserWithEmailAndPassword(auth, email, password)
+  return createUserWithEmailAndPassword(auth, email, password).catch((error) => {
+    void recordTelemetryEvent({
+      eventType: "auth_error",
+      severity: "error",
+      action: "sign_up",
+      message: error instanceof Error ? error.message : String(error),
+      errorCode: typeof error === "object" && error && "code" in error ? String(error.code) : null,
+    })
+    throw error
+  })
 }
 
 export function getSignInMethods(email: string) {
@@ -33,7 +52,16 @@ export function getSignInMethods(email: string) {
 
 export function requestPasswordReset(email: string) {
   auth.languageCode = "ko"
-  return sendPasswordResetEmail(auth, email.trim())
+  return sendPasswordResetEmail(auth, email.trim()).catch((error) => {
+    void recordTelemetryEvent({
+      eventType: "auth_error",
+      severity: "error",
+      action: "password_reset",
+      message: error instanceof Error ? error.message : String(error),
+      errorCode: typeof error === "object" && error && "code" in error ? String(error.code) : null,
+    })
+    throw error
+  })
 }
 
 export async function requestAdminPasswordReset(email: string) {
@@ -46,11 +74,23 @@ export async function requestAdminPasswordReset(email: string) {
     SendAdminPasswordResetEmailResult
   >(functions, "sendAdminPasswordResetEmail")
 
-  const result = await callable({
-    authEmail: email.trim(),
-    selfService: true,
-  })
-  return result.data
+  try {
+    const result = await callable({
+      authEmail: email.trim(),
+      selfService: true,
+    })
+    return result.data
+  } catch (error) {
+    void recordTelemetryEvent({
+      eventType: "auth_error",
+      severity: "error",
+      action: "admin_password_reset",
+      functionName: "sendAdminPasswordResetEmail",
+      message: error instanceof Error ? error.message : String(error),
+      errorCode: typeof error === "object" && error && "code" in error ? String(error.code) : null,
+    })
+    throw error
+  }
 }
 
 export function signOutUser() {

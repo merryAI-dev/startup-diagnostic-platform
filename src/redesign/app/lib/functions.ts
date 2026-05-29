@@ -1,5 +1,6 @@
 import { httpsCallable } from "firebase/functions";
 import { functions, isFirebaseConfigured } from "@/redesign/app/lib/firebase";
+import { callWithTelemetry } from "@/observability/instrumented-functions";
 import type { CompanyInfoRecord } from "@/types/company";
 import type {
   ApplicationStatus,
@@ -329,8 +330,7 @@ export async function submitRegularApplicationViaFunction(
     SubmitRegularApplicationResult
   >(functions, "submitRegularApplication");
 
-  const result = await callable(payload);
-  return result.data;
+  return callWithTelemetry("submitRegularApplication", callable, payload);
 }
 
 export async function transitionApplicationStatusViaFunction(
@@ -345,8 +345,7 @@ export async function transitionApplicationStatusViaFunction(
     TransitionApplicationResult
   >(functions, "transitionApplicationStatus");
 
-  const result = await callable(payload);
-  return result.data;
+  return callWithTelemetry("transitionApplicationStatus", callable, payload);
 }
 
 export async function cancelApplicationViaFunction(payload: CancelApplicationPayload) {
@@ -359,8 +358,7 @@ export async function cancelApplicationViaFunction(payload: CancelApplicationPay
     "cancelApplication"
   );
 
-  const result = await callable(payload);
-  return result.data;
+  return callWithTelemetry("cancelApplication", callable, payload);
 }
 
 export async function updateCompanyApplicationViaFunction(
@@ -375,8 +373,7 @@ export async function updateCompanyApplicationViaFunction(
     UpdateCompanyApplicationResult
   >(functions, "updateCompanyApplication");
 
-  const result = await callable(payload);
-  return result.data;
+  return callWithTelemetry("updateCompanyApplication", callable, payload);
 }
 
 export async function runApplicationMaintenanceViaFunction() {
@@ -389,8 +386,7 @@ export async function runApplicationMaintenanceViaFunction() {
     "runApplicationMaintenance"
   );
 
-  const result = await callable({});
-  return result.data;
+  return callWithTelemetry("runApplicationMaintenance", callable, {});
 }
 
 export async function syncIrregularCalendarSessionsViaFunction() {
@@ -403,8 +399,7 @@ export async function syncIrregularCalendarSessionsViaFunction() {
     "syncIrregularCalendarSessions"
   );
 
-  const result = await callable({});
-  return result.data;
+  return callWithTelemetry("syncIrregularCalendarSessions", callable, {});
 }
 
 export async function approvePendingUserViaFunction(userId: string) {
@@ -417,8 +412,7 @@ export async function approvePendingUserViaFunction(userId: string) {
     "approvePendingUser"
   );
 
-  const result = await callable({ userId });
-  return result.data;
+  return callWithTelemetry("approvePendingUser", callable, { userId });
 }
 
 export async function updateCompanyProgramsViaFunction(
@@ -433,8 +427,7 @@ export async function updateCompanyProgramsViaFunction(
     UpdateCompanyProgramsResult
   >(functions, "updateCompanyPrograms");
 
-  const result = await callable(payload);
-  return result.data;
+  return callWithTelemetry("updateCompanyPrograms", callable, payload);
 }
 
 export async function saveManagedCompanyInfoViaFunction(
@@ -449,8 +442,7 @@ export async function saveManagedCompanyInfoViaFunction(
     SaveManagedCompanyInfoResult
   >(functions, "saveManagedCompanyInfo");
 
-  const result = await callable(payload);
-  return result.data;
+  return callWithTelemetry("saveManagedCompanyInfo", callable, payload);
 }
 
 export async function syncConsultantSchedulingViaFunction(
@@ -465,8 +457,7 @@ export async function syncConsultantSchedulingViaFunction(
     SyncConsultantSchedulingResult
   >(functions, "syncConsultantScheduling");
 
-  const result = await callable(payload);
-  return result.data;
+  return callWithTelemetry("syncConsultantScheduling", callable, payload);
 }
 
 export async function syncProgramDefinitionViaFunction(
@@ -481,8 +472,7 @@ export async function syncProgramDefinitionViaFunction(
     SyncProgramDefinitionResult
   >(functions, "syncProgramDefinition");
 
-  const result = await callable(payload);
-  return result.data;
+  return callWithTelemetry("syncProgramDefinition", callable, payload);
 }
 
 export async function generateCompanyAnalysisReportViaFunction(
@@ -497,8 +487,7 @@ export async function generateCompanyAnalysisReportViaFunction(
     GenerateCompanyAnalysisReportResult
   >(functions, "generateCompanyAnalysisReport");
 
-  const result = await callable(payload);
-  return result.data;
+  return callWithTelemetry("generateCompanyAnalysisReport", callable, payload);
 }
 
 export async function runBiztalkStageCheckViaFunction(
@@ -513,8 +502,7 @@ export async function runBiztalkStageCheckViaFunction(
     RunBiztalkStageCheckResult
   >(functions, "runBiztalkStageCheck")
 
-  const result = await callable(payload)
-  return result.data
+  return callWithTelemetry("runBiztalkStageCheck", callable, payload)
 }
 
 export async function sendBiztalkTestAlimtalkViaFunction(
@@ -529,8 +517,7 @@ export async function sendBiztalkTestAlimtalkViaFunction(
     SendBiztalkTestAlimtalkResult
   >(functions, "sendBiztalkTestAlimtalk")
 
-  const result = await callable(payload)
-  return result.data
+  return callWithTelemetry("sendBiztalkTestAlimtalk", callable, payload)
 }
 
 export async function queryBiztalkAlimtalkResultsViaFunction(
@@ -545,8 +532,7 @@ export async function queryBiztalkAlimtalkResultsViaFunction(
     QueryBiztalkAlimtalkResultsResult
   >(functions, "queryBiztalkAlimtalkResults")
 
-  const result = await callable(payload)
-  return result.data
+  return callWithTelemetry("queryBiztalkAlimtalkResults", callable, payload)
 }
 
 export async function sendStageTestEmailViaFunction(
@@ -561,8 +547,7 @@ export async function sendStageTestEmailViaFunction(
     SendStageTestEmailResult
   >(functions, "sendStageTestEmail")
 
-  const result = await callable(payload)
-  return result.data
+  return callWithTelemetry("sendStageTestEmail", callable, payload)
 }
 
 export async function sendAdminPasswordResetEmailViaFunction(
@@ -577,8 +562,7 @@ export async function sendAdminPasswordResetEmailViaFunction(
     SendAdminPasswordResetEmailResult
   >(functions, "sendAdminPasswordResetEmail")
 
-  const result = await callable(payload)
-  return result.data
+  return callWithTelemetry("sendAdminPasswordResetEmail", callable, payload)
 }
 
 export async function sendStageSlackDmTestViaFunction(
@@ -593,8 +577,7 @@ export async function sendStageSlackDmTestViaFunction(
     SendStageSlackDmTestResult
   >(functions, "sendStageSlackDmTest")
 
-  const result = await callable(payload)
-  return result.data
+  return callWithTelemetry("sendStageSlackDmTest", callable, payload)
 }
 
 export async function sendStageSlackChannelAvailabilityTestViaFunction(
@@ -609,6 +592,5 @@ export async function sendStageSlackChannelAvailabilityTestViaFunction(
     SendStageSlackChannelAvailabilityTestResult
   >(functions, "sendStageSlackChannelAvailabilityTest")
 
-  const result = await callable(payload)
-  return result.data
+  return callWithTelemetry("sendStageSlackChannelAvailabilityTest", callable, payload)
 }
