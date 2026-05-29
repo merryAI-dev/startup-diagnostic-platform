@@ -1,6 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { collection, getDocs, limit, orderBy, query } from "firebase/firestore"
-import { Activity, AlertTriangle, Clock, MousePointerClick, RefreshCcw, Search } from "lucide-react"
+import {
+  Activity,
+  AlertTriangle,
+  CalendarCheck,
+  Clock,
+  MousePointerClick,
+  RefreshCcw,
+  Search,
+  UserCheck,
+  UserPlus,
+} from "lucide-react"
 import { db, isFirebaseConfigured } from "@/redesign/app/lib/firebase"
 
 type TelemetryEvent = {
@@ -44,6 +54,18 @@ type TelemetrySession = {
   lastSeenAt?: { toDate?: () => Date } | Date | null
 }
 
+type SignupRequestDoc = {
+  id: string
+  status?: string | null
+  role?: string | null
+  requestedRole?: string | null
+  email?: string | null
+  createdAt?: { toDate?: () => Date } | Date | string | null
+  approvedAt?: { toDate?: () => Date } | Date | string | null
+  activatedAt?: { toDate?: () => Date } | Date | string | null
+  updatedAt?: { toDate?: () => Date } | Date | string | null
+}
+
 type OfficeHourApplicationDoc = {
   id: string
   type?: string | null
@@ -54,6 +76,8 @@ type OfficeHourApplicationDoc = {
   agenda?: string | null
   applicantEmail?: string | null
   createdByUid?: string | null
+  consultantId?: string | null
+  pendingConsultantIds?: string[]
   createdAt?: { toDate?: () => Date } | Date | string | null
 }
 
@@ -170,6 +194,17 @@ function formatDuration(ms = 0) {
   const minutes = Math.floor(seconds / 60)
   const rest = seconds % 60
   return rest ? `${minutes}분 ${rest}초` : `${minutes}분`
+}
+
+function isToday(value: { toDate?: () => Date } | Date | string | null | undefined) {
+  const date = toDate(value)
+  if (!date || Number.isNaN(date.getTime())) return false
+  const now = new Date()
+  return (
+    date.getFullYear() === now.getFullYear() &&
+    date.getMonth() === now.getMonth() &&
+    date.getDate() === now.getDate()
+  )
 }
 
 function shortId(value?: string | null) {
@@ -318,6 +353,7 @@ export function AdminObservability() {
   const [profiles, setProfiles] = useState<ProfileDoc[]>([])
   const [companies, setCompanies] = useState<CompanyDoc[]>([])
   const [consultants, setConsultants] = useState<ConsultantDoc[]>([])
+  const [signupRequests, setSignupRequests] = useState<SignupRequestDoc[]>([])
   const [officeHourApplications, setOfficeHourApplications] = useState<OfficeHourApplicationDoc[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -333,12 +369,13 @@ export function AdminObservability() {
     setLoading(true)
     setError(null)
     try {
-      const [eventSnap, sessionSnap, profileSnap, companySnap, consultantSnap, applicationSnap] = await Promise.all([
+      const [eventSnap, sessionSnap, profileSnap, companySnap, consultantSnap, signupRequestSnap, applicationSnap] = await Promise.all([
         getDocs(query(collection(db, "telemetryEvents"), orderBy("createdAt", "desc"), limit(500))),
         getDocs(query(collection(db, "telemetrySessions"), orderBy("lastSeenAt", "desc"), limit(200))),
         getDocs(query(collection(db, "profiles"), limit(500))),
         getDocs(query(collection(db, "companies"), limit(500))),
         getDocs(query(collection(db, "consultants"), limit(500))),
+        getDocs(query(collection(db, "signupRequests"), orderBy("createdAt", "desc"), limit(500))),
         getDocs(query(collection(db, "officeHourApplications"), orderBy("createdAt", "desc"), limit(500))),
       ])
       setEvents(eventSnap.docs.map((doc) => ({ id: doc.id, ...(doc.data() as Omit<TelemetryEvent, "id">) })))
@@ -349,6 +386,9 @@ export function AdminObservability() {
       setCompanies(companySnap.docs.map((doc) => ({ id: doc.id, ...(doc.data() as Omit<CompanyDoc, "id">) })))
       setConsultants(
         consultantSnap.docs.map((doc) => ({ id: doc.id, ...(doc.data() as Omit<ConsultantDoc, "id">) })),
+      )
+      setSignupRequests(
+        signupRequestSnap.docs.map((doc) => ({ id: doc.id, ...(doc.data() as Omit<SignupRequestDoc, "id">) })),
       )
       setOfficeHourApplications(
         applicationSnap.docs.map((doc) => ({ id: doc.id, ...(doc.data() as Omit<OfficeHourApplicationDoc, "id">) })),
@@ -463,6 +503,25 @@ export function AdminObservability() {
       ].some((value) => String(value ?? "").toLowerCase().includes(filter))
     })
   }, [companyById, officeHourApplications, resolveUserDisplay, userFilter])
+
+  const todaySignupRequests = signupRequests.filter((request) => isToday(request.createdAt))
+  const todayApprovedSignupRequests = signupRequests.filter(
+    (request) =>
+      isToday(request.approvedAt) ||
+      isToday(request.activatedAt) ||
+      (request.status === "approved" && isToday(request.updatedAt)),
+  )
+  const todayApplications = filteredApplications.filter((application) => isToday(application.createdAt))
+  const todayConfirmedApplications = todayApplications.filter((application) => application.status === "confirmed")
+  const todayPendingApplications = todayApplications.filter((application) =>
+    ["pending", "review"].includes(application.status || ""),
+  )
+  const todayWaitingConsultantApplications = todayPendingApplications.filter(
+    (application) => (application.pendingConsultantIds ?? []).length > 0,
+  )
+  const todayUnassignedApplications = todayPendingApplications.filter(
+    (application) => !application.consultantId && (application.pendingConsultantIds ?? []).length === 0,
+  )
 
   const companyEvents = useMemo(
     () =>
@@ -603,6 +662,27 @@ export function AdminObservability() {
           {error}
         </div>
       )}
+
+      <section className="space-y-3">
+        <div>
+          <h2 className="text-sm font-semibold text-slate-900">오늘 운영 현황</h2>
+          <p className="mt-1 text-xs text-slate-500">가입 승인과 오피스아워 신청 데이터를 Firestore 기준으로 집계합니다.</p>
+        </div>
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
+          <MetricCard icon={UserPlus} label="오늘 가입 신청" value={todaySignupRequests.length.toLocaleString()} />
+          <MetricCard icon={UserCheck} label="오늘 승인" value={todayApprovedSignupRequests.length.toLocaleString()} />
+          <MetricCard icon={CalendarCheck} label="오늘 오피스아워 신청" value={todayApplications.length.toLocaleString()} />
+          <MetricCard icon={CalendarCheck} label="오늘 확정" value={todayConfirmedApplications.length.toLocaleString()} />
+          <MetricCard icon={Clock} label="오늘 수락 대기" value={todayWaitingConsultantApplications.length.toLocaleString()} />
+          <MetricCard icon={AlertTriangle} label="오늘 배정 대기" value={todayUnassignedApplications.length.toLocaleString()} tone={todayUnassignedApplications.length ? "danger" : "default"} />
+        </div>
+      </section>
+
+      <section className="space-y-3">
+        <div>
+          <h2 className="text-sm font-semibold text-slate-900">Company 행동 지표</h2>
+          <p className="mt-1 text-xs text-slate-500">관리자/컨설턴트 행동과 알려진 관측 코드 오류는 제외합니다.</p>
+        </div>
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
         <MetricCard icon={Activity} label="웹뷰" value={pageViews.length.toLocaleString()} />
         <MetricCard
@@ -619,6 +699,7 @@ export function AdminObservability() {
         <MetricCard icon={Clock} label="평균 화면 체류" value={formatDuration(averageDwellMs)} />
         <MetricCard icon={AlertTriangle} label="에러" value={errorEvents.length.toLocaleString()} tone="danger" />
       </div>
+      </section>
 
       <section className="rounded-lg border border-slate-200 bg-white shadow-sm">
         <div className="border-b border-slate-200 px-4 py-3">
