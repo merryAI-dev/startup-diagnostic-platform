@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, Calendar as CalendarIcon, Check, AlertCircle } from "lucide-react";
 import { Button } from "@/redesign/app/components/ui/button";
 import {
@@ -40,6 +40,7 @@ import {
 import { format, isBefore, startOfDay } from "date-fns";
 import { ko } from "date-fns/locale";
 import { cn } from "@/redesign/app/components/ui/utils";
+import { recordTelemetryEvent } from "@/observability/client";
 
 interface RegularApplicationWizardProps {
   officeHour: RegularOfficeHour;
@@ -403,6 +404,8 @@ export function RegularApplicationWizard({
   const [ticketAlertMessage, setTicketAlertMessage] = useState("");
   const [showCompactReview, setShowCompactReview] = useState(false);
   const [hoveredTime, setHoveredTime] = useState("");
+  const wizardStartedAtRef = useRef(performance.now());
+  const agendaSelectedAtRef = useRef<number | null>(null);
 
   const consultantsByAgendaId = useMemo(() => {
     const map = new Map<string, Consultant[]>();
@@ -438,6 +441,41 @@ export function RegularApplicationWizard({
   const isExternalAgendaSelected = selectedAgenda?.scope === "external";
   const selectedAgendaScope = selectedAgenda?.scope === "external" ? "external" : "internal";
   const agendaName = selectedAgenda?.name;
+
+  const recordAgendaSelection = (agendaId: string) => {
+    const now = performance.now();
+    agendaSelectedAtRef.current = now;
+    const agenda = agendas.find((item) => item.id === agendaId);
+
+    void recordTelemetryEvent({
+      eventType: "user_action",
+      severity: "info",
+      route: "/company/regular-wizard",
+      action: "application_agenda_selected",
+      elementLabel: "정기 오피스아워 아젠다 선택",
+      durationMs: Math.round(now - wizardStartedAtRef.current),
+      metadata: {
+        wizardType: "regular",
+        agendaId,
+        agendaName: agenda?.name ?? "",
+        agendaScope: agenda?.scope ?? "",
+        officeHourId: activeOfficeHour.id,
+        currentStep,
+      },
+    });
+  };
+
+  const handleAgendaChange = (value: string, options: { resetDate: boolean }) => {
+    setSelectedAgendaId(value);
+    if (options.resetDate) {
+      setSelectedDate(undefined);
+    }
+    setSelectedTime("");
+    if (value) {
+      recordAgendaSelection(value);
+    }
+  };
+
   const requestSectionValidations = REQUEST_SECTION_META.map(({ key, label }) => {
     const value = requestSections[key].trim();
     return {
@@ -618,6 +656,23 @@ export function RegularApplicationWizard({
   const handleSubmit = async () => {
     if (!selectedDate || isSubmitting) return;
     setIsSubmitting(true);
+    const now = performance.now();
+    void recordTelemetryEvent({
+      eventType: "user_action",
+      severity: "info",
+      route: "/company/regular-wizard",
+      action: "application_submit",
+      elementLabel: "정기 오피스아워 신청 제출",
+      durationMs: Math.round(now - wizardStartedAtRef.current),
+      metadata: {
+        wizardType: "regular",
+        agendaId: selectedAgendaId,
+        agendaName: agendaName ?? "",
+        agendaScope: selectedAgenda?.scope ?? "",
+        msSinceAgendaSelected: agendaSelectedAtRef.current ? Math.round(now - agendaSelectedAtRef.current) : null,
+        officeHourId: activeOfficeHour.id,
+      },
+    });
     try {
       await Promise.resolve(
         onSubmit({
@@ -915,10 +970,7 @@ export function RegularApplicationWizard({
                 </div>
                 <Select
                   value={selectedAgendaId}
-                  onValueChange={(value) => {
-                    setSelectedAgendaId(value);
-                    setSelectedTime("");
-                  }}
+                  onValueChange={(value) => handleAgendaChange(value, { resetDate: false })}
                   disabled={activeAgendas.length === 0}
                 >
                   <SelectTrigger data-testid="regular-agenda-trigger">
@@ -1219,11 +1271,7 @@ export function RegularApplicationWizard({
                   <Label>아젠다 선택</Label>
                   <Select
                     value={selectedAgendaId}
-                    onValueChange={(value) => {
-                      setSelectedAgendaId(value);
-                      setSelectedDate(undefined);
-                      setSelectedTime("");
-                    }}
+                    onValueChange={(value) => handleAgendaChange(value, { resetDate: true })}
                     disabled={activeAgendas.length === 0}
                   >
                     <SelectTrigger data-testid="regular-agenda-trigger">

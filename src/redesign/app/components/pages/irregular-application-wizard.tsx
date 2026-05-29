@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ArrowLeft, Calendar as CalendarIcon, Check, AlertCircle } from "lucide-react";
 import { Button } from "@/redesign/app/components/ui/button";
 import {
@@ -22,6 +22,7 @@ import { Agenda, SessionFormat, FileItem } from "@/redesign/app/lib/types";
 import { format } from "date-fns";
 import { ko } from "date-fns/locale";
 import { cn } from "@/redesign/app/components/ui/utils";
+import { recordTelemetryEvent } from "@/observability/client";
 
 interface IrregularApplicationWizardProps {
   agendas: Agenda[];
@@ -99,6 +100,8 @@ export function IrregularApplicationWizard({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [ticketAlertOpen, setTicketAlertOpen] = useState(false);
   const [ticketAlertMessage, setTicketAlertMessage] = useState("");
+  const wizardStartedAtRef = useRef(performance.now());
+  const agendaSelectedAtRef = useRef<number | null>(null);
 
   const remainingInternalSessions = remainingInternalTickets;
   const remainingExternalSessions = remainingExternalTickets;
@@ -116,6 +119,35 @@ export function IrregularApplicationWizard({
   const requestContent = requestSectionValidations
     .map(({ label, value }) => `${label}\n${value}`)
     .join("\n\n");
+
+  const recordAgendaSelection = (agendaId: string) => {
+    const now = performance.now();
+    agendaSelectedAtRef.current = now;
+    const agenda = agendas.find((item) => item.id === agendaId);
+
+    void recordTelemetryEvent({
+      eventType: "user_action",
+      severity: "info",
+      route: "/company/irregular-wizard",
+      action: "application_agenda_selected",
+      elementLabel: "비정기 오피스아워 아젠다 선택",
+      durationMs: Math.round(now - wizardStartedAtRef.current),
+      metadata: {
+        wizardType: "irregular",
+        agendaId,
+        agendaName: agenda?.name ?? "",
+        agendaScope: agenda?.scope ?? "",
+        currentStep,
+      },
+    });
+  };
+
+  const handleAgendaSelect = (agendaId: string) => {
+    setSelectedAgendaId(agendaId);
+    if (agendaId) {
+      recordAgendaSelection(agendaId);
+    }
+  };
 
   const isStepValid = () => {
     switch (currentStep) {
@@ -159,6 +191,23 @@ export function IrregularApplicationWizard({
   const handleSubmit = async () => {
     if (!periodFrom || !periodTo || isSubmitting) return;
     setIsSubmitting(true);
+    const now = performance.now();
+    void recordTelemetryEvent({
+      eventType: "user_action",
+      severity: "info",
+      route: "/company/irregular-wizard",
+      action: "application_submit",
+      elementLabel: "비정기 오피스아워 신청 제출",
+      durationMs: Math.round(now - wizardStartedAtRef.current),
+      metadata: {
+        wizardType: "irregular",
+        agendaId: selectedAgendaId,
+        agendaName: selectedAgenda?.name ?? "",
+        agendaScope: selectedAgenda?.scope ?? "",
+        msSinceAgendaSelected: agendaSelectedAtRef.current ? Math.round(now - agendaSelectedAtRef.current) : null,
+        projectName,
+      },
+    });
     try {
       await Promise.resolve(
         onSubmit({
@@ -326,7 +375,7 @@ export function IrregularApplicationWizard({
                   {activeAgendas.map((agenda) => (
                     <button
                       key={agenda.id}
-                      onClick={() => setSelectedAgendaId(agenda.id)}
+                      onClick={() => handleAgendaSelect(agenda.id)}
                       className={cn(
                         "p-4 rounded-lg border text-left transition-colors",
                         selectedAgendaId === agenda.id

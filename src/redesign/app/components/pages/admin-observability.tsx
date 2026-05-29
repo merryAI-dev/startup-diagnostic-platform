@@ -223,10 +223,23 @@ function eventLabel(eventType?: string) {
       return "링크 클릭"
     case "form_submit":
       return "폼 제출"
+    case "user_action":
+      return "퍼널 이벤트"
     case "application_created":
       return "신청 완료"
     default:
       return eventType || "이벤트"
+  }
+}
+
+function actionLabel(action?: string | null) {
+  switch (action) {
+    case "application_agenda_selected":
+      return "아젠다 선택"
+    case "application_submit":
+      return "신청 제출"
+    default:
+      return action || "이벤트"
   }
 }
 
@@ -248,10 +261,11 @@ function applicationRoute(type?: string | null) {
 }
 
 function isKnownTelemetrySelectorError(event: TelemetryEvent) {
+  const message = event.message || ""
   return (
     event.eventType === "client_error" &&
-    (event.message || "").includes("Failed to execute 'closest'") &&
-    (event.message || "").includes("data-observability-action")
+    message.includes("data-observability-action") &&
+    (message.includes("not a valid selector") || message.includes("closest"))
   )
 }
 
@@ -442,14 +456,33 @@ export function AdminObservability() {
     })
   }, [companyById, officeHourApplications, resolveUserDisplay, userFilter])
 
-  const ignoredTelemetrySelectorErrors = filteredEvents.filter(isKnownTelemetrySelectorError)
   const errorEvents = filteredEvents.filter(
     (event) => (event.severity === "error" || event.severity === "fatal") && !isKnownTelemetrySelectorError(event),
   )
+  const visibleErrorCountBySessionId = useMemo(() => {
+    const map = new Map<string, number>()
+    errorEvents.forEach((event) => {
+      if (!event.sessionId) return
+      map.set(event.sessionId, (map.get(event.sessionId) ?? 0) + 1)
+    })
+    return map
+  }, [errorEvents])
   const pageViews = filteredEvents.filter((event) => event.eventType === "page_view")
   const interactions = filteredEvents.filter((event) =>
     ["button_click", "link_click", "form_submit"].includes(event.eventType || ""),
   )
+  const applicationFunnelEvents = filteredEvents.filter(
+    (event) =>
+      event.eventType === "user_action" &&
+      ["application_agenda_selected", "application_submit"].includes(event.action || ""),
+  )
+  const displayedInteractionEvents = [...interactions, ...applicationFunnelEvents]
+  const agendaSelectionEvents = applicationFunnelEvents.filter(
+    (event) => event.action === "application_agenda_selected" && Number.isFinite(event.durationMs),
+  )
+  const averageAgendaSelectionMs = agendaSelectionEvents.length
+    ? agendaSelectionEvents.reduce((sum, event) => sum + (event.durationMs || 0), 0) / agendaSelectionEvents.length
+    : 0
   const routeDwellEvents = filteredEvents.filter((event) => event.eventType === "route_dwell")
   const totalDwellMs = routeDwellEvents.reduce((sum, event) => sum + (event.durationMs || 0), 0)
   const averageDwellMs = routeDwellEvents.length ? totalDwellMs / routeDwellEvents.length : 0
@@ -458,9 +491,9 @@ export function AdminObservability() {
     : 0
   const errorGroups = groupEvents(errorEvents, () => true)
   const interactionGroups: InteractionRow[] = [
-    ...groupEvents(interactions, () => true).map((group) => ({
+    ...groupEvents(displayedInteractionEvents, () => true).map((group) => ({
       key: group.key,
-      label: group.label,
+      label: actionLabel(group.label),
       eventType: eventLabel(group.sample.eventType),
       route: group.route,
       count: group.count,
@@ -544,19 +577,14 @@ export function AdminObservability() {
           {error}
         </div>
       )}
-      {ignoredTelemetrySelectorErrors.length > 0 && (
-        <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-          해결된 관측 코드 오류 {ignoredTelemetrySelectorErrors.length.toLocaleString()}건은 유저 에러 지표에서 제외했습니다.
-        </div>
-      )}
-
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
         <MetricCard icon={Activity} label="웹뷰" value={pageViews.length.toLocaleString()} />
         <MetricCard
           icon={MousePointerClick}
           label="클릭/제출"
-          value={(interactions.length + filteredApplications.length).toLocaleString()}
+          value={(displayedInteractionEvents.length + filteredApplications.length).toLocaleString()}
         />
+        <MetricCard icon={Clock} label="아젠다 선택까지" value={formatDuration(averageAgendaSelectionMs)} />
         <MetricCard icon={Clock} label="평균 세션" value={formatDuration(averageSessionMs)} />
         <MetricCard icon={Clock} label="평균 화면 체류" value={formatDuration(averageDwellMs)} />
         <MetricCard icon={AlertTriangle} label="에러" value={errorEvents.length.toLocaleString()} tone="danger" />
@@ -659,7 +687,7 @@ export function AdminObservability() {
         <div className="border-b border-slate-200 px-4 py-3">
           <h2 className="font-semibold text-slate-900">유저/세션별 현황</h2>
         </div>
-        <div className="overflow-x-auto">
+        <div className="max-h-[720px] overflow-auto">
           <table className="w-full min-w-[960px] text-left text-sm">
             <thead className="bg-slate-50 text-xs uppercase text-slate-500">
               <tr>
@@ -676,8 +704,9 @@ export function AdminObservability() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {filteredSessions.slice(0, 50).map((session) => {
+              {filteredSessions.map((session) => {
                 const user = resolveUserDisplay(session.uid, session.anonymousId, session.sessionId, session.role)
+                const visibleErrorCount = session.sessionId ? visibleErrorCountBySessionId.get(session.sessionId) ?? 0 : 0
 
                 return (
                   <tr key={session.id}>
@@ -702,7 +731,7 @@ export function AdminObservability() {
                     <td className="px-4 py-3">
                       {(session.buttonClickCount || 0) + (session.linkClickCount || 0) + (session.formSubmitCount || 0)}
                     </td>
-                    <td className="px-4 py-3">{session.errorCount || 0}</td>
+                    <td className="px-4 py-3">{visibleErrorCount}</td>
                     <td className="px-4 py-3">{formatDate(toDate(session.lastSeenAt))}</td>
                   </tr>
                 )
