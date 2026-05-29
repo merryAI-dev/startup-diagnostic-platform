@@ -5,6 +5,7 @@ import {
   AlertTriangle,
   CalendarCheck,
   Clock,
+  Download,
   MousePointerClick,
   RefreshCcw,
   Search,
@@ -88,6 +89,8 @@ type OfficeHourApplicationDoc = {
 }
 
 type DailyMetricKey = "signup" | "approved" | "applications" | "confirmed" | "waiting" | "unassigned"
+
+type CsvCell = string | number | null | undefined
 
 type GroupRow = {
   key: string
@@ -195,6 +198,18 @@ function formatDate(value: Date | null) {
   }).format(value)
 }
 
+function formatCsvDate(value: Date | null) {
+  if (!value) return ""
+  return new Intl.DateTimeFormat("ko-KR", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).format(value)
+}
+
 function formatDuration(ms = 0) {
   if (!Number.isFinite(ms) || ms <= 0) return "0초"
   const seconds = Math.round(ms / 1000)
@@ -202,6 +217,37 @@ function formatDuration(ms = 0) {
   const minutes = Math.floor(seconds / 60)
   const rest = seconds % 60
   return rest ? `${minutes}분 ${rest}초` : `${minutes}분`
+}
+
+function csvEscape(value: CsvCell) {
+  const text = String(value ?? "")
+  if (/[",\n\r]/.test(text)) {
+    return `"${text.replace(/"/g, '""')}"`
+  }
+  return text
+}
+
+function downloadCsv(filename: string, headers: string[], rows: CsvCell[][]) {
+  const csv = [headers, ...rows].map((row) => row.map(csvEscape).join(",")).join("\n")
+  const blob = new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8" })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement("a")
+  link.href = url
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  URL.revokeObjectURL(url)
+}
+
+function exportDateKey() {
+  const now = new Date()
+  const year = now.getFullYear()
+  const month = String(now.getMonth() + 1).padStart(2, "0")
+  const day = String(now.getDate()).padStart(2, "0")
+  const hour = String(now.getHours()).padStart(2, "0")
+  const minute = String(now.getMinutes()).padStart(2, "0")
+  return `${year}${month}${day}-${hour}${minute}`
 }
 
 function isToday(value: { toDate?: () => Date } | Date | string | null | undefined) {
@@ -545,8 +591,18 @@ export function AdminObservability() {
     })
   }, [companyById, officeHourApplications, resolveUserDisplay, userFilter])
 
-  const todaySignupRequests = signupRequests.filter((request) => isToday(request.createdAt))
-  const todayApprovedSignupRequests = signupRequests.filter(
+  const filteredSignupRequests = useMemo(() => {
+    const filter = userFilter.trim().toLowerCase()
+    if (!filter) return signupRequests
+    return signupRequests.filter((request) =>
+      [request.id, request.email, request.role, request.requestedRole, request.status].some((value) =>
+        String(value ?? "").toLowerCase().includes(filter),
+      ),
+    )
+  }, [signupRequests, userFilter])
+
+  const todaySignupRequests = filteredSignupRequests.filter((request) => isToday(request.createdAt))
+  const todayApprovedSignupRequests = filteredSignupRequests.filter(
     (request) =>
       isToday(request.approvedAt) ||
       isToday(request.activatedAt) ||
@@ -712,6 +768,139 @@ export function AdminObservability() {
         return groupKey === selectedGroup.key
       })
     : []
+  const resolveApplicationCompany = (application: OfficeHourApplicationDoc) =>
+    application.companyName ||
+    (application.companyId ? companyById.get(application.companyId)?.name : null) ||
+    "회사명 미입력"
+  const resolveApplicationConsultant = (application: OfficeHourApplicationDoc) => {
+    const pendingConsultants = (application.pendingConsultantIds ?? [])
+      .map((consultantId) => consultantById.get(consultantId)?.name || shortId(consultantId))
+      .join(", ")
+    return (
+      application.consultant ||
+      (application.consultantId ? consultantById.get(application.consultantId)?.name : null) ||
+      pendingConsultants ||
+      "배정 대기"
+    )
+  }
+  const handleExportCsv = () => {
+    const headers = [
+      "구분",
+      "발생시각",
+      "사용자/기업",
+      "보조정보",
+      "역할",
+      "화면/아젠다",
+      "경로/일정",
+      "행동/상태",
+      "상세",
+      "체류초",
+      "웹뷰",
+      "클릭/제출",
+      "에러",
+      "UID",
+      "브라우저ID",
+      "세션ID",
+      "문서ID",
+    ]
+    const eventRows: CsvCell[][] = companyEvents
+      .filter((event) => !isKnownTelemetrySelectorError(event))
+      .map((event) => {
+        const user = resolveUserDisplay(event.uid, event.anonymousId, event.sessionId, event.role)
+        return [
+          "이벤트",
+          formatCsvDate(toDate(event.createdAt)),
+          user.primary,
+          user.secondary,
+          user.role,
+          routeLabel(event.route),
+          event.route || "",
+          event.action ? actionLabel(event.action) : eventLabel(event.eventType),
+          event.elementLabel || event.message || event.functionName || event.errorCode || "",
+          event.durationMs ? Math.round(event.durationMs / 1000) : "",
+          "",
+          "",
+          event.severity === "error" || event.severity === "fatal" ? 1 : "",
+          event.uid || "",
+          event.anonymousId || "",
+          event.sessionId || "",
+          event.id,
+        ]
+      })
+    const sessionRows: CsvCell[][] = companySessions.map((session) => {
+      const user = resolveUserDisplay(session.uid, session.anonymousId, session.sessionId, session.role)
+      return [
+        "세션",
+        formatCsvDate(toDate(session.lastSeenAt)),
+        user.primary,
+        user.secondary,
+        user.role,
+        `${routeLabel(session.firstRoute)} → ${routeLabel(session.lastRoute)}`,
+        `${session.firstRoute || ""} → ${session.lastRoute || ""}`,
+        "세션 요약",
+        "",
+        Math.round((session.durationMs || 0) / 1000),
+        session.pageViewCount || 0,
+        (session.buttonClickCount || 0) + (session.linkClickCount || 0) + (session.formSubmitCount || 0),
+        session.sessionId ? visibleErrorCountBySessionId.get(session.sessionId) ?? 0 : 0,
+        session.uid || "",
+        session.anonymousId || "",
+        session.sessionId || "",
+        session.id,
+      ]
+    })
+    const applicationRows: CsvCell[][] = filteredApplications.map((application) => [
+      "오피스아워 신청",
+      formatCsvDate(toDate(application.createdAt)),
+      resolveApplicationCompany(application),
+      application.applicantEmail || "",
+      "기업",
+      application.agenda || application.agendaId || "",
+      [application.scheduledDate, application.scheduledTime].filter(Boolean).join(" "),
+      applicationStatusLabel(application.status),
+      [
+        officeHourTypeLabel(application.type),
+        application.officeHourTitle,
+        `컨설턴트: ${resolveApplicationConsultant(application)}`,
+      ]
+        .filter(Boolean)
+        .join(" / "),
+      "",
+      "",
+      "",
+      "",
+      application.createdByUid || "",
+      "",
+      "",
+      application.id,
+    ])
+    const signupRows: CsvCell[][] = filteredSignupRequests.map((request) => [
+      "가입 신청",
+      formatCsvDate(toDate(request.createdAt)),
+      request.email || "",
+      "",
+      roleLabel(request.requestedRole ?? request.role),
+      "회원가입",
+      "",
+      signupStatusLabel(request.status),
+      request.approvedAt || request.activatedAt ? `승인: ${formatCsvDate(toDate(request.approvedAt ?? request.activatedAt))}` : "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      request.id,
+    ])
+
+    downloadCsv(`운영로그-${exportDateKey()}.csv`, headers, [
+      ...eventRows,
+      ...sessionRows,
+      ...applicationRows,
+      ...signupRows,
+    ])
+  }
 
   return (
     <div className="space-y-6 p-6">
@@ -722,14 +911,24 @@ export function AdminObservability() {
             Company 방문자의 웹뷰, 버튼 클릭, 체류시간, 에러 지점을 확인합니다.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => void loadTelemetry()}
-          className="inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
-        >
-          <RefreshCcw className="h-4 w-4" />
-          새로고침
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={handleExportCsv}
+            className="inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
+          >
+            <Download className="h-4 w-4" />
+            CSV 내보내기
+          </button>
+          <button
+            type="button"
+            onClick={() => void loadTelemetry()}
+            className="inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
+          >
+            <RefreshCcw className="h-4 w-4" />
+            새로고침
+          </button>
+        </div>
       </div>
 
       <div className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 shadow-sm">
